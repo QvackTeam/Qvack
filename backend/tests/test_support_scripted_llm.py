@@ -251,6 +251,38 @@ async def test_stream_call_without_output_fails_loudly() -> None:
         await _events(provider, _stream_request("EvaluatorOutput", carried, tools=True))
 
 
+async def test_stream_incomplete_on_a_tool_step_has_no_calls() -> None:
+    """D-B-125 п.5: `incomplete` on a tool step — no `function_call`, only
+    `StreamCompleted(status="incomplete")`; the retry of the same step gives the calls."""
+    provider = ScriptedLLMProvider()
+    provider.script_tools(
+        "EvaluatorOutput", ScriptedToolStep((ScriptedToolCall("graph_read", {"skill": "S1"}),))
+    )
+    provider.fail(ScriptedFailure("incomplete", schema_name="EvaluatorOutput"))
+    request = _stream_request("EvaluatorOutput", tools=True)
+    cut = await _events(provider, request)
+    assert len(cut) == 1
+    assert isinstance(cut[0], StreamCompleted) and cut[0].status == "incomplete"
+    retry = await _events(provider, request)
+    [call] = tool_calls(_items(retry))
+    assert json.loads(call.arguments) == {"skill": "S1"}
+    assert isinstance(retry[-1], StreamCompleted) and retry[-1].status == "completed"
+
+
+async def test_stream_invalid_json_waits_for_the_answer_step() -> None:
+    """D-B-125 п.5: `invalid_json` is not taken on a tool step; it breaks the answer."""
+    provider = ScriptedLLMProvider()
+    provider.script_tools(
+        "EvaluatorOutput", ScriptedToolStep((ScriptedToolCall("graph_read", {}),))
+    )
+    provider.fail(ScriptedFailure("invalid_json", schema_name="EvaluatorOutput"))
+    items = _items(await _events(provider, _stream_request("EvaluatorOutput", tools=True)))
+    [call] = tool_calls(items)
+    follow = next_step_input((), items, {call.call_id: "{}"})
+    answer = await _events(provider, _stream_request("EvaluatorOutput", follow, tools=True))
+    assert _text(answer) == "{not json"
+
+
 TURN = {
     "p3_markup": {"intent": "explain"},
     "p1_head": {"status": "thinking"},
