@@ -1,6 +1,7 @@
-"""Routes of canvases (ТЗ Ф4 §6.4 «Канвас», WP21.1): `POST /v1/sessions/{id}/canvases`,
-`GET /v1/canvases/{id}`, `GET /v1/domains/{id}/canvases`. The learner comes only from the
-session cookie (WP18.3); a session, task, canvas or domain of another learner is 404."""
+"""Routes of canvases (ТЗ Ф4 §6.4 «Канвас», WP21.1, WP21.2): `POST /v1/sessions/{id}/canvases`,
+`GET /v1/canvases/{id}`, `GET /v1/domains/{id}/canvases`, `WS /v1/canvases/{id}/ws`. The
+learner comes only from the session cookie (WP18.3); a session, task, canvas or domain of another
+learner is 404."""
 
 from __future__ import annotations
 
@@ -8,13 +9,13 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, WebSocket
 from pydantic import BaseModel
 
-from quack.api.auth import CurrentSession, get_current_session
+from quack.api.auth import CurrentSession, get_current_session, websocket_session
 from quack.api.errors import ApiError
 from quack.api.resources import AppResources, get_resources
-from quack.canvas import boards
+from quack.canvas import boards, socket
 from quack.canvas.board import BoardDoc
 
 router = APIRouter(prefix="/v1", tags=["canvas"])
@@ -92,3 +93,24 @@ async def domain_canvases(domain_id: UUID, session: Session, resources: Resource
     except boards.CanvasNotFound as exc:
         raise _not_found(exc) from exc
     return CanvasList(canvases=[_view(c) for c in canvases])
+
+
+@router.websocket("/canvases/{canvas_id}/ws")
+async def canvas_socket(websocket: WebSocket, canvas_id: UUID) -> None:
+    """WP21.2: refused with 1008 without a session that may open this canvas (D-C-121)."""
+    resources = get_resources(websocket)
+    session = await websocket_session(websocket)
+    canvas = None
+    if socket.may_open(session, canvas_id):
+        assert session is not None
+        try:
+            canvas = await boards.get_canvas(
+                resources.db, learner_id=session.learner_id, canvas_id=canvas_id
+            )
+        except boards.CanvasNotFound:
+            canvas = None
+    if session is None or canvas is None or canvas.session_id is None:
+        await websocket.close(code=socket.CLOSE_POLICY)
+        return
+    await websocket.accept()
+    await socket.serve_canvas(websocket, resources, session, canvas)
