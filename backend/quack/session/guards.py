@@ -37,7 +37,18 @@ def head_violations(
     head: TurnHead, *, answered_verdict: Verdict | None, skill_labels: Collection[str]
 ) -> list[GuardViolation]:
     """Violations of the head rules (Т-§12.4: honest verdict, the turn is marked)."""
-    raise NotImplementedError
+    violations: list[GuardViolation] = []
+    if head.verdict_stance == "code" and not _code_verdict(answered_verdict):
+        violations.append(
+            GuardViolation(
+                "stance_without_code_verdict",
+                "verdict_stance code needs a code-class verdict of the answered answer",
+            )
+        )
+    if not head.target_skills:
+        violations.append(GuardViolation("no_target_skills", "targetSkills is empty"))
+    violations.extend(_unknown("unknown_skill_label", head.target_skills, skill_labels))
+    return violations
 
 
 def markup_violations(
@@ -45,10 +56,34 @@ def markup_violations(
 ) -> list[GuardViolation]:
     """Violations of «the turn is marked» in `p3_markup`: unknown labels of exposures and of
     `targetsMisconception`."""
-    raise NotImplementedError
+    violations = _unknown("unknown_skill_label", [e.skill for e in markup.exposures], skill_labels)
+    if markup.targets_misconception is not None:
+        violations.extend(
+            _unknown(
+                "unknown_misconception_label",
+                [markup.targets_misconception],
+                misconception_labels,
+            )
+        )
+    return violations
 
 
 def settle_stance(head: TurnHead, answered_verdict: Verdict | None) -> TurnHead:
     """After the retries: `code` without a code verdict becomes `formative`; code never
     raises the stance."""
-    raise NotImplementedError
+    if head.verdict_stance == "code" and not _code_verdict(answered_verdict):
+        return head.model_copy(update={"verdict_stance": "formative"})
+    return head
+
+
+def _code_verdict(verdict: Verdict | None) -> bool:
+    return verdict is not None and verdict.verification == "code"
+
+
+def _unknown(
+    reason: GuardReason, labels: list[str], known: Collection[str]
+) -> list[GuardViolation]:
+    missing = [label for label in labels if label not in known]
+    if not missing:
+        return []
+    return [GuardViolation(reason, f"unknown labels: {', '.join(dict.fromkeys(missing))}")]
