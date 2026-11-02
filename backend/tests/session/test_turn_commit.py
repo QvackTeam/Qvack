@@ -460,3 +460,90 @@ async def test_task_closed_by_answered_action(
     closed = await _types_of(pg_db, learner_id, "task.closed")
     expected = [] if how is None else [{"task_id": str(SKILL), "how": how}]
     assert closed == expected
+
+
+# --- session plan document (WP13.6, part of T-TT9; D-B-154) ---
+
+
+async def _plan(db: Db, session_id: UUID) -> dict[str, Any] | None:
+    return await db.fetch_one(
+        "SELECT learner_id, plan, status FROM content.session_plans WHERE session_id = %(s)s",
+        {"s": session_id},
+    )
+
+
+def _plan_update(current: str, done: list[str]) -> dict[str, Any]:
+    return {
+        "completed_steps": done,
+        "current_step": current,
+        "next_steps": ["ratio test"],
+        "branches": [{"description": "why does 1/3 converge", "type": "curiosity"}],
+        "cancel_requests": [],
+    }
+
+
+async def test_turn_writes_the_session_plan(pg_db: Db) -> None:
+    """`planUpdate` of every turn → `content.session_plans` of the session, in the turn's
+    transaction; the latest turn's plan is the document."""
+    learner_id, session_id = await create_learner(pg_db), uuid4()
+    first = _bare(planUpdate=_plan_update("definition", []))
+    second = _bare(planUpdate=_plan_update("geometric sum", ["definition"]))
+
+    await commit_turn(
+        pg_db, _batch(learner_id, first, session_id=session_id), learner_id=learner_id
+    )
+    row = await _plan(pg_db, session_id)
+    assert row is not None and row["learner_id"] == learner_id and row["status"] == "active"
+    assert row["plan"]["current_step"] == "definition"
+
+    batch = _batch(learner_id, second, session_id=session_id)
+    await commit_turn(pg_db, batch, learner_id=learner_id)
+    await commit_turn(pg_db, batch, learner_id=learner_id)  # a repeat changes nothing
+
+    row = await _plan(pg_db, session_id)
+    assert row is not None
+    assert row["plan"] == {
+        "completed_steps": ["definition"],
+        "current_step": "geometric sum",
+        "next_steps": ["ratio test"],
+        "branches": [{"description": "why does 1/3 converge", "type": "curiosity"}],
+        "cancel_request_ids": [],
+    }
+
+
+async def test_failed_turn_leaves_the_plan(pg_db: Db) -> None:
+    learner_id, session_id = await create_learner(pg_db), uuid4()
+    await commit_turn(
+        pg_db,
+        _batch(learner_id, _bare(planUpdate=_plan_update("definition", [])), session_id=session_id),
+        learner_id=learner_id,
+    )
+    batch = _batch(learner_id, _bare(planUpdate=_plan_update("later", [])), session_id=session_id)
+    broken = replace(batch, manifest=replace(batch.manifest, prompt_version=None))
+
+    with pytest.raises(Exception):  # noqa: B017 — the NOT NULL violation of the manifest
+        await commit_turn(pg_db, broken, learner_id=learner_id)
+
+    row = await _plan(pg_db, session_id)
+    assert row is not None and row["plan"]["current_step"] == "definition"
+
+
+async def test_plan_of_another_learner_session_is_not_taken(pg_db: Db) -> None:
+    """A session id is the learner's: the plan row of another learner is never overwritten."""
+    owner, other, session_id = await create_learner(pg_db), await create_learner(pg_db), uuid4()
+    await commit_turn(
+        pg_db,
+        _batch(owner, _bare(planUpdate=_plan_update("mine", [])), session_id=session_id),
+        learner_id=owner,
+    )
+
+    with pytest.raises(LookupError):
+        await commit_turn(
+            pg_db,
+            _batch(other, _bare(planUpdate=_plan_update("theirs", [])), session_id=session_id),
+            learner_id=other,
+        )
+
+    row = await _plan(pg_db, session_id)
+    assert row is not None and row["learner_id"] == owner
+    assert await _events(pg_db, other) == []
