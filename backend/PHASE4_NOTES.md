@@ -604,6 +604,18 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `tests/auth/test_auth_wp18.py`.
 - Требует подтверждения владельцем: нет.
 
+### D-C-112. Перевод входа API с JWT на сессии (WP18.3) — предложение потокам A и B
+- Класс: B (пересечение зон, §7.3) — **ждёт ответа A и B**
+- WP / место: WP18.3, WP18.4; `quack/api/auth.py` (C), объявления в роутерах A и B
+- Контекст: §2.3 строка 3 удаляет пароль, JWT, `auth.users`, `/v1/auth/register|login`; WP18.3 — `learner_id` только из сессии. На входе Фазы 3 (`get_current_learner_id`) сидят роутеры всех потоков: A — `quack/domains/router.py`; B — `quack/session/deps.py`; C — `quack/artifacts/router.py`, `quack/api/learner_stream.py`, `quack/api/ratelimit.py`. Токены JWT выпускают тесты: A — `tests/domains/*` (8 файлов); B — `tests/session/*` (5); корневые `test_app_assembly`, `test_dispatcher`, `test_jobs_phase3`, `test_learner_stream`, `test_loadtest_scenario`, `test_neo4j_outage`, `test_ops_phase3`; C — `tests/artifacts/conftest.py`, `tests/e2e/system.py`, `tests/support/auth.py`.
+- Предложение:
+  1. `quack.api.auth.get_current_learner_id` сохраняет имя и подпись (возвращает `UUID`), но читает cookie сессии (`quack.auth.sessions.resolve_session`); нет или отозвана — 401 `UNAUTHENTICATED`. **Код роутеров A и B не меняется.**
+  2. Тестовый вход: `tests/support/auth.py` получает `login(client, db, learner_id)` — строка `core.auth_sessions` и cookie на клиенте; `ensure_users_hook` и выпуск JWT уходят. Тесты A и B меняют только способ входа (одна строка на клиент). C делает это одним PR с ревью A и B (§7.3); если A или B хотят править свои тесты сами — тот же хелпер, их PR после PR C.
+  3. `CONSENT_REQUIRED` на старте сессии (WP18.4): зависимость `quack.auth.require_terms` (C) объявляется на `POST` старта сессии в `quack/session/router.py` (B) — в чужом роутере только объявление (§7.3 п.3).
+  4. Удаление `auth.users` и старой миграции — в WP1.3 (A), не здесь.
+- Нужно: A — согласие с п.1, п.2 для `tests/domains` и корневых тестов A, п.4; B — согласие с п.2 для `tests/session` и с п.3.
+- Требует подтверждения владельцем: нет (решение потоков); значения `terms_version`, `auth_success_redirect_url` — по-прежнему за владельцем (D-C-105).
+
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
 Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
