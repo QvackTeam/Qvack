@@ -7,32 +7,26 @@ revocation time. `learner_id` comes only from the session, never from a request 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
+from quack.api.auth import SESSION_COOKIE, CurrentSession
 from quack.auth.links import new_token, token_hash
 from quack.config import Settings
 from quack.db import Db
 
 type Scope = Literal["full", "companion"]
 
-# D-C-111: the documents name the flags and the domain of the cookie, not its name.
-SESSION_COOKIE = "quack_session"
+# The cookie name and the session type live in the API base (`quack.api.auth`), which every
+# router depends on (§4.1); D-C-111 names the cookie.
+AuthSession = CurrentSession
+__all__ = ["SESSION_COOKIE", "AuthSession"]
 # The learner of a request is unknown until its session is found by the token (D-C-111).
 _SESSION_BY_TOKEN = (
     "SELECT learner_id, scope, canvas_id, expires_at FROM core.auth_sessions "
     "WHERE token_hash = %(hash)s AND revoked_at IS NULL AND expires_at > %(now)s"
 )
-
-
-@dataclass(frozen=True)
-class AuthSession:
-    learner_id: UUID
-    scope: Scope
-    canvas_id: UUID | None
-    expires_at: datetime
 
 
 async def open_session(

@@ -19,8 +19,18 @@ from quack.api.errors import ErrorResponse
 COMPONENT_REF = "#/components/schemas/{model}"
 ERROR_REF = COMPONENT_REF.format(model=ErrorResponse.__name__)
 
-# Routes reachable without a token (WP1.2): register and login.
-PUBLIC_ROUTES = frozenset({("post", "/v1/auth/register"), ("post", "/v1/auth/login")})
+# Routes reachable without a session: register and login of Phase 3 (WP1.2) until they are
+# removed (§2.3 row 3), and the sign-in routes of ТЗ Ф4 WP18.
+PUBLIC_ROUTES = frozenset(
+    {
+        ("post", "/v1/auth/register"),
+        ("post", "/v1/auth/login"),
+        ("post", "/auth/link"),
+        ("get", "/auth/link/verify"),
+        ("get", "/auth/google/start"),
+        ("get", "/auth/google/callback"),
+    }
+)
 # The heartbeat does not count against the `actions` limit (WP1.5, `quack.api.ratelimit`).
 RATE_LIMIT_EXEMPT = frozenset({("post", "/v1/sessions/{session_id}/heartbeat")})
 MUTATING_METHODS = frozenset({"post", "patch", "delete"})
