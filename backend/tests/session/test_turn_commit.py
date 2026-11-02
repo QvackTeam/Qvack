@@ -8,6 +8,7 @@ A deadline is written only from the learner's words (law 6, П-8.1, D-B-149)."""
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -176,6 +177,7 @@ def _batch(
     session_id: UUID | None = None,
     answered: AnsweredAction | None = None,
     learner_texts: list[LearnerText] = LEARNER,
+    learner_timezone: str | None = None,
 ) -> Any:
     labels = _labels()
     return turn_batch(
@@ -187,6 +189,7 @@ def _batch(
         settings=SETTINGS,
         answered=answered,
         learner_texts=learner_texts,
+        learner_timezone=learner_timezone,
     )
 
 
@@ -376,6 +379,38 @@ def test_teacher_words_are_not_a_source() -> None:
     batch = _batch(uuid4(), _bare(deadline=_deadline(quote="  ")))
 
     assert [e.type for e in batch.events] == ["turn.committed"]
+
+
+@pytest.mark.parametrize(
+    ("deadline_at", "timezone", "expected"),
+    [
+        ("2026-12-01T09:00:00", "Europe/Moscow", "2026-12-01T06:00:00+00:00"),
+        ("2026-12-01T09:00:00+03:00", "America/New_York", "2026-12-01T06:00:00+00:00"),
+        ("2026-12-01T09:00:00Z", None, "2026-12-01T09:00:00+00:00"),
+    ],
+    ids=["local-in-learner-zone", "offset-wins", "utc"],
+)
+def test_deadline_time_zone(deadline_at: str, timezone: str | None, expected: str) -> None:
+    """A date without an offset is the learner's local time (Т-§14.6: the zone of
+    `core.learners.settings`); an explicit offset is kept."""
+    batch = _batch(
+        uuid4(), _bare(deadline=_deadline(deadline_at=deadline_at)), learner_timezone=timezone
+    )
+
+    [event] = [e for e in batch.events if e.type == "hub.deadline_set"]
+    assert event.payload.deadline_at_ms == int(datetime.fromisoformat(expected).timestamp() * 1000)
+
+
+@pytest.mark.parametrize("timezone", [None, "Not/A_Zone"], ids=["no-zone", "unknown-zone"])
+def test_local_deadline_without_learner_zone_is_not_written(timezone: str | None) -> None:
+    batch = _batch(
+        uuid4(),
+        _bare(deadline=_deadline(deadline_at="2026-12-01T09:00:00")),
+        learner_timezone=timezone,
+    )
+
+    assert [e.type for e in batch.events] == ["turn.committed"]
+    assert batch.events[0].payload.markup.deadline is None
 
 
 # --- help and closing of tasks (D-B-149 п. д) ---
