@@ -267,6 +267,79 @@ class Settings(BaseSettings):
     dispatcher_concurrency: int = 8
     dispatcher_batch_size: int = 100
     dispatcher_restart_pause_s: float = 5.0
+    # Phase 4 (ТЗ Ф4 §6.7, stream A). Starting values: Т-§21.3, Т-§22.11, Д-§14.1.
+    # `evidence_tier_weights`, `hint_step_penalty`, `hot_window_min` (stream C block) and
+    # `episode_context_turns` (stream B block) already exist under these names (§6.7 «есть»).
+    # `projector_batch_max_events` -> `projector_batch_size` and `rebuild_max_tx_ops` 200 000
+    # come with the projector rewrite in WP3 (Phase 4 decision D-A-102).
+    # WP1.2: pool of `Db` per process; the docs give no sizes (Phase 4 decision D-A-101).
+    pg_pool_min_size: int = 1
+    pg_pool_max_size: int = 10
+    # Т-§2.7, Т-§2.4.
+    rebuild_concurrency: int = 2
+    projector_lag_p95_ms: int = 500
+    # Т-§7.9: derived evidence.
+    requires_min_confidence: float = 0.6
+    same_idea_min_confidence: float = 0.7
+    # Т-§7.5: episodes.
+    episode_max_turns: int = 12
+    episode_idle_min: int = 10
+    # Т-§8.2: understanding.
+    level_recency_factor: float = 0.6
+    proof_min_weight: float = 0.8
+    fail_min_weight: float = 0.8
+    unstable_min_weight: float = 0.4
+    delayed_fail_factor: float = 0.25
+    level_implications: dict[int, list[int]] = Field(
+        default_factory=lambda: {3: [1], 4: [3, 1], 5: [1], 6: [3, 1]}
+    )
+    # Т-§8.3: retention.
+    delay_threshold_h: int = 20
+    target_retention: float = 0.9
+    retention_fit_min_reviews: int = 1000
+    # Т-§8.4, Т-§8.5, Т-§8.7.
+    gap_window: int = 5
+    control_type_levels: dict[str, list[int]] = Field(
+        default_factory=lambda: {
+            "tasks": [3, 4],
+            "colloquium_proofs": [2, 3, 6],
+            "oral_theory": [2, 6],
+            "no_goal": [3],
+        }
+    )
+    why_recent_n: int = 3
+    # Т-§9.2, Т-§9.5: misconceptions and profile.
+    fix_min_resists: int = 2
+    watch_days: int = 3
+    profile_min_samples: int = 10
+    calibration_window: int = 200
+    calibration_min_reports: int = 10
+    # Т-§13.2, Т-§4.10, Т-§3.2: queue and periodic work.
+    max_jobs_per_learner: int = 4
+    graph_hygiene_every_topics: int = 10
+    turn_manifest_retention_days: int = 30
+    # Т-§18.2: level status -> predicted probability of a correct answer (calibrated, Т-§18.5).
+    p_proven: float = 0.9
+    p_derived: float = 0.7
+    p_unstable: float = 0.5
+    p_failed: float = 0.2
+    p_unknown: float = 0.4
+    # Т-§14: review, «Today», pace, prep mode.
+    review_trigger_retention: float = 0.85
+    forgetting_domain_idle_days: int = 30
+    review_item_minutes: float = 1.5
+    today_max_items: int = 3
+    # WP17.2: «подбирается на первых данных»; the class B record comes with WP17.
+    today_min_score: float = 0.0
+    # WP17.1: «веса в конфиге» without names or values — Phase 4 decision at WP17 (1.0 each).
+    review_weight_need: float = 1.0
+    review_weight_deadline: float = 1.0
+    review_weight_forgetting: float = 1.0
+    review_weight_consolidation: float = 1.0
+    pace_window_days: int = 14
+    pace_warning_margin: float = 0.8
+    pace_min_active_days: int = 5
+    cheatsheet_offer_days: int = 7
 
     # --- stream B ---
     # Т-§7.5: turns before the episode given to the extractor for understanding only (WP12).
@@ -410,8 +483,22 @@ class Settings(BaseSettings):
     symbolic_check_delay_ms: int = 3000
     min_sig_digits: int = 3
     numeric_points: int = 20
+    # WP11.5 (Т-§6.6): numbers of the numeric check sent to compute in `/v1/math/*`; the
+    # documents give none of them. Phase 4 decision D-B-124.
+    math_precision_digits: int = 30
+    math_sample_low: float = -10.0
+    math_sample_high: float = 10.0
+    math_positive_sample_min: float = 1e-3
+    math_max_attempts_per_point: int = 10
+    math_rel_tol: float = 1e-9
+    math_abs_tol: float = 1e-12
+    # Share of `timeout_ms` given to `simplify(a − b)` (Т-§6.6 «свой таймаут»). D-B-124.
+    math_simplify_share: float = 0.8
     # WP11.6 (Т-§7.7).
     verdict_min_confidence: float = 0.7
+    # WP11.7 (Т-§6.9, Т-§16.3): below this recognition confidence the reading is «unsure»;
+    # the documents give no number. Phase 4 decision D-B-127.
+    recognition_min_confidence: float = 0.8
     second_opinion_model: str = WONDER
     # WP13.9 (Т-§3.2).
     turn_context_sample_rate: float = 0.02
@@ -454,6 +541,70 @@ class Settings(BaseSettings):
     hot_window_min: int = 10
     # Т-§7.4 «окно горит» ×0.5; ТЗ §6.2 не называет параметр — Phase 3 decision D-C-019.
     hot_window_factor: float = 0.5
+
+    # Phase 4 (ТЗ Фазы 4 §6.7), stream C. Secrets per role — Д-§7; values from Т-§21.3,
+    # Т-§22.11, Д-§14.1. `None` — the value is not in the documents (Phase 4 decision D-C-105).
+    # WP18 (Т-§19.1, Д-§3.1, Д-§7)
+    auth_link_ttl_min: int = 15
+    auth_link_per_email_per_hour: int = 5
+    auth_link_per_ip_per_hour: int = 20
+    auth_session_ttl_days: int = 7
+    session_cookie_domain: str = "qvack.online"
+    auth_success_redirect_url: str | None = None
+    terms_version: str | None = None
+    # Phase 4 decision D-C-104: names of sender and redirect URI are not in §6.7.
+    auth_email_from: str = "login@qvack.online"
+    google_oidc_redirect_url: str = "https://api.qvack.online/auth/google/callback"
+    email_api_key: SecretStr = SecretStr("")
+    google_oidc_client_id: SecretStr = SecretStr("")
+    google_oidc_client_secret: SecretStr = SecretStr("")
+    # WP19 (Т-§19.8, Д-§8.4)
+    upload_max_mb: int = 50
+    object_url_ttl_s: int = 300
+    export_link_ttl_hours: int = 24
+    s3_bucket_learners: str = "quack-learners"
+    s3_endpoint: SecretStr = SecretStr("")
+    s3_access_key: SecretStr = SecretStr("")
+    s3_secret_key: SecretStr = SecretStr("")
+    # WP25 seam S9 (Д-§8.5). Phase 4 decision D-C-103: the R2 endpoint is a config address.
+    deletions_bucket: str = "quack-deletions"
+    deletions_s3_endpoint: str = ""
+    deletions_s3_access_key: SecretStr = SecretStr("")
+    deletions_s3_secret_key: SecretStr = SecretStr("")
+    # WP20 (Т-§10.5, ТЗ §2.3 п.17)
+    materials_k: int = 5
+    embedding_dim: int = 768
+    modal_token_id: SecretStr = SecretStr("")
+    modal_token_secret: SecretStr = SecretStr("")
+    # WP21 (Т-§15, Т-§22.11)
+    stroke_chunk_seconds: int = 10
+    mark_min_confidence: float = 0.8
+    error_grace_ms: int = 8000
+    stuck_idle_s: int = 60
+    max_unprompted_marks_per_task: int = 2
+    min_intervention_gap_s: int = 45
+    # Client parameters served in GET /v1/me (ТЗ §6.7); Т-§21.3 (§15.2, §15.3, §16.2).
+    stroke_batch_ms: int = 300
+    line_pause_ms: int = 1200
+    capture_still_ms: int = 700
+    # WP22 (Т-§16, Т-§22.6)
+    pairing_ttl_s: int = 120
+    sheet_line_match_threshold: float = 0.2
+    new_sheet_match_share: float = 0.3
+    # WP23 (Т-§17)
+    cards_per_topic_max: int = 15
+    cheatsheet_fit_rounds: int = 2
+    # WP9 (Д-§2.1, Д-§4.2, Д-§8.1, Д-§9.3)
+    disk_warn_pct: int = 75
+    disk_crit_pct: int = 90
+    team_daily_alert_usd: float = 60.0
+    backup_interval_hours: int = 6
+    backup_retention_days: int = 14
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["https://app.qvack.online", "https://preview.qvack.online"]
+    )
+    # WP24: hard timeout of a compute PDF, image or render job — Phase 4 decision D-C-107.
+    compute_task_timeout_s: float = 60.0
 
     fold: FoldParams = Field(default_factory=FoldParams)
 
@@ -525,6 +676,21 @@ class Settings(BaseSettings):
             self.meta_api_key.get_secret_value(),
             self.jwt_secret.get_secret_value(),
             self.neo4j_password.get_secret_value(),
+            *(
+                secret.get_secret_value()
+                for secret in (
+                    self.email_api_key,
+                    self.google_oidc_client_id,
+                    self.google_oidc_client_secret,
+                    self.s3_endpoint,
+                    self.s3_access_key,
+                    self.s3_secret_key,
+                    self.deletions_s3_access_key,
+                    self.deletions_s3_secret_key,
+                    self.modal_token_id,
+                    self.modal_token_secret,
+                )
+            ),
         ]
         return [v for v in values if len(v) >= 4]
 

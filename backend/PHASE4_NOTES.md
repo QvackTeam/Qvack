@@ -7,10 +7,9 @@
 
 Состояние на 2026-11-02 (WP0, поток C).
 
-- **Нужно от владельца до начала кода фазы:** письменное подтверждение в чате, что ни в одном
-  окружении нет событий настоящих учеников (WP0 п.2, §0.3 «Чистый старт»). Без него фаза не
-  начинается (§0.4.6, причина 1).
-- **Нужно подтверждение решения класса C:** `D-C-101` — имена рабочих веток.
+- «Чистый старт» (WP0 п.2) подтверждён владельцем 2026-11-02 (раздел «Вход»).
+- `D-C-101` и `D-C-106` подтверждены владельцем 2026-11-02 (передано потоком B).
+- **Нужны значения:** `terms_version`, `auth_success_redirect_url` (`D-C-105`).
 - `main` `9ef6e3e` зелёный (раздел «Вход»).
 - \[ПРОВЕРИТЬ\] WP0 п.3а закрыт: фильтр внутри векторного индекса работает на Neo4j
   2026.10.1 Community (раздел «Вход»).
@@ -27,7 +26,7 @@
   `quack-test-neo4j` (:57687, **Neo4j 2026.06.0** — README и compose называют 2026.10,
   `D-A-017`; локальный контейнер старше, на итог прогона не влияет), `quack-test-redis`
   (Redis 7, :56379; compose — 8.2). Docker 29.8.1, uv 0.12.23.
-- **Чистый старт (WP0 п.2): подтверждён владельцем в чате 2026-11-02** — событий настоящих учеников нет ни в одном окружении; локальные стенды `quack-*` и `quack-test-*` тестовые.
+- **Чистый старт (WP0 п.2): подтверждён владельцем в чате 2026-11-02** — событий настоящих учеников нет ни в одном окружении; локальные стенды `quack-*` и `quack-test-*` тестовые. Дословно (передано потоком B): «у нас пока никаких данных учеников нет. остальные решения если за мной какие есть - сверься с тз и тз доком, дай решение».
 
 Прогон на `main` `9ef6e3e`:
 
@@ -46,8 +45,8 @@
 | Пункт | Поток | Скрипт | Итог |
 | :-- | :-: | :-- | :-- |
 | а) `SEARCH … VECTOR INDEX … WHERE learnerId = $id AND searchable = true` (`Т-§3.4.6`, `Т-§1.10`) | C | `scripts/checks/vector_search_filter.py` | **Работает** на `neo4j:2026.10-community` (агент `Neo4j/2026.10.1`, community): индекс с `WITH [c.learnerId, c.searchable]`, запрос `CYPHER 25 MATCH … SEARCH c IN (VECTOR INDEX … FOR $q WHERE … LIMIT 30) SCORE AS score` вернул ровно узлы ученика с `searchable = true`. Запасной путь WP20.4 не нужен |
-| б) составной range-индекс `(learnerId, retDueAtMs)` на `Skill` (`Т-§3.4.8`) | A | — | ждёт поток A |
-| в) параметры `py-fsrs` (`Т-§8.3`) | A | — | ждёт поток A |
+| б) составной range-индекс `(learnerId, retDueAtMs)` на `Skill` (`Т-§3.4.8`) | A | `scripts/checks/skill_due_index.py` | **Работает** на `neo4j:2026.10-community` (2026.10.1): `CREATE RANGE INDEX … FOR (s:Skill) ON (s.learnerId, s.retDueAtMs)` → `ONLINE`; запрос WP17.1 (`learnerId = $id AND retDueAtMs > 0 AND retDueAtMs <= $now`) идёт через `NodeIndexSeek` по составному индексу. Запасной путь (одиночные индексы) не нужен |
+| в) параметры `py-fsrs` (`Т-§8.3`) | A | `scripts/checks/fsrs_params.py` | `py-fsrs` **6.3.2** (закрепляется в WP4): `Scheduler(parameters, desired_retention, learning_steps, relearning_steps, maximum_interval, enable_fuzzing)` — все четыре имени `Т-§8.3` совпадают; по умолчанию 21 вес (FSRS-6); при `enable_fuzzing=False`, пустых шагах и явном UTC-времени два прогона дают одинаковые сроки; первый `Good` сразу даёт `Review`. `uv run --with fsrs==6.3.2 python scripts/checks/fsrs_params.py` → код 0 |
 | г) `antlr4-python3-runtime` для SymPy, `parse_latex(…, strict=True)` (`Т-§6.5`) | B | `scripts/checks/wp0_3g_antlr.py` | SymPy 1.14.0 требует **4.11.x**; `strict` есть; с 4.11.1 строгий разбор работает. В `compute` рантайма пока нет — закрепляется в WP11.5. Подробно — ниже, «Поток B: подробности п.3г, п.3д» |
 | д) Meta Model API: `sam-3.1`, `muse-voice-transcribe-1.0` (`Т-§1.3`) | B | — (только документация: вызов запрещён п.3д, скрипту нечего проверять) | `sam-3.1` — `POST /v1/responses`, ответ спецтокенами; голос — `POST /v1/asr/transcribe`, `multipart/form-data`, WAV. Подробно — ниже, «Поток B: подробности п.3г, п.3д» |
 | е) `READ`-сессия Neo4j отклоняет запись (`Д-§14.2`, `T-A9b`) | C (перенос) | `tests/test_neo4j_read_session.py` | **Подтверждено**: 3 passed на Neo4j 2026.06.0 (полный прогон) и на 2026.10.1 (`QUACK_TEST_NEO4J_URI=bolt://127.0.0.1:57688`) |
@@ -97,6 +96,9 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | Пакет | Поток | Состояние | Тесты |
 | :-- | :-: | :-- | :-- |
 | WP0 (зона C) | C | частично: ждёт п.2 (владелец) | — (скрипт п.3а) |
+| WP0 (зона A) | A | выполнен: аудит B1–B7, B21; п.3б, п.3в | — (скрипты п.3б, п.3в) |
+| WP2 (A) | A | черновик каталога S3 (G0) в `phase-4-a-wp2`: 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; заморозка — G1 после Q-A-2, Q-A-3 | `tests/events`: 73 passed |
+| WP1.1–1.2 (A) | A | выполнен в `phase-4-a-wp1` (шов S2): базовая миграция dbmate, `Db`, `append_events`, параметры §6.7 потока A. WP1.4 (`.squawk.toml`, S16) — к G2; WP1.3 — к G3/G4 | `tests/db`: 19 passed |
 | WP0 (зона B) | B | выполнен: аудит, п.3г, п.3д, п.5 | — (скрипт п.3г) |
 | Этап I G1 (B: S7, S8, S11, S13) | B | контракты в `phase-4-b`, тесты контрактов зелёные | см. «Красные прогоны» |
 | WP10.2–10.3 (B) | B | частично: разбор потока хода и вход шага цикла с инструментами — зелёные (`T-AI2`–`T-AI4`); адаптер `ResponsesClient.stream_structured` и цикл `run_tool_loop` (параллельные инструменты с таймаутом, повтор оборванного с удвоенным лимитом) — зелёные (`T-AI5`, `T-AI6` без строки `ops.llm_usage` — она в WP10.4); встраивание в шлюз (допуск, семафоры, учёт) — с WP13 | 19 passed |
@@ -120,6 +122,18 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | B24 | Подтверждено: `AppResources` — `settings`, `engine`, `session_factory`, `neo4j`, `redis`, `llm`, `compute`; новых ресурсов и CORS-списка нет |
 | B27 | Подтверждено: `loadtest/meta_mock.py` строит ответ по схеме (`minimal_instance`), без стриминга и инструментов. Часть WP26.2 — C, `meta_smoke.py` — B |
 
+Пункты §3, которые подтверждает поток A (`phase-4` `a087529`, 2026-11-02).
+
+| # | Итог |
+| :-- | :-- |
+| B1 | Подтверждено: Alembic `migrations/versions/0001_initial_schema.py`, `0002_phase3.py`; таблицы `auth.users`, `core.learner_seq`, `core.events`, `core.sessions`, `core.artifacts`, `core.domains`, `core.task_bank`, `core.llm_outbox`, `ops.jobs`, `ops.dlq`, `ops.llm_ledger`, `ops.deletion_tombstones`, `ops.projector_offsets`, `ops.event_types_seen`, `ops.dispatcher_offsets`, `ops.turn_manifests` |
+| B2 | Подтверждено, пересчёт: `sqlalchemy`/`asyncpg` импортируют **41** модуль `quack/` и **61** файл `tests/`; `loadtest/` — 0 |
+| B3 | Подтверждено: `quack/events/catalog.py` — 36 типов |
+| B4 | Подтверждено: `quack/graph/` — `phase_a.py`, `folds.py`, `topic_display.py`; в коде `p_mastery`, `PART_OF`, `PREREQ_OF`, `DEPENDS_ON`, `appliedSeq`, `rules@2` |
+| B5 | Подтверждено: `quack/graph/evidence_weights.py`, `evidence_validation.py` есть |
+| B6 | Подтверждено: `quack/jobs/dispatcher.py`, `dispatcher_rules.py` есть |
+| B7 | Подтверждено: `quack/jobs/queue.py` — числовой `priority`, `attempt`/`max_attempts`, `run_after`, статусы `queued`/`running`/`done`/`failed`/`cancelled`, `ops.dlq`; нет `visible`, `cancel_requested`, `skipped_budget`, `max_jobs_per_learner` |
+| B21 | Подтверждено: `quack/domains/learner.py` пишет `ops.deletion_tombstones` (`pending_purge`); зачистка — `quack/ops/purge_job.py` |
 
 Пункты §3, которые подтверждает поток B (`main` `9ef6e3e`, 2026-11-02).
 
@@ -173,6 +187,49 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 ## Журнал решений
 
 ### Поток A
+
+### D-A-101. Размер пула `Db`
+- Класс: B. WP1.2, `quack/config.py`: `pg_pool_min_size` 1, `pg_pool_max_size` 10 на процесс. Размеров нет ни в `Т-§`, ни в `Д-§`; числа в коде запрещены (§0.3). Варианты: (а) 1/10; (б) как в Фазе 3 (10 + 5 сверх). Решение (а) — консервативно (§0.4.3, последний абзац). Обратимость: значения параметров. Тесты: `T-DB5` (работает на пуле). Подтверждение: нет.
+
+### D-A-102. `projector_batch_size` и `rebuild_max_tx_ops` 200 000 — вместе с WP3
+- Класс: B. §6.7 требует переименовать `projector_batch_max_events` → `projector_batch_size` и поднять `rebuild_max_tx_ops` до 200 000. Оба читают проектор и пересборка Фазы 3, `quack/cli.py` (C) и тесты Фазы 3 (`test_worker_and_ops.py`, `test_infra.py` проверяет 5000). Варианты: (а) сейчас — правка файлов C и утверждения чужого теста; (б) в WP3, когда старый проектор заменяется и его потребители уходят. Решение (б). Почему: §0.4.3 п.3, п.5; §0.4.4 п.14. Обратимость: имя и значение параметра. Подтверждение: нет.
+
+### D-A-103. Переходный период: две схемы Postgres до WP1.3
+- Класс: C
+- WP / место: WP1.1–1.3; `backend/db/migrations/`, `quack/db/db.py`, `quack/events/log.py`, `quack/events/registry.py`, `tests/db/fixtures.py`
+- Контекст: WP1.1 (чистый старт) создаёт таблицы с теми же именами, что у Фаз 1–3, но с другими колонками (`core.events`, `ops.jobs`, `ops.event_types_seen`, `ops.projector_offsets`, `ops.dispatcher_offsets`, `ops.turn_manifests`), а каталог WP2 убирает 36 типов `С-§5`. WP1.3 при этом оставляет старые модули B и C на SQLAlchemy до G3, и им нужны старые таблицы и старый каталог; `phase-4` должна быть всегда зелёной (§7.4). ТЗ не говорит, как обе схемы живут одновременно.
+- Варианты: (1) заменить схему сразу — старый код и ~770 тестов B и C падают, чинить пришлось бы в чужих зонах (§0.4.4 п.14); (2) новые таблицы под временными именами — нарушает контракт §6.1; (3) две схемы до WP1.3: новая — dbmate из `backend/db/migrations/` в отдельной базе (в тестах — `<test db>_p4`, фикстуры `p4_db`, `pg_db`, `create_learner` в `tests/db/fixtures.py`), новый код (`quack.db.Db`, `quack.events.log.append_events`, `quack.events.registry`) — рядом со старым (`quack.db.postgres`, `quack.events.append`, `quack.events.catalog`). Alembic, старый каталог и старые модули удаляются в WP1.3 вместе с последним потребителем; переключение `ops migrate`, compose и CI на dbmate — WP9 (C) в момент перехода.
+- Решение: (3).
+- Почему: ТЗ само предполагает, что старый код на SQLAlchemy работает до WP1.3: поля `engine` и `session_factory` уходят «вместе с SQLAlchemy (WP1.3)» (§4.2), зависимость `alembic` удаляется в WP1.3, а не в WP1.1, старые модули переносит владелец «когда переписывает» (WP1.3, риск R-W §9), остаток можно урезать с возвратом R2 в реестр (§7.5 п.6), `phase-4` всегда зелёная (§7.4). Со всем этим расходится одна фраза WP1.1 «Alembic-ревизии 0001, 0002 удаляются»: без старой схемы старые модули и их тесты падают в чужих зонах (§0.4.4 п.14). Первоисточники (`Т-§1.2`, `Т-§3.1`) переход не описывают; итог фазы одинаков в обоих вариантах. Критерии §0.4.3: п.1 — ничего не теряется и не ломается; п.3 — интерфейсы швов S2/S3 те же; п.4 — снимается удалением старых модулей и Alembic в WP1.3. Сдвигается только момент удаления ревизий Alembic: из WP1.1 в WP1.3 (вместе с зависимостью `alembic`).
+- Обратимость: удалить отдельную базу и фикстуры; схема и код Фазы 4 от этого не меняются.
+- Тесты: `T-DB1`, `T-DB5`, `tests/db/fixtures.py`.
+- Согласовано: B — да (2026-11-02: новый код B сразу на `Db` и `append_events`, старые модули B переводит и удаляет при переписывании в WP11–WP15, остаток к G3 — A по §7.3 п.1); C — да (2026-11-02, ответ в PR #74, раздел C; dbmate в CI — PR #77).
+- Требует подтверждения владельцем: да — **подтверждено** владельцем 2026-11-02 (передано через B, согласие B — PR #76). Решение принято исполнителем A по поручению разработчика потока A после сверки с ТЗ.
+
+### D-A-104. Колонки базовой миграции, которых §6.1 не уточняет
+- Класс: B. WP1.1, `backend/db/migrations/20261102000001_baseline.sql`. После G0 добавить `NOT NULL` нельзя (только расширяющие миграции), поэтому `NOT NULL` — у ключей, `learner_id`, времени и статусов, а ссылки, без которых строка осмысленна (`domain_id`, `topic_id`, `hub_id`, `session_id`), — `NULL`. Исключение по сверке B: `content.sessions.domain_id NOT NULL` (`Т-§22.9`: «Сессий без домена нет»). Целые — `BIGINT` (правило squawk `prefer-bigint-over-int`, `Д-§5.2` п.2; тип после G0 не меняется). `core.learners.email` — `NOT NULL`, уникальный, `CHECK` на нижний регистр. `ops.jobs.job_key` — первичный ключ; `ops.jobs.learner_id` — `NULL` только у периодических задач WP7.5. `ops.turn_manifests` — ключ `manifest_id` (ссылка `turn.committed.manifest_id`; `turn_id` в Фазе 4 нет), `reasoning_effort` Фазы 3 → `effort`; `prompt_version` и `renderer_version` — `TEXT` вида `teacher@2`, `renderer@1` (по сверке B: `Т-§11.6` «версия роль@N записывается в манифест», `Т-§10.6`). `ops.llm_usage` — токены `input`, `cached_input`, `output`, `reasoning` (виды таблицы цен §1.3 плюс рассуждение), `cost_usd numeric(12,6)`. `ops.event_types_seen.first_seen_at` и `updated_at` у отметок — как в Фазе 3. Внешних ключей нет (как в Фазе 3; удаление WP25 идёт по `learner_id`). Схема `langgraph` не создаётся (`Т-§22.3`, §2.2). Почему: §0.4.3, «частые случаи», строка 1; п.4. Обратимость: до G0 — правка baseline, после — расширяющая миграция. Тесты: `T-DB1`. Владельцам таблиц B и C — проверить свои до G0. Подтверждение: нет.
+
+### D-A-105. `append_events` не заводит строку ученика
+- Класс: B. WP1.2, `quack/events/log.py`. `Т-§2.3`: «блокирует строку ученика (SELECT … FOR UPDATE)»; Фаза 3 заводила `core.learner_seq` лениво. Решение: нет строки `core.learners` → `LearnerNotFoundError`; строку заводит вход (WP18, C), в тестах — `tests.db.fixtures.create_learner`. Почему: §0.4.3 п.2 (буква `Т-§2.3`), `email NOT NULL` (D-A-104). Обратимость: одна ветка функции. Тесты: `test_learner_row_is_required`. Подтверждение: нет.
+
+### D-A-106. Формат `agent:<kind>` в `actor`
+- Класс: B. WP2.1, `quack/events/actor.py`: `agent:` и имя в `snake_case` (`^agent:[a-z][a-z0-9_]*$`), как имена ролей; формы `kind` документ не задаёт. Обратимость: одно регулярное выражение. Тесты: `test_actor_versions_and_agents`. Подтверждение: нет.
+
+### D-A-107. Текст `item.flagged_unclear` — в поле `text`
+- Класс: B. WP2.1, WP2.3, `quack/events/event_types.py`. §6.3 называет поле `quote`, а WP2.3 включает тип в полнотекстовый поиск, и `Т-§3.1` требует: «все типы событий с текстом для поиска хранят его в поле text». Решение: цитируемый фрагмент — поле `text` (уровень 2 §0.4.1 выше ТЗ). Обратимость: имя поля до G1. Тесты: `test_text_types_have_text_and_match_index`. Подтверждение: нет (B пишет этот тип — сообщено).
+
+### D-A-108. Ключ `check.failed`
+- Класс: B. WP2.1, `quack/events/keys.py`: `check_failed:{answer_seq}:{part}` — по образцу `verdict:{answer_seq}:{part}` (одна запись на часть, `Т-§6.1`). Тесты: `test_derived_keys_deterministic`. Подтверждение: нет.
+
+### D-A-109. Черновик каталога S3 (G0) — поля сверх §6.3
+- Класс: B
+- WP / место: WP2.1, `quack/events/values.py`, `quack/events/records.py`, `quack/events/event_types.py`
+- Контекст: §6.3 даёт ключевые поля, остальное — «минимально нужное для правила» (§0.4.3, «частые случаи», строка 1). Q-A-1 (а): модели B одной формы — в ядре, формы с метками — их id-версии в ядре, имена даёт A.
+- Решение: `values.py` — `LearnerAnswer`, `AnswerSpec` и части, `Verdict`, `CheckFailed` (теперь модель Pydantic, а не dataclass), `NewSkill`, перечни; `Verdict` и `CheckFailed` — сами нагрузки `verdict.recorded`, `check.failed`. `records.py` — id-формы: поле-метка `x` → `x_id`, `R…` → `request_id`, `C…` → `card_ids`, `P…` → `chunk_id`; `TurnTaskRecord` несёт `task_id` задачи, созданной ходом (WP2.2); `DeadlineRecord.deadline_at_ms` (как в `hub.deadline_set`); `ExtractedElementRecord.at_ms` — время действия, копирует код (`Т-§2.1`); `RootCauseRecord.confidence` — категория модели, число даёт код при проекции (закон 4). Перечни из `Т-§3.4.2`: `origin` темы и навыка (`session`, `material`, `learner`), задача — `source` (`seminar`, `generated`, `material`, `teacher`), `verification` (`unchecked`, `checked`, `disputed`); `edge.added.origin` — `material`, `model`, `learner` (`Т-§4.6`); `hub.created.kind` — WP6.3; `hub.deadline_set.source` — `turn`, `observation`, `syllabus`, `learner` (WP6.3); `deadline_at_ms = null` снимает дедлайн. `from`/`into` → `from_id`/`into_id`. Пометки «обработчик / правило» — по столбцам §6.3 (`SPECS`, T-EV5).
+- Почему: §0.4.3, «частые случаи», строка 1; `Т-§0.4` (snake_case в нагрузке).
+- Обратимость: до G1 — правка моделей; после — только новой версией схемы (§0.4.4 п.2).
+- Тесты: `T-EV1`, `T-EV2`, `T-EV5`, `test_shared_models_are_the_payloads`, `tests/events/samples.py`.
+- Требует подтверждения владельцем: нет. Поля типов B и C — подтвердить владельцам типов до G1 (вопросы Q-A-2, Q-A-3).
 
 ### Поток B
 
@@ -285,6 +342,90 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `test_tool_loop_step_limit`.
 - Требует подтверждения владельцем: нет
 
+### D-B-120. Ядро математики WP11.5 — чистые функции до каркаса compute
+- Класс: B
+- WP / место: WP11.5, `compute/quack_compute/math/` (`grammar.py`, `equivalence.py`)
+- Контекст: каркас compute с пулом и эндпоинтами `/v1/math/check`, `/v1/math/transition` — шов S10 (C, WP24) — ещё не готов; зависимости `pint`, `antlr4-python3-runtime==4.11.1`, `pebble` — в `compute/pyproject.toml` (файл C).
+- Решение: ядро без ввода-вывода и без пула: разбор грамматикой-белым списком (`Т-§6.5`, `Т-§22.7`), сравнение в режимах `equal`, `up_to_constant`, `solution_set`, `interval`, `form` (`Т-§6.6`), подсказки `sign`, `coefficient` (`Т-§6.2`). `numeric_points` и бюджет `simplify` приходят параметрами от вызывающего (`Settings`, §6.7). Точность вычислений, диапазон точек и допуск сравнения — константы модуля, как в `checker.py` Фазы 3 (в §6.7 у compute только `compute_workers`, `chromium_idle_close_s`). Переменные вещественные (`Т-§6.6`): точка с невещественным значением — «не определена», кроме выражений с `I`. `form`: структурная проверка есть только для `factored`; для `simplified` — отказ `unsupported` → проверка моделью (`Т-§6.6`). Величины (`pint`), LaTeX (ANTLR strict) и эндпоинты — после S10 и зависимостей.
+- Почему: §7.1 «не ждать гейт»: работа в своей зоне без чужих швов.
+- Обратимость: новый каталог, старый `checker.py` не тронут.
+- Тесты: `compute/tests/math/test_grammar.py` (`T-CH5`), `test_equivalence.py` (`T-CH4`, `T-CH7` без размерности).
+- Требует подтверждения владельцем: нет
+
+### D-B-123. Эндпоинты `/v1/math/check`, `/v1/math/transition`
+- Класс: B
+- WP / место: WP11.5, `compute/quack_compute/math/` (`schemas.py`, `service.py`, `latex.py`, `units.py`), маршруты в `compute/quack_compute/app.py` (объявление B по §7.3 п.3, как просил C в #82)
+- Контекст: `Т-§6.5`–`Т-§6.7`, `Т-§15.4` п.1, `Т-§22.7` задают поведение, не форму запроса.
+- Решение: выражение — `{latex?, sympy?}`, `sympy` разбирается первым, без него — LaTeX через ANTLR strict; `kind = quantity` — сырой ответ с единицей и `pint` (СИ, запятая → точка, допуск по `Т-§6.4`, иная размерность — `incorrect` + `dimension`); бюджет вызова — `timeout_ms` из запроса (API — `symbolic_inline_timeout_ms`, страховка — `symbolic_background_timeout_ms`), пороги проверки — объект `numeric` и `tolerance` из `Settings` вызывающего (D-B-124); неудача — `status: failed` с `reason` → `check.failed`. Переход строки: уравнение — равенство множеств решений, неравенство — интервалы, иначе — эквивалентность выражений.
+- Почему: §0.4.3 п.2 (буква `Т-§`), п.6 (покрыто тестами).
+- Обратимость: модели в `math/schemas.py`.
+- Тесты: `compute/tests/math/test_service.py`.
+- Требует подтверждения владельцем: нет
+
+### D-B-124. Пороги численной проверки WP11.5 — в `Settings`, в compute через `Params`
+- Класс: B
+- WP / место: WP11.5, `compute/quack_compute/math/equivalence.py` (`Params`), `quack/config.py` (блок B)
+- Контекст: ТЗ Ф4 §0.3 — пороги только в `Settings`, числа в коде модулей запрещены (ревью C к #79). `Т-§6.6` называет только `numeric_points` («высокая точность», «случайные точки области» — без чисел); у compute в §6.7 только `compute_workers`, `chromium_idle_close_s`. Отменяет часть D-B-120 про константы модуля.
+- Варианты: (1) константы модуля, как в `checker.py` Фазы 3; (2) поля `ComputeSettings` (файл C); (3) `Settings` API (блок B), значения едут в запросе `/v1/math/*` и попадают в `Params`.
+- Решение: (3). `math_precision_digits` = 30, `math_sample_low`/`math_sample_high` = −10/10, `math_positive_sample_min` = 1e-3, `math_max_attempts_per_point` = 10, `math_rel_tol` = 1e-9, `math_abs_tol` = 1e-12, `math_simplify_share` = 0.8 — значения Фазы 4 до этого решения, без изменения поведения.
+- Почему: §0.3 (буква ТЗ); §0.4.3 п.4 — одно место правки; без правки чужого файла (§7.3).
+- Обратимость: параметры в одном блоке `Settings`.
+- Тесты: `compute/tests/math/test_params.py` (нет числовых констант в `math/*.py`, состав `Params`, допуск берётся из `Params`); `test_service.py` (`numeric`, `tolerance`, поля `numeric` обязательны — в compute нет значений по умолчанию).
+- Требует подтверждения владельцем: нет
+
+### D-B-125. S13: формат `function_call`, событий потока и флагов сбоев для подмен
+- Класс: B
+- WP / место: WP10.2–10.3, шов S13 (§7.2): интерфейс — `quack/llm/streaming.py` (`StreamingLLMProvider`, `StreamRequest`, `StreamEvent`), разбор SSE — `quack/llm/responses_client.py` (`_stream_event`); подмены — `tests/support/llm.py` (`ScriptedLLMProvider`) и `meta-mock` (C, §8.1, WP26.2)
+- Контекст: §8.1 и WP26.2 называют возможности подмен (стриминг, ключи по алфавиту, тело раньше шапки по флагу, `function_call`, иногда два за шаг, `phase: commentary`, сбои Фазы 3), но не формат. Формат задаёт то, что уже читает код B.
+- Решение — контракт для C:
+  1. **`ScriptedLLMProvider.stream_structured(StreamRequest)`** отдаёт `StreamEvent` по шагам сценария схемы `request.base.schema_name`: `TextDelta` — куски текста ответа (только сообщения без `phase: commentary`); `OutputItemDone(item)` — каждый законченный элемент шага, как есть; последним — всегда `StreamCompleted(status, usage, model, headers)`. В журнал вызовов пишется весь `StreamRequest` (тесты B проверяют `input_items` следующего шага). Ответчик по умолчанию для схемы — один шаг без инструментов, текст — тот же JSON, что у `complete_structured`.
+  2. **Элементы шага** (Responses API, Т-§11.5):
+     - `{"type": "reasoning", "id": "rs_…", "encrypted_content": "…", "summary": []}`;
+     - `{"type": "function_call", "id": "fc_…", "call_id": "call_…", "name": <имя инструмента из quack.session.tools>, "arguments": <JSON-строка аргументов>, "status": "completed"}` — код B берёт `call_id`, а не `id`; два вызова за шаг — два таких элемента подряд;
+     - комментарий: `{"type": "message", "id": "msg_…", "role": "assistant", "phase": "commentary", "content": [{"type": "output_text", "text": "…"}]}` — перед `function_call`;
+     - ответ: тот же `message` без `phase: commentary`, `content[0].text` — JSON выхода схемы.
+     Шаг с `function_call` не содержит ответа; следующий шаг сценария выдаётся, когда во входе есть `function_call_output` на каждый `call_id` прошлого шага (`next_step_input`).
+  3. **`meta-mock` (SSE `/responses`, `stream: true`)**: строки `data: {json}`; ключи по алфавиту на корне и во вложенных объектах (WP26.2). На элемент: `response.output_item.added {item}` (у комментария — с `phase: commentary`), для сообщения — `response.output_text.delta {item_id, delta}`, затем `response.output_item.done {item}`. В конце — `response.completed` или `response.incomplete` с `response: {model, status, usage: {input_tokens, input_tokens_details: {cached_tokens}, output_tokens, output_tokens_details: {reasoning_tokens}}}`. Заголовки `x-ratelimit-*` — у HTTP-ответа потока.
+  4. **Флаг `body_before_head`** (§8.1): в тексте ответа хода ключ `p2_body` идёт раньше `p1_head`; парсер B буферизует ход целиком (Т-§12.2). Иначе ключи ответа — по алфавиту (`p1_head`, `p2_body`, `p3_markup`).
+  5. **Сбои** — те же `ScriptedFailure.kind` Фазы 3, новых видов нет. Для потока: `unavailable`, `rate_limited` (с `retry_after`: секунды, дата HTTP или `None`), `bad_request` — исключение провайдера до первого события; `incomplete` — часть `TextDelta`, затем `StreamCompleted(status="incomplete")` (код B не разбирает, повторяет шаг с удвоенным лимитом); `invalid_json` — текст ответа не JSON, `status="completed"`; `commentary_only` — только элемент-комментарий, без ответа; `ratelimit_headers` — обычный ответ, заголовки — в `StreamCompleted.headers`. В `meta-mock` событие `response.failed` или `error` код B читает как `ProviderUnavailableError`.
+- Почему: §0.4.3 п.3 — контракт совпадает с тем, что уже читает код B (`_stream_event`, `next_step_input`, `tool_calls`), шов не меняется; п.7 — сбои те же, что в Фазе 3.
+- Обратимость: описание; код B не меняется.
+- Тесты: `tests/llm/test_phase4_stream_adapter.py`, `tests/llm/test_phase4_ai_layer.py` (`T-AI2`–`T-AI6`) — на стороне B; тесты подмен — C.
+- Требует подтверждения владельцем: нет
+
+### D-B-126. Быстрая проверка WP11.3 в `check()`: что не пишется сейчас и что идёт к модели
+- Класс: B
+- WP / место: WP11.3, `quack/practice/check.py` (`check`, `_math_request`, `_from_compute`, `NotYet.reason`)
+- Контекст: WP11.3 и `Т-§6.1` говорят «успел — вердикт; нет — ничего не пишет; страховка проверяет позже»; не названо: (а) что делать, если compute недоступен; (б) чем страховке отличить таймаут от недоступности; (в) ответ compute `unsupported` (нет структурной проверки вида, `Т-§6.6`); (г) `set`/`vector` не из чисел; (д) ответ без `sympy` и `latex`.
+- Варианты: (1) таймаут и недоступность — `CheckFailed` сразу; (2) оба — `NotYet` с причиной, страховка превращает его в `check.failed` с той же причиной; (3) новый аргумент `check()` «режим API / страховка».
+- Решение: (2). `NotYet.reason` — `timeout` (ожидание дольше `timeout_ms` с отменой запроса, или 504 compute) или `compute_unavailable`; значения совпадают с `CheckFailedReason` каталога A. `unsupported` → `NeedsModel` (модель, класс model, `Т-§6.6`), а не `check.failed`. `set`/`vector` не из чисел и спецификация без `value` → `CheckFailed("unparsed")` без вызова compute (в compute нет такого режима; `check.failed` → модель, `Т-§22.7`). Ответ ученика без `sympy` и `latex` уходит строкой `sympy`: compute разбирает любую строку грамматикой-белым списком (`Т-§6.5`). Допуск величины: `tol_abs` / `tol_rel` / `sig_digits` спецификации переводятся в `tol_abs` той же функцией, что у чисел (`Т-§6.4`); `min_sig_digits` и пороги численной проверки — из `Settings` (D-B-124).
+- Почему: §0.4.3 п.3 — подпись `check()` (шов S7) не меняется, в `NotYet` только поле со значением по умолчанию; п.1 — каталог событий не трогается; п.2 — `Т-§6.6` («нет её — проверка моделью»).
+- Обратимость: одна функция `_from_compute` и поле `NotYet.reason`.
+- Тесты: `tests/practice/test_check_fast.py` (чистая часть `T-CH2`, `T-CH3`).
+- Требует подтверждения владельцем: нет
+
+### D-B-127. Распознанный ответ: порог «неуверенного» прочтения и снижение уверенности вердикта
+- Класс: B
+- WP / место: WP11.7, `quack/practice/check.py` (`apply_reading`), `quack/config.py` (блок B, `recognition_min_confidence`)
+- Контекст: `Т-§6.9`, `Т-§16.3`: «уверенность распознавания понижает уверенность вердикта»; «неуверенное распознавание + отрицательный вердикт → сначала прочтение». Числа порога и способа понижения в документах нет; `mark_min_confidence` (`Т-§15.4`) — о диагнозе строки, не о прочтении.
+- Варианты: (1) новый параметр `recognition_min_confidence`, понижение умножением; (2) взять `mark_min_confidence`; (3) понижение минимумом.
+- Решение: (1). `recognition_min_confidence` = 0.8 (консервативно: чаще показываем прочтение до отрицательного вердикта; то же число, что у `mark_min_confidence`). Уверенность вердикта кода (её нет) становится уверенностью распознавания; уверенность модели умножается на неё. «Отрицательный» — `incorrect` и `partial` (консервативно: ученик видит прочтение раньше частичного вердикта). Набранный ответ (`recognition_confidence = None`) не меняется.
+- Почему: §0.3 и §0.4.3 последний абзац — параметра нет в документах, значение консервативное, в `Settings`; п.4 — одна функция и один параметр.
+- Обратимость: `apply_reading` и параметр в блоке B.
+- Тесты: `tests/practice/test_check_reading.py` (`T-CH8`).
+- Требует подтверждения владельцем: нет
+
+### D-B-128. Второе мнение: что считается «отрицательным», «согласием» и чей вердикт
+- Класс: B
+- WP / место: WP11.6, `quack/practice/model_check.py` (`model_verdict`, `needs_second_opinion`, `with_second_opinion`)
+- Контекст: `Т-§7.7` называет триггеры и результат, но не говорит: (а) входит ли `partial` в «отрицательный» и «положительный»; (б) что такое «согласно»; (в) как одна задача с несколькими уровнями даёт триггер; (г) куда идёт гипотеза заблуждения, пока `Verdict.misconception` одно поле (Q-A-2 п.1 не закрыт).
+- Варианты: (а) `partial` — триггер или нет; (б) равенство `outcome` или совпадение пунктов рубрики; (в) любой уровень или все.
+- Решение: (а) `partial` — не триггер: спайк `Т-§7.7` прямо отверг «partial на уровне 4 и выше» как новый триггер; (б) согласно — тот же `outcome`; (в) любой проверяемый уровень задачи; (г) `misconception` — метка, иначе гипотеза словами (`WP11.4` «метка или формулировка»), до разделения полей по Q-A-2. Вердикт кода второго мнения не получает (`Т-§7.7`: «только для вердикта модели»), даже с уверенностью распознавания (D-B-127). Ярус по `secondOpinion` ставит код A (WP4.1).
+- Почему: §0.4.3 п.2 — буква `Т-§7.7` и его спайка; п.5 — без новых параметров.
+- Обратимость: одна функция `needs_second_opinion`.
+- Тесты: `tests/practice/test_second_opinion.py` (чистая часть `T-CH6`).
+- Требует подтверждения владельцем: нет
+
 #### Поток B: сверка таблиц B в базовой миграции (шов S2) и ответ на D-A-103
 
 Сверено: `backend/db/migrations/20261102000001_baseline.sql` (ветка `phase-4-a-wp1`) против ТЗ Ф4 §6.1, `Т-§3.1`, `Т-§3.2`, `Т-§11.4`.
@@ -293,8 +434,8 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | :-- | :-- |
 | `content.session_plans`, `content.study_plans`, `content.tasks` | совпадает |
 | `ops.llm_usage` | совпадает |
-| `content.sessions` | **расхождение:** `domain_id UUID NULL`, а сессий без домена нет (`Т-§22.9`, ТЗ Ф4 WP13.10, WP16.4: «Домен выбирается до старта») — нужно `domain_id UUID NOT NULL` |
-| `ops.turn_manifests` | **расхождение:** `prompt_version INT`, `renderer_version INT`, а в `ops.llm_usage` — `prompt_version TEXT`. Версии по `Т-§11.6`, `Т-§10.6` — `роль@N`, `renderer@N`; `teacher_fallback` идёт с промптом `teacher@2`, и по одному номеру промпт не восстановить для проигрывания (`Т-§3.2`). Предложение: `prompt_version TEXT`, `renderer_version TEXT` (`teacher@2`, `renderer@1`), как в `ops.llm_usage` |
+| `content.sessions` | **расхождение:** `domain_id UUID NULL`, а сессий без домена нет (`Т-§22.9`, ТЗ Ф4 WP13.10, WP16.4: «Домен выбирается до старта») — нужно `domain_id UUID NOT NULL` — **исправлено A в #78** (`b561aa3`) |
+| `ops.turn_manifests` | **расхождение:** `prompt_version INT`, `renderer_version INT`, а в `ops.llm_usage` — `prompt_version TEXT`. Версии по `Т-§11.6`, `Т-§10.6` — `роль@N`, `renderer@N`; `teacher_fallback` идёт с промптом `teacher@2`, и по одному номеру промпт не восстановить для проигрывания (`Т-§3.2`). Предложение: `prompt_version TEXT`, `renderer_version TEXT` (`teacher@2`, `renderer@1`), как в `ops.llm_usage` — **исправлено A в #78** (`b561aa3`) |
 
 Обе правки — до G0: после G0 только расширяющие миграции (§0.4.4 п.4).
 
@@ -326,22 +467,165 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
   соглашение Фазы 3.
 - Обратимость: имя ветки, ничего в коде.
 - Тесты: нет (процесс).
-- Требует подтверждения владельцем: да
+- Согласование потоков (шов, §0.4): B согласен (2026-11-02, работает в `phase-4-b`, PR #72);
+  A согласен (2026-11-02, ревью #74).
+- Требует подтверждения владельцем: да — **подтверждено** 2026-11-02: владелец поручил B решать по ТЗ и
+  техдоку («у нас пока никаких данных учеников нет. остальные решения если за мной какие есть - сверься с тз и тз доком, дай решение»); решение B — в пользу (1). A согласен (ревью #74).
+
+#### Состояние пакетов потока C
+
+| Пакет | Состояние | Тесты |
+| :-- | :-- | :-- |
+| S1 (зона C), этап I | интерфейсы `ObjectStore`, `EmbeddingClient`, `EmailSender`, `DeletionJournal`; поля `AppResources`; подмены; имена параметров §6.7 потока C. Продовые клиенты — `NotImplementedError` (WP18–WP20, WP25) | `tests/storage/test_s1_resources.py` — 8 passed |
+| S10, этап I + пул | `compute`: пул `pebble` (`quack_compute/pool.py`) с жёстким таймаутом — реализован; настройки, схемы и маршруты WP24 — тела `NotImplementedError`; `Renderer` (Chromium) — этап I. `backend`: `ComputeClient` — методы всех эндпоинтов WP24, `create_compute_client`; заглушка — очереди по эндпоинтам | `compute/tests/test_pool_and_contract.py` — 4 passed (`T-CM1` зелёный; в Linux, весь `compute` — 9 passed); `tests/storage/test_compute_client_s10.py` — 4 passed |
+| S13 (реализация подмен) | `tests/support/llm.py`: `ScriptedLLMProvider.stream_structured` — шаги с инструментами (`script_tools`, два вызова за шаг, `phase: commentary`), ответ дельтами с ключами по алфавиту, флаг `body_before_head`, сбои Фазы 3 по D-B-125 п.5, журнал `stream_calls`; `loadtest/meta_mock.py`: SSE при `stream: true` (D-B-125 п.3), после `function_call_output` на каждый вызов — ответ. Формат — D-B-125 (B, PR #86) | `tests/test_support_scripted_llm.py` — 21 passed; `tests/test_meta_mock.py` — 59 passed |
+| S10: клиент math (WP24, по просьбе B) | `quack/compute_client/math_contracts.py` — копия `compute/quack_compute/math/schemas.py` (B); `ComputeClient.math_check`, `math_transition`, таймаут HTTP — `timeout_ms / 1000 + compute_timeout_sec`; очереди заглушки `/v1/math/check`, `/v1/math/transition`. `/v1/check/math` Фазы 3 остаётся до перевода `quack.practice` (WP11.3, B) | `tests/storage/test_compute_client_math.py` — 6 passed |
+
+### D-C-102. Где живут `EmailSender` и `DeletionJournal`
+- Класс: B
+- WP / место: S1, S9; `quack/api/email.py`, `quack/storage/deletions.py`
+- Контекст: §4.2 называет ресурсы, §4.1 и §6.9 — пакеты, но не место этих двух интерфейсов.
+  `AppResources` лежит в основании API и может импортировать только ядро и основание API (§4.1);
+  `quack/auth` — продуктовый пакет; `quack/deletion/**` — зона A, а `DeletionJournal` выдаёт C (S9).
+- Варианты: (1) `EmailSender` — `quack/api/email.py`, `DeletionJournal` — `quack/storage/deletions.py`;
+  (2) новый пакет ядра на каждый клиент; (3) интерфейсы в `quack/auth` и `quack/deletion`.
+- Решение: (1). Конструкторы `create_*` — рядом с классами, чтобы `quack/runtime` (A) вызывал их
+  для `JobContext` (§7.3 п.6) без импорта `quack.api.resources`.
+- Почему: §0.4.3 п.3 и п.5 — слои §4.1 соблюдены, новых пакетов сверх §6.9 нет; `DeletionJournal` —
+  тоже S3 API (R2), как `ObjectStore`.
+- Обратимость: перенос модуля и импорты.
+- Тесты: `T-A6` (`tests/test_contracts.py`), `tests/storage/test_s1_resources.py`.
+- Требует подтверждения владельцем: нет. A согласен (2026-11-02, ревью #74).
+
+### D-C-103. Адрес R2 для журнала удалений — параметр `deletions_s3_endpoint`
+- Класс: B
+- WP / место: S9, `quack/config.py`
+- Контекст: `Д-§7` даёт `DELETIONS_S3_ACCESS_KEY`/`SECRET_KEY` для `api`, `workers`, `backup`, но не
+  эндпоинт; `BACKUP_S3_ENDPOINT` есть только у `backup`. Контракт `Д-§7`: несекретные адреса — в
+  конфиге окружения.
+- Варианты: (1) несекретный параметр `deletions_s3_endpoint`; (2) отдать `api`/`workers` секрет
+  `BACKUP_S3_ENDPOINT`.
+- Решение: (1), значение — из конфига окружения при выкатке (WP9).
+- Почему: §0.4.3 п.2 (буква `Д-§7`: адреса — в конфиге) и п.4.
+- Обратимость: один параметр.
+- Тесты: `test_production_clients_and_doubles_implement_the_interfaces`.
+- Требует подтверждения владельцем: нет
+
+### D-C-104. Имена параметров отправителя письма и redirect URI Google
+- Класс: B
+- WP / место: WP18.1–18.2, `quack/config.py`
+- Контекст: значения есть (`login@qvack.online` — `Т-§19.1`, `Д-§3.1`;
+  `https://api.qvack.online/auth/google/callback` — `Д-§3.1`), имён параметров в §6.7 нет.
+- Решение: `auth_email_from`, `google_oidc_redirect_url` со значениями документов.
+- Почему: §0.3 — адреса в `Settings`, не в коде. Обратимость: имя параметра.
+- Тесты: WP18 (`T-AU1`, `T-AU3`).
+- Требует подтверждения владельцем: нет
+
+### D-C-105. Параметры без значений в документах — `None`
+- Класс: B
+- WP / место: §6.7, `quack/config.py`
+- Контекст: §6.7 называет `auth_success_redirect_url` и `terms_version`, но значений нет ни в
+  §6.7, ни в `Т-§21.3`, `Т-§22.11`, `Д-§14.1`.
+- Варианты: (1) `None` до значения владельца, потребитель явно отказывает; (2) придумать значения.
+- Решение: (1). `terms_version` — версия текста согласия (продукт, владелец); без
+  `auth_success_redirect_url` вход не завершает редирект.
+- Исправление 2026-11-02 (по поручению владельца решать по ТЗ и техдоку, передал B): `stroke_batch_ms` 300, `line_pause_ms` 1200,
+  `capture_still_ms` 700 в документах есть — таблица `Т-§21.3` (строки §15.2, §15.3, §16.2);
+  в первой версии записи ошибочно отнесены к пробелам, в `Settings` теперь эти значения.
+- Почему: закон 8 «отсутствие — не ноль», §0.4.3 п.2. Обратимость: значение параметра.
+- Тесты: WP18 (`T-AU1`, `T-AU6`).
+- Требует подтверждения владельцем: да — нужны значения `terms_version`,
+  `auth_success_redirect_url`
+
+### D-C-106. Ключ Modal и у `api`
+- Класс: C
+- WP / место: S1, S12; `_PROD_SECRETS_BY_ROLE` (WP9.2, `T-OPS6`)
+- Контекст: `Д-§7` выдаёт `MODAL_TOKEN_ID`/`SECRET` только `workers`. ТЗ §4.2 даёт
+  `EmbeddingClient` и `api`; `Д-§3.2` пускает `api` в Modal; `Т-§10.5` и S12: `embed_query` для
+  поиска по свободному запросу (инструмент учителя в `api`, `GET /v1/search`).
+- Варианты: (1) ключ у `api` и `workers`; (2) `api` ставит поиск задачей в `workers`
+  (ход учителя ждал бы фон — закон 9).
+- Решение: (1). В этапе I ключи — только поля `Settings`; требование секрета по роли — в WP9.2.
+- Почему: §0.4.1 — `Т-§` выше `Д-§`; `Д-§3.2` согласуется; закон 9.
+- Обратимость: строка таблицы ролей.
+- Тесты: `T-OPS6` (WP9).
+- Требует подтверждения владельцем: да — **подтверждено** 2026-11-02, вариант (1): по поручению владельца
+  решать по ТЗ и техдоку («у нас пока никаких данных учеников нет. остальные решения если за мной какие есть - сверься с тз и тз доком, дай решение»), решение передал B.
+
+### D-C-107. Контракт эндпоинтов compute WP24 и таймаут задания
+- Класс: B
+- WP / место: WP24, шов S10; `compute/quack_compute/contracts.py`, `backend/quack/compute_client/contracts.py`, `Settings.compute_task_timeout_s`
+- Контекст: WP24 называет эндпоинты и что они делают, но не схемы и не таймаут задания;
+  `Д-§3.2`: compute без сети, файл — в теле запроса, результат — в ответе.
+- Варианты: (1) JSON с base64 для двоичных данных, одна схема на эндпоинт; (2) сырой двоичный
+  запрос и `multipart`-ответ.
+- Решение: (1). Схемы — минимальные поля из WP20.2, WP21.3, WP22.3, `Т-§13.6`, `Т-§17.6`:
+  `pdf/pages` → страницы (номер, текст, WebP); `image/align` → `aligned` и WebP; `image/clean-drawing`
+  (изображение и маска `segmenter`) → WebP; `image/render-strokes` (штрихи в координатах доски,
+  размер) → WebP; `render/snapshots` (HTML, наборы параметров) → снимок, ошибки консоли, `blank`;
+  `render/pdf` (HTML) → PDF и `page_count`. Таймаут задания — `compute_task_timeout_s` = 60 с в
+  compute и backend (документы не называют; консервативно — дольше), задание сверх него убивается,
+  ответ 504 → `ComputeJobTimeout`; клиент ждёт `compute_task_timeout_s + compute_timeout_sec`.
+  Рендер — в процессе сервиса (`Renderer`, один Chromium с закрытием по простою), не в пуле.
+- Почему: §0.4.3 п.5 (одна форма для всех эндпоинтов, без новых зависимостей), п.4.
+- Обратимость: схема одного эндпоинта, один параметр.
+- Тесты: `T-CM1`, `test_wp24_endpoints_are_declared`, `tests/storage/test_compute_client_s10.py`;
+  `T-CM2`, `T-CM3` — с реализацией WP24.
+- Требует подтверждения владельцем: нет
+
+### D-C-108. Подмены S13: идентификаторы шагов, размер дельты, журнал
+- Класс: B
+- WP / место: шов S13, §8.1, WP26.2; `tests/support/llm.py`, `backend/loadtest/meta_mock.py`
+- Контекст: D-B-125 задаёт формат элементов, событий и сбоев, но не размер куска текста, не вид идентификаторов в `ScriptedLLMProvider` и не то, как вызов попадает в журнал.
+- Решение: (1) текст ответа идёт кусками по `STREAM_DELTA_CHARS` = 16 символов (в обеих подменах; тесты проверяют только, что кусков больше одного и что они склеиваются в ответ); (2) в `ScriptedLLMProvider` идентификаторы детерминированы: `call_{schema}_{шаг}_{n}`, `fc_…`, `rs_…`, `msg_…`. Номер шага считается по входу (сколько шагов сценария закрыты `function_call_output`), а не по порядку вызовов. Поэтому параллельные задачи e2e не мешают друг другу (§8.1, как выбор ответа по `schema_name`). `function_call` из входа без `function_call_output` — `AssertionError`; (3) весь `StreamRequest` пишется в `stream_calls`, его `base` — ещё и в `calls`, чтобы `calls_for` считал все вызовы роли; (4) при `commentary_only` поток содержит только элемент-комментарий, при `incomplete` — только дельты, а на шаге с инструментами — только `StreamCompleted(status="incomplete")` без `function_call`, повтор того же шага отдаёт вызовы; `invalid_json` на шаге с инструментами не берётся и срабатывает на шаге ответа (D-B-125 п.5, замечание B к #87); в остальных шагах первым идёт элемент `reasoning`; (5) `meta-mock` с `tools` отвечает на шаг, где во входе есть `function_call_output` на каждый `function_call`, иначе — шаг с вызовами, как в Фазе 3. Задержка профиля `measured` — целиком до начала потока.
+- Почему: §0.4.3 п.5 (без новых зависимостей и параметров `Settings` — это подмены тестов), D-B-125 п.2.
+- Обратимость: константы и вспомогательные функции подмен.
+- Тесты: `tests/test_support_scripted_llm.py` (`test_stream_*`), `tests/test_meta_mock.py` (`test_stream_*`).
+- Требует подтверждения владельцем: нет
+
+#### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
+
+Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
+с §6.1 по колонкам: `core.auth_sessions`, `core.auth_links`, `content.canvas_boards`,
+`content.materials`, `content.material_pages`, `content.artifacts`, `content.artifact_versions`,
+`content.learner_skills`, `content.exports`; плюс колонки C в `core.learners` (`email`, `settings`).
+Все колонки §6.1 есть, лишних нет, `learner_id` в каждой таблице; `NULL`/`NOT NULL` по D-A-104
+C подходят (`material_pages.text NOT NULL` — для страницы без текста пишется пустая строка).
+Правок не нужно.
+
+D-A-103 (две схемы до WP1.3): **C согласен** с вариантом (3). В WP9 при переходе (WP1.3) C
+переключает `ops migrate`, образ (`dbmate` в `quack-backend`) и сервис `migrate` в compose на
+dbmate. Сейчас нужно только одно: dbmate в CI, иначе `T-DB1`/`T-DB5` падают в job `backend` —
+PR #77 (dbmate v2.36.0, sha256).
 
 ## Заблокировано
 
 ## Красные прогоны
 
+- WP2 (A), Этап I–II: схемы нагрузок (Этап I), шаблоны ключей — `NotImplementedError`: `pytest -q tests/events` — 2 failed (`T-EV3`), 71 passed (`T-EV1`, `T-EV2`, `T-EV5` на схемах Этапа I). Зелёный: 73 passed.
+- WP1 (A), коммит `8c9fe33` (Этап I–II): `QUACK_TEST_REQUIRE_INFRA=1 python -m pytest -q tests/db` — 13 errors (`NotImplementedError` в `open_db`: все `T-DB5`), 6 passed (`T-DB1` — миграция есть с Этапа I; `T-DB2`, `T-DB4` и их самопроверки; формат `actor`). Зелёный (`phase-4-a-wp1`): 19 passed.
+- S13, подмены (C, `phase-4-c-s13`, коммит `dbe6022`): `uv run pytest tests/test_meta_mock.py tests/test_support_scripted_llm.py` — `test_meta_mock.py`: 12 красных (нет SSE), 47 зелёных; `test_support_scripted_llm.py` — ошибка сборки (`ScriptedToolCall` нет). Зелёный: 80 passed; с затронутыми (`tests/llm`, `test_llm_runtime.py`, `tests/session/test_phase3_hot_path.py`) — 166 passed, 32 skipped (без инфраструктуры; их прогонит CI).
+- S13, сбои на шаге с инструментами (C, замечание B к #87): `test_stream_incomplete_on_a_tool_step_has_no_calls`, `test_stream_invalid_json_waits_for_the_answer_step` на прежнем `tests/support/llm.py` — 2 красных. Зелёный: `tests/test_support_scripted_llm.py` + `tests/test_meta_mock.py` — 82 passed.
 - Этап I G1 (B): `uv run pytest tests/session/test_phase4_contracts.py tests/llm/test_phase4_ai_layer.py tests/practice/test_tasks_markup.py tests/practice/test_check_instant.py tests/test_contracts.py` — 33 красных (`NotImplementedError`: `TurnStreamParser`, `next_step_input`, `validate_markup`, `check`), 26 зелёных (контракты, `T-AI1`, `T-A6`).
 - WP10.2–10.3 (адаптер и цикл): `tests/llm/test_phase4_stream_adapter.py` написан до реализации, но красный прогон не снят отдельно (до реализации тесты падали бы на импорте `quack.llm.tool_loop`). Зелёный: 9 passed; с затронутыми старыми (`tests/llm`, `test_llm_runtime.py`, `test_meta_mock.py`, `test_thresholds_in_settings.py`, `test_contracts.py`) — 127 passed.
+- WP11.5 ядро математики (#79, коммит `85e07f9`): один коммит, красный прогон не снят отдельно (замечание C по §7.4). Зелёный: `compute/tests/math` — 40 passed.
+- WP11.5, пороги через `Params` (D-B-124): `cd compute && uv run pytest tests/math/test_params.py` — красный на сборке (`TypeError: Params.__init__() got an unexpected keyword argument 'precision_digits'`), коммит `32db37f`. Зелёный: `compute/tests/math` — 43 passed.
+- WP11.5, эндпоинты без значений по умолчанию (D-B-124, #83): `cd compute && uv run pytest tests/math/test_service.py` — 11 failed, 4 passed (422 и `ValidationError`: `numeric`, `tolerance` не в схеме). Зелёный: весь `compute` — 67 passed.
 - Зелёный прогон (B, `phase-4-b`): те же файлы — 59 passed. Полный прогон набора на итоговом SHA (§0.4.7) — job `backend` CI (`QUACK_TEST_REQUIRE_INFRA=1`); SHA и итог — в описании PR #72.
+- WP11.3, быстрая проверка (D-B-126): `cd backend && uv run pytest tests/practice/test_check_fast.py` — 11 failed (`NotImplementedError` в `check()`), коммит `6f32612`. Зелёный: 11 passed; с затронутыми (`tests/practice`, `tests/test_contracts.py`, `tests/storage/test_compute_client_math.py`, `tests/test_thresholds_in_settings.py`) — 67 passed.
+- WP11.7 (D-B-127): `cd backend && uv run pytest tests/practice/test_check_reading.py` — 4 failed, 1 passed (набранный ответ не меняется уже сейчас), коммит `883b237`. Зелёный: `tests/practice` — 55 passed.
+- WP11.6, чистая часть (D-B-128): `cd backend && uv run pytest tests/practice/test_second_opinion.py` — 14 failed (`NotImplementedError`), коммит `6e3de38`. Зелёный: 14 passed; с затронутыми (`tests/practice`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`) — 81 passed.
 
 ## Правки тестов
 
 - `tests/test_contracts.py` (`T-A6`): в `PRODUCT` добавлен `agents` (ТЗ Ф4 §4.1). Сила проверки не меняется.
+- `compute/tests/math/test_equivalence.py`: `PARAMS` берётся из `test_params.py` (у `Params` новые поля, D-B-124). Утверждения не менялись.
 
 ## Вопросы к команде
 
+- **Q-A-2 (A → B, к заморозке S3 на G1).** (1) `Verdict.misconception` в событии — id заблуждения или гипотеза словами, метка недопустима (`Т-§4.5`); оставить одно поле `str` или разделить на `misconception_id` и `misconception_hypothesis`? (2) `element.responded` по §6.3 — без `answer`; ответ на элемент-задачу пишется как `answer.submitted` с `element_id` — так? (3) `observation.extracted.rejected` — форма `{reason, quote}` достаточна? (4) `RootCauseRecord.confidence` — категория в событии, число по `root_cause_confidence_map` считает проектор (A) — согласен? (5) `item.flagged_unclear.text` вместо `quote` (D-A-107). (6) `CheckFailed` стал моделью Pydantic — позиционный конструктор dataclass больше не работает.
+- **Q-A-3 (A → C, к заморозке S3 на G1).** (1) `observation.diagnosed`: `diagnosis.kind` (`error`, `question`) и `method` (`model`, `symbolic`) — по WP5.1, WP21.4 так? (2) `canvas.line_committed.kind` — пока `str`: дай закрытый перечень видов строки (`Т-§15.3`). (3) `material.parsed` — `{material_id, pages_count}` достаточно? (4) `artifact.updated.kind` — пока `str`: назови значения видов WP23.1. (5) `DeletionRecord.target_id` — UUID, как `ops.deletion_log.target_id` (ревью #74).
+- **Q-A-1 (A → B, класс C, шов S3).** Каталог событий живёт в ядре (`quack.events`, §4.1), и импортировать модели B из `quack.practice`, `quack.agents`, `quack.session` он не может (слои §4.1, `T-A6`). Кроме того, разметка `turn.committed` хранит id, а `TurnMarkup` модели — метки. Предложение A: модели нагрузки — в каталоге (`quack.events.registry`, S3), поля — по моделям B (`Verdict`, `CheckFailed`, `ExtractedElement`, `TurnMarkup` с id, `LearnerAnswer`); B импортирует их из ядра вместо своих копий или держит свои модели, а тест-контракт сверяет поля. Нужен выбор B до G1.
 - **Q-A-2 (A → B) — ответ B:** (1) `Verdict.misconception` разделить на `misconception_id` и `misconception_hypothesis`; (2) да, ответ на элемент-задание — `answer.submitted` с `element_id`; (3) `rejected` — предложение `{index, reason, quote}` (провенанс, закон 6), решает A; (4) согласен, число корня — при проекции по `root_cause_confidence_map`; (5) согласен с D-A-107; (6) согласен. Подробно — комментарий в PR #80.
 - **Q-A-1 (A → B, класс C, шов S3) — ответ B: вариант (а).** Модели нагрузки событий, которые пишет B (`answer.submitted`, `verdict.recorded`, `check.failed`, `observation.extracted`, `turn.committed`, `task.created` и др.), живут в ядре — в `quack.events.registry` (A), с полями по моделям B из PR #72. B импортирует их из ядра. Почему: ядро не может импортировать продукт (§4.1, `T-A6`); WP2.1 требует модель Pydantic на каждый тип в реестре и отказ неверной нагрузки при записи — это возможно только с моделями в ядре; одна реализация вместо двух (§0.4.3, «частые случаи»: два потока сделали по-разному). Раскладка:
   - модели с одинаковой формой в событии и в продукте — `LearnerAnswer`, поля `Verdict`, `CheckFailed`, `AnswerSpec` (внутри разметки `task.created`) — переезжают в ядро; `quack.practice` их переэкспортирует, а не копирует. Переезд делает A при заморозке каталога (S3, G1), B меняет импорты одним PR сразу после;
@@ -357,6 +641,15 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 ## Для фронтенда
 
 Снимок `backend/openapi.json` и таблица «старый эндпоинт → новый» (§6.4) — на каждом гейте.
+
+### Черновик к G1 (решение владельца 2026-11-02, передано потоком B; D-B-119)
+
+- Снимок: `backend/openapi.json` в ветке `phase-4-b-actions-route`, коммит `679b8ea` или новее
+  (PR #75): https://github.com/steppetech1/Quack/blob/679b8ea/backend/openapi.json
+- **Маршрут `/actions` объявлен, тело — WP13.1.** `POST /v1/sessions/{session_id}/actions`:
+  `200` — `text/event-stream`, событие — `ActionFrame` (кадры §4.7), `Element`; `201` —
+  `ActionAccepted`.
+- `backend/openapi.json` в `phase-4` до слияния #75 не меняется. Таблица «старый → новый» — §6.4 ТЗ.
 
 ## DoD
 
