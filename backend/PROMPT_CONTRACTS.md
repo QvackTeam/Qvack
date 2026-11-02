@@ -463,7 +463,6 @@ Output fields:
 - `note`: string
 
 Input blocks: `problem`, `options`, `claimed_markup`, `source_problem`
-Layer 1: stub, owner's doctrine pending (BLOCKED-B-101)
 
 ## `task_arbiter@1` → `TaskCheckOutput`
 
@@ -479,7 +478,6 @@ Output fields:
 - `note`: string
 
 Input blocks: `problem`, `claimed_markup`, `source_problem`, `generator_solution`, `checker_solution`, `disagreement`
-Layer 1: stub, owner's doctrine pending (BLOCKED-B-102)
 
 ## `solution_space@1` → `SolutionSpace`
 
@@ -498,7 +496,6 @@ Output fields:
 
 Input blocks: `problem`, `answer_spec`, `reference_solution`, `known_misconceptions`
 Label fields: `wrong_branches.misconception`
-Layer 1: stub, owner's doctrine pending (BLOCKED-B-103)
 
 ## `analyst@1` → `AnalystOutput`
 
@@ -562,7 +559,6 @@ Output fields:
 - `triggers`: list[string]
 
 Input blocks: `skill`, `manifestations`
-Layer 1: stub, owner's doctrine pending (BLOCKED-B-104)
 
 ## `today_planner@1` → `TodayPlannerOutput`
 
@@ -576,7 +572,6 @@ Output fields:
 
 Input blocks: `recommendations`, `candidate_tasks`, `cards`
 Label fields: `items.tasks`
-Layer 1: stub, owner's doctrine pending (BLOCKED-B-105)
 
 ## `domain_classifier@1` → `DomainClassifierOutput`
 
@@ -588,7 +583,6 @@ Output fields:
 - `confidence`: number
 
 Input blocks: `domains`, `text`
-Layer 1: stub, owner's doctrine pending (BLOCKED-B-106)
 
 ## `viz_builder@1` → `VizBuilderOutput`
 
@@ -600,7 +594,6 @@ Output fields:
 - `answer_action`: string | null
 
 Input blocks: `description`, `libraries`, `previous_errors`
-Layer 1: stub, owner's doctrine pending (BLOCKED-B-107)
 
 ## `release_judge@1` → `ReleaseJudgeOutput`
 
@@ -610,7 +603,6 @@ Output fields:
 - `reason`: string
 
 Input blocks: `situation`, `turn_a`, `turn_b`, `criteria`
-Layer 1: stub, owner's doctrine pending (BLOCKED-B-108)
 
 ## Edit points after G1
 

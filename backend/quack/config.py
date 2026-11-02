@@ -151,26 +151,28 @@ def _role(
 def default_llm_roles() -> dict[str, RoleConfig]:
     """Т-§11.1 (models, effort, output limits), Т-§11.3 (priority classes), Т-§1.3 (model ids).
     Timeouts: teacher 45 s and teacher_fallback 30 s as in Phase 3, others `llm_timeout_sec`
-    (60 s). Classes of roles with two uses (`recognizer`, `builder`) and of `voice` — D-B-101."""
+    (60 s). Classes of roles with two uses (`recognizer`, `builder`) and of `voice` — D-B-101.
+    Output limits of ten roles are set by the stand measurement with `effort` (D-B-134): the
+    Т-§11.1 figure of 4096 came from a spike without a reasoning level."""
     return {
         "teacher": _role(WONDER, "low", 8192, "P0", "teacher@2", 45.0),
-        "teacher_fallback": _role(SPARK, "low", 4096, "P0", "teacher@2", 30.0),
-        "extractor": _role(SPARK, "high", 4096, "P2", "extractor@3"),
-        "verdict_free": _role(SPARK, "high", 4096, "P1", "verdict_free@1"),
+        "teacher_fallback": _role(SPARK, "low", 8192, "P0", "teacher@2", 30.0),
+        "extractor": _role(SPARK, "high", 16384, "P2", "extractor@3"),
+        "verdict_free": _role(SPARK, "high", 8192, "P1", "verdict_free@1"),
         "verdict_proof": _role(WONDER, "high", 8192, "P1", "verdict_proof@1"),
         "second_opinion": _role(WONDER, "high", 8192, "P1", "second_opinion@1"),
         "canvas_diagnoser": _role(SPARK, "low", 4096, "P0", "canvas_diagnoser@1"),
         "recognizer": _role(SPARK, "low", 4096, "P0", "recognizer@1"),
         "segmenter": _role("sam-3.1", None, None, "P1", None),
         "voice": _role("muse-voice-transcribe-1.0", None, None, "P1", None),
-        "analyst": _role(SPARK, "high", 4096, "P2", "analyst@1"),
-        "analyst_deep": _role(WONDER, "high", 8192, "P2", "analyst@1"),
-        "builder": _role(SPARK, "high", 4096, "P2", "builder@1"),
+        "analyst": _role(SPARK, "high", 16384, "P2", "analyst@1"),
+        "analyst_deep": _role(WONDER, "high", 16384, "P2", "analyst@1"),
+        "builder": _role(SPARK, "high", 8192, "P2", "builder@1"),
         "material_parser": _role(SPARK, "high", 4096, "P2", "material_parser@1"),
-        "task_generator": _role(SPARK, "high", 4096, "P2", "task_generator@1"),
-        "task_checker": _role(SPARK, "high", 4096, "P1", "task_checker@1"),
+        "task_generator": _role(SPARK, "high", 8192, "P2", "task_generator@1"),
+        "task_checker": _role(SPARK, "high", 8192, "P1", "task_checker@1"),
         "task_arbiter": _role(WONDER, "high", 8192, "P2", "task_arbiter@1"),
-        "solution_space": _role(SPARK, "high", 4096, "P2", "solution_space@1"),
+        "solution_space": _role(SPARK, "high", 8192, "P2", "solution_space@1"),
         "viz_builder": _role(WONDER, "high", 16384, "P2", "viz_builder@1"),
         "viz_checker": _role(SPARK, "low", 4096, "P2", "viz_checker@1"),
         "misconception_describer": _role(SPARK, "high", 4096, "P3", "misconception_describer@1"),
