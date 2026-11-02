@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, TypeAdapter
@@ -168,6 +169,7 @@ def turn_batch(
     settings: Settings,
     answered: AnsweredAction | None = None,
     learner_texts: Sequence[LearnerText] = (),
+    learner_timezone: str | None = None,
 ) -> TurnBatch:
     """The events of the turn with ids instead of labels (WP2.2, WP13.3)."""
     output = turn.output
@@ -218,6 +220,7 @@ def turn_batch(
             output.p3_markup.deadline,
             labels,
             learner_texts,
+            learner_timezone=learner_timezone,
             settings=settings,
             key=f"{key}:deadline",
             common=common,
@@ -287,6 +290,7 @@ def _deadline(
     labels: LabelMap,
     learner_texts: Sequence[LearnerText],
     *,
+    learner_timezone: str | None,
     settings: Settings,
     key: str,
     common: dict[str, Any],
@@ -305,6 +309,13 @@ def _deadline(
     except ValueError:
         log.warning("turn_deadline_bad_date", deadline_at=deadline.deadline_at)
         return None, []
+    if at.tzinfo is None:
+        # Т-§14.6: the learner's days are in their zone (`core.learners.settings`).
+        zone = _zone(learner_timezone)
+        if zone is None:
+            log.warning("turn_deadline_no_timezone", deadline_at=deadline.deadline_at)
+            return None, []
+        at = at.replace(tzinfo=zone)
     coverage = [labels.resolve("topic", t) for t in deadline.coverage]
     refs = [{"seq": source.seq}]
     events: list[NewEvent] = []
@@ -363,6 +374,15 @@ def _deadline(
         coverage_topic_ids=coverage,
     )
     return record, events
+
+
+def _zone(name: str | None) -> ZoneInfo | None:
+    if not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
 
 
 async def commit_turn(
