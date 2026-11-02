@@ -4,8 +4,8 @@ Seam S1: the field set of `AppResources` is a contract shared by all streams. Pr
 packages import `AppResources` and the dependencies only from this module (§4.1), so that
 `quack.api.app` can import product routers without an import cycle.
 
-ТЗ Фазы 4 §4.2 adds `storage`, `embeddings`, `email`, `deletions` (stream C); `db` comes with
-WP1.2 (stream A, seam S2) and replaces `engine` and `session_factory` in WP1.3.
+ТЗ Фазы 4 §4.2 adds `storage`, `embeddings`, `email`, `deletions` (stream C) and `db` (the `Db`
+of WP1.2, stream A, seam S2); `engine` and `session_factory` leave in WP1.3.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from quack.api.email import EmailSender, create_email_sender
 from quack.compute_client.client import ComputeClient, create_compute_client
 from quack.config import Settings
+from quack.db import Db, open_db
 from quack.db.neo4j import create_driver
 from quack.db.postgres import SessionFactory, create_engine, create_session_factory
 from quack.db.redis import create_redis
@@ -42,6 +43,7 @@ class AppResources:
     """
 
     settings: Settings
+    db: Db
     engine: AsyncEngine
     session_factory: SessionFactory
     neo4j: AsyncDriver
@@ -55,7 +57,7 @@ class AppResources:
 
     async def close(self) -> None:
         """Close in reverse creation order: deletions, email, embeddings, storage, compute, llm,
-        redis, neo4j, engine (§4.2)."""
+        redis, neo4j, engine, db (§4.2)."""
         await self.deletions.aclose()
         await self.email.aclose()
         await self.embeddings.aclose()
@@ -66,10 +68,13 @@ class AppResources:
             await self.redis.aclose()
         await self.neo4j.close()
         await self.engine.dispose()
+        await self.db.close()
 
 
-def create_app_resources(settings: Settings) -> AppResources:
-    """Production resources of the API process, in the creation order of §4.2."""
+async def create_app_resources(settings: Settings) -> AppResources:
+    """Production resources of the API process, in the creation order of §4.2; `db` is opened
+    here (`open_db` waits for the pool, so a missing Postgres fails the start)."""
+    db = await open_db(settings)
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
     neo4j = create_driver(settings)
@@ -77,6 +82,7 @@ def create_app_resources(settings: Settings) -> AppResources:
     provider = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
     return AppResources(
         settings=settings,
+        db=db,
         engine=engine,
         session_factory=session_factory,
         neo4j=neo4j,

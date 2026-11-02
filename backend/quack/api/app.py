@@ -140,7 +140,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        built = None if resources is not None else create_app_resources(settings)
+        built = None if resources is not None else await create_app_resources(settings)
         if built is not None:
             app.state.resources = built
         try:
