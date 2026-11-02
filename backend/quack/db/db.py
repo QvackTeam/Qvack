@@ -164,13 +164,14 @@ class Db:
                 await conn.set_autocommit(False)
 
 
-async def open_db(settings: Settings) -> Db:
-    """Create and open the pool (once per process, `quack.runtime`)."""
+async def open_db(settings: Settings, *, wait: bool = True) -> Db:
+    """Create and open the pool (once per process, `quack.runtime`). `wait=False` opens it
+    without waiting for Postgres (the API starts and `/health/ready` reports 503)."""
     pool = AsyncConnectionPool(
         settings.postgres_dsn,
         min_size=settings.pg_pool_min_size,
         max_size=settings.pg_pool_max_size,
         open=False,
     )
-    await pool.open(wait=True)
+    await pool.open(wait=wait)
     return Db(pool)

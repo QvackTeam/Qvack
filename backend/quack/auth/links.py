@@ -121,13 +121,14 @@ async def request_link(
     await email_sender.send_login_link(to=address, link=f"{verify_url}?token={token}")
 
 
-async def learner_for_email(db: Db, email: str) -> UUID:
-    """The learner of the address; a new `core.learners` row for a new one."""
+async def learner_for_email(db: Db, email: str, learner_id: UUID | None = None) -> UUID:
+    """The learner of the address; a new `core.learners` row for a new one, with `learner_id`
+    (a fresh id by default). A known address keeps its own id."""
     address = email.strip().lower()
     await db.execute(
         "INSERT INTO core.learners (learner_id, email) VALUES (%(learner_id)s, %(email)s) "
         "ON CONFLICT (email) DO NOTHING",
-        {"learner_id": uuid4(), "email": address},
+        {"learner_id": learner_id or uuid4(), "email": address},
     )
     row = await db.fetch_one(_LEARNER_BY_EMAIL, {"email": address})
     assert row is not None
