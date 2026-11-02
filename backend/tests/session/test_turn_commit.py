@@ -547,3 +547,27 @@ async def test_plan_of_another_learner_session_is_not_taken(pg_db: Db) -> None:
     row = await _plan(pg_db, session_id)
     assert row is not None and row["learner_id"] == owner
     assert await _events(pg_db, other) == []
+
+
+async def test_completed_steps_are_history(pg_db: Db) -> None:
+    """П-4.6: done steps are a history that does not change — a turn that leaves a done step
+    out of `completed_steps` does not erase it; new ones are added in order, once."""
+    learner_id, session_id = await create_learner(pg_db), uuid4()
+    turns = [
+        _plan_update("geometric sum", ["definition", "example"]),
+        _plan_update("ratio test", ["geometric sum"]),
+        _plan_update("root test", ["example", "ratio test"]),
+    ]
+    for plan in turns:
+        batch = _batch(learner_id, _bare(planUpdate=plan), session_id=session_id)
+        await commit_turn(pg_db, batch, learner_id=learner_id)
+
+    row = await _plan(pg_db, session_id)
+    assert row is not None
+    assert row["plan"]["completed_steps"] == [
+        "definition",
+        "example",
+        "geometric sum",
+        "ratio test",
+    ]
+    assert row["plan"]["current_step"] == "root test"
