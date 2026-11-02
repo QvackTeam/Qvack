@@ -156,7 +156,7 @@ async def check(
         outcome, method = _instant(answer, spec, settings)
         if outcome is not None:
             help_used = help_used or HelpUsed()
-            return Verdict(
+            verdict = Verdict(
                 answer_seq=answer_seq,
                 part=part,
                 outcome=outcome,
@@ -165,6 +165,7 @@ async def check(
                 help_step=help_used.hint_step,
                 solution_shown=help_used.solution_requested,
             )
+            return apply_reading(verdict, recognition_confidence, settings)
     # Fast types and numbers written as expressions go to compute (WP11.3, WP11.5). Without a
     # compute call nothing is decided now: the insurance job checks later (Т-§6.1).
     if compute is None:
@@ -178,7 +179,31 @@ async def check(
         return NotYet(answer_seq, part, "timeout")
     except ComputeUnavailableError:
         return NotYet(answer_seq, part, "compute_unavailable")
-    return _from_compute(response, answer_seq, part, help_used or HelpUsed())
+    result = _from_compute(response, answer_seq, part, help_used or HelpUsed())
+    if isinstance(result, Verdict):
+        return apply_reading(result, recognition_confidence, settings)
+    return result
+
+
+def apply_reading(
+    verdict: Verdict, recognition_confidence: float | None, settings: Settings
+) -> Verdict:
+    """Т-§6.9 (WP11.7, D-B-127): the recognition confidence lowers the verdict confidence (a
+    code verdict has none — it becomes the recognition confidence; a model verdict is
+    multiplied by it); below `recognition_min_confidence` a negative verdict (`incorrect`,
+    `partial`) waits until the learner has seen the reading. A typed answer — unchanged."""
+    if recognition_confidence is None:
+        return verdict
+    confidence = (
+        recognition_confidence
+        if verdict.confidence is None
+        else verdict.confidence * recognition_confidence
+    )
+    unsure = recognition_confidence < settings.recognition_min_confidence
+    negative = verdict.outcome in ("incorrect", "partial")
+    return verdict.model_copy(
+        update={"confidence": confidence, "needs_reading_confirmation": unsure and negative}
+    )
 
 
 # --- Fast check in compute (WP11.3, WP11.5) ---
