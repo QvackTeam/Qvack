@@ -14,7 +14,10 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
+from structlog.testing import capture_logs
+
 from quack.config import Settings
+from quack.graph.read.models import RequiresLink
 from quack.llm.provider import ProviderRequest
 from quack.llm.streaming import StreamRequest
 from quack.practice.check import Verdict
@@ -26,6 +29,7 @@ from quack.session.actions import (
     TurnCommittedFrame,
     VerdictFrame,
 )
+from quack.session.guards import Boundary
 from quack.session.teacher_output import TurnTask
 from quack.session.turn_graph import (
     AssembledTurn,
@@ -122,7 +126,7 @@ def _remove_spoiler(text: str) -> str:
     return " ".join(s for s in sentences if ANSWER not in s).strip()
 
 
-def _guard(verdict: Verdict | None = None) -> GuardInputs:
+def _guard(verdict: Verdict | None = None, boundary: Boundary | None = None) -> GuardInputs:
     return GuardInputs(
         answered_verdict=verdict,
         skill_labels=frozenset({"S1", "S2"}),
@@ -130,6 +134,7 @@ def _guard(verdict: Verdict | None = None) -> GuardInputs:
         task_labels=frozenset(),
         has_spoiler=_has_spoiler,
         remove_spoiler=_remove_spoiler,
+        boundary=boundary,
     )
 
 
@@ -195,11 +200,15 @@ class Ports:
         return TurnTask.model_validate(answer)
 
 
-def _ports(verdict: Verdict | None = None, frame: VerdictFrame | None = None) -> Ports:
+def _ports(
+    verdict: Verdict | None = None,
+    frame: VerdictFrame | None = None,
+    boundary: Boundary | None = None,
+) -> Ports:
     return Ports(
         AssembledTurn(
             request=_request(),
-            guard=_guard(verdict),
+            guard=_guard(verdict, boundary),
             effort="low",
             degraded_mode=None,
             verdict=frame,
@@ -392,6 +401,47 @@ async def test_code_stance_with_code_verdict_passes() -> None:
 
     assert len(provider.stream_calls) == 1
     assert ports.committed[0].output.p1_head.verdict_stance == "code"
+
+
+def _jump() -> Boundary:
+    """S1 needs S2, which was neither shown nor practised."""
+    pre = uuid4()
+    return Boundary(
+        requires={"S1": (RequiresLink(skill_id=pre, confidence=0.9),)},
+        skill_ids={"S1": uuid4(), "S2": pre},
+        min_confidence=0.6,
+    )
+
+
+async def test_boundary_jump_retried_before_the_body() -> None:
+    """«Do not jump the boundary» at the head: retry before any body text; a turn that takes
+    the prerequisite too passes."""
+    provider = ScriptedLLMProvider()
+    _answers(
+        provider,
+        _turn("Jumped.", head=_head(targetSkills=["S1"])),
+        _turn(head=_head(targetSkills=["S1", "S2"])),
+    )
+    ports = _ports(boundary=_jump())
+
+    await _run(ports, provider)
+
+    assert len(provider.stream_calls) == 2
+    assert _shown(ports.frames) == CLEAN_PREFIX
+    assert "boundary_jump" in str(provider.stream_calls[1].input_items)
+
+
+async def test_boundary_jump_after_retries_is_shown_and_logged() -> None:
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(head=_head(targetSkills=["S1"])))
+    ports = _ports(boundary=_jump())
+
+    with capture_logs() as logs:
+        await _run(ports, provider, guard_max_retries=1)
+
+    assert len(provider.stream_calls) == 2 and len(ports.committed) == 1
+    assert _shown(ports.frames) == CLEAN_PREFIX
+    assert any(e["event"] == "guard_violation" and "boundary_jump" in e["reasons"] for e in logs)
 
 
 async def test_markup_labels_reset_after_shown_text() -> None:

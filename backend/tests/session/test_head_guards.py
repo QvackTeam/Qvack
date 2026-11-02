@@ -5,11 +5,14 @@ before the body is shown is the turn graph (WP13.2)."""
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
+from quack.graph.read.models import RequiresLink
 from quack.practice.check import Verdict
 from quack.session.guards import (
+    Boundary,
     GuardViolation,
     head_violations,
     markup_violations,
@@ -139,3 +142,55 @@ def test_settle_stance_only_lowers(
         _head(verdict_stance=stance), None if verdict is None else _verdict(verdict)
     )
     assert head.verdict_stance == settled
+
+
+# --- «do not jump the boundary» (Т-§12.4, WP13.5; S4 `RequiresLink`, D-B-153) ---
+
+PRE, PRE2, TARGET = uuid4(), uuid4(), uuid4()
+
+
+def _boundary(*links: RequiresLink, min_confidence: float = 0.6) -> Boundary:
+    return Boundary(
+        requires={"S1": links},
+        skill_ids={"S1": TARGET, "S2": PRE},
+        min_confidence=min_confidence,
+    )
+
+
+@pytest.mark.parametrize(
+    ("link", "targets", "ok"),
+    [
+        (RequiresLink(skill_id=PRE, confidence=0.9), ["S1"], False),
+        (RequiresLink(skill_id=PRE, confidence=0.9, has_exposure=True), ["S1"], True),
+        (RequiresLink(skill_id=PRE, confidence=0.9, has_evidence=True), ["S1"], True),
+        (RequiresLink(skill_id=PRE, confidence=0.5), ["S1"], True),
+        (RequiresLink(skill_id=PRE, confidence=0.6), ["S1"], False),
+        (RequiresLink(skill_id=PRE, confidence=0.9), ["S1", "S2"], True),
+    ],
+    ids=["jump", "shown", "evidenced", "unsure-link", "at-threshold", "turn-takes-it"],
+)
+def test_boundary(link: RequiresLink, targets: list[str], ok: bool) -> None:
+    """Every sure prerequisite (`confidence >= requires_min_confidence`) of a target skill has
+    a showing or evidence (the slice reads them with the session overlay), or this turn
+    takes it in `targetSkills`; unsure links are a warning in the context, not a rule."""
+    violations = head_violations(
+        _head(targetSkills=targets),
+        answered_verdict=None,
+        skill_labels=SKILLS,
+        boundary=_boundary(link),
+    )
+    assert _reasons(violations) == ([] if ok else ["boundary_jump"])
+
+
+def test_boundary_names_the_missing_prerequisites_once() -> None:
+    links = (
+        RequiresLink(skill_id=PRE, confidence=0.9),
+        RequiresLink(skill_id=PRE2, confidence=0.8),
+        RequiresLink(skill_id=PRE, confidence=0.7),
+    )
+    [violation] = head_violations(
+        _head(), answered_verdict=None, skill_labels=SKILLS, boundary=_boundary(*links)
+    )
+    assert violation.reason == "boundary_jump"
+    assert violation.detail.count(str(PRE)) == 0  # the model sees labels, never ids (Т-§4.5)
+    assert "S2" in violation.detail and "S1" in violation.detail
