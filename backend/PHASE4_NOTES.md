@@ -841,6 +841,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Обратимость: одна ветка в `insure_symbolic`.
 - Тесты: `tests/practice/test_check_symbolic_job.py`.
 - Требует подтверждения владельцем: нет
+### D-B-144. Грамматика API пускает отношения — режим `interval` проходит проверку разметки
+- Класс: B
+- WP / место: WP12.3, WP11.5; `quack/practice/grammar.py` (`grammar_ok`, D-B-115)
+- Контекст: D-B-137 (#84) убрал режим `interval` из контрактов промптов, потому что ответ-неравенство не проходил `validate_markup` (`expression_unparsed`): токен-грамматика API не пускала `<`, `>`. Грамматика compute (`compute/quack_compute/math/grammar.py`, `Т-§6.5`) эти токены пускает, и сравнение `interval` в compute есть (`_intervals`: два неравенства с одной переменной, `Т-§6.6`).
+- Варианты: (1) те же токены отношений, что в compute; (2) оставить как есть, `interval` не предлагать.
+- Решение: (1). В грамматику API добавлены токены `<`, `<=`, `>`, `>=` — ровно набор compute; Юникод (`≥`) и `!=` по-прежнему отказ. Объединения интервалов (`Union`, `Interval`) не добавлены: их нет и в compute.
+- Почему: D-B-115 — грамматика API отказывает ровно в том, в чём откажет compute (§0.4.3 п.7, единообразие); `Т-§6.6` называет режим `interval`.
+- Обратимость: одно регулярное выражение.
+- Тесты: `tests/practice/test_grammar_relations.py`.
+- Требует подтверждения владельцем: нет
+- Следствие для промптов: режим `interval` можно вернуть в контракты `teacher@2` и `task_generator@1` (D-B-137) — с оговоркой «одно неравенство с одной переменной, без объединений».
 
 ### D-B-147. Запись действий WP13.1: намерение без текста, ответ на элемент-задание
 - Класс: B
@@ -850,6 +861,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.1 (идемпотентность: повтор действия ничего не дублирует), п.3 (схемы S3 и S11 не меняются).
 - Обратимость: одна функция.
 - Тесты: `tests/session/test_record_action.py` (часть `T-TT1`). Проверено и на неверной реализации: подмена события у `hint_request` и отсутствие ответа за элементом — тесты падают.
+- Требует подтверждения владельцем: нет
+
+### D-B-151. Согласие на старте сессии: `require_terms` и тесты Фазы 3
+- Класс: B
+- WP / место: WP13.1, WP18.4 (D-C-112 п.3), `quack/session/router.py` (`POST /v1/sessions`), `tests/session/fixtures.py`
+- Контекст: после #106 `quack.api.auth.require_terms` берёт сессию через `Depends(get_current_session)` (cookie Фазы 4). Маршрут старта Фазы 3 читает ученика по Bearer-токену; тесты Фазы 3 B входят только токеном, без cookie и согласия.
+- Решение: `POST /v1/sessions` — `dependencies=[Depends(require_terms)]` (импорт из `quack.api.auth`, не из `quack.auth`, §4.1/T-A6). В фикстуре `session_app` тестов Фазы 3 зависимость подменена пустой: эти тесты проверяют ход и жизненный цикл, а не вход; ворота проверяет свой тест с cookie и согласием (`tests/session/test_session_terms.py`). e2e потока C (ученик из `System.register` без `consent.given`) падают на старте `403` — правка у C: `register` даёт `consent.given {kind: terms, version: terms_version}`; PR B вливается вместе с ней или после.
+- Почему: §0.4.3 п.2 (WP13.1 «без согласия — `CONSENT_REQUIRED`», `Т-§19.4`), п.5.
+- Обратимость: одна строка маршрута и одна строка фикстуры.
+- Тесты: `tests/session/test_session_terms.py` (часть `T-TT1`): без согласия и со старой версией — `403 CONSENT_REQUIRED`, с текущей — `201`; без cookie — `401`.
 - Требует подтверждения владельцем: нет
 
 ### D-B-148. Граф хода WP13.2: порты, причина повтора, блоки в потоке `token`
@@ -1153,6 +1174,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP13.1, согласие на старте сессии (D-B-151): `uv run pytest tests/session/test_session_terms.py` — 2 failed (старт без согласия `201`, без cookie `201`), коммит `f5029a2`. Зелёный: 2 passed; `tests/session` и `tests/llm/test_labels.py` зелёные; `tests/e2e` — 13 failed (`403` на старте, правка у C).
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
 - WP18, этап I (C, `phase-4-c-wp18`): в Linux против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` и dbmate v2.36.0 `pytest tests/auth` — 7 failed (`NotImplementedError`: `request_link`, `redeem_link`, `LinkLimiter`, `cookie_params`, `learner_for_google`, сессии, согласия). Зелёный (библиотека): 7 passed. `T-AU5` — с маршрутами (весь API на сессиях).
 - WP20.1, WP20.5 (C, `phase-4-c-wp20`, коммит `d161aed`): в Linux против `quack-test-*` с dbmate — `tests/materials` 4 failed (`NotImplementedError`). Зелёный: `tests/materials`, `test_contracts.py`, `tests/db/test_sql_static.py` — 15 passed.
@@ -1185,6 +1207,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.5 (`T-TT4`, часть): `tests/session/test_head_guards.py` — 15 failed (`NotImplementedError`), коммит `26755dd`. Зелёный: 15 passed.
 - WP13.4 (`T-TT3`, часть): `tests/session/test_holdback.py` — 4 failed (`NotImplementedError`), коммит `83675d3`. Зелёный: 5 passed; с затронутыми (`tests/session/test_spoiler_guard.py`, `test_phase3_hot_path.py::test_teacher_reasoning_effort_by_situation`, на инфраструктуре B) — 43 passed.
 - S3, модели B из ядра (Q-A-1 вариант (а)): `cd backend && uv run pytest tests/practice/test_core_models.py` — 11 failed (модели `quack.practice` — копии, не объекты `quack.events.values`), 3 passed (поля форм с метками и с id уже совпадают), коммит `ed6188c`. Зелёный: 14 passed; с затронутыми (`tests/practice`, `tests/events`, `tests/session/test_phase4_contracts.py`, `tests/llm/test_phase4_ai_layer.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 195 passed. `CheckFailed` теперь модель Pydantic ядра — вызовы B с именованными аргументами.
+- D-B-144 (грамматика API, отношения): `cd backend && uv run pytest tests/practice/test_grammar_relations.py` — 5 failed, 4 passed (отказы и так отказы), коммит `b2d0309`. Зелёный: 9 passed; с затронутыми (`tests/practice`, `tests/session/test_phase4_contracts.py`, `tests/test_contracts.py`) — 116 passed.
 
 - S3/S4/S6 (A, `phase-4-a-s4-s6`): тесты и код писались в одной итерации, красный прогон отдельно не снят (`Verdict` split, `RejectedElementRecord.index`, `quack.graph.read`, `rules_p4.py`). Зелёный: `tests/graph/test_read_stub.py`, `tests/jobs`, `tests/events/test_rejected_element.py`, `tests/practice/test_second_opinion.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` (`T-A6`) — локально без инфраструктуры; тесты с Postgres/dbmate (`tests/db`, `tests/events/test_catalog.py`, `tests/practice/test_answer_transaction.py`, `tests/practice/test_tasks_store.py`) локально не запускались (нет `dbmate`) — их прогонит CI.
 - WP11.6, тело `check.model` (D-B-145): `cd backend && uv run pytest tests/practice/test_check_model.py` — 12 failed (`NotImplementedError`), коммит `63ba969`. Зелёный: 12 passed; с затронутыми (`tests/practice`, `tests/llm`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 196 passed.
