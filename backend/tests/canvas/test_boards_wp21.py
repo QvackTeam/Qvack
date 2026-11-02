@@ -138,6 +138,35 @@ async def test_open_canvas_by_task_and_read_it(pg_db: Db, client_for: ClientFor)
     assert [c["canvas_id"] for c in listed.json()["canvases"]] == [canvas_id]
 
 
+async def test_one_request_per_task(pg_db: Db, client_for: ClientFor) -> None:
+    """Law 5 (`Т-§1.1`, key from the task id), WP12.4: a second canvas on the same on-the-fly
+    task — another session or a reopening — writes no second `agent.requested`. The request is
+    written by code (`actor = code`) with the domain and the session of its canvas (WP10.4)."""
+    learner = await create_learner(pg_db)
+    domain = await _domain(pg_db, learner)
+    first, second = await _session(pg_db, learner, domain), await _session(pg_db, learner, domain)
+    task_id = await _task(pg_db, learner, source="teacher", solution_space=False)
+    client = await client_for(learner)
+    for session_id in (first, second, first):
+        opened = await client.post(
+            f"/v1/sessions/{session_id}/canvases", json={"task_id": str(task_id)}
+        )
+        assert opened.status_code == 201, opened.text
+    rows = await pg_db.fetch_all(
+        "SELECT actor, domain_id, session_id, idempotency_key FROM core.events "
+        "WHERE learner_id = %(learner_id)s AND type = 'agent.requested'",
+        {"learner_id": learner},
+    )
+    assert rows == [
+        {
+            "actor": "code",
+            "domain_id": domain,
+            "session_id": first,
+            "idempotency_key": f"solution_space:{task_id}",
+        }
+    ]
+
+
 async def test_no_request_when_the_space_exists_or_task_is_from_the_bank(
     pg_db: Db, client_for: ClientFor
 ) -> None:
