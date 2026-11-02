@@ -11,6 +11,7 @@ fields is replaced by it.
 from __future__ import annotations
 
 from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import Field
 
@@ -124,8 +125,9 @@ class RubricItemResult(_Value):
 class Verdict(_Value):
     """`verdict.recorded` payload (Т-§6.2, WP11.4). Key `verdict:{answer_seq}:{part}`.
 
-    `help_step` / `solution_shown` — help computed by code (WP11.2). `misconception` — in the
-    event a misconception id or a hypothesis in words, never a short label (Т-§4.5).
+    `help_step` / `solution_shown` — help computed by code (WP11.2). `misconception_id` — a known
+    misconception; `misconception_hypothesis` — a new one in words; never a short label (Т-§4.5,
+    Q-A-2 п.1); at most one of the two is set.
     """
 
     answer_seq: int
@@ -140,7 +142,8 @@ class Verdict(_Value):
     help_step: int = Field(default=0, ge=0, le=3)
     solution_shown: bool = False
     rubric: list[RubricItemResult] | None = None
-    misconception: str | None = None
+    misconception_id: UUID | None = None
+    misconception_hypothesis: str | None = None
     needs_reading_confirmation: bool = False
 
 

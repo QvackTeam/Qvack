@@ -341,8 +341,10 @@ class ExtractedElementRecord(_Record):
 
 
 class RejectedElementRecord(_Record):
-    """An element the code rejected before it became evidence (Т-§7.6): why and its quote."""
+    """An element the code rejected before it became evidence (Т-§7.6): its index in the
+    extractor output, why and its quote (provenance, law 6; Q-A-2 п.3)."""
 
+    index: int = Field(ge=0)
     reason: str
     quote: str
 

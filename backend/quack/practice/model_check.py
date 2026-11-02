@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from uuid import UUID
 
 from quack.config import Settings
 from quack.practice.check import HelpUsed, RubricItemResult, SecondOpinion, Verdict
@@ -28,11 +29,19 @@ class LevelState:
 
 
 def model_verdict(
-    output: ModelVerdictOutput, *, answer_seq: int, part: str, help_used: HelpUsed | None = None
+    output: ModelVerdictOutput,
+    *,
+    answer_seq: int,
+    part: str,
+    help_used: HelpUsed | None = None,
+    known_misconceptions: Sequence[UUID] = (),
 ) -> Verdict:
     """`verdict.recorded` of a model verdict (Т-§6.8, WP11.4): class model, rubric items with
-    quotes, confidence, a misconception label or hypothesis."""
+    quotes, confidence, a misconception id or hypothesis. `known_misconceptions` lists the ids
+    behind the labels `M1`... in the order the prompt showed them; the event never carries a
+    label (Т-§4.5, Q-A-2 п.1), an unknown label is dropped."""
     help_used = help_used or HelpUsed()
+    misconception_id = _misconception_id(output.misconception, known_misconceptions)
     return Verdict(
         answer_seq=answer_seq,
         part=part,
@@ -45,8 +54,18 @@ def model_verdict(
         rubric=[
             RubricItemResult(item=i.item, status=i.status, quote=i.quote) for i in output.items
         ],
-        misconception=output.misconception or output.misconception_hypothesis,
+        misconception_id=misconception_id,
+        misconception_hypothesis=None if misconception_id else output.misconception_hypothesis,
     )
+
+
+def _misconception_id(label: str | None, known: Sequence[UUID]) -> UUID | None:
+    if label is None:
+        return None
+    label = label.strip()
+    if label.startswith("M") and label[1:].isdigit() and 1 <= int(label[1:]) <= len(known):
+        return known[int(label[1:]) - 1]
+    return None
 
 
 def needs_second_opinion(

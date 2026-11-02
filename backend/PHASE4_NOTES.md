@@ -98,12 +98,15 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | WP0 (зона C) | C | частично: ждёт п.2 (владелец) | — (скрипт п.3а) |
 | WP0 (зона A) | A | выполнен: аудит B1–B7, B21; п.3б, п.3в | — (скрипты п.3б, п.3в) |
 | WP2 (A) | A | черновик каталога S3 (G0) в `phase-4-a-wp2`: 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; заморозка — G1 после Q-A-2, Q-A-3 | `tests/events`: 73 passed |
+| WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` в `phase-4-a-s4-s6` (D-A-111); реализация — G2 | `tests/graph/test_read_stub.py`: 9 passed |
+| WP7.1 (A), S6 | A | виды задач и таблица правил по событию в `phase-4-a-s4-s6` (D-A-110); строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 25 passed |
 | WP1.1–1.2 (A) | A | выполнен в `phase-4-a-wp1` (шов S2): базовая миграция dbmate, `Db`, `append_events`, параметры §6.7 потока A. WP1.4 (`.squawk.toml`, S16) — к G2; WP1.3 — к G3/G4 | `tests/db`: 19 passed |
 | WP0 (зона B) | B | выполнен: аудит, п.3г, п.3д, п.5 | — (скрипт п.3г) |
 | Этап I G1 (B: S7, S8, S11, S13) | B | контракты в `phase-4-b`, тесты контрактов зелёные | см. «Красные прогоны» |
 | WP10.2–10.3 (B) | B | частично: разбор потока хода и вход шага цикла с инструментами — зелёные (`T-AI2`–`T-AI4`); адаптер `ResponsesClient.stream_structured` и цикл `run_tool_loop` (параллельные инструменты с таймаутом, повтор оборванного с удвоенным лимитом) — зелёные (`T-AI5`, `T-AI6` без строки `ops.llm_usage` — она в WP10.4); встраивание в шлюз (допуск, семафоры, учёт) — с WP13 | 19 passed |
 | WP11 (B) | B | частично: `check()` мгновенные типы (WP11.2) — зелёный `T-CH1`, включая «в той же транзакции» (`record_answer`, WP11.4 — ветка `phase-4-b-wp12` поверх S2/S3 A); быстрые — с каркасом compute (S10); медленные — WP11.6 | 11 + 4 passed |
 | WP12.1–12.3 (B) | B | частично: `validate_markup` (WP12.3) — зелёный `T-TK2`; `content.tasks` + `task.created` (WP12.1, `quack/practice/task_store.py`) — зелёный `T-TK1` в ветке `phase-4-b-wp12` поверх S2/S3 A (#78, #80); PR — после их слияния | 14 + 4 passed |
+| WP10.5 промпты (B) | B | частично: 16 промптов ролей B в `quack/prompts/` (слой 2 по схемам кода), `manifest.json`, `PROMPT_CONTRACTS.md`; `T-M5` на все роли; слой 1 у всех 16 (8 — черновики стенда, D-B-132); стенд на Meta API — §«Промпты», «Стенд B на Meta API»; роли C (`recognizer`, `canvas_diagnoser`, `material_parser`, `artifact_writer`) — слой 2 пишет C | 73 passed (`tests/llm`); весь набор без инфраструктуры — 578 passed, 306 skipped |
 
 ## Аудит
 
@@ -180,6 +183,85 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 в сигнале потока B. Перечни `intent` и `approach` выхода хода (WP13.3) тоже ждут доктрину:
 до неё стоят временные значения (D-B-104).
 
+**Заготовки владельца (2 нояб.).** Владелец передал пакет заготовок стенда (Baseten,
+`muse-spark-open-1026`; папка `drive-download-20261102T020137Z-1-001`, вне репозитория) и реестр
+промптов `documentation/SYSTEM_PROMPTS_PHASE4_REGISTRY.md` (версия 2 нояб., 792 строки, с таблицей
+исправлений §0). Результатам стенда поток B не доверяет: аудит пакета (`AUDIT_REPORT.md` в нём) и
+сверка B показали, что схемы Фазы 4 на стенде не проверялись (контракт вырезался или подменялся
+схемами Фазы 3), прогоны — по одному разу с `temperature`, holdout частично продублирован в main.
+Поэтому из пакета взят только слой 1, а слой 2 написан заново по схемам кода (S8), см. D-B-138.
+
+Решения владельца в чате 2026-11-02 (передано потоком B):
+
+1. Слой 1 `teacher@2` — `teacher/v6.md` пакета как есть: это одобренная доктрина Фазы 3, текст
+   совпадает с разделами 1–6 `teacher@1` (отличие только в переводах строк). Черновик стенда
+   `teacher/v2.md` (Фаза 4) не берётся: правила подогнаны под сценарии holdout.
+2. Заготовки, которые по смыслу годятся, ставятся дословно (слой 1), в слой 2 переносятся только
+   правила формата (D-B-143); неточности — вопросами владельцу ниже. Одобрение текста — на ревью PR.
+3. Заготовки, противоречащие ТЗ и схемам, не ставятся: роль на заглушке, тест доктрины —
+   `xfail(strict=True)` с номером `BLOCKED-B-…` (§0.4.3, §7.6 п.5).
+
+| Промпт | Слой 1 — откуда | Состояние |
+| :-- | :-- | :-- |
+| `teacher@2` (и `teacher_fallback`) | `teacher/v6.md` = `teacher@1` разд. 1–6 | доктрина владельца |
+| `extractor@3` | `extractor/v3.md` до «Layer 2» | заготовка дословно |
+| `verdict_free@1` | `verdict_free/v1.md` без разд. 4 (D-B-143) | заготовка |
+| `verdict_proof@1` | `verdict_proof/v1.md`, п.9 без правила префикса (D-B-143) | заготовка |
+| `second_opinion@1` | `second_opinion/v1.md`, п.5 без правила префикса (D-B-143) | заготовка |
+| `task_generator@1` | `task_gen@1` разд. 1–8 (= `task_generator/v3.md` без двух фраз формата, D-B-139) | доктрина владельца |
+| `builder@1` | `builder/v1.md` до «Layer 2» | заготовка дословно |
+| `analyst@1` (и `analyst_deep`) | `drafts_untested/analyst_v1.md` до «Layer 2» | заготовка дословно, на стенде не гонялась |
+| `task_checker@1`, `task_arbiter@1`, `solution_space@1`, `misconception_describer@1`, `today_planner@1`, `domain_classifier@1`, `viz_builder@1`, `release_judge@1` | черновики стенда (пакет `phase4_step1_clean_results/prompts/<role>/v1.md` + `TRACE_v1.md`), написанные по тезисам документа стенда | черновик, D-B-132; до этого — заглушка `BLOCKED-B-101`…`108` |
+
+Вопросы владельцу по поставленным заготовкам (текст слоя 1 не правился):
+
+- `verdict_proof@1` п.1: «authoritative gateway check for … levels 5–6» — по `Т-§7.3` вердикт модели
+  проходит ворота только парой; формулировку стоит смягчить.
+- `second_opinion@1` п.1: триггеры «confidence < 0.70 … or was explicitly challenged by the learner» —
+  в `Т-§7.7` оспаривания учеником среди триггеров нет, порог — параметр `verdict_min_confidence`;
+  второе применение (`second_opinion.diagnosis` строки канваса, `Т-§15.4`) заготовкой не покрыто.
+- `verdict_free@1` п.2.7 и `verdict_proof@1`/`second_opinion@1`: «set `misconception: null`» —
+  в схеме ещё `misconception_hypothesis`; по смыслу оба null, слой 2 это говорит.
+- `extractor@3` разд. 2 дублирует таблицу типов пробела общего блока `diagnostics_and_caution`
+  (разными словами); в `Т-§7.6` таблица `П-6.4` подаётся ещё и входом (`{{ gap_types }}`).
+- `analyst@1` п.5: «affective state (confidence, frustration, fatigue)» — опора манеры в
+  `Т-§9.5`/WP5.3 — профиль и выученное; эмоции из динамики сессии там не названы.
+- `builder@1` п.4 (циклы `REQUIRES`): выход `builder@1` рёбер не содержит, циклы снимает код
+  (`Т-§4.10`); правило безвредно, но не к чему.
+- Общий блок `diagnostics_and_caution` (реестр §4.1) есть только в `extractor@3`; у `verdict_*` и
+  `second_opinion` — свои формулировки тех же правил.
+
+**Стенд B на Meta API (2 нояб.).** Пакет второго прогона стенда (`workprompt/phase4_step1_clean_results`:
+`BENCHMARK_SUMMARY.md`, `PROBE_CALLS_REPORT.md`, 252 лога) перепроверен по сырым логам моделями кода.
+Расхождения: сводка ставит PASS всем ролям при 66.7% проверок кода у `teacher`, 50% у
+`today_planner` и 6.7% валидных первых ответов у `task_generator`; вывод пробы P1 «модель не может
+нарушить strict-схему» неверен — на Baseten есть ответы `assumptions: "real"` и
+`neighbor_idea: null` против схемы; сценарии — по 2–5 на роль, у учителя пустой блок инструментов,
+у `builder` проверки на несуществующие поля, «спойлер» учителя противоречит доктрине (ученик просит
+ответ). Поэтому B собрал свой стенд: вызов как у шлюза (`POST /responses`, одно user-сообщение,
+strict-схема `to_strict_json_schema`, без `temperature`, повтор схемы и обрыва как в
+`responses_client.py`), модели прода (`muse-spark-1.3`, `muse-wonder-1.0`; ключа Baseten нет),
+проверки — модели Pydantic, `validate_markup`, `grammar_ok` и проверки кода из реестра §5.
+Сценарии: 117 main/ru и 42 holdout (holdout написан отдельно, до правок; sha256 файлов —
+`ff2e4a8f…d691d7`). Прогоны по 3 на сценарий. Стенд, сценарии, логи и отчёт —
+`workprompt/phase4_step1_clean_results/stage_b_meta_bench/` (вне репозитория).
+
+Итог на финальных промптах и лимитах (D-B-131…137), 3 прогона на сценарий: main/ru — 411
+прогонов, все первые ответы валидны по схеме, 0 обрывов, 404 PASS (98.3%); по сценариям — 126 PASS,
+7 FLAKY (по одному сбою из трёх: `teacher` ×3, `teacher_fallback`, `analyst_deep`, `task_checker`,
+`task_generator`), 0 FAIL. Holdout (под него промпты не правились) — 35 PASS, 4 FLAKY, 2 FAIL из 42:
+FAIL `teacher` h05 — дефект сценария (ждёт знак «?», а учитель спрашивает элементом; ход верный),
+`task_checker` h03 — спорно (без слова о возврате модель читает выбор «без возврата» и не отмечает
+неоднозначность); FLAKY `viz_builder` ×2 (одно значение параметра вместо трёх в части прогонов),
+`task_checker` h02 (назван ли метод в «выборочное стандартное отклонение»), `teacher` h03.
+Расход финального main/ru: ~0.88 млн входных и ~0.93 млн выходных токенов.
+
+Открытые вопросы стенда владелец 2026-11-02 поручил решить B по документам: решения D-B-134…137.
+
+Роли, вызываемые кодом C (`recognizer`, `canvas_diagnoser`, `material_parser`, `artifact_writer`):
+слой 2 пишет C (§7.3 п.2), B регистрирует схемы и ревьюит PR; заготовки лежат в том же пакете
+(`drafts_untested/`, `artifact_writer/v1`–`v4`) и тоже не проверены на схемах Фазы 4.
+
 ## Реестр отклонений от основных документов
 
 Как в ТЗ Фазы 4 §2.4 (R4-1…R4-4). Новых строк нет.
@@ -230,6 +312,81 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Обратимость: до G1 — правка моделей; после — только новой версией схемы (§0.4.4 п.2).
 - Тесты: `T-EV1`, `T-EV2`, `T-EV5`, `test_shared_models_are_the_payloads`, `tests/events/samples.py`.
 - Требует подтверждения владельцем: нет. Поля типов B и C — подтвердить владельцам типов до G1 (вопросы Q-A-2, Q-A-3).
+
+### D-A-110. S6: виды задач и таблица правил WP7.1 — выборы там, где ТЗ молчит
+- Класс: B
+- WP / место: WP7.1, §6.5, `quack/jobs/rules_p4.py` (до WP1.3 рядом с `kinds.py`/`dispatcher_rules.py` Фазы 3, D-A-103)
+- Контекст: таблица WP7.1 — по описанию владельцев задач (§7.3 п.4). Часть условий в ней словами; в нагрузке событий они выражаются полями, и надо выбрать какими.
+- Решение (таблица — ниже; `plan_jobs(event, settings)` — чистая функция события):
+  1. «Числа выражением» (B): `answer.kind == "number"` с заполненным `answer.sympy` → `check.symbolic`; просто число — мгновенный вердикт (WP11.2), задачи нет. `expression`, `quantity` — всегда `check.symbolic`.
+  2. Ключи. Без склейки: `job_key = {kind}:{learner}:{seq}`; у `check.symbolic` и `check.model` — `{kind}:{learner}:{answer_seq}:{part}`, часть без имени — `main` (D-B-121). Медленный `answer.submitted` и `check.failed` того же ответа дают один ключ `check.model` — вторая вставка ничего не делает (`ON CONFLICT DO NOTHING`). Со склейкой — `{coalesce_key}:{seq}` (ориентир `Т-§13.1`).
+  3. `analyst.deep` склеивается по своему ключу `analyst_deep:{learner}`, а не по `analyst:{learner}` из таблицы: при общем ключе `analyst.deep` на `session.ended` склеился бы с `analyst.run` и один из видов пропал бы. `lock_key` общий (`analyst:{learner}`) — как в таблице.
+  4. «Проявление заблуждения»: `verdict.recorded` с `misconception_id` или `misconception_hypothesis`; `observation.diagnosed` с тем же в `diagnosis`; `observation.extracted` с элементом, где `misconception_id`, `new_misconception` или `kind = misconception_hypothesis`. Ставит `analyst.run`; `misconception.describe` — только для известного `misconception_id` (`lock_key = misconception:{id}`): у гипотезы словами узла ещё нет. **Вопрос B (WP16.2):** описывать ли гипотезу, когда проектор создаст узел, и по какому событию.
+  5. «Неуверенная пометка» диагноза: `diagnosis.kind == "question"` (`Т-§15.4`, WP21.4: неуверенный диагноз → `question` и второе мнение) → `second_opinion.diagnosis`.
+  6. «Задачи банка без пространства решения»: `task.created` с `source` ∈ {`seminar`, `generated`, `material`} → `task.solution_space` (P2). Задачи `teacher` (на лету) получают пространство лениво через `agent.requested {kind: solution_space}` (WP12.4).
+  7. `agent.requested`: вид `agent.<kind>` для `viz`, `illustration`, `task_generation`, `solution_space`, `artifact`; класс P1, если `needed_in_session`, иначе P2. Вид `known_check` задачи агента не ставит (проверку «я это знаю» ставит `known.claimed` → `check.known_claim`). **Вопрос B:** кто пишет `agent.requested {kind: known_check}` и нужна ли по нему задача?
+  8. `photo.pipeline`: `lock_key = canvas:{canvas_id}`; фото вне канваса — `photo:{photo_id}`. `material.parse`: P1 при `session_id`, иначе P2; блокировку шага записи структуры `domain:{id}` ставит обработчик (C) — домена в нагрузке `material.uploaded` нет.
+  9. `skill.split`: `extract.episode` с `restrict_skill_ids` = делимый навык и части; `episode.reassigned`: `extract.episode` с `episode_seq` и `topic_id`. Какие эпизоды переизвлечь, находит обработчик WP15.
+  10. `visible` (`Т-§13.8`): видимы `check.symbolic`, `check.model`, `task.check`, `photo.pipeline`, `material.parse`, `agent.*`, `check.known_claim`; остальные — нет. \[ПРОВЕРИТЬ\] для `second_opinion.diagnosis`, `canvas.rediagnose`, `today.prepare`, `task.solution_space`, `artifact.*`, `export.data`: документ не называет — сделаны невидимыми.
+  11. Роли по видам (`KIND_LLM_ROLES`) — из перечня классов ролей (`Т-§11.3`, ТЗ §5, «Класс приоритета роли»); `check.symbolic` моделей не зовёт (страховка может уйти в `check.model` отдельной задачей). Класс по умолчанию — класс из таблицы WP7.1; периодические — P3.
+  12. Строки, читающие данные сверх события (`artifact.topic_refresh` на `session.ended` и `task.closed`, `artifact.cheatsheet`, `embedding.compute`, `graph.hygiene`), перечислены в `RULES` с полем `needs` и реализуются в G2 вместе с диспетчером (WP7.1); `plan_jobs` их пока не планирует.
+- Почему: §0.4.3 п.4, п.5; закон 5 (повтор заменяет запись, не дублирует); `Т-§13.1`.
+- Обратимость: таблица данных, один модуль.
+- Тесты: `tests/jobs/test_rules_p4.py` (25 passed; `T-D1` в части строк по событию, полный — в G2).
+- Требует подтверждения владельцем: нет. Вопросы B — п.4, п.7; \[ПРОВЕРИТЬ\] — п.10.
+
+Таблица S6 (G1; «пакет» — исполнитель вида):
+
+| Событие | Вид задачи | Класс | `lock_key` / `coalesce_key` | `required_seq` | Пакет |
+| :-- | :-- | :-: | :-- | :-: | :-- |
+| `episode.closed`, `has_content` | `extract.episode` | P2 | — / — | seq события | WP15 |
+| `task.closed` | `analyst.run` | P2 | `analyst:{learner}` / `analyst:{learner}` | seq | WP16.1 |
+| `session.ended` | `analyst.run` + `analyst.deep` | P2 | `analyst:{learner}` / `analyst:{learner}`, `analyst_deep:{learner}` | seq | WP16.1 |
+| `verdict.recorded`, `observation.diagnosed`, `observation.extracted` с проявлением | `analyst.run`; `misconception.describe` (с id) | P2; P3 | `analyst:{learner}` / `analyst:{learner}`; `misconception:{id}` / — | seq | WP16.1, WP16.2 |
+| `answer.submitted`: `expression`, `quantity`, `number` с `sympy` | `check.symbolic`, `run_at = occurred_at + symbolic_check_delay_ms` | P1 | — / — | — | WP11.3 |
+| `answer.submitted`: `proof`, `free_text`, `drawing` | `check.model` | P1 | — / — | — | WP11.6 |
+| `check.failed` | `check.model` | P1 | — / — | — | WP11.6 |
+| `turn.committed`, `markup.tasks` не пуст | `task.check` | P1 | — / — | — | WP12.5 |
+| `observation.diagnosed`, `diagnosis.kind = question` | `second_opinion.diagnosis` | P1 | — / — | seq | WP21.4 |
+| `handwriting.corrected` | `canvas.rediagnose` | P1 | — / — | — | WP21.4 |
+| `photo.uploaded` | `photo.pipeline` | P1 | `canvas:{id}` / — | — | WP22.3 |
+| `material.uploaded` | `material.parse` | P1 при `session_id`, иначе P2 | — / — | — | WP20.2 |
+| `task.created`, `source` банка | `task.solution_space` | P2 | — / — | — | WP12.4 |
+| `agent.requested` | `agent.<kind>` | P1 при `needed_in_session`, иначе P2 | — / — | — | WP16.6 |
+| `today.shown` | `today.prepare` | P2 | `today:{learner}` / `today:{learner}` | seq | WP16.8 |
+| `digest.written`, `plan_divergence` | `analyst.deep` | P2 | `analyst:{learner}` / `analyst_deep:{learner}` | seq | WP16.1 |
+| `known.claimed` | `check.known_claim` | P2 | — / — | seq | WP8.2 |
+| `episode.reassigned`, `skill.split` | `extract.episode` (с ограничением) | P2 | — / — | seq | WP15 |
+| G2: `session.ended`, `task.closed`, дедлайн хаба; новые узлы с текстом; `session.ended` / счётчик тем | `artifact.topic_refresh`, `artifact.cheatsheet`; `embedding.compute`; `graph.hygiene` | P2; P2; P3 | `artifact:{topic}`, `artifact:{hub}`; —; `domain:{id}` / `hygiene:{domain}` | — | WP23, WP20.3, WP16.3 |
+
+### D-A-111. S4: `quack.graph.read` — доступ через объект `GraphReader`, заглушка с фиксированными данными
+- Класс: B
+- WP / место: WP6.4, `quack/graph/read/` (`models.py`, `reader.py`), `tests/support/graph_read.py` (`FixedGraphReader`)
+- Контекст: S4 (G1) — сигнатуры, модели ответов и заглушки. §4.2 запрещает модульные переопределения, а набор полей `AppResources`/`JobContext` фиксирован (в нём нет поля для чтения памяти).
+- Решение: (1) интерфейс — `Protocol GraphReader` с методами WP6.4 (`slice_for_turn`, `frontier`, `topic_readiness`, `why`, `topic_requires`, `recall_probability`, `review_candidates`, `prep_context`, `skill_history`, `prerequisites`, `similar_mistakes`, `past_solution`, `state_at`); читающий код получает объект аргументом, настоящий читатель (G2) строится из `neo4j` и `settings` ресурсов; `materials_prefetch`/`materials_search` — `quack/graph/read/materials.py` (C), не здесь. (2) Модели — Pydantic, неизменяемые, без лишних полей, только id и факты (`Т-§10.2`, `Т-§7.4`: ни весов, ни ярусов); «не проверялось» — `LevelFact.status = not_tested`, не `failed` (закон 8). (3) Для B (WP11.6): `LevelFact.proven_by_direct` («доказан прямым Т1/Т2») и `last_t1_failed` («последнее Т1 по времени — провал») — входы `needs_second_opinion`; `LevelState` B строится из них одной строкой. (4) Для защитного правила WP13.5 `SkillFact.requires` — связи `REQUIRES` с `confidence` и признаками «есть показ», «есть свидетельство»; `PrerequisiteFact.confidence`. (5) `FixedGraphReader` — один ученик, три навыка (доказан прямым Т1/Т2; последнее Т1 — провал; не проверялся), заблуждение, корень, кандидаты на повторение, `prep_context`, `state_at`; `FixedGraphReader(lag_degraded=True)` — срез с отставанием проектора.
+- Почему: §4.1, §4.2, WP6.4, S4.
+- Обратимость: сигнатуры замораживаются на G1; до этого — правка моделей.
+- Тесты: `tests/graph/test_read_stub.py` (9 passed).
+- Требует подтверждения владельцем: нет. Поля, которых документ не называет прямо (`ExposureFact.kind: str`, `MaterialRef.kind`, `ReviewReason`), — \[ПРОВЕРИТЬ\] с B (WP14.2) и C (WP17) до G1.
+
+### D-A-112. Единый ввод `get_current_learner_id` на сессиях — моя часть (ответ на D-C-112)
+- Класс: B (пересечение зон, §7.3)
+- Решение: согласен с п.1 (имя и подпись `get_current_learner_id` не меняются, код роутеров не меняется), п.2 и п.4. Роутер A один: `quack/domains/router.py`; его тесты на старом входе — `tests/domains/test_diag_idempotency.py`, `test_diag_open_and_bank.py`, `test_diag_state_from_events.py`, `test_diagnostic_and_graph_view.py`, `test_graph_view_fixes.py`, `test_topic_alias_routes.py`. Корневые тесты A, которые выпускают токены, — по `grep` на `ensure_users_hook`/`get_current_learner_id` в `tests/` корневых файлов A нет. C правит их одним PR с моим ревью (§7.3): смена способа входа, утверждения не меняются.
+- Требует подтверждения владельцем: нет.
+
+### Ответы потока A (2026-11-02)
+
+- **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
+- **C: `quack.runtime`.** `create_job_context` строит `ComputeClient` через `create_compute_client(settings)` (§7.3 п.6): таймаут задания = `compute_task_timeout_s + compute_timeout_sec`.
+- **C: D-A-101 и `Д-§4.1`.** `Д-§4.1` называет соединения по ролям: api 2 × 10, workers 2 × 5, projector 8 (всего около 46 из `max_connections = 100`). `pg_pool_max_size` — одно число на процесс (D-A-101, 10) — это верхняя граница, соединения открываются по мере надобности (`pg_pool_min_size = 1`). Худший случай при общем значении 10: 2 × 10 + 2 × 10 + 10 + служебные ≈ 64 из 100. Чтобы совпасть с `Д-§4.1`, **C ставит `PG_POOL_MAX_SIZE=5` у `workers` и `8` у `projector` в `compose.yaml`** (параметр уже есть, кода не нужно). Отдельной настройки «по роли» не заводим — в документах её нет.
+- **C: D-A-103.** Подтверждено владельцем (строка «Требует подтверждения» D-A-103); ответ C принят.
+- **C: `CROSS_LEARNER_ALLOWED`.** Две записи для #97 добавлены в `tests/db/test_sql_static.py`: `quack/auth/links.py:_LEARNER_BY_EMAIL`, `quack/auth/sessions.py:_SESSION_BY_TOKEN` (до входа ученик неизвестен, D-C-111).
+- **C: срок заглушек `graph.read` (S4).** Готовы: D-A-111, `tests/support/graph_read.py`. Реализация — G2 (WP6.4).
+- **B: `Verdict`.** `misconception` разделён на `misconception_id: UUID | None` и `misconception_hypothesis: str | None` (Q-A-2 п.1). `model_verdict` принимает `known_misconceptions` — ids в порядке меток `M1`…; метка в событие не попадает, неизвестная метка отбрасывается.
+- **B: `rejected` (Q-A-2 п.3).** `{index, reason, quote}`: `index` — позиция элемента в выходе извлекателя (провенанс, закон 6).
+- **B: чтение `core.events` (D-B-122).** Общих функций чтения в `quack.events` A не даёт: WP1.2 помещает SQL в модули пакетов, и три запроса B (событие по ключу идемпотентности, события сессии после N, владение доменом по `domain.created`) B пишет в своих `repo.py`. Условия: параметры только `%(name)s`, фильтр `learner_id` (тест `test_sql_static.py` это проверяет), для горячего пути — на `Db`, не на SQLAlchemy. Запрос по ключу идемпотентности уже есть внутри `append_events` (повтор возвращает записанное событие) — для страховки `check.symbolic` вердикт ищется по `verdict:{answer_seq}:{part}` тем же ключом. Если ни одна из функций не нужна второму потоку, дублирования нет.
+- **B: правила S6 для WP11.3.** Таблица выше (D-A-110): `answer.submitted` быстрого типа → `check.symbolic` с `run_at = occurred_at + symbolic_check_delay_ms`; `check.failed` → `check.model`; `episode.closed` → `extract.episode`.
+- **Ревью (2026-11-02).** Опубликованы в PR: #97, #98, #99 (открытые; в #99 одна ошибка состояния `StrokeJournal.flush`, до слияния), #93, #94, #96 (влиты до ревью; замечания — следующим PR B и C). `open_db(settings, wait=False)` — для замены блока пула в `create_app_resources` (C).
 
 ### Поток B
 
@@ -491,6 +648,158 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: при реализации WP16.5 — разбор `parameter_values` (B, `tests/agents/`); снимок с набором, который страница читает из `window.QUACK_VIZ_PARAMS` (C, `compute/tests`).
 - Требует подтверждения владельцем: нет
 
+### D-B-138. Слой 2 промптов Фазы 4 — по схемам кода; имена входных блоков
+- Класс: B
+- WP / место: WP10.5, `quack/prompts/<role>/v<N>.md`, `tests/llm/prompt_contracts.py`
+- Контекст: `## Output contract` заготовок стенда описывает схемы, которых нет в коде (поля
+  `verdict`, `note`, `decisions`, `pairs.pair`, `verified`, `known_alternatives` и др.); имена
+  входных блоков в реестре владельца — \[ОРИЕНТИР\]; сборщиков контекста для ролей Фазы 4 ещё нет
+  (WP11.6, WP12.4–12.6, WP13–WP16).
+- Варианты: (а) слой 2 заново по схемам S8 (`teacher_output.py`, `role_outputs.py`,
+  `agents/schemas.py`), входы — по составу `Т-§`, имена — реестра, где он их даёт; (б) взять
+  контракты заготовок и менять схемы.
+- Решение: (а). Учитель: слоты `Т-§10.1` по порядку — слой 1 и слой 2 (статично), затем
+  `tools_and_elements` (слой 3, шлёт код), `profile`, `domain_and_goals`, `conversation`,
+  `session_plan`, `memory_picture`, `materials`, `labels`, `tail`, `guard_feedback`. Остальные
+  роли — блоки по `Т-§` (`PROMPT_CONTRACTS.md`). Имена блоков — точка правки до написания
+  сборщиков.
+- Почему: §0.4.3 п.3 (схемы S8 не меняются), п.2 (состав входа — буква `Т-§`).
+- Обратимость: текст промпта до первой выкатки правится на месте (§7.6 п.3).
+- Тесты: `T-M5` (`test_prompt_mentions_only_declared_fields`), `test_prompt_contracts_file_is_current`.
+- Требует подтверждения владельцем: нет
+
+### D-B-139. Слой 1 `task_generator@1` — текст `task_gen@1`
+- Класс: B. Заготовка `task_generator/v3.md` = разделы 1–8 `task_gen@1` плюс две фразы формата
+  (значения `catches`, метка в `tests`) — это слой 2; они перенесены в `## Output contract`, слой 1
+  остаётся словом в слово `task_gen@1`. Тесты: `T-M5`. Подтверждение: нет.
+
+### D-B-140. `builder@1` — один промпт, две схемы по режиму
+- Класс: B. `Т-§4.3` (сверка) и `Т-§4.10` (гигиена) — одна роль и один промпт (§6.6); код
+  передаёт `text.format` по режиму: `BuilderOutput` или `HygieneOutput`. В реестре контрактов —
+  кортеж схем (`PHASE4_PROMPT_SCHEMAS`), `T-M5` берёт объединение полей. Подтверждение: нет.
+
+### D-B-141. `task_arbiter@1` — та же схема, что у `task_checker@1`
+- Класс: B. `Т-§5.6`: при расхождении — арбитраж Wonder, «снова расхождение — задача
+  выбрасывается»: арбитр даёт свой ответ и оценку разметки, сравнивает код (`check()`), как у
+  проверяющего. Отдельной схемы нет (`TaskCheckOutput`); вход — оба решения и место расхождения.
+  Обратимость: одна строка реестра. Подтверждение: нет.
+
+### D-B-142. Пара уровня 5 от генератора — `pairTaskId` ставит код
+- Класс: B. WP12.6: у второй задачи пары ещё нет метки `K…`, модель её не знает (`Т-§4.5`);
+  генератор пишет обе задачи записями `tasks`, `pairTaskId` = null, связь ставит код до
+  `validate_markup` (иначе правило уровня 5 не пройдёт). Тесты — с WP12.6. Подтверждение: нет.
+
+### D-B-143. Правила формата из слоя 1 заготовок — в слой 2
+- Класс: C
+- WP / место: WP10.5, `verdict_free@1`, `verdict_proof@1`, `second_opinion@1`
+- Контекст: в слое 1 заготовок есть правила формата под их контракт: префикс `new: ` в метке
+  заблуждения (`verdict_proof` п.9, `second_opinion` п.5), раздел 4 `verdict_free` «System Output
+  Note» (поле `note`, которого в схеме нет), служебная HTML-пометка стенда на русском.
+- Варианты: (а) убрать их из слоя 1 и выразить в слое 2 (`misconception_hypothesis`); (б) оставить —
+  модель получит противоречивые указания формата.
+- Решение: (а), остальной текст слоя 1 — дословно.
+- Почему: §7.6 п.1 (формат — слой 2, его пишет B); §0.4.3 п.3 (схема S8).
+- Обратимость: вернуть фразы из пакета.
+- Тесты: `T-M5`.
+- Требует подтверждения владельцем: да
+
+### D-B-131. Метки доменов `D`
+- Класс: B
+- WP / место: WP16.4, `quack/llm/labels.py`
+- Контекст: `domain_classifier@1` выбирает домен ученика по метке (`Т-§4.5`, `Т-§4.9`), а в
+  `LabelMap` вида «домен» не было; на стенде модель без метки писала имя домена.
+- Решение: вид `domain` с префиксом `D` в `LabelMap`, `LabelMap.build(domains=…)`; без лимита (как `M`).
+- Обратимость: убрать вид. Тесты: `test_label_map_labels_domains`, `T-M5`.
+- Требует подтверждения владельцем: нет
+
+### D-B-132. Слой 1 восьми ролей — черновики стенда
+- Класс: C
+- WP / место: WP10.5, `task_checker@1`, `task_arbiter@1`, `solution_space@1`,
+  `misconception_describer@1`, `today_planner@1`, `domain_classifier@1`, `viz_builder@1`,
+  `release_judge@1`; `builder@1` п.6
+- Контекст: черновики слоя 1 написаны на стенде по тезисам документа стенда (реестр §5) и
+  прогнаны; владелец в чате 2026-11-02 поручил B дорабатывать промпты самому («можешь дорабатывать
+  сама все»). Слой 2 стенд не менял. В `builder@1` добавлен п.6 «та же идея в другом домене — свой
+  навык со связью» (`Т-§3.4`, `Т-§4.3`): без него `same_idea` не заполнялся (0/3 → 3/3).
+- Решение: черновики поставлены, заглушки и `BLOCKED-B-101…108` сняты (`DOCTRINE_PENDING` пуст).
+- Обратимость: вернуть заглушки и записи `DOCTRINE_PENDING`.
+- Тесты: `test_prompt_has_owner_doctrine`; стенд B (§«Промпты»).
+- Требует подтверждения владельцем: да (текст слоя 1 — на ревью PR)
+
+### D-B-133. Уточнения слоя 2 по стенду
+- Класс: B
+- WP / место: WP10.5, слой 2 промптов
+- Контекст: стенд B показал, где модель путает контракт.
+- Решение: пункт рубрики — метка (`R1`) без текста (`verdict_*`, `second_opinion`: было 0/12 →
+  12/12); `assumptions` — список, `neighbor_idea` — true/false (`teacher@2`, `task_generator@1`);
+  домен — метка `D…`, не имя; в `analyst@1` навыки и заблуждения — только метки; `extractor@3` не
+  пишет `evidence` по навыку и уровню с вердиктом кода в эпизоде (`code_verdict_exists`);
+  `teacher@2` — таблица уровней `Т-§5.3` для заданий и «метки не в тексте»; `builder@1` —
+  `topic_hint` у каждого нового навыка, `same_idea` — навык другого домена; `viz_builder@1` —
+  наборы параметров по D-B-130 (один JSON-объект на снимок, страница читает
+  `window.QUACK_VIZ_PARAMS`, иначе свои значения по умолчанию; маркер в `MARKERS`, стенд — 6/6
+  сценариев, 12 прогонов).
+- Обратимость: вернуть формулировки. Тесты: `T-M5`, `test_prompt_contracts_file_is_current`.
+- Требует подтверждения владельцем: нет
+
+### D-B-134. Лимиты выхода по замеру с уровнем рассуждения
+- Класс: B
+- WP / место: WP10.1, `quack/config.py` (`default_llm_roles`)
+- Контекст: 4096 в `Т-§11.1` обоснованы спайком без указания уровня рассуждения (самый длинный
+  выход — 1674 токена). Замер стенда B на Meta API с продовыми `effort` (≈750 вызовов): обрыв
+  первого ответа у `analyst` в 100% (медиана выхода 6043), `extractor` 36% (p95 10 182, максимум
+  15 538), `solution_space` 29%, `task_generator` 26%, `analyst_deep` 8%; у `verdict_free`, `builder`,
+  `task_checker` максимум — у самого лимита. Повтор с удвоенным лимитом спасает ответ, но удваивает
+  задержку и расход; для P0/P1 это задержка, которую видит ученик (П-1.4).
+- Решение: по `Т-§11.1` «меняются по замеру без правки документа» — около 1.5× p95, не выше
+  `max_output_tokens_cap`: `extractor`, `analyst`, `analyst_deep` — 16 384; `verdict_free`,
+  `builder`, `task_generator`, `task_checker`, `solution_space`, `teacher_fallback` — 8192.
+  Остальные роли B — без изменений (запас есть). Роли C не мерились.
+- Обратимость: значения конфига. Тесты: `test_role_table_matches_t111`.
+- Требует подтверждения владельцем: нет (поручено решить B)
+
+### D-B-135. Обход в `extractor@3`: просьба решения — не провал
+- Класс: B (по поручению владельца решить по документам)
+- WP / место: WP10.5, `extractor@3` слой 1, разд. 3 п.3
+- Контекст: на стенде «не знаю, покажи решение» записывалось как `evidence` `incorrect`/`no_idea`,
+  а пассивное «понял» после показа — уровнем 3 (main m03, holdout h03).
+- Решение: две строки доктрины по `П-4.8` («каждый обход — сигнал, а не повод спорить», ученику
+  не отказываем), `П-6.9`/`П-6.10` (показанное решение уровень не доказывает, пропущенная проверка —
+  уровень неизвестен), `Т-§7` (показанное решение — «свидетельства понимания нет, есть обход»):
+  из самой просьбы ничего отрицательного; работа по задаче — один раз с `help = shown_solution`,
+  согласие после показа — не выше уровня 1; пропущенная проверка — ничего.
+- Обратимость: убрать строки. Тесты: стенд B.
+- Требует подтверждения владельцем: нет (поручено)
+
+### D-B-136. `verdict_stance` — только о последнем действии ученика
+- Класс: B
+- WP / место: WP13.3/13.5, `teacher@2` слой 2; будущая защита «честный вердикт»
+- Контекст: ход, открыто поправляющий пересмотренную проверку, ставил `verdict_stance = code`.
+  `Т-§6.3`: позиция — «для ответа, на который отвечает»; поправка — отдельный слот контекста и
+  поле `correctionsAcknowledged` (`Т-§5.6`, `Т-§10`).
+- Решение: позиция относится только к последнему действию ученика (действию, запустившему ход);
+  поправка пересмотра отмечается в `correctionsAcknowledged`. Защита WP13.5 сравнивает позицию с
+  вердиктом ответа из этого действия.
+- Обратимость: формулировка контракта. Тесты: стенд B; защита — при WP13.5.
+- Требует подтверждения владельцем: нет
+
+### D-B-137. Режим `interval` до проверки в коде — не в промптах
+- Класс: B
+- WP / место: WP10.5, `teacher@2`, `task_generator@1` слой 2; `compute` (`Т-§6.5`, `Т-§6.6`)
+- Контекст: `Т-§6.6` — режим `interval` «неравенство: множества как интервалы и их объединения».
+  В `phase-4` его сравнивает `compute` (`compute/quack_compute/math/equivalence.py`, `_intervals`:
+  два неравенства с одной переменной; грамматика compute пускает `<`, `<=`, `>`, `>=`). Отсекает
+  локальная грамматика `validate_markup` (`quack/practice/grammar.py`): в ней нет `<`, `>`, поэтому
+  ответ-неравенство даёт `expression_unparsed`, и задача выбрасывается. Расширение `grammar.py` —
+  отдельная задача B (не WP10.5).
+- Решение: в контрактах режим `interval` не предлагается; неравенство — задачей с выбором
+  интервалов или с числовым ответом. Реализация режима (имена `Interval`, `Union` в белом списке
+  `Т-§6.5`, сравнение множеств) — отдельная задача проверки в коде; после неё режим возвращается в
+  контракты.
+- Обратимость: вернуть режим в перечень. Тесты: стенд B (`validate_markup`).
+- Требует подтверждения владельцем: нет
+
+
 #### Поток B: ответы на D-C-112 (п.2–3), слой учителя доски (WP21.1) и D-A-110 (п.4, п.7) — 2026-11-02
 
 **D-C-112 п.2 (тестовый вход в `tests/session`).** Согласен. C переводит `tests/session/*` на `tests/support/auth.py: login(client, db, learner_id)` в своём PR вместе с остальными, ревью — B. Меняется только способ входа: утверждения и данные тестов B не меняются (§8.15).
@@ -680,15 +989,24 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Заблокировано
 
+- ~~BLOCKED-B-101…108~~ — сняты 2026-11-02: слой 1 восьми ролей — черновики стенда (D-B-132).
+
 ## Красные прогоны
 
 - Поле `db` (C, `phase-4-c-db-field`): `uv run pytest tests/storage/test_s1_resources.py` — 3 failed (нет поля `db`; `create_app_resources` не асинхронная). Зелёный — в Linux-контейнере против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` (на Windows async-psycopg не работает с Proactor-циклом pytest — `PoolTimeout`): `test_s1_resources.py`, `test_api_llm_provider.py`, `test_app_assembly.py` — 30 passed; все пользователи `build_app_resources` (`tests/session`, `tests/domains`, `tests/artifacts`, `tests/e2e`, `test_dispatcher.py`) — 281 passed (в первом прогоне один раз упал `test_mutating_endpoints_are_idempotent`, отдельно и при повторе — зелёный; на чистом `phase-4` тот же набор — 281 passed).
 - WP24 (C, `phase-4-c-wp24`, коммит `c98d1b8`): в Linux (контейнер uv python3.12-bookworm-slim + `playwright install --with-deps chromium`) `pytest tests/test_wp24_endpoints.py` — 7 failed (`NotImplementedError`), 1 xfailed. Зелёный: весь `compute` — 74 passed, 1 xfailed (BLOCKED-C-201).
+- WP10.5 `viz_builder@1` по D-B-130 (B): `uv run pytest tests/llm/test_labels.py` — 2 failed (`test_prompt_has_its_markers[viz_builder@1]`, устаревший `PROMPT_CONTRACTS.md`), 54 passed, коммит `1d7572d`. Зелёный: `tests/llm` — 76 passed.
 - WP19 (C, `phase-4-c-wp19`, коммит `4fb10f3`): `uv run pytest tests/storage/test_storage_wp19.py` — ошибка сборки (нет `quack.storage.keys`, `quack.storage.uploads`). Зелёный: 12 passed; `tests/storage` — 29 passed; с затронутыми (`test_app_assembly.py` — снимок OpenAPI, `test_neo4j_outage.py`, `test_ratelimit.py`, `test_infra.py`, `tests/session/test_degradation_and_workers.py`, `test_contracts.py`) — 27 passed, 42 skipped (без инфраструктуры; их прогонит CI).
 - WP2 (A), Этап I–II: схемы нагрузок (Этап I), шаблоны ключей — `NotImplementedError`: `pytest -q tests/events` — 2 failed (`T-EV3`), 71 passed (`T-EV1`, `T-EV2`, `T-EV5` на схемах Этапа I). Зелёный: 73 passed.
 - WP1 (A), коммит `8c9fe33` (Этап I–II): `QUACK_TEST_REQUIRE_INFRA=1 python -m pytest -q tests/db` — 13 errors (`NotImplementedError` в `open_db`: все `T-DB5`), 6 passed (`T-DB1` — миграция есть с Этапа I; `T-DB2`, `T-DB4` и их самопроверки; формат `actor`). Зелёный (`phase-4-a-wp1`): 19 passed.
 - S13, подмены (C, `phase-4-c-s13`, коммит `dbe6022`): `uv run pytest tests/test_meta_mock.py tests/test_support_scripted_llm.py` — `test_meta_mock.py`: 12 красных (нет SSE), 47 зелёных; `test_support_scripted_llm.py` — ошибка сборки (`ScriptedToolCall` нет). Зелёный: 80 passed; с затронутыми (`tests/llm`, `test_llm_runtime.py`, `tests/session/test_phase3_hot_path.py`) — 166 passed, 32 skipped (без инфраструктуры; их прогонит CI).
 - S13, сбои на шаге с инструментами (C, замечание B к #87): `test_stream_incomplete_on_a_tool_step_has_no_calls`, `test_stream_invalid_json_waits_for_the_answer_step` на прежнем `tests/support/llm.py` — 2 красных. Зелёный: `tests/test_support_scripted_llm.py` + `tests/test_meta_mock.py` — 82 passed.
+- WP10.5 лимиты (B): `uv run pytest tests/llm/test_phase4_ai_layer.py` — 1 failed (`test_role_table_matches_t111`: новые лимиты D-B-134), 9 passed.
+- WP10.5 стенд (B, `phase-4-b-prompts`): `uv run pytest tests/llm/test_labels.py` — 10 failed (`test_label_map_labels_domains` — нет `domains`; `test_prompt_has_owner_doctrine` × 8 — заглушки; устаревший `PROMPT_CONTRACTS.md`), 43 passed. Зелёный: `tests/llm` — 73 passed.
+- WP10.5 промпты (B, `phase-4-b-prompts`): `uv run pytest tests/llm/test_labels.py -k prompt` без
+  файлов промптов Фазы 4 — 25 failed (`PromptNotFoundError`, устаревший `PROMPT_CONTRACTS.md`),
+  16 passed, 8 xfailed. Зелёный: 41 passed, 8 xfailed.
+
 - Этап I G1 (B): `uv run pytest tests/session/test_phase4_contracts.py tests/llm/test_phase4_ai_layer.py tests/practice/test_tasks_markup.py tests/practice/test_check_instant.py tests/test_contracts.py` — 33 красных (`NotImplementedError`: `TurnStreamParser`, `next_step_input`, `validate_markup`, `check`), 26 зелёных (контракты, `T-AI1`, `T-A6`).
 - WP10.2–10.3 (адаптер и цикл): `tests/llm/test_phase4_stream_adapter.py` написан до реализации, но красный прогон не снят отдельно (до реализации тесты падали бы на импорте `quack.llm.tool_loop`). Зелёный: 9 passed; с затронутыми старыми (`tests/llm`, `test_llm_runtime.py`, `test_meta_mock.py`, `test_thresholds_in_settings.py`, `test_contracts.py`) — 127 passed.
 - WP12.1 (`T-TK1`, `tests/practice/test_tasks_store.py`): красный прогон отдельно не снят — тесты и код в одной итерации, до установки `dbmate` все 4 пропускались. Зелёный: `QUACK_TEST_REQUIRE_INFRA=1` — 4 passed (dbmate 2.37.0, Postgres 16).
@@ -704,9 +1022,12 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.4 (`T-TT3`, часть): `tests/session/test_holdback.py` — 4 failed (`NotImplementedError`), коммит `83675d3`. Зелёный: 5 passed; с затронутыми (`tests/session/test_spoiler_guard.py`, `test_phase3_hot_path.py::test_teacher_reasoning_effort_by_situation`, на инфраструктуре B) — 43 passed.
 - S3, модели B из ядра (Q-A-1 вариант (а)): `cd backend && uv run pytest tests/practice/test_core_models.py` — 11 failed (модели `quack.practice` — копии, не объекты `quack.events.values`), 3 passed (поля форм с метками и с id уже совпадают), коммит `ed6188c`. Зелёный: 14 passed; с затронутыми (`tests/practice`, `tests/events`, `tests/session/test_phase4_contracts.py`, `tests/llm/test_phase4_ai_layer.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 195 passed. `CheckFailed` теперь модель Pydantic ядра — вызовы B с именованными аргументами.
 
+- S3/S4/S6 (A, `phase-4-a-s4-s6`): тесты и код писались в одной итерации, красный прогон отдельно не снят (`Verdict` split, `RejectedElementRecord.index`, `quack.graph.read`, `rules_p4.py`). Зелёный: `tests/graph/test_read_stub.py`, `tests/jobs`, `tests/events/test_rejected_element.py`, `tests/practice/test_second_opinion.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` (`T-A6`) — локально без инфраструктуры; тесты с Postgres/dbmate (`tests/db`, `tests/events/test_catalog.py`, `tests/practice/test_answer_transaction.py`, `tests/practice/test_tasks_store.py`) локально не запускались (нет `dbmate`) — их прогонит CI.
+
 ## Правки тестов
 
 - `tests/session/test_holdback.py` (B, до зелёного): `test_spoiler_found_only_at_the_end` ошибочно ждал спойлер только в `finish`, хотя по WP13.4 весь накопленный текст проверяется на каждом куске. Заменён на `test_spoiler_completed_inside_the_holdback` (спойлер ловится на куске, который его дописал) и `test_finish_checks_the_whole_text`. Проверка не ослаблена: показанный текст по-прежнему пуст.
+- `tests/llm/test_phase4_ai_layer.py` (`T111`): `max_output_tokens` десяти ролей — по замеру (D-B-134); `Т-§11.1` разрешает менять конфиг по замеру. Сила проверки не меняется.
 - `tests/test_contracts.py` (`T-A6`): в `PRODUCT` добавлен `agents` (ТЗ Ф4 §4.1). Сила проверки не меняется.
 - `compute/tests/math/test_equivalence.py`: `PARAMS` берётся из `test_params.py` (у `Params` новые поля, D-B-124). Утверждения не менялись.
 
