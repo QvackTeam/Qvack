@@ -655,6 +655,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.8 (`T-TT8`): `tests/session/test_turn_effort.py` — 6 failed, 3 passed (`TypeError`: нет флагов), коммит `00cb285`. Зелёный: 9 passed.
 - WP13.5 (`T-TT4`, часть): `tests/session/test_head_guards.py` — 15 failed (`NotImplementedError`), коммит `26755dd`. Зелёный: 15 passed.
 - WP13.4 (`T-TT3`, часть): `tests/session/test_holdback.py` — 4 failed (`NotImplementedError`), коммит `83675d3`. Зелёный: 5 passed; с затронутыми (`tests/session/test_spoiler_guard.py`, `test_phase3_hot_path.py::test_teacher_reasoning_effort_by_situation`, на инфраструктуре B) — 43 passed.
+- S3, модели B из ядра (Q-A-1 вариант (а)): `cd backend && uv run pytest tests/practice/test_core_models.py` — 11 failed (модели `quack.practice` — копии, не объекты `quack.events.values`), 3 passed (поля форм с метками и с id уже совпадают), коммит `ed6188c`. Зелёный: 14 passed; с затронутыми (`tests/practice`, `tests/events`, `tests/session/test_phase4_contracts.py`, `tests/llm/test_phase4_ai_layer.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 195 passed. `CheckFailed` теперь модель Pydantic ядра — вызовы B с именованными аргументами.
 
 ## Правки тестов
 
