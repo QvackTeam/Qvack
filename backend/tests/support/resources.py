@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from neo4j import AsyncDriver
+from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -19,6 +20,7 @@ from quack.api.email import EmailSender
 from quack.api.resources import AppResources
 from quack.compute_client.client import ComputeClient
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory, create_session_factory
 from quack.embeddings.client import EmbeddingClient
 from quack.jobs.runner import JobContext
@@ -40,6 +42,7 @@ def build_app_resources(
     neo4j: AsyncDriver | Any,
     redis: Redis | Any | None,
     *,
+    db: Db | None = None,
     session_factory: SessionFactory | None = None,
     provider: LLMProvider | None = None,
     compute: ComputeClient | None = None,
@@ -51,10 +54,12 @@ def build_app_resources(
     """`AppResources` over the test pools. `neo4j` / `redis` may be the broken doubles of
     `tests.support.broken`; by default the LLM is down (`UnavailableLLMProvider`) and compute is an
     empty `ComputeScenario` (answers 503); storage, embeddings, email and the deletion journal
-    are the working in-memory doubles."""
+    are the working in-memory doubles. Without `db` (pass `pg_db`, seam S2) the `Db` is over a
+    closed pool: a test that touches Postgres through it fails with `PoolClosed`."""
     factory = session_factory or create_session_factory(engine)
     return AppResources(
         settings=settings,
+        db=db or Db(AsyncConnectionPool(settings.postgres_dsn, open=False)),
         engine=cast(AsyncEngine, engine),
         session_factory=factory,
         neo4j=cast(AsyncDriver, neo4j),
