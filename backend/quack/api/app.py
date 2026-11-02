@@ -21,6 +21,10 @@ from quack.api.openapi import install_openapi, render_openapi
 from quack.api.ratelimit import enforce_action_rate_limit
 from quack.api.resources import AppResources, create_app_resources
 from quack.artifacts.router import router as artifacts_router
+from quack.auth.consents import has_current_terms
+from quack.auth.google import AuthlibGoogleOIDC, GoogleOIDC
+from quack.auth.router import router as auth_router
+from quack.auth.sessions import resolve_session
 from quack.config import Settings, get_settings
 from quack.domains.router import router as domains_router
 from quack.logging import configure_logging, get_logger, log_context
@@ -126,7 +130,10 @@ def _healthz_router() -> APIRouter:
 
 
 def create_app(
-    settings: Settings | None = None, *, resources: AppResources | None = None
+    settings: Settings | None = None,
+    *,
+    resources: AppResources | None = None,
+    google_oidc: GoogleOIDC | None = None,
 ) -> FastAPI:
     """The API application. `resources` are the process resources: tests pass their own and
     keep ownership of them; `None` builds them in the lifespan and closes them on shutdown."""
@@ -153,6 +160,10 @@ def create_app(
     app = FastAPI(title="Quack API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.resources = resources
+    # ТЗ Ф4 WP18: the API base reads sessions and consents through these (§4.1, D-C-115).
+    app.state.session_resolver = resolve_session
+    app.state.terms_checker = has_current_terms
+    app.state.google_oidc = google_oidc or AuthlibGoogleOIDC(settings)
     install_error_handlers(app)
     install_openapi(app)
 
@@ -178,6 +189,7 @@ def create_app(
     app.include_router(session_router, dependencies=[Depends(enforce_action_rate_limit)])
     app.include_router(artifacts_router)
     app.include_router(learner_stream_router)
+    app.include_router(auth_router)
     return app
 
 

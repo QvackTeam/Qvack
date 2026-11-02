@@ -28,7 +28,7 @@ from quack.events.registry import EventPayload
 from quack.practice.answers import record_answer
 from quack.practice.check import Verdict
 from quack.practice.repo import event_by_seq
-from quack.practice.task_store import get_task
+from quack.practice.task_store import TaskDocument, get_task
 from quack.session.actions import (
     ACTION_EVENT_TYPES,
     TURN_ACTION_KINDS,
@@ -74,6 +74,8 @@ async def record_action(
             action.model_dump(exclude={"kind", "idempotency_key"})
         )
         return await _answer(db, answer, key, learner_id, session_id, domain_id, settings, redis)
+    if isinstance(action, HintRequestAction | SolutionRequestAction | CheckSkipAction):
+        await _own_task(db, learner_id, action.task_id)
     async with db.transaction():
         [event] = await append_events(
             db,
@@ -153,9 +155,7 @@ async def _answer(
     settings: Settings,
     redis: Redis | None,
 ) -> RecordedAction:
-    task = await get_task(db, learner_id=learner_id, task_id=answer.task_id)
-    if task is None:
-        raise LookupError(f"no task {answer.task_id}")
+    task = await _own_task(db, learner_id, answer.task_id)
     recorded = await record_answer(
         db,
         learner_id=learner_id,
@@ -168,6 +168,14 @@ async def _answer(
         redis=redis,
     )
     return RecordedAction(recorded.answer_seq, True, recorded.verdict)
+
+
+async def _own_task(db: Db, learner_id: UUID, task_id: UUID) -> TaskDocument:
+    """The learner's task; `LookupError` for a task of another learner or none (D-B-147)."""
+    task = await get_task(db, learner_id=learner_id, task_id=task_id)
+    if task is None:
+        raise LookupError(f"no task {task_id}")
+    return task
 
 
 async def _element_task(db: Db, learner_id: UUID, turn_seq: int, element_id: str) -> UUID:

@@ -222,3 +222,23 @@ async def test_repeat_with_the_same_key_writes_nothing_new(pg_db: Db) -> None:
     )
     assert first.seq == second.seq
     assert await _types(pg_db, learner_id) == ["message.sent"]
+
+
+@pytest.mark.parametrize("kind", ["answer", "hint_request", "solution_request", "check_skip"])
+async def test_task_of_another_learner_writes_nothing(pg_db: Db, kind: str) -> None:
+    """A kind that names a task: the task must be the learner's (D-B-147, review of #108)."""
+    learner_id, other = await create_learner(pg_db), await create_learner(pg_db)
+    foreign = await _task(pg_db, other)
+    action = ACTION.validate_python(
+        {"kind": kind, "idempotency_key": str(uuid4()), **_actions(foreign)[kind]}
+    )
+    with pytest.raises(LookupError):
+        await record_action(
+            pg_db,
+            action,
+            learner_id=learner_id,
+            session_id=uuid4(),
+            domain_id=None,
+            settings=SETTINGS,
+        )
+    assert await _types(pg_db, learner_id) == []
