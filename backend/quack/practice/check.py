@@ -10,6 +10,7 @@ check that did not parse or did not collect points is `CheckFailed` (Т-§22.7),
 
 from __future__ import annotations
 
+import asyncio
 import math
 import re
 from dataclasses import dataclass
@@ -19,7 +20,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from quack.compute_client.client import ComputeClient
+from quack.compute_client.client import ComputeClient, ComputeJobTimeout, ComputeUnavailableError
+from quack.compute_client.math_contracts import (
+    MathCheckRequest,
+    MathCheckResponse,
+    MathInput,
+    NumericParams,
+    Tolerance,
+)
+from quack.compute_client.math_contracts import Variable as MathVariable
 from quack.config import Settings
 from quack.practice.answer_spec import (
     INSTANT_TYPES,
@@ -160,7 +169,103 @@ async def check(
     # compute call nothing is decided now: the insurance job checks later (Т-§6.1).
     if compute is None:
         return NotYet(answer_seq, part)
-    raise NotImplementedError
+    request = _math_request(answer, spec, settings, timeout_ms)
+    if request is None:
+        return CheckFailed(answer_seq, part, "unparsed")
+    try:
+        response = await asyncio.wait_for(compute.math_check(request), request.timeout_ms / 1000)
+    except (TimeoutError, ComputeJobTimeout):
+        return NotYet(answer_seq, part, "timeout")
+    except ComputeUnavailableError:
+        return NotYet(answer_seq, part, "compute_unavailable")
+    return _from_compute(response, answer_seq, part, help_used or HelpUsed())
+
+
+# --- Fast check in compute (WP11.3, WP11.5) ---
+
+
+def _math_request(
+    answer: LearnerAnswer, spec: AnswerSpec, settings: Settings, timeout_ms: int | None
+) -> MathCheckRequest | None:
+    """The `/v1/math/check` request of a fast type; `None` — compute has no mode for it
+    (a `set` / `vector` of non-numbers, a spec without the correct value; D-B-126).
+    Every threshold comes from `settings` (ТЗ Ф4 §0.3, D-B-124)."""
+    if spec.value is None or spec.type not in ("expression", "quantity", "number"):
+        return None
+    reference = MathInput(latex=spec.value.latex, sympy=spec.value.sympy)
+    tolerance = _spec_tolerance(spec, _magnitude(spec.value.sympy))
+    common: dict[str, object] = {
+        "reference": reference,
+        "variables": [
+            MathVariable(name=v.name, assumptions=list(v.assumptions)) for v in spec.variables or []
+        ],
+        "tolerance": Tolerance(
+            tol_abs=None if tolerance is None else float(tolerance),
+            min_sig_digits=settings.min_sig_digits,
+        ),
+        "numeric": NumericParams(
+            numeric_points=settings.numeric_points,
+            simplify_share=settings.math_simplify_share,
+            precision_digits=settings.math_precision_digits,
+            sample_low=settings.math_sample_low,
+            sample_high=settings.math_sample_high,
+            positive_sample_min=settings.math_positive_sample_min,
+            max_attempts_per_point=settings.math_max_attempts_per_point,
+            rel_tol=settings.math_rel_tol,
+            abs_tol=settings.math_abs_tol,
+        ),
+        "timeout_ms": timeout_ms or settings.symbolic_inline_timeout_ms,
+    }
+    if spec.type == "quantity":
+        return MathCheckRequest.model_validate(
+            {**common, "kind": "quantity", "student_text": answer.value, "unit": spec.unit}
+        )
+    # Т-§22.7: `sympy` of the editor or the recognizer first, else LaTeX; a raw answer
+    # without either goes as `sympy` — compute parses every string by the whitelist grammar.
+    student = (
+        MathInput(latex=answer.latex, sympy=answer.sympy)
+        if answer.latex is not None or answer.sympy is not None
+        else MathInput(sympy=answer.value)
+    )
+    return MathCheckRequest.model_validate(
+        {
+            **common,
+            "kind": "expression",
+            "student": student,
+            "mode": spec.mode or "equal",
+            "form_target": spec.form_target,
+        }
+    )
+
+
+def _magnitude(reference: str) -> Fraction:
+    """The reference as a number for a tolerance by significant digits; 0 — not a plain
+    number (then only `tol_abs` / `tol_rel` of the spec apply)."""
+    written = _parse_number(reference)
+    return Fraction(0) if written is None else written.value
+
+
+def _from_compute(
+    response: MathCheckResponse, answer_seq: int, part: str, help_used: HelpUsed
+) -> CheckResult:
+    if response.status == "failed":
+        if response.reason in ("unparsed", "too_few_points"):
+            return CheckFailed(answer_seq, part, response.reason)
+        # `unsupported`: no code check for this form — the model decides (Т-§6.6).
+        return NeedsModel(answer_seq, part)
+    if response.outcome is None or response.method is None:
+        return CheckFailed(answer_seq, part, "unparsed")
+    return Verdict(
+        answer_seq=answer_seq,
+        part=part,
+        outcome=response.outcome,
+        method=response.method,
+        verification="code",
+        numeric_only=response.numeric_only,
+        error_hint=response.error_hint,
+        help_step=help_used.hint_step,
+        solution_shown=help_used.solution_requested,
+    )
 
 
 # --- Instant checks (Т-§6.4, WP11.2) ---
