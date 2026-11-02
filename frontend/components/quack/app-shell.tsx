@@ -77,6 +77,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const inSession = /^\/(session|topic|hub|canvas)\//.test(pathname);
   // Доска канваса занимает весь экран: ни панели доменов, ни панели сессий
   const fullscreen = pathname.startsWith("/canvas/");
+  // Живой режим: пока данные грузятся (или «/» без предметов — сейчас уведёт на создание) — пустой центр; ошибка — плашка
+  const busy = API_MODE && (!data.ready || (!data.error && data.domains.length === 0 && pathname === "/"));
+  const failed = API_MODE && !busy && !!data.error;
 
   const [domainId, setDomainId] = useState(domains[0].id);
   const [pending, setPending] = useState<string | null>(null);
@@ -234,9 +237,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <History />
               </IconButton>}
             </div>}
-            {API_MODE && (!data.ready || (!data.error && data.domains.length === 0 && pathname === "/")) ? (
+            {busy ? (
               <div className="flex-1" aria-busy="true" />
-            ) : API_MODE && data.error ? (
+            ) : failed ? (
               <div role="alert" className="m-auto max-w-md px-6 text-center">
                 <p className="text-body text-paper">{data.error}</p>
                 <button
@@ -247,9 +250,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   {t.live.retry}
                 </button>
               </div>
-            ) : (
-              children
-            )}
+            ) : null}
+            {/* Страницу рендерим всегда (и на сервере — иначе Next не может проверить instant-навигацию),
+                пока данных нет — просто прячем; обёртка постоянная, страница не пересоздаётся */}
+            <div className={busy || failed ? "hidden" : "contents"}>{children}</div>
           </main>
 
           {!inSettings && !fullscreen && <aside
