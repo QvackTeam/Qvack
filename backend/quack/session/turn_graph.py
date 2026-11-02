@@ -21,7 +21,7 @@ with the turn lock, context assembly (WP14), tool execution (WP14.4), the write 
 - **commit** writes through the port unless the turn was cancelled (`TurnCancelled`): a new
   action during the turn cancels it without a write (Т-§12.1, `TurnSlots`).
 
-Not here yet: «do not jump the boundary» (S4 `REQUIRES`), «generated is checked» (WP12.5).
+Not here yet: «generated is checked» (WP12.5).
 """
 
 from __future__ import annotations
@@ -73,6 +73,7 @@ from quack.session.actions import (
 )
 from quack.session.elements import TASK_ELEMENT_KINDS, Element
 from quack.session.guards import (
+    Boundary,
     GuardViolation,
     head_violations,
     markup_violations,
@@ -108,6 +109,7 @@ class GuardInputs:
     task_labels: frozenset[str]
     has_spoiler: Callable[[str], bool]
     remove_spoiler: Callable[[str], str]
+    boundary: Boundary | None = None
 
 
 @dataclass(frozen=True)
@@ -248,7 +250,10 @@ class _Attempt:
         head = TurnHead.model_validate_json(text)
         guard = self._run.guard
         violations = head_violations(
-            head, answered_verdict=guard.answered_verdict, skill_labels=guard.skill_labels
+            head,
+            answered_verdict=guard.answered_verdict,
+            skill_labels=guard.skill_labels,
+            boundary=guard.boundary,
         )
         if violations and not self._final:
             raise _HeadRejected(violations)

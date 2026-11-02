@@ -192,5 +192,7 @@ def test_boundary_names_the_missing_prerequisites_once() -> None:
         _head(), answered_verdict=None, skill_labels=SKILLS, boundary=_boundary(*links)
     )
     assert violation.reason == "boundary_jump"
-    assert violation.detail.count(str(PRE)) == 0  # the model sees labels, never ids (Т-§4.5)
-    assert "S2" in violation.detail and "S1" in violation.detail
+    # The model sees labels, never ids (Т-§4.5): PRE2 has no label and is only counted.
+    assert str(PRE) not in violation.detail and str(PRE2) not in violation.detail
+    assert "S1 needs S2 and 1 unlabeled first" in violation.detail
+    assert violation.detail.count("S2") == 1
