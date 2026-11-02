@@ -16,6 +16,8 @@ from quack.config import Settings
 # The Modal application of `modal/embeddings.py` and its class (D-C-117).
 EMBEDDING_APP = "quack-embeddings"
 EMBEDDER_CLASS = "Embedder"
+# Т-§10.5: the model; `embedding.ready.model` and the idempotency key carry it.
+EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-0.6B"
 
 type RemoteEmbed = Callable[[Sequence[str], str | None, int], Awaitable[list[list[float]]]]
 

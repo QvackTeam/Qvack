@@ -16,6 +16,7 @@ from quack.config import Settings
 from quack.embeddings.client import (
     EMBEDDER_CLASS,
     EMBEDDING_APP,
+    EMBEDDING_MODEL,
     EmbeddingsUnavailable,
     ModalEmbeddingClient,
     create_embedding_client,
@@ -104,4 +105,4 @@ def test_client_looks_up_the_names_of_the_modal_app() -> None:
     spec.loader.exec_module(app_module)
     assert app_module.app.name == EMBEDDING_APP
     assert hasattr(app_module, EMBEDDER_CLASS)
-    assert app_module.MODEL == "Qwen/Qwen3-Embedding-0.6B"
+    assert app_module.MODEL == EMBEDDING_MODEL
