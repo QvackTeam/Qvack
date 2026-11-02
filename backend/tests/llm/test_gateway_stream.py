@@ -19,9 +19,10 @@ from sqlalchemy import text
 from quack.config import Settings
 from quack.db.postgres import SessionFactory
 from quack.db.redis import llm_pressure_key
-from quack.llm.errors import LLMRateLimitedError, LLMUnavailableError
+from quack.llm.errors import LLMRateLimitedError, LLMUnavailableError, ProviderUnavailableError
 from quack.llm.gateway import LLMGateway
 from quack.llm.streaming import StreamCompleted, StreamEvent, StreamingLLMProvider, TextDelta
+from quack.llm.tool_loop import stream_step
 from quack.prompts.build_manifest import write_manifest
 from quack.prompts.registry import PromptRegistry
 from tests.support.llm import ScriptedFailure, ScriptedLLMProvider
@@ -256,3 +257,49 @@ async def test_teacher_waits_for_a_slot_no_longer_than_admission_wait(
 
     gate.release.set()
     assert isinstance((await first)[-1], StreamCompleted)
+
+
+class _BreaksMidStream:
+    """Gives one text delta, then the connection drops."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def complete_structured(self, request: Any) -> Any:  # pragma: no cover - unused
+        raise AssertionError("not called")
+
+    async def stream_structured(self, request: Any) -> AsyncIterator[StreamEvent]:
+        self.calls += 1
+        yield TextDelta('{"label":')
+        raise ProviderUnavailableError("connection dropped")
+
+
+async def test_failure_after_the_first_event_is_not_retried(
+    db: SessionFactory, prompts: PromptRegistry
+) -> None:
+    """The learner may have seen the first text: the turn fails, no second stream."""
+    provider = _BreaksMidStream()
+    gw = _gateway(db, provider, prompts, llm_retry_attempts=3)
+    request, stream = _stream(gw, uuid4(), uuid4())
+
+    with pytest.raises(LLMUnavailableError):
+        await _collect(stream.stream_structured(request))
+    assert provider.calls == 1
+
+
+async def test_graph_step_stopped_by_the_consumer_frees_the_slot(
+    db: SessionFactory, prompts: PromptRegistry
+) -> None:
+    """`stream_step` closes the stream when its text callback raises (a rejected head)."""
+    provider = _provider()
+    gw = _gateway(db, provider, prompts, llm_concurrency={"api": {WONDER: 1}})
+    request, stream = _stream(gw, uuid4(), uuid4())
+
+    async def reject(_text: str) -> None:
+        raise RuntimeError("head rejected")
+
+    with pytest.raises(RuntimeError):
+        await stream_step(stream, request, reject)
+    gw.settings.teacher_admission_wait_ms = 50  # the slot must be free now, not after GC
+    second = await _collect(stream.stream_structured(request))
+    assert isinstance(second[-1], StreamCompleted)

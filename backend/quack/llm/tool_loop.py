@@ -128,15 +128,22 @@ async def stream_step(
     text: list[str] = []
     items: list[Mapping[str, Any]] = []
     completed: StreamCompleted | None = None
-    async for event in provider.stream_structured(request):
-        if isinstance(event, TextDelta):
-            text.append(event.text)
-            if on_text is not None:
-                await on_text(event.text)
-        elif isinstance(event, OutputItemDone):
-            items.append(event.item)
-        else:
-            completed = event
+    stream = provider.stream_structured(request)
+    try:
+        async for event in stream:
+            if isinstance(event, TextDelta):
+                text.append(event.text)
+                if on_text is not None:
+                    await on_text(event.text)
+            elif isinstance(event, OutputItemDone):
+                items.append(event.item)
+            else:
+                completed = event
+    finally:
+        # A stopped step (the caller's `on_text` raised) frees the provider at once.
+        aclose = getattr(stream, "aclose", None)
+        if aclose is not None:
+            await aclose()
     if completed is None:
         raise ProviderIncompleteError("".join(text))  # the stream ended without its end event
     return Step("".join(text), tuple(items), completed)
