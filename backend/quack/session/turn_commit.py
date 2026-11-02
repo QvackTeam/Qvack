@@ -2,29 +2,39 @@
 
 `turn_batch` translates the labels of the turn output to ids (an unknown label —
 `UnknownLabelError`, nothing is written) and builds the batch: `task.created` of the tasks
-the turn shows, `turn.committed`, `agent.requested` of its requests, `hub.deadline_set` of a
-deadline heard in the conversation (D-B-149). `commit_turn` writes the batch with one
-`append_events` call, the documents of the new tasks and the `ops.turn_manifests` row in one
-transaction: a failure writes none of them; a repeat of the same batch writes nothing new.
+the turn shows, `turn.committed`, `agent.requested` of its requests, a deadline heard in the
+conversation (`hub.created` and `hub.topics_changed` of a new hub, `hub.deadline_set`) — only
+when the learner's words the model quotes are in a learner message of the session. What the
+turn answered adds `hint.shown` (a hint request; the step is counted by code) and
+`task.closed` (solved, skipped, solution shown). D-B-149. `commit_turn` writes the batch with
+one `append_events` call, the documents of the new tasks and the `ops.turn_manifests` row in
+one transaction: a failure writes none of them; a repeat of the same batch writes nothing new.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from psycopg.types.json import Jsonb
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 from redis.asyncio import Redis
 
+from quack.config import Settings
 from quack.db.db import Db
 from quack.events import records
 from quack.events.event_types import (
     AgentRequested,
     DegradedMode,
+    HintShown,
+    HubCreated,
     HubDeadlineSet,
+    HubTopic,
+    HubTopicsChanged,
+    TaskClosed,
     TurnCommitted,
 )
 from quack.events.log import NewEvent, append_events
@@ -35,7 +45,7 @@ from quack.practice.markup import TaskMarkup, TestedLevel
 from quack.practice.role_outputs import TaskCondition
 from quack.practice.task_store import get_task, insert_task_document, task_created_event
 from quack.session.elements import Element
-from quack.session.teacher_output import AgentRequest, TurnMarkup
+from quack.session.teacher_output import AgentRequest, DeadlineFromTalk, TurnMarkup
 from quack.session.turn_graph import TurnToCommit
 
 log = get_logger(__name__)
@@ -55,6 +65,48 @@ INSERT INTO ops.turn_manifests (
 )
 ON CONFLICT (manifest_id) DO NOTHING
 """
+
+# Hints shown for the task in the session before this turn (Т-§7.4: steps 1–3).
+_PRIOR_HINT_STEP = (
+    "SELECT coalesce(max((payload->>'step')::int), 0) AS step FROM core.events "
+    "WHERE learner_id = %(learner_id)s AND session_id = %(session_id)s "
+    "AND type = 'hint.shown' AND payload->>'task_id' = %(task_id)s "
+    "AND idempotency_key <> %(key)s"
+)
+_TASK_CLOSED = (
+    "SELECT count(*) AS n FROM core.events WHERE learner_id = %(learner_id)s "
+    "AND type = 'task.closed' AND payload->>'task_id' = %(task_id)s "
+    "AND idempotency_key <> %(key)s"
+)
+HINT_STEPS = 3
+
+
+class _Step(BaseModel):
+    step: int
+
+
+class _Count(BaseModel):
+    n: int
+
+
+@dataclass(frozen=True)
+class LearnerText:
+    """A learner message of the session (`message.sent`): what a quote may come from."""
+
+    seq: int
+    text: str
+
+
+@dataclass(frozen=True)
+class AnsweredAction:
+    """The action the turn answers, as far as it changes a task (D-B-149): a hint request
+    gets the next hint step; a solution request closes the task `solution_shown`; a skipped
+    check — `skipped`; an answer with every part correct by the time of the turn
+    (`solved`, computed by the caller from the verdicts) — `solved`."""
+
+    kind: Literal["hint_request", "solution_request", "check_skip", "answer"]
+    task_id: UUID
+    solved: bool = False
 
 
 @dataclass(frozen=True)
@@ -94,10 +146,16 @@ class NewTurnTask:
 
 @dataclass(frozen=True)
 class TurnBatch:
+    """`events` — in order, without the help events; `hint_task_id` / `close` — the help
+    events `commit_turn` adds after reading the session inside its transaction."""
+
     events: list[NewEvent]
     tasks: list[NewTurnTask]
     manifest: TurnManifestRow
     domain_id: UUID | None
+    common: dict[str, Any] = field(default_factory=dict)
+    hint_task_id: UUID | None = None
+    close: tuple[UUID, Literal["solved", "skipped", "solution_shown"]] | None = None
 
 
 def turn_batch(
@@ -107,6 +165,9 @@ def turn_batch(
     manifest: TurnManifestRow,
     action_seq: int,
     domain_id: UUID | None,
+    settings: Settings,
+    answered: AnsweredAction | None = None,
+    learner_texts: Sequence[LearnerText] = (),
 ) -> TurnBatch:
     """The events of the turn with ids instead of labels (WP2.2, WP13.3)."""
     output = turn.output
@@ -151,7 +212,17 @@ def turn_batch(
             )
         )
     requests = [_request_record(r, labels) for r in output.p3_markup.agent_requests]
-    markup = _turn_markup(output.p3_markup, labels, task_records, requests)
+    deadline, deadline_events = (None, [])
+    if output.p3_markup.deadline is not None:
+        deadline, deadline_events = _deadline(
+            output.p3_markup.deadline,
+            labels,
+            learner_texts,
+            settings=settings,
+            key=f"{key}:deadline",
+            common=common,
+        )
+    markup = _turn_markup(output.p3_markup, labels, task_records, requests, deadline)
     head = output.p1_head
     committed = TurnCommitted(
         action_seq=action_seq,
@@ -186,25 +257,112 @@ def turn_batch(
                 **common,
             )
         )
-    deadline = markup.deadline
-    if deadline is not None and deadline.hub_id is not None:
+    events.extend(deadline_events)
+    hint_task_id, close = None, None
+    if answered is not None:
+        match answered.kind:
+            case "hint_request":
+                hint_task_id = answered.task_id
+            case "solution_request":
+                close = (answered.task_id, "solution_shown")
+            case "check_skip":
+                close = (answered.task_id, "skipped")
+            case "answer" if answered.solved:
+                close = (answered.task_id, "solved")
+            case "answer":
+                pass
+    return TurnBatch(
+        events=events,
+        tasks=tasks,
+        manifest=manifest,
+        domain_id=domain_id,
+        common=common,
+        hint_task_id=hint_task_id,
+        close=close,
+    )
+
+
+def _deadline(
+    deadline: DeadlineFromTalk,
+    labels: LabelMap,
+    learner_texts: Sequence[LearnerText],
+    *,
+    settings: Settings,
+    key: str,
+    common: dict[str, Any],
+) -> tuple[records.DeadlineRecord | None, list[NewEvent]]:
+    """A deadline is written only from the learner's words (law 6, П-8.1): the quote must be
+    in a learner message of the session; the events point at it (`source_refs`). An existing
+    hub gets the date; a new one is created from the learner's request (`kind: request`,
+    `origin: learner`) with its coverage and the levels of its control type (Т-§4.8)."""
+    quote = deadline.quote.strip()
+    source = next((t for t in learner_texts if quote and quote in t.text), None)
+    if source is None:
+        log.warning("turn_deadline_ungrounded", quote=deadline.quote)
+        return None, []
+    try:
+        at = datetime.fromisoformat(deadline.deadline_at)
+    except ValueError:
+        log.warning("turn_deadline_bad_date", deadline_at=deadline.deadline_at)
+        return None, []
+    coverage = [labels.resolve("topic", t) for t in deadline.coverage]
+    refs = [{"seq": source.seq}]
+    events: list[NewEvent] = []
+    if deadline.hub_label is not None:
+        hub_id = labels.resolve("hub", deadline.hub_label)
+    elif deadline.new_hub_name and common["domain_id"] is not None:
+        hub_id = uuid4()
+        control = deadline.control_type or "no_goal"
         events.append(
             NewEvent(
-                type="hub.deadline_set",
-                payload=HubDeadlineSet(
-                    hub_id=deadline.hub_id,
-                    deadline_at_ms=deadline.deadline_at_ms,
-                    source="turn",
+                type="hub.created",
+                payload=HubCreated(
+                    hub_id=hub_id,
+                    domain_id=common["domain_id"],
+                    name=deadline.new_hub_name,
+                    kind="request",
+                    origin="learner",
+                    control_type=control,
                 ),
-                idempotency_key=f"{key}:deadline",
+                idempotency_key=f"{key}:hub",
+                source_refs=refs,
                 **common,
             )
         )
-    elif deadline is not None:
-        # D-B-149 [ПРОВЕРИТЬ]: a new hub needs `hub.created` fields the markup has no
-        # values for (`kind`, `origin`, `control_type`); kept in the turn markup only.
-        log.warning("turn_deadline_new_hub_not_written", new_hub_name=deadline.new_hub_name)
-    return TurnBatch(events=events, tasks=tasks, manifest=manifest, domain_id=domain_id)
+        if coverage:
+            levels = settings.control_type_levels[control]
+            events.append(
+                NewEvent(
+                    type="hub.topics_changed",
+                    payload=HubTopicsChanged(
+                        hub_id=hub_id,
+                        topics=[HubTopic(topic_id=t, required_levels=levels) for t in coverage],
+                    ),
+                    idempotency_key=f"{key}:topics",
+                    source_refs=refs,
+                    **common,
+                )
+            )
+    else:
+        log.warning("turn_deadline_without_hub", new_hub_name=deadline.new_hub_name)
+        return None, []
+    deadline_at_ms = int(at.timestamp() * 1000)
+    events.append(
+        NewEvent(
+            type="hub.deadline_set",
+            payload=HubDeadlineSet(hub_id=hub_id, deadline_at_ms=deadline_at_ms, source="turn"),
+            idempotency_key=key,
+            source_refs=refs,
+            **common,
+        )
+    )
+    record = records.DeadlineRecord(
+        hub_id=hub_id,
+        new_hub_name=deadline.new_hub_name,
+        deadline_at_ms=deadline_at_ms,
+        coverage_topic_ids=coverage,
+    )
+    return record, events
 
 
 async def commit_turn(
@@ -216,7 +374,8 @@ async def commit_turn(
     if manifest.learner_id != learner_id:
         raise ValueError("the manifest belongs to another learner")
     async with db.transaction():
-        stored = await append_events(db, learner_id, batch.events, redis=redis)
+        events = [*batch.events, *await _help_events(db, batch, learner_id)]
+        stored = await append_events(db, learner_id, events, redis=redis)
         by_key = {event.idempotency_key: event for event in stored}
         for task in batch.tasks:
             if await get_task(db, learner_id=learner_id, task_id=task.task_id):
@@ -234,6 +393,50 @@ async def commit_turn(
         await db.execute(_INSERT_MANIFEST, _manifest_params(manifest))
     [turn] = [event for event in stored if event.type == "turn.committed"]
     return turn.seq
+
+
+async def _help_events(db: Db, batch: TurnBatch, learner_id: UUID) -> list[NewEvent]:
+    """`hint.shown` with the next step (at most `HINT_STEPS`) and `task.closed` unless the
+    task is closed already; read inside the write transaction."""
+    key = f"turn:{batch.manifest.manifest_id}"
+    events: list[NewEvent] = []
+    if batch.hint_task_id is not None:
+        prior = await db.fetch_one(
+            _PRIOR_HINT_STEP,
+            {
+                "learner_id": learner_id,
+                "session_id": batch.manifest.session_id,
+                "task_id": str(batch.hint_task_id),
+                "key": f"{key}:hint",
+            },
+            row=_Step,
+        )
+        step = min((prior.step if prior else 0) + 1, HINT_STEPS)
+        events.append(
+            NewEvent(
+                type="hint.shown",
+                payload=HintShown(task_id=batch.hint_task_id, step=step, source="teacher"),
+                idempotency_key=f"{key}:hint",
+                **batch.common,
+            )
+        )
+    if batch.close is not None:
+        task_id, how = batch.close
+        closed = await db.fetch_one(
+            _TASK_CLOSED,
+            {"learner_id": learner_id, "task_id": str(task_id), "key": f"{key}:close"},
+            row=_Count,
+        )
+        if closed is None or closed.n == 0:
+            events.append(
+                NewEvent(
+                    type="task.closed",
+                    payload=TaskClosed(task_id=task_id, how=how),
+                    idempotency_key=f"{key}:close",
+                    **batch.common,
+                )
+            )
+    return events
 
 
 # --- labels → ids (Т-§4.5) ---
@@ -307,9 +510,9 @@ def _turn_markup(
     labels: LabelMap,
     tasks: list[records.TurnTaskRecord],
     requests: list[records.AgentRequestRecord],
+    deadline: records.DeadlineRecord | None,
 ) -> records.TurnMarkupRecord:
     plan = markup.plan_update
-    deadline = markup.deadline
     return records.TurnMarkupRecord(
         tasks=tasks,
         elements=[_element_record(e, labels) for e in markup.elements],
@@ -330,14 +533,7 @@ def _turn_markup(
         agent_requests=requests,
         corrections_acknowledged=markup.corrections_acknowledged,
         decision_reason=markup.decision_reason,
-        deadline=None
-        if deadline is None
-        else records.DeadlineRecord(
-            hub_id=_optional(labels, "hub", deadline.hub_label),
-            new_hub_name=deadline.new_hub_name,
-            deadline_at_ms=int(datetime.fromisoformat(deadline.deadline_at).timestamp() * 1000),
-            coverage_topic_ids=[labels.resolve("topic", t) for t in deadline.coverage],
-        ),
+        deadline=deadline,
     )
 
 
@@ -383,6 +579,8 @@ def _manifest_params(manifest: TurnManifestRow) -> dict[str, Any]:
 
 
 __all__ = [
+    "AnsweredAction",
+    "LearnerText",
     "NewTurnTask",
     "TurnBatch",
     "TurnManifestRow",
