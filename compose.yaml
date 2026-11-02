@@ -134,6 +134,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       QUACK_VERSION: ${QUACK_VERSION:-dev}
       POSTGRES_DSN: postgresql://quack:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/quack
+      # `ops db-roles` runs in this service too (superuser DSN); `ops migrate` ignores them.
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-}
+      READER_DB_PASSWORD: ${READER_DB_PASSWORD:-}
+      MIGRATOR_DB_PASSWORD: ${MIGRATOR_DB_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -255,13 +259,12 @@ services:
     profiles: [backup]
     restart: "no"
     command: ["ops", "backup"]
-    # Д-§7 names `quack_reader` for the dump; the role comes with `ops db-roles` (WP9.6), until
-    # then the dump reads with the application user.
+    # Д-§7: the dump reads as `quack_reader`, created by `ops db-roles` (deploy.sh runs it).
     environment:
       ENV: ${ENV:-prod}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       QUACK_VERSION: ${QUACK_VERSION:-dev}
-      POSTGRES_DSN: postgresql://quack:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/quack
+      POSTGRES_DSN: postgresql://quack_reader:${READER_DB_PASSWORD:-}@postgres:5432/quack
       BACKUP_LOCAL_DIR: /backups
       BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
       BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY:-}

@@ -32,6 +32,7 @@ from quack.jobs.runner import JobRunner
 from quack.logging import configure_logging, get_logger
 from quack.ops.backup import run_backup
 from quack.ops.commands import migrate, purge_deleted, replay_dlq
+from quack.ops.db_roles import DbRolesRefused, RolePasswords, apply_db_roles
 from quack.ops.registry import can_rollback, seen_pairs, write_event_registry
 from quack.ops.seed import SeedRefusedError, seed_learners, write_learners
 from quack.ops.status import collect_status
@@ -88,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     ops_sub.add_parser("purge-deleted", help="physically delete learners with tombstones")
     backup = ops_sub.add_parser("backup", help="encrypted Postgres dump to R2 and local copies")
     backup.add_argument("when", nargs="?", choices=["now"], help="an out-of-schedule dump")
+    ops_sub.add_parser("db-roles", help="create or update the Postgres roles and grants")
     ops_sub.add_parser("status", help="print the state of the system as one JSON object")
     registry = ops_sub.add_parser("event-registry", help="write the event registry JSON")
     registry.add_argument("--out", required=True, help="path of the registry to write")
@@ -269,6 +271,21 @@ async def _seed_learners(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+async def _db_roles(settings: Settings) -> int:
+    """Д-§7: needs the superuser DSN and the three role passwords; exit code 2 when refused."""
+    try:
+        passwords = RolePasswords.from_settings(settings)
+    except DbRolesRefused as exc:
+        log.error("db_roles_refused", reason=str(exc))
+        return 2
+    engine = create_engine(settings, pool_size=1)
+    try:
+        await apply_db_roles(engine, passwords)
+    finally:
+        await engine.dispose()
+    return 0
+
+
 async def _ops(settings: Settings, args: argparse.Namespace) -> int:
     if args.op == "verify-schema":
         driver = create_driver(settings)
@@ -283,6 +300,8 @@ async def _ops(settings: Settings, args: argparse.Namespace) -> int:
         return 0
     if args.op == "backup":
         return await run_backup(settings)
+    if args.op == "db-roles":
+        return await _db_roles(settings)
     if args.op == "openapi":
         # Imported here: the function is stream C's (WP8.7) and needs no resources.
         from quack.api.app import write_openapi
