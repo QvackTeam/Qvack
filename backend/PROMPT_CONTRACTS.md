@@ -594,6 +594,7 @@ Output fields:
 - `answer_action`: string | null
 
 Input blocks: `description`, `libraries`, `previous_errors`
+Markers: "window.QUACK_VIZ_PARAMS"
 
 ## `release_judge@1` → `ReleaseJudgeOutput`
 

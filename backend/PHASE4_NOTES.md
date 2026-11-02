@@ -630,7 +630,9 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
   пишет `evidence` по навыку и уровню с вердиктом кода в эпизоде (`code_verdict_exists`);
   `teacher@2` — таблица уровней `Т-§5.3` для заданий и «метки не в тексте»; `builder@1` —
   `topic_hint` у каждого нового навыка, `same_idea` — навык другого домена; `viz_builder@1` —
-  значение для каждого параметра описания.
+  наборы параметров по D-B-130 (один JSON-объект на снимок, страница читает
+  `window.QUACK_VIZ_PARAMS`, иначе свои значения по умолчанию; маркер в `MARKERS`, стенд — 6/6
+  сценариев, 12 прогонов).
 - Обратимость: вернуть формулировки. Тесты: `T-M5`, `test_prompt_contracts_file_is_current`.
 - Требует подтверждения владельцем: нет
 
@@ -678,10 +680,12 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 ### D-B-137. Режим `interval` до проверки в коде — не в промптах
 - Класс: B
 - WP / место: WP10.5, `teacher@2`, `task_generator@1` слой 2; `compute` (`Т-§6.5`, `Т-§6.6`)
-- Контекст: `Т-§6.6` — режим `interval` «неравенство: множества как интервалы и их объединения»,
-  но в `compute` его сравнения нет, а грамматика `Т-§6.5` не пускает `<`, `>`, `Interval`, `Union`
-  (точка — только внутри числа). Ответ-интервал не проходит `validate_markup`
-  (`expression_unparsed`), задача выбрасывается.
+- Контекст: `Т-§6.6` — режим `interval` «неравенство: множества как интервалы и их объединения».
+  В `phase-4` его сравнивает `compute` (`compute/quack_compute/math/equivalence.py`, `_intervals`:
+  два неравенства с одной переменной; грамматика compute пускает `<`, `<=`, `>`, `>=`). Отсекает
+  локальная грамматика `validate_markup` (`quack/practice/grammar.py`): в ней нет `<`, `>`, поэтому
+  ответ-неравенство даёт `expression_unparsed`, и задача выбрасывается. Расширение `grammar.py` —
+  отдельная задача B (не WP10.5).
 - Решение: в контрактах режим `interval` не предлагается; неравенство — задачей с выбором
   интервалов или с числовым ответом. Реализация режима (имена `Interval`, `Union` в белом списке
   `Т-§6.5`, сравнение множеств) — отдельная задача проверки в коде; после неё режим возвращается в
@@ -854,6 +858,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP10.5 `viz_builder@1` по D-B-130 (B): `uv run pytest tests/llm/test_labels.py` — 2 failed (`test_prompt_has_its_markers[viz_builder@1]`, устаревший `PROMPT_CONTRACTS.md`), 54 passed, коммит `1d7572d`. Зелёный: `tests/llm` — 76 passed.
 - WP19 (C, `phase-4-c-wp19`, коммит `4fb10f3`): `uv run pytest tests/storage/test_storage_wp19.py` — ошибка сборки (нет `quack.storage.keys`, `quack.storage.uploads`). Зелёный: 12 passed; `tests/storage` — 29 passed; с затронутыми (`test_app_assembly.py` — снимок OpenAPI, `test_neo4j_outage.py`, `test_ratelimit.py`, `test_infra.py`, `tests/session/test_degradation_and_workers.py`, `test_contracts.py`) — 27 passed, 42 skipped (без инфраструктуры; их прогонит CI).
 - WP2 (A), Этап I–II: схемы нагрузок (Этап I), шаблоны ключей — `NotImplementedError`: `pytest -q tests/events` — 2 failed (`T-EV3`), 71 passed (`T-EV1`, `T-EV2`, `T-EV5` на схемах Этапа I). Зелёный: 73 passed.
 - WP1 (A), коммит `8c9fe33` (Этап I–II): `QUACK_TEST_REQUIRE_INFRA=1 python -m pytest -q tests/db` — 13 errors (`NotImplementedError` в `open_db`: все `T-DB5`), 6 passed (`T-DB1` — миграция есть с Этапа I; `T-DB2`, `T-DB4` и их самопроверки; формат `actor`). Зелёный (`phase-4-a-wp1`): 19 passed.
