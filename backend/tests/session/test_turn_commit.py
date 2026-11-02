@@ -571,3 +571,26 @@ async def test_completed_steps_are_history(pg_db: Db) -> None:
         "ratio test",
     ]
     assert row["plan"]["current_step"] == "root test"
+
+
+def test_known_check_without_topic_is_not_requested() -> None:
+    """`check.known_claim` reads the skills of a topic (WP8.2): a `known_check` request
+    without a topic label is dropped, the others stay (review B of #117)."""
+    params = {
+        "skill": None,
+        "level": None,
+        "topic": None,
+        "task": None,
+        "misconception": None,
+        "description": None,
+    }
+    requests = [
+        {"kind": "known_check", "params": params, "needed_in_session": True},
+        {"kind": "known_check", "params": {**params, "topic": "T1"}, "needed_in_session": False},
+    ]
+    batch = _batch(uuid4(), _bare(agentRequests=requests))
+
+    asked = [e.payload for e in batch.events if e.type == "agent.requested"]
+    assert [(a.kind, a.params.topic_id) for a in asked] == [("known_check", TOPIC)]
+    [turn] = [e.payload for e in batch.events if e.type == "turn.committed"]
+    assert [r.params.topic_id for r in turn.markup.agent_requests] == [TOPIC]
