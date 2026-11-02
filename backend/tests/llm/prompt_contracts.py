@@ -43,7 +43,7 @@ PROMPT_SCHEMAS: dict[str, type[BaseModel]] = {
 }
 
 # The roles of stream B in Phase 4 (ТЗ Ф4 §6.6). A prompt with two modes has one schema per
-# mode (`builder@1`: reconciliation and hygiene, D-B-127). The roles whose layer 2 stream C
+# mode (`builder@1`: reconciliation and hygiene, D-B-140). The roles whose layer 2 stream C
 # writes (§7.3 п.2) are added with their prompts.
 PHASE4_PROMPT_SCHEMAS: dict[str, tuple[type[BaseModel], ...]] = {
     "teacher@2": (TeacherOutputV2,),
@@ -137,7 +137,7 @@ EDIT_POINTS = [
     "the reply language of the teacher from the profile.",
     "Phase 4: `intent` and `approach` lists of `teacher@2` (D-B-104, owner's doctrine);",
     "Phase 4: names of the input blocks of the Phase 4 roles, until their context builders"
-    " (WP11.6, WP12.4–12.6, WP13–WP16) are written (D-B-125);",
+    " (WP11.6, WP12.4–12.6, WP13–WP16) are written (D-B-138);",
     "Phase 4: the domain label of `domain_classifier@1` (no `LabelMap` kind yet, WP16.4);",
     "Phase 4: layer 1 of the roles in `DOCTRINE_PENDING` (owner's doctrine).",
 ]

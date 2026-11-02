@@ -941,7 +941,8 @@
           "VALIDATION_ERROR",
           "UNAUTHORIZED",
           "RATE_LIMITED",
-          "SERVICE_UNAVAILABLE"
+          "SERVICE_UNAVAILABLE",
+          "UPLOAD_REJECTED"
         ],
         "type": "string"
       },

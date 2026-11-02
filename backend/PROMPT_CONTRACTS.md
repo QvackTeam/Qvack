@@ -612,6 +612,6 @@ Input blocks: `situation`, `turn_a`, `turn_b`, `criteria`
 - the marker of unavailable memory (`memory temporarily unavailable`);
 - the reply language of the teacher from the profile.
 - Phase 4: `intent` and `approach` lists of `teacher@2` (D-B-104, owner's doctrine);
-- Phase 4: names of the input blocks of the Phase 4 roles, until their context builders (WP11.6, WP12.4–12.6, WP13–WP16) are written (D-B-125);
+- Phase 4: names of the input blocks of the Phase 4 roles, until their context builders (WP11.6, WP12.4–12.6, WP13–WP16) are written (D-B-138);
 - Phase 4: the domain label of `domain_classifier@1` (no `LabelMap` kind yet, WP16.4);
 - Phase 4: layer 1 of the roles in `DOCTRINE_PENDING` (owner's doctrine).
