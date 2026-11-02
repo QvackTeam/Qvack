@@ -491,6 +491,18 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: при реализации WP16.5 — разбор `parameter_values` (B, `tests/agents/`); снимок с набором, который страница читает из `window.QUACK_VIZ_PARAMS` (C, `compute/tests`).
 - Требует подтверждения владельцем: нет
 
+### D-B-144. Грамматика API пускает отношения — режим `interval` проходит проверку разметки
+- Класс: B
+- WP / место: WP12.3, WP11.5; `quack/practice/grammar.py` (`grammar_ok`, D-B-115)
+- Контекст: D-B-137 (#84) убрал режим `interval` из контрактов промптов, потому что ответ-неравенство не проходил `validate_markup` (`expression_unparsed`): токен-грамматика API не пускала `<`, `>`. Грамматика compute (`compute/quack_compute/math/grammar.py`, `Т-§6.5`) эти токены пускает, и сравнение `interval` в compute есть (`_intervals`: два неравенства с одной переменной, `Т-§6.6`).
+- Варианты: (1) те же токены отношений, что в compute; (2) оставить как есть, `interval` не предлагать.
+- Решение: (1). В грамматику API добавлены токены `<`, `<=`, `>`, `>=` — ровно набор compute; Юникод (`≥`) и `!=` по-прежнему отказ. Объединения интервалов (`Union`, `Interval`) не добавлены: их нет и в compute.
+- Почему: D-B-115 — грамматика API отказывает ровно в том, в чём откажет compute (§0.4.3 п.7, единообразие); `Т-§6.6` называет режим `interval`.
+- Обратимость: одно регулярное выражение.
+- Тесты: `tests/practice/test_grammar_relations.py`.
+- Требует подтверждения владельцем: нет
+- Следствие для промптов: режим `interval` можно вернуть в контракты `teacher@2` и `task_generator@1` (D-B-137) — с оговоркой «одно неравенство с одной переменной, без объединений».
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -686,6 +698,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.5 (`T-TT4`, часть): `tests/session/test_head_guards.py` — 15 failed (`NotImplementedError`), коммит `26755dd`. Зелёный: 15 passed.
 - WP13.4 (`T-TT3`, часть): `tests/session/test_holdback.py` — 4 failed (`NotImplementedError`), коммит `83675d3`. Зелёный: 5 passed; с затронутыми (`tests/session/test_spoiler_guard.py`, `test_phase3_hot_path.py::test_teacher_reasoning_effort_by_situation`, на инфраструктуре B) — 43 passed.
 - S3, модели B из ядра (Q-A-1 вариант (а)): `cd backend && uv run pytest tests/practice/test_core_models.py` — 11 failed (модели `quack.practice` — копии, не объекты `quack.events.values`), 3 passed (поля форм с метками и с id уже совпадают), коммит `ed6188c`. Зелёный: 14 passed; с затронутыми (`tests/practice`, `tests/events`, `tests/session/test_phase4_contracts.py`, `tests/llm/test_phase4_ai_layer.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 195 passed. `CheckFailed` теперь модель Pydantic ядра — вызовы B с именованными аргументами.
+- D-B-144 (грамматика API, отношения): `cd backend && uv run pytest tests/practice/test_grammar_relations.py` — 5 failed, 4 passed (отказы и так отказы), коммит `b2d0309`. Зелёный: 9 passed; с затронутыми (`tests/practice`, `tests/session/test_phase4_contracts.py`, `tests/test_contracts.py`) — 116 passed.
 
 ## Правки тестов
 
