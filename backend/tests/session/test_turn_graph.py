@@ -1,0 +1,441 @@
+"""ТЗ Ф4 §8.9 T-TT2, T-TT3, T-TT4, T-TT6 at the turn graph (WP13.2, WP13.4, WP13.5).
+
+The graph runs on the seam S13 provider (`ScriptedLLMProvider.stream_structured`) and on
+in-memory ports: admission, context, tools, the write and the frames are the caller's
+(route body, WP13.1/§4.7; context WP14). The write of `turn.committed` with the manifest
+(T-TT7) is the commit port over `Db`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+from dataclasses import dataclass, field
+from typing import Any
+from uuid import uuid4
+
+from quack.config import Settings
+from quack.llm.provider import ProviderRequest
+from quack.llm.streaming import StreamRequest
+from quack.practice.check import Verdict
+from quack.session.actions import (
+    ElementFrame,
+    ResetFrame,
+    StatusFrame,
+    TokenFrame,
+    TurnCommittedFrame,
+    VerdictFrame,
+)
+from quack.session.turn_graph import (
+    AssembledTurn,
+    GuardInputs,
+    Role,
+    TurnSlots,
+    TurnToCommit,
+    run_turn,
+)
+from tests.support.llm import ScriptedLLMProvider, ScriptedToolCall, ScriptedToolStep
+
+SCHEMA = "TeacherOutputV2"
+ANSWER = "1/3"
+CLEAN_PREFIX = (
+    "Let us look at the series again: every term is a third of the one before it, "
+    "so the partial sums keep growing but more and more slowly as we go on. "
+)
+NUMBER = {"type": "number", "value": {"latex": "\\frac{1}{3}", "sympy": "1/3"}}
+
+
+def _settings(**overrides: Any) -> Settings:
+    return Settings(env="test", **overrides)
+
+
+def _head(**fields: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "intent": "feedback",
+        "targetSkills": ["S1"],
+        "verdict_stance": None,
+        "branchType": None,
+        "approach": "none",
+    }
+    return {**base, **fields}
+
+
+def _task(level: int = 3, **extra: Any) -> dict[str, Any]:
+    return {
+        "element_id": "e1",
+        "tests": [{"skill": "S1", "level": level}],
+        "methodNamed": False,
+        "answer": NUMBER,
+        **extra,
+    }
+
+
+def _markup(**fields: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "tasks": [_task()],
+        "elements": [
+            {
+                "element_id": "e1",
+                "kind": "short_answer",
+                "prompt": "What is the sum?",
+                "ask_confidence": False,
+            }
+        ],
+        "exposures": [{"skill": "S1", "kind": "explained", "approach": "none"}],
+        "targetsMisconception": None,
+        "planUpdate": {
+            "completed_steps": [],
+            "current_step": "sum of a geometric series",
+            "next_steps": [],
+            "branches": [],
+            "cancel_requests": [],
+        },
+        "agentRequests": [],
+        "correctionsAcknowledged": [],
+        "decisionReason": "practice after the explanation",
+        "deadline": None,
+    }
+    return {**base, **fields}
+
+
+def _turn(text: str = CLEAN_PREFIX, *, head: dict[str, Any] | None = None, **markup: Any) -> dict:
+    return {
+        "p1_head": head or _head(),
+        "p2_body": {
+            "blocks": [
+                {"block_id": "b1", "text": text, "element_id": None},
+                {"block_id": "b2", "text": None, "element_id": "e1"},
+            ]
+        },
+        "p3_markup": _markup(**markup),
+    }
+
+
+def _has_spoiler(text: str) -> bool:
+    return ANSWER in text
+
+
+def _remove_spoiler(text: str) -> str:
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    return " ".join(s for s in sentences if ANSWER not in s).strip()
+
+
+def _guard(verdict: Verdict | None = None) -> GuardInputs:
+    return GuardInputs(
+        answered_verdict=verdict,
+        skill_labels=frozenset({"S1", "S2"}),
+        misconception_labels=frozenset({"M1"}),
+        task_labels=frozenset(),
+        has_spoiler=_has_spoiler,
+        remove_spoiler=_remove_spoiler,
+    )
+
+
+def _request() -> StreamRequest:
+    return StreamRequest(
+        ProviderRequest(
+            model="muse-wonder-1.0",
+            prompt="context",
+            json_schema={"type": "object"},
+            schema_name=SCHEMA,
+            temperature=0.0,
+            timeout_sec=30.0,
+            reasoning_effort="low",
+            max_output_tokens=8192,
+        )
+    )
+
+
+def _verdict(verification: str = "code") -> Verdict:
+    return Verdict.model_validate(
+        {
+            "answer_seq": 4,
+            "part": "main",
+            "outcome": "incorrect",
+            "method": "numeric",
+            "verification": verification,
+        }
+    )
+
+
+@dataclass
+class Ports:
+    assembled: AssembledTurn
+    frames: list[Any] = field(default_factory=list)
+    committed: list[TurnToCommit] = field(default_factory=list)
+    tools: list[str] = field(default_factory=list)
+
+    async def admit(self) -> Role:
+        return "teacher"
+
+    async def assemble(self, role: Role) -> AssembledTurn:
+        return self.assembled
+
+    async def execute_tool(self, name: str, arguments: str) -> str:
+        self.tools.append(name)
+        return f"history of {name}"
+
+    async def commit(self, turn: TurnToCommit) -> int:
+        self.committed.append(turn)
+        return 42
+
+    async def emit(self, frame: Any) -> None:
+        self.frames.append(frame)
+
+
+def _ports(verdict: Verdict | None = None, frame: VerdictFrame | None = None) -> Ports:
+    return Ports(
+        AssembledTurn(
+            request=_request(),
+            guard=_guard(verdict),
+            effort="low",
+            degraded_mode=None,
+            verdict=frame,
+        )
+    )
+
+
+def _answers(provider: ScriptedLLMProvider, *turns: dict[str, Any]) -> None:
+    """The n-th streamed answer is `turns[n]`, the last one repeats."""
+    queue = list(turns)
+
+    def responder(_request: ProviderRequest) -> dict[str, Any]:
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    provider.respond(SCHEMA, responder)
+
+
+def _shown(frames: list[Any]) -> str:
+    return "".join(f.text for f in frames if isinstance(f, TokenFrame))
+
+
+def _kinds(frames: list[Any]) -> list[str]:
+    """Frame names with runs of `token` collapsed."""
+    names: list[str] = []
+    for frame in frames:
+        name = {
+            StatusFrame: "status",
+            VerdictFrame: "verdict",
+            TokenFrame: "token",
+            ResetFrame: "reset",
+            ElementFrame: "element",
+            TurnCommittedFrame: "turn_committed",
+        }[type(frame)]
+        if not (name == "token" and names and names[-1] == "token"):
+            names.append(name)
+    return names
+
+
+async def _run(ports: Ports, provider: ScriptedLLMProvider, **settings: Any) -> int | None:
+    return await run_turn(ports, provider, settings=_settings(**settings), cancel=asyncio.Event())
+
+
+# --- T-TT2 ---
+
+
+async def test_sse_frame_order() -> None:
+    """status thinking → verdict → status tool → token… → element → turn_committed."""
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn())
+    provider.script_tools(SCHEMA, ScriptedToolStep((ScriptedToolCall("skill_history", {}),)))
+    frame = VerdictFrame(
+        answer_seq=4, part="main", outcome="incorrect", method="numeric", verification="code"
+    )
+    ports = _ports(frame=frame)
+
+    seq = await _run(ports, provider)
+
+    assert seq == 42
+    assert _kinds(ports.frames) == [
+        "status",
+        "verdict",
+        "status",
+        "token",
+        "element",
+        "turn_committed",
+    ]
+    assert ports.frames[0] == StatusFrame(state="thinking")
+    assert ports.frames[2] == StatusFrame(state="tool", tool="skill_history")
+    assert ports.tools == ["skill_history"]
+    assert _shown(ports.frames) == CLEAN_PREFIX
+    [element] = [f for f in ports.frames if isinstance(f, ElementFrame)]
+    assert element.block_id == "b2" and element.element.element_id == "e1"
+    assert ports.frames[-1] == TurnCommittedFrame(
+        seq=42, degraded_mode=None, effort="low", role="teacher"
+    )
+    [turn] = ports.committed
+    assert turn.text == CLEAN_PREFIX and turn.guard_retries == 0
+
+
+async def test_no_token_before_checked_head_body_first() -> None:
+    """Body before head: buffered fully; a rejected head shows nothing of that attempt."""
+    provider = ScriptedLLMProvider(body_before_head=True)
+    rejected = _turn("Rejected attempt text. " * 4, head=_head(targetSkills=["S9"]))
+    _answers(provider, rejected, _turn())
+    ports = _ports()
+
+    await _run(ports, provider, spoiler_holdback_chars=5)
+
+    assert "Rejected" not in _shown(ports.frames)
+    assert not [f for f in ports.frames if isinstance(f, ResetFrame)]
+    assert _shown(ports.frames) == CLEAN_PREFIX
+    assert len(provider.stream_calls) == 2
+
+
+async def test_long_body_streams_before_the_end() -> None:
+    """No artificial delay: text beyond the holdback goes out before the body ends."""
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(CLEAN_PREFIX * 3))
+    ports = _ports()
+
+    await _run(ports, provider, spoiler_holdback_chars=40)
+
+    tokens = [f for f in ports.frames if isinstance(f, TokenFrame)]
+    assert len(tokens) > 2
+    assert _shown(ports.frames) == CLEAN_PREFIX * 3
+
+
+# --- T-TT3 ---
+
+
+async def test_holdback_spoiler_reset() -> None:
+    """A spoiler in the buffer → `reset {spoiler}`, retry with the reason; nothing shown had
+    the answer."""
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(CLEAN_PREFIX + f"The sum is {ANSWER}. Check it."), _turn())
+    ports = _ports()
+
+    await _run(ports, provider, spoiler_holdback_chars=20)
+
+    resets = [f for f in ports.frames if isinstance(f, ResetFrame)]
+    assert resets == [ResetFrame(reason="spoiler")]
+    before = ports.frames[: ports.frames.index(resets[0])]
+    assert _shown(before) and ANSWER not in _shown(before)
+    after = ports.frames[ports.frames.index(resets[0]) :]
+    assert _shown(after) == CLEAN_PREFIX
+    retry_input = provider.stream_calls[1].input_items
+    assert any("spoiler" in str(item) for item in retry_input)
+    [turn] = ports.committed
+    assert turn.guard_retries == 1 and ANSWER not in turn.text
+
+
+async def test_spoiler_after_retries_sentence_removed() -> None:
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(CLEAN_PREFIX + f"The sum is {ANSWER}. Check it."))
+    ports = _ports()
+
+    await _run(ports, provider, spoiler_holdback_chars=20, guard_max_retries=2)
+
+    assert len(provider.stream_calls) == 3
+    assert ANSWER not in _shown(ports.frames)
+    [turn] = ports.committed
+    assert ANSWER not in turn.text and "Check it." in turn.text
+    assert turn.guard_retries == 2
+    body = [b.text for b in turn.output.p2_body.blocks if b.text is not None]
+    assert all(ANSWER not in text for text in body)
+
+
+# --- T-TT4 ---
+
+
+async def test_head_guards() -> None:
+    """Honest verdict and «the turn is marked»: violation → retry before the body is shown."""
+    provider = ScriptedLLMProvider()
+    _answers(
+        provider,
+        _turn("Unmarked.", head=_head(targetSkills=[])),
+        _turn("Code stance.", head=_head(verdict_stance="code")),
+        _turn(),
+    )
+    ports = _ports(verdict=_verdict("model"))
+
+    await _run(ports, provider)
+
+    assert len(provider.stream_calls) == 3
+    assert _shown(ports.frames) == CLEAN_PREFIX
+    assert not [f for f in ports.frames if isinstance(f, ResetFrame)]
+    reasons = str(provider.stream_calls[2].input_items)
+    assert "no_target_skills" in reasons and "stance_without_code_verdict" in reasons
+
+
+async def test_stance_settled_after_retries() -> None:
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(head=_head(verdict_stance="code")))
+    ports = _ports(verdict=_verdict("model"))
+
+    await _run(ports, provider, guard_max_retries=1)
+
+    assert len(provider.stream_calls) == 2
+    [turn] = ports.committed
+    assert turn.output.p1_head.verdict_stance == "formative"
+    assert turn.guard_retries == 1
+
+
+async def test_code_stance_with_code_verdict_passes() -> None:
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(head=_head(verdict_stance="code")))
+    ports = _ports(verdict=_verdict("code"))
+
+    await _run(ports, provider)
+
+    assert len(provider.stream_calls) == 1
+    assert ports.committed[0].output.p1_head.verdict_stance == "code"
+
+
+async def test_markup_labels_reset_after_shown_text() -> None:
+    """Unknown label in `p3_markup` after the body was shown → `reset {guard}`, retry."""
+    provider = ScriptedLLMProvider()
+    bad = _turn(exposures=[{"skill": "S9", "kind": "explained", "approach": "none"}])
+    _answers(provider, bad, _turn())
+    ports = _ports()
+
+    await _run(ports, provider, spoiler_holdback_chars=20)
+
+    assert [f for f in ports.frames if isinstance(f, ResetFrame)] == [ResetFrame(reason="guard")]
+    assert "unknown_skill_label" in str(provider.stream_calls[1].input_items)
+    assert ports.committed[0].guard_retries == 1
+
+
+async def test_invalid_task_markup_removes_element() -> None:
+    """«Every task is marked» (Т-§5.3): a task element with bad markup is not shown and
+    leaves the committed turn; the text stays."""
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(tasks=[_task(level=1)]))
+    ports = _ports()
+
+    await _run(ports, provider)
+
+    assert not [f for f in ports.frames if isinstance(f, ElementFrame)]
+    [turn] = ports.committed
+    assert turn.text == CLEAN_PREFIX
+    assert turn.output.p3_markup.elements == [] and turn.output.p3_markup.tasks == []
+    assert [b.block_id for b in turn.output.p2_body.blocks] == ["b1"]
+
+
+# --- T-TT6 ---
+
+
+async def test_new_action_cancels_turn() -> None:
+    """A second action during the stream: the first turn is not written, the second is."""
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn())
+    gate = provider.hold(SCHEMA)
+    slots = TurnSlots()
+    session_id = uuid4()
+    first, second = _ports(), _ports()
+
+    async def turn(ports: Ports) -> int | None:
+        async with slots.claim(session_id) as cancel:
+            return await run_turn(ports, provider, settings=_settings(), cancel=cancel)
+
+    task1 = asyncio.create_task(turn(first))
+    await gate.arrived.wait()
+    task2 = asyncio.create_task(turn(second))
+    await asyncio.sleep(0)
+    gate.release.set()
+
+    assert await task1 is None
+    assert await task2 == 42
+    assert first.committed == []
+    assert not [f for f in first.frames if isinstance(f, TokenFrame | TurnCommittedFrame)]
+    assert len(second.committed) == 1
