@@ -180,6 +180,8 @@ services:
     # No META_API_KEY and no compute: the projector reads the log and writes the graph only.
     environment:
       <<: *db-env
+      # Д-§4.1: 8 Postgres connections for the projector and the dispatcher.
+      PG_POOL_MAX_SIZE: "8"
     networks: [backend]
     stop_grace_period: 15s
     mem_limit: 512m
@@ -206,6 +208,8 @@ services:
       <<: *db-env
       COMPUTE_URL: http://compute:8001
       WORKER_SHUTDOWN_GRACE_S: "20"
+      # Д-§4.1: 5 Postgres connections per workers process (2 × 5).
+      PG_POOL_MAX_SIZE: "5"
       META_API_KEY: ${META_API_KEY:-}
       META_API_BASE_URL: ${META_API_BASE_URL:-}
     networks: [backend, egress]
