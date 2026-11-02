@@ -24,6 +24,7 @@ type GuardReason = Literal[
     "no_target_skills",
     "unknown_skill_label",
     "unknown_misconception_label",
+    "spoiler",
 ]
 
 

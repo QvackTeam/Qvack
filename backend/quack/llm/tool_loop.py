@@ -24,6 +24,7 @@ from quack.llm.streaming import (
     StreamRequest,
     StreamUsage,
     TextDelta,
+    ToolCall,
     next_step_input,
     tool_calls,
 )
@@ -53,7 +54,9 @@ class ToolLoopResult:
 
 
 @dataclass(frozen=True)
-class _Step:
+class Step:
+    """One streamed model step: the answer text, its output items, its end event."""
+
     text: str
     items: tuple[Mapping[str, Any], ...]
     completed: StreamCompleted
@@ -77,8 +80,8 @@ async def run_tool_loop(
     usage = StreamUsage()
     retried = False
     for step_no in range(1, max_steps + 1):
-        step = await _stream_step(provider, request, on_text)
-        usage = _add(usage, step.completed.usage)
+        step = await stream_step(provider, request, on_text)
+        usage = add_usage(usage, step.completed.usage)
         if step.completed.status == "incomplete":
             if retried:
                 raise ProviderIncompleteError(step.text, headers=step.completed.headers)
@@ -89,13 +92,13 @@ async def run_tool_loop(
                 request,
                 base=replace(
                     request.base,
-                    max_output_tokens=_doubled(
+                    max_output_tokens=doubled(
                         request.base.max_output_tokens, max_output_tokens_cap
                     ),
                 ),
             )
-            step = await _stream_step(provider, request, on_text)
-            usage = _add(usage, step.completed.usage)
+            step = await stream_step(provider, request, on_text)
+            usage = add_usage(usage, step.completed.usage)
             if step.completed.status == "incomplete":
                 raise ProviderIncompleteError(step.text, headers=step.completed.headers)
         calls = tool_calls(step.items)
@@ -112,19 +115,16 @@ async def run_tool_loop(
         if on_tool is not None:
             for call in calls:
                 await on_tool(call.name)
-        results = await asyncio.gather(
-            *(_run_tool(execute, call.name, call.arguments, tool_timeout_ms) for call in calls)
-        )
-        outputs = {call.call_id: result for call, result in zip(calls, results, strict=True)}
+        outputs = await run_tools(execute, calls, tool_timeout_ms)
         request = replace(
             request, input_items=next_step_input(request.input_items, step.items, outputs)
         )
     raise ToolLoopLimitError(f"no answer after {max_steps} model steps")
 
 
-async def _stream_step(
+async def stream_step(
     provider: StreamingLLMProvider, request: StreamRequest, on_text: OnText | None
-) -> _Step:
+) -> Step:
     text: list[str] = []
     items: list[Mapping[str, Any]] = []
     completed: StreamCompleted | None = None
@@ -139,7 +139,15 @@ async def _stream_step(
             completed = event
     if completed is None:
         raise ProviderIncompleteError("".join(text))  # the stream ended without its end event
-    return _Step("".join(text), tuple(items), completed)
+    return Step("".join(text), tuple(items), completed)
+
+
+async def run_tools(execute: ExecuteTool, calls: list[ToolCall], timeout_ms: int) -> dict[str, str]:
+    """All calls of a step at once; `function_call_output` text by `call_id`."""
+    results = await asyncio.gather(
+        *(_run_tool(execute, call.name, call.arguments, timeout_ms) for call in calls)
+    )
+    return {call.call_id: result for call, result in zip(calls, results, strict=True)}
 
 
 async def _run_tool(execute: ExecuteTool, name: str, arguments: str, timeout_ms: int) -> str:
@@ -152,11 +160,11 @@ async def _run_tool(execute: ExecuteTool, name: str, arguments: str, timeout_ms:
         return f"error: tool {name} failed: {type(exc).__name__}: {exc}"
 
 
-def _doubled(limit: int | None, cap: int) -> int:
+def doubled(limit: int | None, cap: int) -> int:
     return cap if limit is None else min(limit * 2, cap)
 
 
-def _add(a: StreamUsage, b: StreamUsage) -> StreamUsage:
+def add_usage(a: StreamUsage, b: StreamUsage) -> StreamUsage:
     return StreamUsage(
         input_tokens=a.input_tokens + b.input_tokens,
         cached_tokens=a.cached_tokens + b.cached_tokens,
