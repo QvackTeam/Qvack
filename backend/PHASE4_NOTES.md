@@ -100,6 +100,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | WP2 (A) | A | черновик каталога S3 (G0) в `phase-4-a-wp2`: 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; заморозка — G1 после Q-A-2, Q-A-3 | `tests/events`: 73 passed |
 | WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` в `phase-4-a-s4-s6` (D-A-111); реализация — G2 | `tests/graph/test_read_stub.py`: 9 passed |
 | WP7.1 (A), S6 | A | виды задач и таблица правил по событию в `phase-4-a-s4-s6` (D-A-110); строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 25 passed |
+| WP3.1 (A) | A | схема Neo4j Фазы 4 в `quack/db/neo4j.py`: уникальность `id` для Hub, Option, Material, Chunk, Digest, Profile; range по `learnerId` на метках, где его ещё нет; составной `(learnerId, retDueAtMs)` на Skill; пять векторных индексов с фильтрующими свойствами и `embedding_dim`; сосуществует с индексами Фазы 3 до WP1.3. Остальное WP3 (обработчики, фазы А–В) — дальше | `tests/graph/test_schema_wp31.py` + `test_infra.py`: 4 passed (Neo4j 2026.06.0) |
 | WP1.1–1.2 (A) | A | выполнен в `phase-4-a-wp1` (шов S2): базовая миграция dbmate, `Db`, `append_events`, параметры §6.7 потока A. WP1.4 (`.squawk.toml`, S16) — к G2; WP1.3 — к G3/G4 | `tests/db`: 19 passed |
 | WP0 (зона B) | B | выполнен: аудит, п.3г, п.3д, п.5 | — (скрипт п.3г) |
 | Этап I G1 (B: S7, S8, S11, S13) | B | контракты в `phase-4-b`, тесты контрактов зелёные | см. «Красные прогоны» |
