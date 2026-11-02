@@ -32,7 +32,26 @@ from quack.db.redis import ratelimit_key
 from tests.support.broken import BrokenNeo4jDriver, BrokenRedis
 from tests.support.resources import build_app_resources
 
-PUBLIC_ROUTES = {("POST", "/v1/auth/register"), ("POST", "/v1/auth/login")}
+PUBLIC_ROUTES = {
+    ("POST", "/v1/auth/register"),
+    ("POST", "/v1/auth/login"),
+    # ТЗ Ф4 WP18: sign-in routes.
+    ("POST", "/auth/link"),
+    ("GET", "/auth/link/verify"),
+    ("GET", "/auth/google/start"),
+    ("GET", "/auth/google/callback"),
+}
+# ТЗ Ф4 WP18.3: routes on Phase 4 sessions answer `UNAUTHENTICATED`; the Phase 3 routes keep
+# `UNAUTHORIZED` until the whole API moves to sessions (D-C-112).
+SESSION_ROUTES = {
+    ("POST", "/auth/logout"),
+    ("GET", "/v1/me"),
+    ("PATCH", "/v1/learner/settings"),
+    ("POST", "/v1/consents"),
+    ("DELETE", "/v1/consents/research"),
+}
+# Т-§19.1: the start of the Google flow is a redirect only, it has no 2xx body.
+REDIRECT_ONLY_ROUTES = {("GET", "/auth/google/start")}
 PATH_PARAM = re.compile(r"\{[^}]+\}")
 # One GET route of each product package (T-A3).
 PACKAGE_PROBES = ("/v1/domains", "/v1/sessions/active", "/v1/artifacts")
@@ -88,7 +107,9 @@ def _protected_routes(app: FastAPI) -> Iterator[tuple[str, str]]:
 
 def _assert_unauthorized(response: httpx.Response, what: str) -> None:
     assert response.status_code == 401, f"{what}: {response.status_code} {response.text}"
-    assert ErrorResponse.model_validate(response.json()).error.code == "UNAUTHORIZED", what
+    method, _, path = what.partition(" ")
+    code = "UNAUTHENTICATED" if (method, path) in SESSION_ROUTES else "UNAUTHORIZED"
+    assert ErrorResponse.model_validate(response.json()).error.code == code, what
 
 
 async def test_every_protected_route_requires_auth_before_validation(
@@ -151,6 +172,16 @@ EXPECTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
     {
         ("GET", "/health/live"),
         ("GET", "/health/ready"),
+        # ТЗ Ф4 WP18 (stream C)
+        ("POST", "/auth/link"),
+        ("GET", "/auth/link/verify"),
+        ("GET", "/auth/google/start"),
+        ("GET", "/auth/google/callback"),
+        ("POST", "/auth/logout"),
+        ("GET", "/v1/me"),
+        ("PATCH", "/v1/learner/settings"),
+        ("POST", "/v1/consents"),
+        ("DELETE", "/v1/consents/research"),
         # stream 1
         ("POST", "/v1/auth/register"),
         ("POST", "/v1/auth/login"),
@@ -256,7 +287,11 @@ async def test_static_session_route_wins_over_parametric(api: httpx.AsyncClient)
 
 def test_create_app_without_resources_builds_them_in_lifespan(settings: Settings) -> None:
     """T-A1 / WP1.1: `resources=None` is the production path; the flag `connect` is gone."""
-    assert list(inspect.signature(create_app).parameters) == ["settings", "resources"]
+    assert list(inspect.signature(create_app).parameters) == [
+        "settings",
+        "resources",
+        "google_oidc",
+    ]
     app = create_app(settings)
     assert app.state.resources is None  # built by the lifespan, not at creation
 
@@ -490,6 +525,8 @@ def test_openapi_documents_every_response() -> None:
     for path, operations in schema["paths"].items():
         for method, operation in operations.items():
             what = f"{method.upper()} {path}"
+            if (method.upper(), path) in REDIRECT_ONLY_ROUTES:
+                continue
             ok = [r for s, r in operation["responses"].items() if s.startswith("2")]
             assert len(ok) == 1, what
             content = ok[0].get("content", {})

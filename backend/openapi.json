@@ -486,6 +486,30 @@
         "title": "CheckpointView",
         "type": "object"
       },
+      "ClientParams": {
+        "description": "Numbers of the client from the server config (ТЗ Ф4 §6.7).",
+        "properties": {
+          "capture_still_ms": {
+            "title": "Capture Still Ms",
+            "type": "integer"
+          },
+          "line_pause_ms": {
+            "title": "Line Pause Ms",
+            "type": "integer"
+          },
+          "stroke_batch_ms": {
+            "title": "Stroke Batch Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stroke_batch_ms",
+          "line_pause_ms",
+          "capture_still_ms"
+        ],
+        "title": "ClientParams",
+        "type": "object"
+      },
       "ConfirmStructureRequest": {
         "properties": {
           "idempotency_key": {
@@ -533,6 +557,82 @@
           "seq"
         ],
         "title": "ConfirmStructureResponse",
+        "type": "object"
+      },
+      "ConsentRecorded": {
+        "properties": {
+          "given": {
+            "title": "Given",
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "terms",
+              "research"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "given"
+        ],
+        "title": "ConsentRecorded",
+        "type": "object"
+      },
+      "ConsentRequest": {
+        "properties": {
+          "idempotency_key": {
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "terms",
+              "research"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "version": {
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "version",
+          "idempotency_key"
+        ],
+        "title": "ConsentRequest",
+        "type": "object"
+      },
+      "ConsentRevocation": {
+        "properties": {
+          "idempotency_key": {
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "version": {
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "idempotency_key"
+        ],
+        "title": "ConsentRevocation",
         "type": "object"
       },
       "CreateDomainRequest": {
@@ -942,7 +1042,9 @@
           "UNAUTHORIZED",
           "RATE_LIMITED",
           "SERVICE_UNAVAILABLE",
-          "UPLOAD_REJECTED"
+          "UPLOAD_REJECTED",
+          "UNAUTHENTICATED",
+          "CONSENT_REQUIRED"
         ],
         "type": "string"
       },
@@ -1398,6 +1500,62 @@
         "title": "LearnerMeResponse",
         "type": "object"
       },
+      "LearnerSettings": {
+        "properties": {
+          "settings": {
+            "additionalProperties": true,
+            "title": "Settings",
+            "type": "object"
+          }
+        },
+        "required": [
+          "settings"
+        ],
+        "title": "LearnerSettings",
+        "type": "object"
+      },
+      "LearnerSettingsPatch": {
+        "properties": {
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timezone"
+        ],
+        "title": "LearnerSettingsPatch",
+        "type": "object"
+      },
+      "LinkRequest": {
+        "properties": {
+          "email": {
+            "maxLength": 320,
+            "minLength": 3,
+            "pattern": "^[^@\\s]+@[^@\\s]+$",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "LinkRequest",
+        "type": "object"
+      },
+      "LinkSent": {
+        "description": "The same answer for a known and a new address (WP18.1).",
+        "properties": {
+          "status": {
+            "const": "sent",
+            "default": "sent",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "LinkSent",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "email": {
@@ -1416,6 +1574,52 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "Me": {
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/ClientParams"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "learner_id": {
+            "format": "uuid",
+            "title": "Learner Id",
+            "type": "string"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "title": "Settings",
+            "type": "object"
+          },
+          "terms_accepted": {
+            "title": "Terms Accepted",
+            "type": "boolean"
+          },
+          "terms_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Version"
+          }
+        },
+        "required": [
+          "learner_id",
+          "email",
+          "settings",
+          "terms_version",
+          "terms_accepted",
+          "client"
+        ],
+        "title": "Me",
         "type": "object"
       },
       "MisconceptionDraft": {
@@ -2175,6 +2379,33 @@
           "start_seq"
         ],
         "title": "SessionStarted",
+        "type": "object"
+      },
+      "SignedIn": {
+        "description": "Without `auth_success_redirect_url` (D-C-105) sign-in answers 200 with the cookie.",
+        "properties": {
+          "learner_id": {
+            "format": "uuid",
+            "title": "Learner Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "learner_id"
+        ],
+        "title": "SignedIn",
+        "type": "object"
+      },
+      "SignedOut": {
+        "properties": {
+          "status": {
+            "const": "signed_out",
+            "default": "signed_out",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "SignedOut",
         "type": "object"
       },
       "SkillDepEdge": {
@@ -3050,6 +3281,187 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/auth/google/callback": {
+      "get": {
+        "operationId": "google_callback_auth_google_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "title": "State",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedIn"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "303": {
+            "description": "Signed in: back to the app"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Google Callback",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/google/start": {
+      "get": {
+        "operationId": "google_start_auth_google_start_get",
+        "responses": {
+          "302": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "To Google"
+          }
+        },
+        "summary": "Google Start",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/link": {
+      "post": {
+        "description": "A one-time link by mail; the same answer for a known and a new address.",
+        "operationId": "post_link_auth_link_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkSent"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/link/verify": {
+      "get": {
+        "operationId": "verify_link_auth_link_verify_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedIn"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "303": {
+            "description": "Signed in: back to the app"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout_auth_logout_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Logout",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/health/live": {
       "get": {
         "operationId": "live_health_live_get",
@@ -3796,6 +4208,168 @@
         "summary": "Register Endpoint",
         "tags": [
           "domains"
+        ]
+      }
+    },
+    "/v1/consents": {
+      "post": {
+        "operationId": "post_consent_v1_consents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentRecorded"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Post Consent",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/consents/research": {
+      "delete": {
+        "operationId": "delete_research_v1_consents_research_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsentRevocation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentRecorded"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Delete Research",
+        "tags": [
+          "auth"
         ]
       }
     },
@@ -5251,6 +5825,87 @@
         ]
       }
     },
+    "/v1/learner/settings": {
+      "patch": {
+        "operationId": "patch_settings_v1_learner_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LearnerSettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LearnerSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Patch Settings",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/learner/stream": {
       "get": {
         "description": "SSE `projection_advanced` (WP7); data are fetched with ordinary GETs.",
@@ -5291,6 +5946,47 @@
         "summary": "Get Learner Stream",
         "tags": [
           "learner"
+        ]
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "operationId": "me_v1_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Me",
+        "tags": [
+          "auth"
         ]
       }
     },
