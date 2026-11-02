@@ -236,6 +236,8 @@ SCRIPTED_INPUT_TOKENS = 100
 SCRIPTED_OUTPUT_TOKENS = 40
 COMMENTARY_TEXT = "Thinking it over."
 PROVIDER_ERRORS = frozenset({"unavailable", "rate_limited", "bad_request"})
+# Failures a tool step leaves for the answer step (D-B-125 п.5).
+TOOL_STEP_SKIPS = frozenset({"invalid_json"})
 
 
 @dataclass(frozen=True)
@@ -380,8 +382,13 @@ class ScriptedLLMProvider:
             and (schema_name is None or c.schema_name == schema_name)
         ]
 
-    def _take_failure(self, request: ProviderRequest) -> ScriptedFailure | None:
+    def _take_failure(
+        self, request: ProviderRequest, skip: frozenset[str] = frozenset()
+    ) -> ScriptedFailure | None:
+        """The first matching failure; kinds in `skip` are left for a later call."""
         for failure in self.failures:
+            if failure.kind in skip:
+                continue
             if failure.times <= 0:
                 continue
             if failure.model not in (None, request.model):
@@ -444,7 +451,10 @@ class ScriptedLLMProvider:
             await gate.release.wait()
         steps = self.tool_steps.get(base.schema_name, ())
         step = _answered_steps(base.schema_name, steps, request.input_items)
-        failure = self._take_failure(base)
+        tool_step = step < len(steps)
+        # D-B-125 п.5: `invalid_json` breaks the answer text, so on a tool step it waits for
+        # the answer step.
+        failure = self._take_failure(base, TOOL_STEP_SKIPS if tool_step else frozenset())
         kind = None if failure is None else failure.kind
         if failure is not None and kind in PROVIDER_ERRORS:
             _failed_content(failure)
@@ -452,13 +462,16 @@ class ScriptedLLMProvider:
         if failure is not None and kind == "ratelimit_headers":
             headers = _ratelimit_headers(failure.remaining_share or 0.0)
         status: Literal["completed", "incomplete"] = "completed"
-        # D-B-125 п.5: `commentary_only` gives only the commentary, `incomplete` only text.
+        # D-B-125 п.5: `commentary_only` gives only the commentary, `incomplete` only text
+        # (on a tool step — nothing: no `function_call`, only `StreamCompleted`).
         if kind not in ("commentary_only", "incomplete"):
             yield OutputItemDone(_reasoning_item(base.schema_name, step))
         if kind == "commentary_only":
             item_id = f"msg_{base.schema_name}_{step}_c"
             yield OutputItemDone(_message_item(item_id, COMMENTARY_TEXT, commentary=True))
-        elif step < len(steps):
+        elif tool_step and kind == "incomplete":
+            status = "incomplete"
+        elif tool_step:
             for event in _tool_step(base.schema_name, step, steps[step]):
                 yield event
         else:
