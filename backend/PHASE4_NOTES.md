@@ -817,6 +817,27 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 
 **D-A-110 п.7 (`agent.requested {kind: known_check}`).** Пишет код хода учителя (B, WP13.2, шаг `commit`) из `p3_markup.agentRequests` (`AgentRequestKind` включает `known_check`, WP16.6). Например, ученик сказал в чате «я это уже знаю», и учитель просит проверку темы (`params.topic`). Задача нужна, и это `check.known_claim`: в §6.5 вида `agent.known_check` нет, а `check.known_claim` делает ровно эту работу (1–3 задачи по навыкам темы через `task_generator`, итог — `agent.completed {kind: known_check, task_ids}`, WP8.2). Предлагаемая строка таблицы S6: `agent.requested`, `kind = known_check` → `check.known_claim`, класс P1 при `needed_in_session`, иначе P2 (WP16.6), `lock_key`/`coalesce_key` — как у строки `known.claimed`. Решение класса B для A (таблица S6 — файл A).
 
+### D-B-145. Тело `check.model`: вход ролей вердикта, метки, порядок второго мнения и прочтения
+- Класс: B
+- WP / место: WP11.6, `quack/practice/model_check.py` (`verdict_role`, `verdict_inputs`, `check_with_model`, `record_verdict`)
+- Контекст: `Т-§6.8`, `Т-§7.7`, `Т-§22.7` и контракты `verdict_free@1`, `verdict_proof@1`, `second_opinion@1` (#84) задают роли, блоки входа и выход. Не названо: (а) вид рубрики и списка заблуждений во входе; (б) рубрики нет ни в пространстве решения, ни в спецификации; (в) порядок второго мнения и понижения уверенности распознанного ответа (WP11.7); (г) ключи идемпотентности вызовов.
+- Решение: (а) рубрика — `R1. …`, `R2. …` из ключевых шагов пространства решения, иначе из `key_ideas`; заблуждения — `M1. …` в порядке, который даёт вызывающий; `answer_spec` — JSON спецификации без пустых полей; ответ — `value` и рассуждение `text` с новой строки. (б) Пустой список — блок `none`, модель сверяет со спецификацией. (в) Решение о втором мнении — по уверенности самой модели; понижение по распознаванию (D-B-127) применяется последним: неуверенное прочтение лечится показом прочтения, а не второй моделью. (г) `check.model:{answer_seq}:{part}` и `second_opinion:{answer_seq}:{part}` — повтор задачи берёт ответ из исходящих шлюза. Неизвестная метка `R…`/`M…` возвращается модели через `check` шлюза (`Т-§4.5`); что осталось неизвестным после исправления, `model_verdict` отбрасывает. Регистрация обработчика `check.model` — с диспетчером Фазы 4 (A, WP7.1, G2): тело принимает `Db`, шлюз и факты памяти (`LevelFact` → `LevelState`, заблуждения навыков — `KnownMisconception`) от вызывающего.
+- Почему: §0.4.3 п.2 (`Т-§6.8`: «рубрика — ключевые шаги … или ключевые идеи»; `Т-§7.7`: «при сомнении» — сомнении вердикта), п.5.
+- Обратимость: одна функция входа и порядок двух строк.
+- Тесты: `tests/practice/test_check_model.py`.
+- Требует подтверждения владельцем: нет
+- Открыто: рисунок (`drawing`) идёт в `verdict_free` текстом `value`. Изображения в запросе шлюз пока не передаёт (`Т-§6.8` «Spark с изображением»); нужен вход-изображение в `generate_structured` (B, WP10.2) — до него ответ-рисунок проверяется по описанию. У `MisconceptionFact` (S4) нет формулировки заблуждения — для `KnownMisconception.statement` нужна она (вопрос A).
+
+### D-B-146. Тело страховки `check.symbolic`: чтение `core.events` B и ответ `unsupported`
+- Класс: B
+- WP / место: WP11.3, `quack/practice/symbolic_job.py` (`insure_symbolic`), `quack/practice/repo.py`
+- Контекст: WP11.3 — страховка ищет вердикт по `verdict:{answer_seq}:{part}`, иначе проверяет с `symbolic_background_timeout_ms` и пишет вердикт; «не разобралось или не набралось точек» — `check.failed`. A ответил на D-B-122: чтения `core.events` B пишет в своих модулях. Не названо: что пишет страховка, если compute ответил `unsupported` (нет структурной проверки вида, `Т-§6.6`), — в `CheckFailedReason` каталога такого значения нет.
+- Решение: чтения по ключу и по `seq` — `quack/practice/repo.py` (параметры `%(name)s`, фильтр `learner_id`, `T-DB2`, `T-DB4`). `NotYet` (таймаут, compute недоступен, D-B-126) страховка пишет как `check.failed` с той же причиной под `check_failed:{answer_seq}:{part}`. `unsupported` → `NeedsModel`: страховка не пишет ничего, пока в каталоге нет причины, — модель такой ответ сейчас не проверит. **Вопрос A:** добавить `unsupported` в `CheckFailedReason` (`quack/events/values.py`); тогда страховка пишет `check.failed {reason: unsupported}`, и диспетчер ставит `check.model` (`Т-§6.6`: «нет её — проверка моделью»).
+- Почему: §0.4.3 п.1 (без изменения каталога в чужом файле), п.3.
+- Обратимость: одна ветка в `insure_symbolic`.
+- Тесты: `tests/practice/test_check_symbolic_job.py`.
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -1023,6 +1044,8 @@ PR #77 (dbmate v2.36.0, sha256).
 - S3, модели B из ядра (Q-A-1 вариант (а)): `cd backend && uv run pytest tests/practice/test_core_models.py` — 11 failed (модели `quack.practice` — копии, не объекты `quack.events.values`), 3 passed (поля форм с метками и с id уже совпадают), коммит `ed6188c`. Зелёный: 14 passed; с затронутыми (`tests/practice`, `tests/events`, `tests/session/test_phase4_contracts.py`, `tests/llm/test_phase4_ai_layer.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 195 passed. `CheckFailed` теперь модель Pydantic ядра — вызовы B с именованными аргументами.
 
 - S3/S4/S6 (A, `phase-4-a-s4-s6`): тесты и код писались в одной итерации, красный прогон отдельно не снят (`Verdict` split, `RejectedElementRecord.index`, `quack.graph.read`, `rules_p4.py`). Зелёный: `tests/graph/test_read_stub.py`, `tests/jobs`, `tests/events/test_rejected_element.py`, `tests/practice/test_second_opinion.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` (`T-A6`) — локально без инфраструктуры; тесты с Postgres/dbmate (`tests/db`, `tests/events/test_catalog.py`, `tests/practice/test_answer_transaction.py`, `tests/practice/test_tasks_store.py`) локально не запускались (нет `dbmate`) — их прогонит CI.
+- WP11.6, тело `check.model` (D-B-145): `cd backend && uv run pytest tests/practice/test_check_model.py` — 12 failed (`NotImplementedError`), коммит `63ba969`. Зелёный: 12 passed; с затронутыми (`tests/practice`, `tests/llm`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 196 passed.
+- WP11.3, тело `check.symbolic` (D-B-146): `cd backend && uv run pytest tests/practice/test_check_symbolic_job.py` — 5 failed (`NotImplementedError`), коммит `2ead504`. Зелёный: 5 passed; с `tests/db/test_sql_static.py` — 9 passed.
 
 ## Правки тестов
 
