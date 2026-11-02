@@ -504,6 +504,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `test_tool_loop_step_limit`.
 - Требует подтверждения владельцем: нет
 
+### D-B-118. Объявление `POST /v1/sessions/{id}/actions` родным SSE FastAPI
+- Класс: B
+- WP / место: WP13.1 (Этап I, к G1 по запросу C), `quack/session/router.py`, `quack/session/actions.py`
+- Контекст: шов S11 требует кадры §4.7 и `Element` в OpenAPI к G1; FastAPI сам не выводит схему тела SSE.
+- Варианты: (а) `EventSourceResponse` FastAPI 0.162 и генератор с типом `AsyncIterator[ActionFrame]` — схема кадров в `itemSchema` под `text/event-stream`; (б) свой класс ответа и `responses` — FastAPI добавляет рядом с `$ref` `type: string`.
+- Решение: (а); `201 {seq}` — `ActionAccepted` под `application/json`. Тело — `NotImplementedError` до WP13.
+- Почему: §0.4.3 п.6–7 (проверяемо, средствами уже используемой библиотеки).
+- Обратимость: один маршрут.
+- Тесты: `test_actions_route_in_openapi`.
+- Требует подтверждения владельцем: нет
+
 ### D-B-121. Часть задачи без частей — `main`
 - Класс: B. WP11.4, `quack/practice/answers.py` (`DEFAULT_PART`): ключ вердикта `verdict:{answer_seq}:{part}` (`Т-§6.1`) требует часть, а у задачи без частей (`Т-§6.2`) её нет. Значение `main` — одна константа. Тесты: `test_instant_verdict_in_answer_transaction`. Подтверждение: нет.
 
@@ -1245,6 +1256,13 @@ PR #77 (dbmate v2.36.0, sha256).
 - `tests/session/test_holdback.py` (B, до зелёного): `test_spoiler_found_only_at_the_end` ошибочно ждал спойлер только в `finish`, хотя по WP13.4 весь накопленный текст проверяется на каждом куске. Заменён на `test_spoiler_completed_inside_the_holdback` (спойлер ловится на куске, который его дописал) и `test_finish_checks_the_whole_text`. Проверка не ослаблена: показанный текст по-прежнему пуст.
 - `tests/llm/test_phase4_ai_layer.py` (`T111`): `max_output_tokens` десяти ролей — по замеру (D-B-134); `Т-§11.1` разрешает менять конфиг по замеру. Сила проверки не меняется.
 - `tests/test_contracts.py` (`T-A6`): в `PRODUCT` добавлен `agents` (ТЗ Ф4 §4.1). Сила проверки не меняется.
+- `tests/test_app_assembly.py` (C, PR #75, §8.15 п.2): `T-A1` — в набор маршрутов добавлен
+  `POST /v1/sessions/{session_id}/actions` (§6.4). `test_openapi_documents_every_response` — у
+  `/actions` ровно два ответа 2xx, `200` (SSE) и `201` (`{seq}`) по §4.7, у остальных — по-прежнему
+  ровно один; модель SSE-ответа принимается из `itemSchema` (так FastAPI описывает одно событие в
+  OpenAPI 3.2), модель обязательна, как раньше. `test_sse_endpoints_document_event_stream` расширен
+  на `/actions`. Тест падает на маршруте с одним 2xx или без модели события (§8.15 п.4).
+  `backend/openapi.json` пересобран `ops openapi`.
 - `compute/tests/math/test_equivalence.py`: `PARAMS` берётся из `test_params.py` (у `Params` новые поля, D-B-124). Утверждения не менялись.
 
 ## Вопросы к команде
