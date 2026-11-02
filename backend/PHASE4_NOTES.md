@@ -335,6 +335,17 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `tests/llm/test_phase4_stream_adapter.py`, `tests/llm/test_phase4_ai_layer.py` (`T-AI2`–`T-AI6`) — на стороне B; тесты подмен — C.
 - Требует подтверждения владельцем: нет
 
+### D-B-126. Быстрая проверка WP11.3 в `check()`: что не пишется сейчас и что идёт к модели
+- Класс: B
+- WP / место: WP11.3, `quack/practice/check.py` (`check`, `_math_request`, `_from_compute`, `NotYet.reason`)
+- Контекст: WP11.3 и `Т-§6.1` говорят «успел — вердикт; нет — ничего не пишет; страховка проверяет позже»; не названо: (а) что делать, если compute недоступен; (б) чем страховке отличить таймаут от недоступности; (в) ответ compute `unsupported` (нет структурной проверки вида, `Т-§6.6`); (г) `set`/`vector` не из чисел; (д) ответ без `sympy` и `latex`.
+- Варианты: (1) таймаут и недоступность — `CheckFailed` сразу; (2) оба — `NotYet` с причиной, страховка превращает его в `check.failed` с той же причиной; (3) новый аргумент `check()` «режим API / страховка».
+- Решение: (2). `NotYet.reason` — `timeout` (ожидание дольше `timeout_ms` с отменой запроса, или 504 compute) или `compute_unavailable`; значения совпадают с `CheckFailedReason` каталога A. `unsupported` → `NeedsModel` (модель, класс model, `Т-§6.6`), а не `check.failed`. `set`/`vector` не из чисел и спецификация без `value` → `CheckFailed("unparsed")` без вызова compute (в compute нет такого режима; `check.failed` → модель, `Т-§22.7`). Ответ ученика без `sympy` и `latex` уходит строкой `sympy`: compute разбирает любую строку грамматикой-белым списком (`Т-§6.5`). Допуск величины: `tol_abs` / `tol_rel` / `sig_digits` спецификации переводятся в `tol_abs` той же функцией, что у чисел (`Т-§6.4`); `min_sig_digits` и пороги численной проверки — из `Settings` (D-B-124).
+- Почему: §0.4.3 п.3 — подпись `check()` (шов S7) не меняется, в `NotYet` только поле со значением по умолчанию; п.1 — каталог событий не трогается; п.2 — `Т-§6.6` («нет её — проверка моделью»).
+- Обратимость: одна функция `_from_compute` и поле `NotYet.reason`.
+- Тесты: `tests/practice/test_check_fast.py` (чистая часть `T-CH2`, `T-CH3`).
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -493,6 +504,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP11.5, пороги через `Params` (D-B-124): `cd compute && uv run pytest tests/math/test_params.py` — красный на сборке (`TypeError: Params.__init__() got an unexpected keyword argument 'precision_digits'`), коммит `32db37f`. Зелёный: `compute/tests/math` — 43 passed.
 - WP11.5, эндпоинты без значений по умолчанию (D-B-124, #83): `cd compute && uv run pytest tests/math/test_service.py` — 11 failed, 4 passed (422 и `ValidationError`: `numeric`, `tolerance` не в схеме). Зелёный: весь `compute` — 67 passed.
 - Зелёный прогон (B, `phase-4-b`): те же файлы — 59 passed. Полный прогон набора на итоговом SHA (§0.4.7) — job `backend` CI (`QUACK_TEST_REQUIRE_INFRA=1`); SHA и итог — в описании PR #72.
+- WP11.3, быстрая проверка (D-B-126): `cd backend && uv run pytest tests/practice/test_check_fast.py` — 11 failed (`NotImplementedError` в `check()`), коммит `6f32612`. Зелёный: 11 passed; с затронутыми (`tests/practice`, `tests/test_contracts.py`, `tests/storage/test_compute_client_math.py`, `tests/test_thresholds_in_settings.py`) — 67 passed.
 
 ## Правки тестов
 
