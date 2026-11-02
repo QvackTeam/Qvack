@@ -838,6 +838,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/practice/test_check_symbolic_job.py`.
 - Требует подтверждения владельцем: нет
 
+### D-B-147. Запись действий WP13.1: намерение без текста, ответ на элемент-задание
+- Класс: B
+- WP / место: WP13.1, `quack/session/record.py` (`record_action`)
+- Контекст: таблица WP13.1 задаёт событие каждого вида (`ACTION_EVENT_TYPES`). Не названо: (а) поле `text` у `message.sent` для намерения (в каталоге оно обязательное); (б) откуда взять задачу у `element_response`, если элемент — задание (в действии `task_id` нет); (в) ключ второго события того же действия.
+- Решение: (а) намерение — `message.sent {text: "", intent, topic_id | hub_id}`: слов у кнопки нет (`Т-§12.7` «событие действия с намерением и темой»). (б) Задача — та, которую разметка хода поставила за `element_id` (`turn.committed.markup.tasks[].task_id`, WP2.2); нет такого хода или элемента — `LookupError` (роутер отвечает ошибкой). (в) `answer.submitted` за элементом пишется под `{idempotency_key}:answer` в той же транзакции, что `element.responded`, с мгновенным вердиктом (WP11.2). Ответ ищет задачу ученика (`content.tasks` по `learner_id`); чужая или несуществующая — `LookupError`.
+- Почему: §0.4.3 п.1 (идемпотентность: повтор действия ничего не дублирует), п.3 (схемы S3 и S11 не меняются).
+- Обратимость: одна функция.
+- Тесты: `tests/session/test_record_action.py` (часть `T-TT1`). Проверено и на неверной реализации: подмена события у `hint_request` и отсутствие ответа за элементом — тесты падают.
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -1046,6 +1056,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - S3/S4/S6 (A, `phase-4-a-s4-s6`): тесты и код писались в одной итерации, красный прогон отдельно не снят (`Verdict` split, `RejectedElementRecord.index`, `quack.graph.read`, `rules_p4.py`). Зелёный: `tests/graph/test_read_stub.py`, `tests/jobs`, `tests/events/test_rejected_element.py`, `tests/practice/test_second_opinion.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` (`T-A6`) — локально без инфраструктуры; тесты с Postgres/dbmate (`tests/db`, `tests/events/test_catalog.py`, `tests/practice/test_answer_transaction.py`, `tests/practice/test_tasks_store.py`) локально не запускались (нет `dbmate`) — их прогонит CI.
 - WP11.6, тело `check.model` (D-B-145): `cd backend && uv run pytest tests/practice/test_check_model.py` — 12 failed (`NotImplementedError`), коммит `63ba969`. Зелёный: 12 passed; с затронутыми (`tests/practice`, `tests/llm`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 196 passed.
 - WP11.3, тело `check.symbolic` (D-B-146): `cd backend && uv run pytest tests/practice/test_check_symbolic_job.py` — 5 failed (`NotImplementedError`), коммит `2ead504`. Зелёный: 5 passed; с `tests/db/test_sql_static.py` — 9 passed.
+- WP13.1, запись действий (D-B-147): `cd backend && uv run pytest tests/session/test_record_action.py` — 12 failed (`NotImplementedError`), коммит `52c769a`; на неверной реализации (другое событие у `hint_request`, нет ответа за элементом) — 2 failed. Зелёный: 12 passed; с затронутыми (`tests/session/test_phase4_contracts.py`, `tests/practice`, `tests/db/test_sql_static.py`, `tests/test_contracts.py`, инфраструктура B) — 149 passed.
 
 ## Правки тестов
 
