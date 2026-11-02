@@ -230,7 +230,9 @@ def turn_batch(
                 idempotency_key=task_key,
             )
         )
-    requests = [_request_record(r, labels) for r in output.p3_markup.agent_requests]
+    requests = [
+        _request_record(r, labels) for r in output.p3_markup.agent_requests if _requestable(r)
+    ]
     deadline, deadline_events = (None, [])
     if output.p3_markup.deadline is not None:
         deadline, deadline_events = _deadline(
@@ -541,6 +543,15 @@ def _tested(tested: TestedLevel, labels: LabelMap) -> records.TestedLevelRecord:
 
 def _optional(labels: LabelMap, kind: Any, label: str | None) -> UUID | None:
     return None if label is None else labels.resolve(kind, label)
+
+
+def _requestable(request: AgentRequest) -> bool:
+    """`known_check` is `check.known_claim` over the skills of a topic (WP8.2): without a topic
+    label there is nothing to check (review B of #117)."""
+    if request.kind == "known_check" and request.params.topic is None:
+        log.warning("turn_known_check_without_topic")
+        return False
+    return True
 
 
 def _request_record(request: AgentRequest, labels: LabelMap) -> records.AgentRequestRecord:
