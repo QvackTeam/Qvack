@@ -842,6 +842,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/practice/test_check_symbolic_job.py`.
 - Требует подтверждения владельцем: нет
 
+### D-B-151. Согласие на старте сессии: `require_terms` и тесты Фазы 3
+- Класс: B
+- WP / место: WP13.1, WP18.4 (D-C-112 п.3), `quack/session/router.py` (`POST /v1/sessions`), `tests/session/fixtures.py`
+- Контекст: после #106 `quack.api.auth.require_terms` берёт сессию через `Depends(get_current_session)` (cookie Фазы 4). Маршрут старта Фазы 3 читает ученика по Bearer-токену; тесты Фазы 3 B входят только токеном, без cookie и согласия.
+- Решение: `POST /v1/sessions` — `dependencies=[Depends(require_terms)]` (импорт из `quack.api.auth`, не из `quack.auth`, §4.1/T-A6). В фикстуре `session_app` тестов Фазы 3 зависимость подменена пустой: эти тесты проверяют ход и жизненный цикл, а не вход; ворота проверяет свой тест с cookie и согласием (`tests/session/test_session_terms.py`). e2e потока C (ученик из `System.register` без `consent.given`) падают на старте `403` — правка у C: `register` даёт `consent.given {kind: terms, version: terms_version}`; PR B вливается вместе с ней или после.
+- Почему: §0.4.3 п.2 (WP13.1 «без согласия — `CONSENT_REQUIRED`», `Т-§19.4`), п.5.
+- Обратимость: одна строка маршрута и одна строка фикстуры.
+- Тесты: `tests/session/test_session_terms.py` (часть `T-TT1`): без согласия и со старой версией — `403 CONSENT_REQUIRED`, с текущей — `201`; без cookie — `401`.
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -1074,6 +1084,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP13.1, согласие на старте сессии (D-B-151): `uv run pytest tests/session/test_session_terms.py` — 2 failed (старт без согласия `201`, без cookie `201`), коммит `f5029a2`. Зелёный: 2 passed; `tests/session` и `tests/llm/test_labels.py` зелёные; `tests/e2e` — 13 failed (`403` на старте, правка у C).
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
 - WP18, этап I (C, `phase-4-c-wp18`): в Linux против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` и dbmate v2.36.0 `pytest tests/auth` — 7 failed (`NotImplementedError`: `request_link`, `redeem_link`, `LinkLimiter`, `cookie_params`, `learner_for_google`, сессии, согласия). Зелёный (библиотека): 7 passed. `T-AU5` — с маршрутами (весь API на сессиях).
 - WP20.1, WP20.5 (C, `phase-4-c-wp20`, коммит `d161aed`): в Linux против `quack-test-*` с dbmate — `tests/materials` 4 failed (`NotImplementedError`). Зелёный: `tests/materials`, `test_contracts.py`, `tests/db/test_sql_static.py` — 15 passed.
