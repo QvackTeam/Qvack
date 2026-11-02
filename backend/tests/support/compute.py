@@ -16,7 +16,9 @@ from quack.compute_client.client import ComputeClient, MathCheckResponse
 type ComputeVerdict = MathCheckResponse | int
 type ComputeAnswer = BaseModel | int
 
-# WP24 endpoints of the stub; `/v1/check/math` keeps its own queue (`verdicts`).
+# Endpoints of the stub with a queue each (`push_for`): math of WP11.5 and WP24;
+# `/v1/check/math` of Phase 3 keeps its own queue (`verdicts`).
+MATH_PATHS = ("/v1/math/check", "/v1/math/transition")
 WP24_PATHS = (
     "/v1/pdf/pages",
     "/v1/image/align",
@@ -45,7 +47,9 @@ class ComputeScenario:
 
     def __init__(self, verdicts: Iterable[ComputeVerdict] = ()) -> None:
         self.verdicts: deque[ComputeVerdict] = deque(verdicts)
-        self.answers: dict[str, deque[ComputeAnswer]] = {path: deque() for path in WP24_PATHS}
+        self.answers: dict[str, deque[ComputeAnswer]] = {
+            path: deque() for path in (*MATH_PATHS, *WP24_PATHS)
+        }
         self.requests: list[httpx.Request] = []
 
     def push(self, *verdicts: ComputeVerdict) -> None:

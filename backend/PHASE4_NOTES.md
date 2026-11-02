@@ -294,15 +294,45 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `compute/tests/math/test_grammar.py` (`T-CH5`), `test_equivalence.py` (`T-CH4`, `T-CH7` без размерности).
 - Требует подтверждения владельцем: нет
 
+### D-B-123. Эндпоинты `/v1/math/check`, `/v1/math/transition`
+- Класс: B
+- WP / место: WP11.5, `compute/quack_compute/math/` (`schemas.py`, `service.py`, `latex.py`, `units.py`), маршруты в `compute/quack_compute/app.py` (объявление B по §7.3 п.3, как просил C в #82)
+- Контекст: `Т-§6.5`–`Т-§6.7`, `Т-§15.4` п.1, `Т-§22.7` задают поведение, не форму запроса.
+- Решение: выражение — `{latex?, sympy?}`, `sympy` разбирается первым, без него — LaTeX через ANTLR strict; `kind = quantity` — сырой ответ с единицей и `pint` (СИ, запятая → точка, допуск по `Т-§6.4`, иная размерность — `incorrect` + `dimension`); бюджет вызова — `timeout_ms` из запроса (API — `symbolic_inline_timeout_ms`, страховка — `symbolic_background_timeout_ms`), пороги проверки — объект `numeric` и `tolerance` из `Settings` вызывающего (D-B-124); неудача — `status: failed` с `reason` → `check.failed`. Переход строки: уравнение — равенство множеств решений, неравенство — интервалы, иначе — эквивалентность выражений.
+- Почему: §0.4.3 п.2 (буква `Т-§`), п.6 (покрыто тестами).
+- Обратимость: модели в `math/schemas.py`.
+- Тесты: `compute/tests/math/test_service.py`.
+- Требует подтверждения владельцем: нет
+
 ### D-B-124. Пороги численной проверки WP11.5 — в `Settings`, в compute через `Params`
 - Класс: B
 - WP / место: WP11.5, `compute/quack_compute/math/equivalence.py` (`Params`), `quack/config.py` (блок B)
 - Контекст: ТЗ Ф4 §0.3 — пороги только в `Settings`, числа в коде модулей запрещены (ревью C к #79). `Т-§6.6` называет только `numeric_points` («высокая точность», «случайные точки области» — без чисел); у compute в §6.7 только `compute_workers`, `chromium_idle_close_s`. Отменяет часть D-B-120 про константы модуля.
 - Варианты: (1) константы модуля, как в `checker.py` Фазы 3; (2) поля `ComputeSettings` (файл C); (3) `Settings` API (блок B), значения едут в запросе `/v1/math/*` и попадают в `Params`.
-- Решение: (3). `math_precision_digits` = 30, `math_sample_low`/`math_sample_high` = −10/10, `math_positive_sample_min` = 1e-3, `math_max_attempts_per_point` = 10, `math_rel_tol` = 1e-9, `math_abs_tol` = 1e-12 — значения Фазы 4 до этого решения, без изменения поведения.
+- Решение: (3). `math_precision_digits` = 30, `math_sample_low`/`math_sample_high` = −10/10, `math_positive_sample_min` = 1e-3, `math_max_attempts_per_point` = 10, `math_rel_tol` = 1e-9, `math_abs_tol` = 1e-12, `math_simplify_share` = 0.8 — значения Фазы 4 до этого решения, без изменения поведения.
 - Почему: §0.3 (буква ТЗ); §0.4.3 п.4 — одно место правки; без правки чужого файла (§7.3).
 - Обратимость: параметры в одном блоке `Settings`.
-- Тесты: `compute/tests/math/test_params.py` (нет числовых констант в `math/*.py`, состав `Params`, допуск берётся из `Params`).
+- Тесты: `compute/tests/math/test_params.py` (нет числовых констант в `math/*.py`, состав `Params`, допуск берётся из `Params`); `test_service.py` (`numeric`, `tolerance`, поля `numeric` обязательны — в compute нет значений по умолчанию).
+- Требует подтверждения владельцем: нет
+
+### D-B-125. S13: формат `function_call`, событий потока и флагов сбоев для подмен
+- Класс: B
+- WP / место: WP10.2–10.3, шов S13 (§7.2): интерфейс — `quack/llm/streaming.py` (`StreamingLLMProvider`, `StreamRequest`, `StreamEvent`), разбор SSE — `quack/llm/responses_client.py` (`_stream_event`); подмены — `tests/support/llm.py` (`ScriptedLLMProvider`) и `meta-mock` (C, §8.1, WP26.2)
+- Контекст: §8.1 и WP26.2 называют возможности подмен (стриминг, ключи по алфавиту, тело раньше шапки по флагу, `function_call`, иногда два за шаг, `phase: commentary`, сбои Фазы 3), но не формат. Формат задаёт то, что уже читает код B.
+- Решение — контракт для C:
+  1. **`ScriptedLLMProvider.stream_structured(StreamRequest)`** отдаёт `StreamEvent` по шагам сценария схемы `request.base.schema_name`: `TextDelta` — куски текста ответа (только сообщения без `phase: commentary`); `OutputItemDone(item)` — каждый законченный элемент шага, как есть; последним — всегда `StreamCompleted(status, usage, model, headers)`. В журнал вызовов пишется весь `StreamRequest` (тесты B проверяют `input_items` следующего шага). Ответчик по умолчанию для схемы — один шаг без инструментов, текст — тот же JSON, что у `complete_structured`.
+  2. **Элементы шага** (Responses API, Т-§11.5):
+     - `{"type": "reasoning", "id": "rs_…", "encrypted_content": "…", "summary": []}`;
+     - `{"type": "function_call", "id": "fc_…", "call_id": "call_…", "name": <имя инструмента из quack.session.tools>, "arguments": <JSON-строка аргументов>, "status": "completed"}` — код B берёт `call_id`, а не `id`; два вызова за шаг — два таких элемента подряд;
+     - комментарий: `{"type": "message", "id": "msg_…", "role": "assistant", "phase": "commentary", "content": [{"type": "output_text", "text": "…"}]}` — перед `function_call`;
+     - ответ: тот же `message` без `phase: commentary`, `content[0].text` — JSON выхода схемы.
+     Шаг с `function_call` не содержит ответа; следующий шаг сценария выдаётся, когда во входе есть `function_call_output` на каждый `call_id` прошлого шага (`next_step_input`).
+  3. **`meta-mock` (SSE `/responses`, `stream: true`)**: строки `data: {json}`; ключи по алфавиту на корне и во вложенных объектах (WP26.2). На элемент: `response.output_item.added {item}` (у комментария — с `phase: commentary`), для сообщения — `response.output_text.delta {item_id, delta}`, затем `response.output_item.done {item}`. В конце — `response.completed` или `response.incomplete` с `response: {model, status, usage: {input_tokens, input_tokens_details: {cached_tokens}, output_tokens, output_tokens_details: {reasoning_tokens}}}`. Заголовки `x-ratelimit-*` — у HTTP-ответа потока.
+  4. **Флаг `body_before_head`** (§8.1): в тексте ответа хода ключ `p2_body` идёт раньше `p1_head`; парсер B буферизует ход целиком (Т-§12.2). Иначе ключи ответа — по алфавиту (`p1_head`, `p2_body`, `p3_markup`).
+  5. **Сбои** — те же `ScriptedFailure.kind` Фазы 3, новых видов нет. Для потока: `unavailable`, `rate_limited` (с `retry_after`: секунды, дата HTTP или `None`), `bad_request` — исключение провайдера до первого события; `incomplete` — часть `TextDelta`, затем `StreamCompleted(status="incomplete")` (код B не разбирает, повторяет шаг с удвоенным лимитом); `invalid_json` — текст ответа не JSON, `status="completed"`; `commentary_only` — только элемент-комментарий, без ответа; `ratelimit_headers` — обычный ответ, заголовки — в `StreamCompleted.headers`. В `meta-mock` событие `response.failed` или `error` код B читает как `ProviderUnavailableError`.
+- Почему: §0.4.3 п.3 — контракт совпадает с тем, что уже читает код B (`_stream_event`, `next_step_input`, `tool_calls`), шов не меняется; п.7 — сбои те же, что в Фазе 3.
+- Обратимость: описание; код B не меняется.
+- Тесты: `tests/llm/test_phase4_stream_adapter.py`, `tests/llm/test_phase4_ai_layer.py` (`T-AI2`–`T-AI6`) — на стороне B; тесты подмен — C.
 - Требует подтверждения владельцем: нет
 
 ### Поток C
@@ -332,6 +362,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | S1 (зона C), этап I | интерфейсы `ObjectStore`, `EmbeddingClient`, `EmailSender`, `DeletionJournal`; поля `AppResources`; подмены; имена параметров §6.7 потока C. Продовые клиенты — `NotImplementedError` (WP18–WP20, WP25) | `tests/storage/test_s1_resources.py` — 8 passed |
 | S10, этап I + пул | `compute`: пул `pebble` (`quack_compute/pool.py`) с жёстким таймаутом — реализован; настройки, схемы и маршруты WP24 — тела `NotImplementedError`; `Renderer` (Chromium) — этап I. `backend`: `ComputeClient` — методы всех эндпоинтов WP24, `create_compute_client`; заглушка — очереди по эндпоинтам | `compute/tests/test_pool_and_contract.py` — 4 passed (`T-CM1` зелёный; в Linux, весь `compute` — 9 passed); `tests/storage/test_compute_client_s10.py` — 4 passed |
 | S13 (реализация подмен) | `tests/support/llm.py`: `ScriptedLLMProvider.stream_structured` — шаги с инструментами (`script_tools`, два вызова за шаг, `phase: commentary`), ответ дельтами с ключами по алфавиту, флаг `body_before_head`, сбои Фазы 3 по D-B-125 п.5, журнал `stream_calls`; `loadtest/meta_mock.py`: SSE при `stream: true` (D-B-125 п.3), после `function_call_output` на каждый вызов — ответ. Формат — D-B-125 (B, PR #86) | `tests/test_support_scripted_llm.py` — 21 passed; `tests/test_meta_mock.py` — 59 passed |
+| S10: клиент math (WP24, по просьбе B) | `quack/compute_client/math_contracts.py` — копия `compute/quack_compute/math/schemas.py` (B); `ComputeClient.math_check`, `math_transition`, таймаут HTTP — `timeout_ms / 1000 + compute_timeout_sec`; очереди заглушки `/v1/math/check`, `/v1/math/transition`. `/v1/check/math` Фазы 3 остаётся до перевода `quack.practice` (WP11.3, B) | `tests/storage/test_compute_client_math.py` — 6 passed |
 
 ### D-C-102. Где живут `EmailSender` и `DeletionJournal`
 - Класс: B
@@ -459,6 +490,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP10.2–10.3 (адаптер и цикл): `tests/llm/test_phase4_stream_adapter.py` написан до реализации, но красный прогон не снят отдельно (до реализации тесты падали бы на импорте `quack.llm.tool_loop`). Зелёный: 9 passed; с затронутыми старыми (`tests/llm`, `test_llm_runtime.py`, `test_meta_mock.py`, `test_thresholds_in_settings.py`, `test_contracts.py`) — 127 passed.
 - WP11.5 ядро математики (#79, коммит `85e07f9`): один коммит, красный прогон не снят отдельно (замечание C по §7.4). Зелёный: `compute/tests/math` — 40 passed.
 - WP11.5, пороги через `Params` (D-B-124): `cd compute && uv run pytest tests/math/test_params.py` — красный на сборке (`TypeError: Params.__init__() got an unexpected keyword argument 'precision_digits'`), коммит `32db37f`. Зелёный: `compute/tests/math` — 43 passed.
+- WP11.5, эндпоинты без значений по умолчанию (D-B-124, #83): `cd compute && uv run pytest tests/math/test_service.py` — 11 failed, 4 passed (422 и `ValidationError`: `numeric`, `tolerance` не в схеме). Зелёный: весь `compute` — 67 passed.
 - Зелёный прогон (B, `phase-4-b`): те же файлы — 59 passed. Полный прогон набора на итоговом SHA (§0.4.7) — job `backend` CI (`QUACK_TEST_REQUIRE_INFRA=1`); SHA и итог — в описании PR #72.
 
 ## Правки тестов
