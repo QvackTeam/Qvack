@@ -423,6 +423,9 @@ class Settings(BaseSettings):
     math_simplify_share: float = 0.8
     # WP11.6 (Т-§7.7).
     verdict_min_confidence: float = 0.7
+    # WP11.7 (Т-§6.9, Т-§16.3): below this recognition confidence the reading is «unsure»;
+    # the documents give no number. Phase 4 decision D-B-127.
+    recognition_min_confidence: float = 0.8
     second_opinion_model: str = WONDER
     # WP13.9 (Т-§3.2).
     turn_context_sample_rate: float = 0.02
