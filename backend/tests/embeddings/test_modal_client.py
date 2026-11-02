@@ -10,6 +10,7 @@ from pathlib import Path
 
 import modal.exception
 import pytest
+from pydantic import SecretStr
 
 from quack.config import Settings
 from quack.embeddings.client import (
@@ -83,7 +84,7 @@ async def test_modal_down_is_unavailable() -> None:
 
 async def test_without_tokens_is_unavailable(settings: Settings) -> None:
     """No `MODAL_TOKEN_*` (dev, CI): the client exists, calls are unavailable."""
-    client = create_embedding_client(settings.model_copy(update={"modal_token_id": ""}))
+    client = create_embedding_client(settings.model_copy(update={"modal_token_id": SecretStr("")}))
     with pytest.raises(EmbeddingsUnavailable):
         await client.embed_documents(["x"])
 

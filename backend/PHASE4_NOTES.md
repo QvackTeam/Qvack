@@ -1053,6 +1053,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/auth/test_auth_routes.py`, `tests/test_app_assembly.py`.
 - Требует подтверждения владельцем: нет.
 
+### D-C-117. WP20.3: приложение Modal и клиент эмбеддингов
+- Класс: B; п.2 и п.4 — вопрос владельцу
+- WP / место: WP20.3; `modal/embeddings.py`, `quack/embeddings/client.py`, `quack/config.py`
+- Контекст: `Т-§10.5` и WP20.3 называют модель (Qwen3-Embedding-0.6B, CPU, MRL), инструкцию к запросу «как рекомендует карточка модели», пакетную обработку и тёплый контейнер, но не называют: имя приложения и класса, текст инструкции, способ загрузки модели (§4.6 `[ПРОВЕРИТЬ в WP20.3]`), окно простоя и число ядер.
+- Решение: (1) Приложение `quack-embeddings`, класс `Embedder`, метод `embed(texts, prompt, dim)`; клиент ищет их по имени (`modal.Cls.from_name`) с `MODAL_TOKEN_*`; имена сверяет тест. (2) **Инструкция запроса** — формат карточки `Instruct: {task}
+Query:{query}`; текст задачи — параметр `embedding_query_instruction`, стартовое значение — пример карточки («Given a web search query, retrieve relevant passages that answer the query») до проверки качества поиска (`Т-§10.5` «Проверить»). Документы — без инструкции. (3) Загрузка — `sentence-transformers` 5.1.0 (`transformers` 4.56.1, `torch` 2.8.0 CPU) в образе Modal, не в backend; векторы нормированы и обрезаны до `embedding_dim` (`truncate_dim`). (4) `[ОРИЕНТИР]` окно простоя `SCALEDOWN_WINDOW_S = 300` и `CPU_CORES = 2` — константы приложения; «тёплый, пока есть активные сессии» и стоимость — за владельцем вместе с деплоем (`modal deploy modal/embeddings.py`). (5) Нет токенов, ошибка Modal, таймаут → `EmbeddingsUnavailable` (`Т-§20.7`); вектор другой размерности — `ValueError` (дефект деплоя, не отказ).
+- Почему: §0.4.3 п.5, `Т-§10.5`, §4.6.
+- Обратимость: одна константа имени и один параметр.
+- Тесты: `tests/embeddings/test_modal_client.py`. Сам Modal в тестах не вызывается; живой вызов — после деплоя владельцем.
+- Требует подтверждения владельцем: п.2 (текст инструкции задачи), п.4 (окно простоя и ядра).
+
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
 Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
@@ -1074,6 +1085,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP20.3, клиент Modal (C, `phase-4-c-wp20-modal`, коммит `92d406a`): `uv run pytest tests/embeddings` — ошибка сбора (нет `EMBEDDING_APP`, `EMBEDDER_CLASS`, параметра `query_instruction`). На неверной реализации (инструкция у документов; ошибки Modal не переводятся в `EmbeddingsUnavailable`) — по 1 failed. Зелёный: `tests/embeddings` (6, в Linux с `modal/` рядом), `tests/storage/test_s1_resources.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, `tests/test_app_assembly.py` — 46 passed. Правка теста красного коммита: `SecretStr("")` вместо `""` в `model_copy` (ошибка теста, не контракта).
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
 - WP18, этап I (C, `phase-4-c-wp18`): в Linux против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` и dbmate v2.36.0 `pytest tests/auth` — 7 failed (`NotImplementedError`: `request_link`, `redeem_link`, `LinkLimiter`, `cookie_params`, `learner_for_google`, сессии, согласия). Зелёный (библиотека): 7 passed. `T-AU5` — с маршрутами (весь API на сессиях).
 - WP20.1, WP20.5 (C, `phase-4-c-wp20`, коммит `d161aed`): в Linux против `quack-test-*` с dbmate — `tests/materials` 4 failed (`NotImplementedError`). Зелёный: `tests/materials`, `test_contracts.py`, `tests/db/test_sql_static.py` — 15 passed.

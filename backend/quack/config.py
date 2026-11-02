@@ -576,6 +576,11 @@ class Settings(BaseSettings):
     # WP20 (Т-§10.5, ТЗ §2.3 п.17)
     materials_k: int = 5
     embedding_dim: int = 768
+    # Т-§10.5: the task instruction of a query «как рекомендует карточка модели»; the starting
+    # value is the card's own example (D-C-117, [ПРОВЕРИТЬ] by the search quality check).
+    embedding_query_instruction: str = (
+        "Given a web search query, retrieve relevant passages that answer the query"
+    )
     modal_token_id: SecretStr = SecretStr("")
     modal_token_secret: SecretStr = SecretStr("")
     # WP21 (Т-§15, Т-§22.11)
