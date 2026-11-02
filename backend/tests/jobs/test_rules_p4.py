@@ -10,7 +10,7 @@ from uuid import UUID
 import pytest
 
 from quack.config import Settings
-from quack.events.models import StoredEvent
+from quack.events.log import StoredEvent
 from quack.jobs import rules_p4 as r
 from tests.events.samples import sample_payload, uid
 
@@ -24,19 +24,19 @@ def _event(event_type: str, seq: int = 10, **changes: Any) -> StoredEvent:
     return StoredEvent(
         learner_id=LEARNER,
         seq=seq,
-        event_id=UUID(int=seq),
+        id=seq,
         type=event_type,
         schema_version=1,
         actor="api",
-        session_id=changes.pop("session_id", UUID(int=99)),
-        turn_id=None,
         domain_id=None,
+        session_id=changes.pop("session_id", UUID(int=99)),
+        causation_seq=None,
         correlation_id=None,
-        causation_id=None,
         idempotency_key=f"k{seq}",
         payload_hash="h",
-        payload=payload,
         occurred_at=NOW,
+        payload=payload,
+        source_refs=[],
     )
 
 
