@@ -17,8 +17,11 @@ from quack.prompts.registry import PromptRegistry
 from quack.session import turns
 from quack.session.schemas import TeacherOutput
 from tests.llm.prompt_contracts import (
+    ALL_PROMPT_SCHEMAS,
     CONTRACTS_PATH,
-    PROMPT_SCHEMAS,
+    DOCTRINE_PENDING,
+    DOCTRINE_PENDING_MARKER,
+    MARKERS,
     render_contracts,
     undeclared_names,
 )
@@ -63,6 +66,17 @@ def test_label_map_roundtrip_and_limits(settings: Settings) -> None:
     assert table["M2"] == str(misconceptions[1])
 
 
+def test_label_map_labels_domains(settings: Settings) -> None:
+    """D-B-131: the learner's domains get `D` labels (Т-§4.9, `domain_classifier@1`)."""
+    domains = _ids(3)
+    labels = LabelMap.build(settings, domains=domains)
+
+    assert [labels.label("domain", d) for d in domains] == ["D1", "D2", "D3"]
+    assert labels.resolve("domain", "D2") == domains[1]
+    with pytest.raises(UnknownLabelError):
+        labels.resolve("domain", "D4")
+
+
 def test_label_map_rejects_unknown_and_foreign_labels(settings: Settings) -> None:
     """T-M1: a label beyond the table or of another kind is an `UnknownLabelError`."""
     labels = LabelMap.build(settings, skills=_ids(2), tasks=_ids(1))
@@ -87,13 +101,43 @@ def test_label_map_follows_settings_limits(settings: Settings) -> None:
     assert sorted(labels.table()) == ["K1", "S1", "S2", "T1"]
 
 
-@pytest.mark.parametrize("ref", sorted(PROMPT_SCHEMAS))
+@pytest.mark.parametrize("ref", sorted(ALL_PROMPT_SCHEMAS))
 def test_prompt_mentions_only_declared_fields(ref: str) -> None:
     """T-M5: backticked names of `## Output contract` are fields of the role schema or
     labels of `LabelMap`."""
     role, version = ref.split("@")
     text = PromptRegistry().load(role, int(version)).text
     assert undeclared_names(ref, text) == []
+
+
+@pytest.mark.parametrize("ref", sorted(MARKERS))
+def test_prompt_has_its_markers(ref: str) -> None:
+    """ТЗ Ф4 §7.6 п.2: a phrase the code relies on (the memory-unavailable marker, the variable
+    the visualization page reads, D-B-130) is in the prompt text."""
+    role, version = ref.split("@")
+    text = PromptRegistry().load(role, int(version)).text
+    assert [m for m in MARKERS[ref] if m not in text] == []
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        pytest.param(
+            ref,
+            marks=pytest.mark.xfail(strict=True, reason=f"{DOCTRINE_PENDING[ref]}: нет доктрины"),
+        )
+        if ref in DOCTRINE_PENDING
+        else ref
+        for ref in sorted(ALL_PROMPT_SCHEMAS)
+    ],
+)
+def test_prompt_has_owner_doctrine(ref: str) -> None:
+    """ТЗ Ф4 §7.6 п.1, п.5: layer 1 is the owner's doctrine; a role without it runs on a stub
+    and this test is `xfail(strict=True)` with its BLOCKED number until the doctrine
+    arrives."""
+    role, version = ref.split("@")
+    text = PromptRegistry().load(role, int(version)).text
+    assert DOCTRINE_PENDING_MARKER not in text
 
 
 def test_prompt_contracts_file_is_current() -> None:
