@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -11,6 +12,8 @@ import pytest
 from quack.config import Settings
 from quack.db import Db
 from quack.events.log import NewEvent, append_events
+from quack.events.registry import TEXT_TYPES
+from quack.materials import search as search_module
 from quack.materials.library import (
     MaterialNotFound,
     get_material,
@@ -20,6 +23,7 @@ from quack.materials.library import (
 from quack.materials.search import search_events
 from quack.storage.objects import StorageUnavailable
 from quack.storage.uploads import UploadRejected
+from tests.conftest import BACKEND_DIR
 from tests.db.fixtures import create_learner
 from tests.support.storage import BrokenObjectStore, InMemoryObjectStore
 
@@ -170,3 +174,19 @@ async def test_fulltext_english(pg_db: Db) -> None:
         {"learner_id": learner, "seq": hit.seq},
     )
     assert await search_events(pg_db, learner_id=learner, query="integral", limit=10) == []
+
+
+def _quoted_types(text: str) -> set[str]:
+    return set(re.findall(r"'([a-z_]+\.[a-z_]+)'", text))
+
+
+def test_search_types_match_the_registry_and_the_index() -> None:
+    """The type list of the search, `TEXT_TYPES` of the registry and the predicate of the
+    partial index `idx_events_fts_en` are one list (review of #98): a new text type that is
+    missing in the query would turn the search into a scan without the index."""
+    migration = next((BACKEND_DIR / "db" / "migrations").glob("*_baseline.sql"))
+    up = migration.read_text(encoding="utf-8").split("-- migrate:down")[0]
+    index = up[up.index("CREATE INDEX idx_events_fts_en") :].split(";")[0]
+    query = search_module._SEARCH  # pyright: ignore[reportPrivateUsage]
+    assert _quoted_types(query) == set(TEXT_TYPES)
+    assert _quoted_types(index) == set(TEXT_TYPES)

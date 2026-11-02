@@ -12,21 +12,8 @@ from uuid import UUID
 
 from quack.db import Db
 
-# The event types of the index `idx_events_text` (WP1.1, WP2.3).
-TEXT_EVENT_TYPES = (
-    "message.sent",
-    "answer.submitted",
-    "element.responded",
-    "turn.committed",
-    "canvas.line_committed",
-    "voice.transcribed",
-    "item.flagged_unclear",
-    "chunk.indexed",
-    "artifact.updated",
-)
-
-
-# The WHERE repeats the predicate and the expression of the partial index, so it can be used.
+# The WHERE repeats the predicate and the expression of the partial index `idx_events_fts_en`
+# (WP1.1), so it can be used; the type list equals `quack.events.registry.TEXT_TYPES` (tested).
 _SEARCH = (
     "SELECT session_id, seq, type, "
     "ts_headline('english', payload ->> 'text', plainto_tsquery('english', %(query)s)) "
