@@ -97,7 +97,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | :-- | :-: | :-- | :-- |
 | WP0 (зона C) | C | частично: ждёт п.2 (владелец) | — (скрипт п.3а) |
 | WP0 (зона A) | A | выполнен: аудит B1–B7, B21; п.3б, п.3в | — (скрипты п.3б, п.3в) |
-| WP2 (A) | A | черновик каталога S3 (G0) в `phase-4-a-wp2`: 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; заморозка — G1 после Q-A-2, Q-A-3 | `tests/events`: 73 passed |
+| WP2 (A) | A | **S3 заморожен (G1)** в `phase-4-a-s3-freeze` (D-A-119): 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; Q-A-2, Q-A-3 закрыты | `tests/events`: 82 passed (без инфраструктуры) |
 | WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` (D-A-111); `MisconceptionFact.statement` (D-B-145) — `phase-4-a-g1`; реализация — G2 | `tests/graph/test_read_stub.py`: 10 passed |
 | WP7.1 (A), S6 | A | виды задач и таблица правил по событию (D-A-110); строка `known_check` и отмена поручений (D-A-115) — `phase-4-a-g1`; строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 27 passed |
 | S1 (A), `JobContext` | A | поля §4.2 `db`, `storage`, `embeddings`, `deletions` в `phase-4-a-g1` (D-A-114) | `tests/jobs/test_job_context.py`: 2 passed |
@@ -412,6 +412,13 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 
 ### D-A-118. S6: `plan_jobs` принимает событие Фазы 4
 - Класс: A. `rules_p4.py` (#101) типизировал событие моделью Фазы 3 `quack.events.models.StoredEvent` (`event_id`, `turn_id`, `causation_id`), а диспетчер Фазы 4 читает `core.events` моделью `quack.events.log.StoredEvent` (S2). Исправлено до заморозки S6 (G1); поведение то же.
+
+### D-A-119. S3 заморожен на G1
+- Класс: A (§7.2: «Каталог событий окончательный (S3)» — G1)
+- Решение: каталог `quack/events/event_types.py` — окончательный. Последние поправки по ответам владельцев типов: `Verdict` — `misconception_id` / `misconception_hypothesis` (Q-A-2 п.1, #101); `rejected` — `{index, reason, quote}` (п.3, #101); `CheckFailedReason` + `unsupported` (п.7, #117); `canvas.line_committed.kind` ∈ {`latex`, `text`} (`Т-§15.3`), `artifact.updated.kind` ∈ {`notes`, `cards`, `cheatsheet`} с `topic_id` у конспекта и карточек и `hub_id` у шпаргалки (WP23.1; имена — маршруты §6.4) (Q-A-3, ответ C). Q-A-3 п.1, 3, 5 — без изменений полей.
+- Дальше: новый тип, новое поле или изменение схемы — только новой версией схемы с записью класса C и согласием трёх потоков (§0.4.4 п.2).
+- Открыто у владельца (вопрос C, не меняет S3 сейчас): пишется ли `observation.diagnosed`, если `canvas_diagnoser` ошибки не нашёл (`Т-§15.4` п.3). Если да — это новая версия схемы `observation.diagnosed` (третье значение `diagnosis.kind` или пустой диагноз) по §0.4.4 п.2.
+- Тесты: `T-EV1`, `T-EV2`, `T-EV5`, `test_frozen_kinds_reject_other_values`. Требует подтверждения владельцем: нет.
 
 ### Ответы потока A (2026-11-02)
 
@@ -1142,6 +1149,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.4 (`T-TT3`, часть): `tests/session/test_holdback.py` — 4 failed (`NotImplementedError`), коммит `83675d3`. Зелёный: 5 passed; с затронутыми (`tests/session/test_spoiler_guard.py`, `test_phase3_hot_path.py::test_teacher_reasoning_effort_by_situation`, на инфраструктуре B) — 43 passed.
 - S3, модели B из ядра (Q-A-1 вариант (а)): `cd backend && uv run pytest tests/practice/test_core_models.py` — 11 failed (модели `quack.practice` — копии, не объекты `quack.events.values`), 3 passed (поля форм с метками и с id уже совпадают), коммит `ed6188c`. Зелёный: 14 passed; с затронутыми (`tests/practice`, `tests/events`, `tests/session/test_phase4_contracts.py`, `tests/llm/test_phase4_ai_layer.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 195 passed. `CheckFailed` теперь модель Pydantic ядра — вызовы B с именованными аргументами.
 
+- S3, заморозка (A, `phase-4-a-s3-freeze`, коммит `dc04d39`): `pytest tests/events/test_catalog.py -k frozen_kinds` — 5 failed (другие значения `kind` и чужая привязка `topic_id`/`hub_id` принимаются), 1 passed. Зелёный: `tests/events`, `tests/jobs` — 111 passed.
 - G1 потока A (`phase-4-a-g1`, коммит `692f4f3`): `pytest tests/jobs tests/graph/test_read_stub.py tests/events/test_catalog.py` — 7 failed (`JobContext` без полей §4.2 и порядок закрытия; `known_check` без задачи; нет `cancelled_requests`; `MisconceptionFact` без `statement` — 2; `check.failed {reason: unsupported}` отклонён), 104 passed. Зелёный — в описании PR.
 - S3/S4/S6 (A, `phase-4-a-s4-s6`): тесты и код писались в одной итерации, красный прогон отдельно не снят (`Verdict` split, `RejectedElementRecord.index`, `quack.graph.read`, `rules_p4.py`). Зелёный: `tests/graph/test_read_stub.py`, `tests/jobs`, `tests/events/test_rejected_element.py`, `tests/practice/test_second_opinion.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` (`T-A6`) — локально без инфраструктуры; тесты с Postgres/dbmate (`tests/db`, `tests/events/test_catalog.py`, `tests/practice/test_answer_transaction.py`, `tests/practice/test_tasks_store.py`) локально не запускались (нет `dbmate`) — их прогонит CI.
 - WP11.6, тело `check.model` (D-B-145): `cd backend && uv run pytest tests/practice/test_check_model.py` — 12 failed (`NotImplementedError`), коммит `63ba969`. Зелёный: 12 passed; с затронутыми (`tests/practice`, `tests/llm`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 196 passed.
