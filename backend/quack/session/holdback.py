@@ -26,11 +26,18 @@ class HoldbackBuffer:
     def feed(self, chunk: str) -> str:
         """Add `chunk`; return the newly releasable text (may be empty). `SpoilerDetected` if
         the accumulated text has a spoiler."""
-        raise NotImplementedError
+        self._text += chunk
+        return self._release(max(self._released, len(self._text) - self._holdback))
 
     def finish(self) -> str:
         """End of the body: check the whole text and release the rest."""
-        raise NotImplementedError
+        return self._release(len(self._text))
+
+    def _release(self, upto: int) -> str:
+        if self._has_spoiler(self._text):
+            raise SpoilerDetected
+        released, self._released = self._text[self._released : upto], upto
+        return released
 
     @property
     def released(self) -> str:

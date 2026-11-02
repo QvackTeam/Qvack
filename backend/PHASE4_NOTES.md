@@ -346,6 +346,16 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `tests/practice/test_check_fast.py` (чистая часть `T-CH2`, `T-CH3`).
 - Требует подтверждения владельцем: нет
 
+### D-B-129. Чистые части WP13: правила шапки и разметки, буфер удержания, уровень рассуждения
+- Класс: B
+- WP / место: WP13.5 `quack/session/guards.py`; WP13.4 `quack/session/holdback.py`; WP13.8 `quack/session/turn_policy.py` (`teacher_reasoning_effort`)
+- Контекст: граф хода (WP13.2) ждёт `Db` (S2), заглушек `graph.read` (S4) и шлюза; правила `Т-§12.4`, этап 3 `Т-§12.2` и таблица `Т-§12.9` от них не зависят. Не названо: (а) что такое «метки существуют» для разметки хода; (б) форма причины возврата модели; (в) когда проверяется спойлер в буфере.
+- Решение: (а) метки `targetSkills`, `exposures[].skill` (навыки) и `targetsMisconception` (заблуждения) — из таблицы меток контекста; задания проверяет `validate_markup` (своё правило «каждое задание размечено»). Правило «опора» читает `REQUIRES` (S4) и придёт с ним. (б) Нарушение — `GuardViolation {reason, detail}`; `reason` — закрытый перечень кода, текст для модели собирает граф хода. (в) Спойлер проверяется по всему накопленному тексту при каждом куске и в конце тела; показывается только проверенный префикс без последних `spoiler_holdback_chars`. Уровень рассуждения — флаги `goal_changed`, `builds_plan`, `proof_answer` у функции Фазы 3 («функция Фазы 3 расширяется», WP13.8), по умолчанию `False`, вызовы Фазы 3 не меняются.
+- Почему: §0.4.3 п.2 (`Т-§12.4`, `Т-§12.2`, `Т-§12.9`), п.3 (подпись функции Фазы 3 — только расширение), п.5.
+- Обратимость: три модуля, по одной функции или классу.
+- Тесты: `tests/session/test_head_guards.py` (часть `T-TT4`), `test_holdback.py` (часть `T-TT3`), `test_turn_effort.py` (`T-TT8`).
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -505,9 +515,13 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP11.5, эндпоинты без значений по умолчанию (D-B-124, #83): `cd compute && uv run pytest tests/math/test_service.py` — 11 failed, 4 passed (422 и `ValidationError`: `numeric`, `tolerance` не в схеме). Зелёный: весь `compute` — 67 passed.
 - Зелёный прогон (B, `phase-4-b`): те же файлы — 59 passed. Полный прогон набора на итоговом SHA (§0.4.7) — job `backend` CI (`QUACK_TEST_REQUIRE_INFRA=1`); SHA и итог — в описании PR #72.
 - WP11.3, быстрая проверка (D-B-126): `cd backend && uv run pytest tests/practice/test_check_fast.py` — 11 failed (`NotImplementedError` в `check()`), коммит `6f32612`. Зелёный: 11 passed; с затронутыми (`tests/practice`, `tests/test_contracts.py`, `tests/storage/test_compute_client_math.py`, `tests/test_thresholds_in_settings.py`) — 67 passed.
+- WP13.8 (`T-TT8`): `tests/session/test_turn_effort.py` — 6 failed, 3 passed (`TypeError`: нет флагов), коммит `00cb285`. Зелёный: 9 passed.
+- WP13.5 (`T-TT4`, часть): `tests/session/test_head_guards.py` — 15 failed (`NotImplementedError`), коммит `26755dd`. Зелёный: 15 passed.
+- WP13.4 (`T-TT3`, часть): `tests/session/test_holdback.py` — 4 failed (`NotImplementedError`), коммит `83675d3`. Зелёный: 5 passed; с затронутыми (`tests/session/test_spoiler_guard.py`, `test_phase3_hot_path.py::test_teacher_reasoning_effort_by_situation`, на инфраструктуре B) — 43 passed.
 
 ## Правки тестов
 
+- `tests/session/test_holdback.py` (B, до зелёного): `test_spoiler_found_only_at_the_end` ошибочно ждал спойлер только в `finish`, хотя по WP13.4 весь накопленный текст проверяется на каждом куске. Заменён на `test_spoiler_completed_inside_the_holdback` (спойлер ловится на куске, который его дописал) и `test_finish_checks_the_whole_text`. Проверка не ослаблена: показанный текст по-прежнему пуст.
 - `tests/test_contracts.py` (`T-A6`): в `PRODUCT` добавлен `agents` (ТЗ Ф4 §4.1). Сила проверки не меняется.
 - `compute/tests/math/test_equivalence.py`: `PARAMS` берётся из `test_params.py` (у `Params` новые поля, D-B-124). Утверждения не менялись.
 

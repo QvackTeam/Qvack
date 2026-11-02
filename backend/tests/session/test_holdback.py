@@ -34,13 +34,26 @@ def test_spoiler_stops_and_nothing_shown_contained_it() -> None:
     assert ANSWER not in buffer.released
 
 
-def test_spoiler_found_only_at_the_end() -> None:
+def test_spoiler_completed_inside_the_holdback() -> None:
+    """The answer is completed by a later chunk while still held: caught on that chunk."""
     buffer = HoldbackBuffer(100, _has_spoiler)
     assert buffer.feed("x = 12") == ""
-    assert buffer.feed("34") == ""
     with pytest.raises(SpoilerDetected):
-        buffer.finish()
+        buffer.feed("34")
     assert buffer.released == ""
+
+
+def test_finish_checks_the_whole_text() -> None:
+    calls: list[str] = []
+
+    def record(text: str) -> bool:
+        calls.append(text)
+        return False
+
+    buffer = HoldbackBuffer(100, record)
+    buffer.feed("abc")
+    assert buffer.finish() == "abc"
+    assert calls[-1] == "abc"
 
 
 def test_zero_holdback_releases_each_checked_chunk() -> None:
