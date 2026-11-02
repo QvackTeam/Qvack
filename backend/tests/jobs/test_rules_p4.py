@@ -187,8 +187,45 @@ def test_agent_request_class_and_kind() -> None:
     assert plan.kind == "agent.viz" and plan.priority_class == "P1"
     later = _event("agent.requested", payload={"kind": "artifact", "needed_in_session": False})
     assert _one(later).priority_class == "P2"
-    known = _event("agent.requested", payload={"kind": "known_check"})
-    assert _kinds(known) == []
+
+
+def test_known_check_request_is_the_known_claim_check() -> None:
+    """B's answer to D-A-110 p.7: `agent.requested {kind: known_check}` -> `check.known_claim`,
+    P1 if needed in the session, else P2; keys as for `known.claimed`."""
+    topic = uid("topic")
+    params = {"topic_id": topic}
+    now = _one(
+        _event(
+            "agent.requested",
+            payload={"kind": "known_check", "params": params, "needed_in_session": True},
+        )
+    )
+    claimed = _one(_event("known.claimed"))
+    assert now.kind == claimed.kind == "check.known_claim"
+    assert now.priority_class == "P1"
+    assert (now.lock_key, now.coalesce_key) == (claimed.lock_key, claimed.coalesce_key)
+    assert now.required_seq == 10
+    assert now.payload["topic_id"] == str(topic)
+    assert now.payload["request_id"] == str(uid("request"))
+    later = _event(
+        "agent.requested",
+        payload={"kind": "known_check", "params": params, "needed_in_session": False},
+    )
+    assert _one(later).priority_class == "P2"
+
+
+def test_plan_update_cancels_agent_requests() -> None:
+    """WP7.4, Т-§13.7: the teacher's `planUpdate.cancel_requests` cancels those requests."""
+    first, second = UUID(int=31), UUID(int=32)
+    plan_update = {
+        **sample_payload("turn.committed")["markup"]["plan_update"],
+        "cancel_request_ids": [str(first), str(second)],
+    }
+    markup = {**sample_payload("turn.committed")["markup"], "plan_update": plan_update}
+    event = _event("turn.committed", payload={"markup": markup})
+    assert r.cancelled_requests(event) == [first, second]
+    assert r.cancelled_requests(_event("turn.committed")) == []
+    assert r.cancelled_requests(_event("message.sent")) == []
 
 
 def test_today_shown_coalesces_per_learner() -> None:
