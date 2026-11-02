@@ -264,7 +264,11 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 
 ## Реестр отклонений от основных документов
 
-Как в ТЗ Фазы 4 §2.4 (R4-1…R4-4). Новых строк нет.
+Как в ТЗ Фазы 4 §2.4 (R4-1…R4-4).
+
+| # | Что | Отступление | Основание | Возврат |
+| :-- | :-- | :-- | :-- | :-- |
+| R4-C1 | Зависимости backend (§4.6) | Добавлен `python-multipart` — его нет в §4.6, но без него FastAPI не разбирает multipart, который требует WP20.1 | Решение владельца 2026-11-02 («конечно ставь тогда»), D-C-113 п.3 | Внести `python-multipart` в таблицу §4.6 |
 
 ## Журнал решений
 
@@ -865,6 +869,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 | S1 (зона C), этап I | интерфейсы `ObjectStore`, `EmbeddingClient`, `EmailSender`, `DeletionJournal`; поля `AppResources`; подмены; имена параметров §6.7 потока C. Продовые клиенты — `NotImplementedError` (WP18–WP20, WP25) | `tests/storage/test_s1_resources.py` — 8 passed |
 | S10, этап I + пул | `compute`: пул `pebble` (`quack_compute/pool.py`) с жёстким таймаутом — реализован; настройки, схемы и маршруты WP24 — тела `NotImplementedError`; `Renderer` (Chromium) — этап I. `backend`: `ComputeClient` — методы всех эндпоинтов WP24, `create_compute_client`; заглушка — очереди по эндпоинтам | `compute/tests/test_pool_and_contract.py` — 4 passed (`T-CM1` зелёный; в Linux, весь `compute` — 9 passed); `tests/storage/test_compute_client_s10.py` — 4 passed |
 | S13 (реализация подмен) | `tests/support/llm.py`: `ScriptedLLMProvider.stream_structured` — шаги с инструментами (`script_tools`, два вызова за шаг, `phase: commentary`), ответ дельтами с ключами по алфавиту, флаг `body_before_head`, сбои Фазы 3 по D-B-125 п.5, журнал `stream_calls`; `loadtest/meta_mock.py`: SSE при `stream: true` (D-B-125 п.3), после `function_call_output` на каждый вызов — ответ. Формат — D-B-125 (B, PR #86) | `tests/test_support_scripted_llm.py` — 21 passed; `tests/test_meta_mock.py` — 59 passed |
+| WP20.1, WP20.5 (библиотека) | `quack/materials/library.py`: загрузка (тип по содержимому, объект, затем строка `content.materials` и `material.uploaded` одной транзакцией), список материалов домена, карточка с текстом страниц и подписанными ссылками; `quack/materials/search.py`: полнотекстовый поиск по событиям тем же выражением и типами, что индекс WP1.1. **Не сделано:** маршруты (с переводом входа на сессии, D-C-112; загрузка multipart — `python-multipart` добавлен по решению владельца, D-C-113), WP20.2 (ждёт очередь A, `builder` B, слой 2 `material_parser`), WP20.3 (Modal — действия владельца), WP20.4 (ждёт узлы кусков в графе, проектор A) | `tests/materials` — 4 passed (`T-MT5`; Linux, инфраструктура) |
 | WP21.2, журнал штрихов | `quack/canvas/strokes.py`: формат куска (MessagePack + zstd, точки разностью, стирание — операция), `StrokeJournal` (пачки в памяти, кусок раз в `stroke_chunk_seconds`, `ack` только после записи, повтор `batch_no` отсекается, хранилище недоступно — `ack` нет). **Не сделано:** WebSocket и Redis pub/sub (с переводом входа на сессии, D-C-112), доска WP21.1, распознавание WP21.3, проверка шагов и пометки WP21.4–21.5, голос и проигрывание WP21.6 | `tests/canvas` — 4 passed (`T-CV1`, `T-CV2`) |
 | S1: поле `db` (после #78) | `AppResources.db: Db` (§4.2): `create_app_resources` стала асинхронной и открывает пул `Db` без ожидания Postgres — API стартует и `/health/ready` отвечает 503 без базы (контракт готовности Фазы 3; `open_db` A ждёт пул — это для workers); закрывается последним. `engine` и `session_factory` остаются до WP1.3 (A). `tests/support/resources.build_app_resources(..., db=)`: без `db` — `Db` над закрытым пулом (`PoolClosed` при обращении) | `tests/storage/test_s1_resources.py`, `tests/test_api_llm_provider.py`, `tests/test_app_assembly.py` — 30 passed (Linux, инфраструктура) |
 | WP24 | `compute`: `/v1/pdf/pages` (PyMuPDF), `/v1/image/align`, `/v1/image/clean-drawing`, `/v1/image/render-strokes` (OpenCV), `/v1/render/pdf` (Playwright, A4, число страниц); Chromium запускается на первое задание и закрывается после `chromium_idle_close_s` простоя; образ с Chromium, `TMPDIR=/srv/quack/tmp`; шаг Chromium в CI. `/v1/render/snapshots` по D-B-130. **Не сделано:** почасовая чистка `/srv/quack/tmp` (вопрос, см. D-C-110) | `compute` в Linux — 76 passed (`T-CM1`, `T-CM2`, `T-CM3`) |
@@ -994,6 +999,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/storage/test_storage_wp19.py`.
 - Требует подтверждения владельцем: нет. \[ПРОВЕРИТЬ\] до первых загрузок (`Д-§8.4` «Проверить»): регион бакета Contabo для подписи, работа подписанных ссылок в path-style. Недоступное хранилище отвечает не сразу: botocore повторяет запрос со своей задержкой (в тесте на Windows — до ~18 с на вызов). Таймаут и число повторов — вопрос владельцу.
 
+### D-C-113. WP20.1, WP20.5: проверка домена, статус материала, multipart, размер выдачи поиска
+- Класс: B; п.3 — класс C (зависимость)
+- WP / место: WP20.1, WP20.5; `quack/materials/library.py`, `quack/materials/search.py`
+- Контекст: WP20.1 называет `POST /v1/domains/{id}/materials` (multipart), строку, событие и одну транзакцию, но не то, как проверить домен, какие значения у `content.materials.status`, и чем разбирать multipart; WP20.5 не называет размер выдачи.
+- Решение: (1) домен ученика проверяется по `domain.created` в журнале (закон 1): таблицы доменов в Postgres нет, а `quack.graph.read` (S4) ещё не готов; после S4 — через него. (2) Статус после загрузки — `uploaded`; следующий ставит разбор WP20.2. (3) **Multipart:** FastAPI разбирает формы через `python-multipart`, его нет в §4.6 и в зависимостях. Варианты: добавить `python-multipart` (стандартная зависимость FastAPI для форм) или принимать файл телом запроса с `Content-Type` (отступление от «multipart» в WP20.1). **Решение владельца 2026-11-02:** добавить `python-multipart` («конечно ставь тогда»); отдельный коммит, строка R4-C1 в реестре отклонений. (4) Размер выдачи полнотекстового поиска — аргумент `limit` функции; число задаёт маршрут, и оно будет вопросом при маршрутах — в документах его нет. (5) Маршруты WP20 делаются вместе с переводом входа на сессии (D-C-112), чтобы не писать их на JWT Фазы 3.
+- Почему: §0.4.3 п.5, закон 1, §4.6.
+- Обратимость: одна функция проверки домена; одно значение статуса.
+- Тесты: `tests/materials/test_materials_wp20.py`.
+- Требует подтверждения владельцем: п.3 — подтверждено 2026-11-02.
+
 ### D-C-114. WP21.2: структура куска штрихов, отсечение повторов, порог переполнения
 - Класс: B; п.3 — вопрос владельцу
 - WP / место: WP21.2; `quack/canvas/strokes.py`
@@ -1025,6 +1040,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP20.1, WP20.5 (C, `phase-4-c-wp20`, коммит `d161aed`): в Linux против `quack-test-*` с dbmate — `tests/materials` 4 failed (`NotImplementedError`). Зелёный: `tests/materials`, `test_contracts.py`, `tests/db/test_sql_static.py` — 15 passed.
 - WP21.2, журнал штрихов (C, `phase-4-c-wp21`, коммит `79079de`): `uv run pytest tests/canvas` — 4 failed (`NotImplementedError`). Зелёный: `tests/canvas` + `test_contracts.py` — 11 passed.
 - Поле `db` (C, `phase-4-c-db-field`): `uv run pytest tests/storage/test_s1_resources.py` — 3 failed (нет поля `db`; `create_app_resources` не асинхронная). Зелёный — в Linux-контейнере против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` (на Windows async-psycopg не работает с Proactor-циклом pytest — `PoolTimeout`): `test_s1_resources.py`, `test_api_llm_provider.py`, `test_app_assembly.py` — 30 passed; все пользователи `build_app_resources` (`tests/session`, `tests/domains`, `tests/artifacts`, `tests/e2e`, `test_dispatcher.py`) — 281 passed (в первом прогоне один раз упал `test_mutating_endpoints_are_idempotent`, отдельно и при повторе — зелёный; на чистом `phase-4` тот же набор — 281 passed).
 - WP24 (C, `phase-4-c-wp24`, коммит `c98d1b8`): в Linux (контейнер uv python3.12-bookworm-slim + `playwright install --with-deps chromium`) `pytest tests/test_wp24_endpoints.py` — 7 failed (`NotImplementedError`), 1 xfailed. Зелёный: весь `compute` — 74 passed, 1 xfailed (BLOCKED-C-201).
