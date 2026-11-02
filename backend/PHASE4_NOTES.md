@@ -361,6 +361,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | :-- | :-- | :-- |
 | S1 (зона C), этап I | интерфейсы `ObjectStore`, `EmbeddingClient`, `EmailSender`, `DeletionJournal`; поля `AppResources`; подмены; имена параметров §6.7 потока C. Продовые клиенты — `NotImplementedError` (WP18–WP20, WP25) | `tests/storage/test_s1_resources.py` — 8 passed |
 | S10, этап I + пул | `compute`: пул `pebble` (`quack_compute/pool.py`) с жёстким таймаутом — реализован; настройки, схемы и маршруты WP24 — тела `NotImplementedError`; `Renderer` (Chromium) — этап I. `backend`: `ComputeClient` — методы всех эндпоинтов WP24, `create_compute_client`; заглушка — очереди по эндпоинтам | `compute/tests/test_pool_and_contract.py` — 4 passed (`T-CM1` зелёный; в Linux, весь `compute` — 9 passed); `tests/storage/test_compute_client_s10.py` — 4 passed |
+| S13 (реализация подмен) | `tests/support/llm.py`: `ScriptedLLMProvider.stream_structured` — шаги с инструментами (`script_tools`, два вызова за шаг, `phase: commentary`), ответ дельтами с ключами по алфавиту, флаг `body_before_head`, сбои Фазы 3 по D-B-125 п.5, журнал `stream_calls`; `loadtest/meta_mock.py`: SSE при `stream: true` (D-B-125 п.3), после `function_call_output` на каждый вызов — ответ. Формат — D-B-125 (B, PR #86) | `tests/test_support_scripted_llm.py` — 21 passed; `tests/test_meta_mock.py` — 59 passed |
 | S10: клиент math (WP24, по просьбе B) | `quack/compute_client/math_contracts.py` — копия `compute/quack_compute/math/schemas.py` (B); `ComputeClient.math_check`, `math_transition`, таймаут HTTP — `timeout_ms / 1000 + compute_timeout_sec`; очереди заглушки `/v1/math/check`, `/v1/math/transition`. `/v1/check/math` Фазы 3 остаётся до перевода `quack.practice` (WP11.3, B) | `tests/storage/test_compute_client_math.py` — 6 passed |
 
 ### D-C-102. Где живут `EmailSender` и `DeletionJournal`
@@ -455,6 +456,16 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
   `T-CM2`, `T-CM3` — с реализацией WP24.
 - Требует подтверждения владельцем: нет
 
+### D-C-108. Подмены S13: идентификаторы шагов, размер дельты, журнал
+- Класс: B
+- WP / место: шов S13, §8.1, WP26.2; `tests/support/llm.py`, `backend/loadtest/meta_mock.py`
+- Контекст: D-B-125 задаёт формат элементов, событий и сбоев, но не размер куска текста, не вид идентификаторов в `ScriptedLLMProvider` и не то, как вызов попадает в журнал.
+- Решение: (1) текст ответа идёт кусками по `STREAM_DELTA_CHARS` = 16 символов (в обеих подменах; тесты проверяют только, что кусков больше одного и что они склеиваются в ответ); (2) в `ScriptedLLMProvider` идентификаторы детерминированы: `call_{schema}_{шаг}_{n}`, `fc_…`, `rs_…`, `msg_…`. Номер шага считается по входу (сколько шагов сценария закрыты `function_call_output`), а не по порядку вызовов. Поэтому параллельные задачи e2e не мешают друг другу (§8.1, как выбор ответа по `schema_name`). `function_call` из входа без `function_call_output` — `AssertionError`; (3) весь `StreamRequest` пишется в `stream_calls`, его `base` — ещё и в `calls`, чтобы `calls_for` считал все вызовы роли; (4) при `commentary_only` поток содержит только элемент-комментарий, при `incomplete` — только дельты, а на шаге с инструментами — только `StreamCompleted(status="incomplete")` без `function_call`, повтор того же шага отдаёт вызовы; `invalid_json` на шаге с инструментами не берётся и срабатывает на шаге ответа (D-B-125 п.5, замечание B к #87); в остальных шагах первым идёт элемент `reasoning`; (5) `meta-mock` с `tools` отвечает на шаг, где во входе есть `function_call_output` на каждый `function_call`, иначе — шаг с вызовами, как в Фазе 3. Задержка профиля `measured` — целиком до начала потока.
+- Почему: §0.4.3 п.5 (без новых зависимостей и параметров `Settings` — это подмены тестов), D-B-125 п.2.
+- Обратимость: константы и вспомогательные функции подмен.
+- Тесты: `tests/test_support_scripted_llm.py` (`test_stream_*`), `tests/test_meta_mock.py` (`test_stream_*`).
+- Требует подтверждения владельцем: нет
+
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
 Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
@@ -474,6 +485,8 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- S13, подмены (C, `phase-4-c-s13`, коммит `dbe6022`): `uv run pytest tests/test_meta_mock.py tests/test_support_scripted_llm.py` — `test_meta_mock.py`: 12 красных (нет SSE), 47 зелёных; `test_support_scripted_llm.py` — ошибка сборки (`ScriptedToolCall` нет). Зелёный: 80 passed; с затронутыми (`tests/llm`, `test_llm_runtime.py`, `tests/session/test_phase3_hot_path.py`) — 166 passed, 32 skipped (без инфраструктуры; их прогонит CI).
+- S13, сбои на шаге с инструментами (C, замечание B к #87): `test_stream_incomplete_on_a_tool_step_has_no_calls`, `test_stream_invalid_json_waits_for_the_answer_step` на прежнем `tests/support/llm.py` — 2 красных. Зелёный: `tests/test_support_scripted_llm.py` + `tests/test_meta_mock.py` — 82 passed.
 - Этап I G1 (B): `uv run pytest tests/session/test_phase4_contracts.py tests/llm/test_phase4_ai_layer.py tests/practice/test_tasks_markup.py tests/practice/test_check_instant.py tests/test_contracts.py` — 33 красных (`NotImplementedError`: `TurnStreamParser`, `next_step_input`, `validate_markup`, `check`), 26 зелёных (контракты, `T-AI1`, `T-A6`).
 - WP10.2–10.3 (адаптер и цикл): `tests/llm/test_phase4_stream_adapter.py` написан до реализации, но красный прогон не снят отдельно (до реализации тесты падали бы на импорте `quack.llm.tool_loop`). Зелёный: 9 passed; с затронутыми старыми (`tests/llm`, `test_llm_runtime.py`, `test_meta_mock.py`, `test_thresholds_in_settings.py`, `test_contracts.py`) — 127 passed.
 - WP11.5 ядро математики (#79, коммит `85e07f9`): один коммит, красный прогон не снят отдельно (замечание C по §7.4). Зелёный: `compute/tests/math` — 40 passed.
