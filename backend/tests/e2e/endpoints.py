@@ -10,8 +10,6 @@ from fastapi import FastAPI
 
 # `(method, path)` without `idempotency_key`, with the reason (ТЗ Фазы 3 §8.7, T-E2).
 NO_IDEMPOTENCY_KEY: dict[tuple[str, str], str] = {
-    ("POST", "/v1/auth/register"): "creates the account; a repeat is 409 by email",
-    ("POST", "/v1/auth/login"): "reads only; issues a new token",
     ("DELETE", "/v1/learner"): "one tombstone per learner; a repeat is a no-op",
     # ТЗ Ф4 §6.4: the body is `{timezone}` only; no event, a repeat sets the same value.
     ("PATCH", "/v1/learner/settings"): "no event; sets core.learners.settings",

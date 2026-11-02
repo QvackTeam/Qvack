@@ -3,7 +3,7 @@
 Every test module of `tests/session/` declares `pytest_plugins = ["tests.session.fixtures"]`
 (a `conftest.py` here would count as a test-configuration change). The infrastructure
 fixtures `settings`, `pg_engine`, `db`, `neo4j`, `redis` come from `tests/conftest.py`.
-Plain helpers (`parse_sse`, `make_token`) live in `tests/session/helpers.py`: import them
+Plain helpers (`parse_sse`) live in `tests/session/helpers.py`: import them
 from there, importing this module directly defeats pytest's assertion rewriting.
 """
 
@@ -32,6 +32,7 @@ from quack.compute_client.client import (
     MathCheckResponse,
 )
 from quack.config import FoldParams, Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.events import append_events
 from quack.events.models import StoredEvent
@@ -42,8 +43,7 @@ from quack.llm.gateway import LLMGateway
 from quack.llm.provider import ProviderRequest, ProviderResponse
 from quack.session.deps import get_compute_client, get_llm_gateway
 from tests.factories import new_event
-from tests.session.helpers import make_token
-from tests.support.auth import ensure_users_hook
+from tests.support.auth import login_hook, session_cookie, session_token
 from tests.support.resources import build_app_resources
 
 # The gateway passes no role to the provider; the response schema identifies it.
@@ -64,6 +64,7 @@ async def session_app(
     settings: Settings,
     pg_engine: AsyncEngine,
     db: SessionFactory,
+    pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
 ) -> FastAPI:
@@ -72,15 +73,18 @@ async def session_app(
     The lifespan is not run by `ASGITransport`, so the resources set here stay in place
     and the pools are owned (and closed) by the infrastructure fixtures.
     """
-    resources = build_app_resources(settings, pg_engine, neo4j, redis, session_factory=db)
+    resources = build_app_resources(settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db)
     return create_app(settings, resources=resources)
 
 
 @pytest.fixture
-async def client(session_app: FastAPI, db: SessionFactory) -> AsyncIterator[httpx.AsyncClient]:
-    """Every Bearer subject gets an `auth.users` row before the request (D-C-004)."""
+async def client(
+    session_app: FastAPI, pg_db: Db, settings: Settings
+) -> AsyncIterator[httpx.AsyncClient]:
+    """A request marked by `learner_headers` is signed in with a session of that learner
+    (D-C-112 п.2)."""
     transport = httpx.ASGITransport(app=session_app)
-    hooks = {"request": [ensure_users_hook(db)]}
+    hooks = {"request": [login_hook(pg_db, settings)]}
     async with httpx.AsyncClient(
         transport=transport, base_url="http://test", event_hooks=hooks
     ) as http:
@@ -93,8 +97,9 @@ def learner() -> UUID:
 
 
 @pytest.fixture
-def auth_headers(settings: Settings, learner: UUID) -> dict[str, str]:
-    return {"Authorization": f"Bearer {make_token(settings, learner)}"}
+async def auth_headers(learner: UUID, pg_db: Db, settings: Settings) -> dict[str, str]:
+    """The session cookie of `learner` (ТЗ Ф4 WP18.3): works on any client of the app."""
+    return session_cookie(await session_token(pg_db, learner, settings))
 
 
 # --- fake LLM provider -------------------------------------------------------------------
