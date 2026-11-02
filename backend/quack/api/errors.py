@@ -11,6 +11,7 @@ from neo4j.exceptions import ConnectionAcquisitionTimeoutError, ServiceUnavailab
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from quack.api.email import EmailUnavailable
 from quack.events.errors import IdempotencyConflictError
 from quack.llm.errors import LLMBudgetExceededError, LLMSchemaError, LLMUnavailableError
 from quack.logging import get_logger
@@ -31,6 +32,10 @@ type ErrorCode = Literal[
     "SERVICE_UNAVAILABLE",
     # ТЗ Ф4 §4.5: an upload is not PDF or an image by content (415) or is too large (413).
     "UPLOAD_REJECTED",
+    # ТЗ Ф4 §4.5: no session or a revoked one (401).
+    "UNAUTHENTICATED",
+    # ТЗ Ф4 §4.5: no `consent.given {kind: terms}` of the current version (403, Т-§19.4).
+    "CONSENT_REQUIRED",
 ]
 
 # §4.5, WP6.1 (seam S7): driver errors meaning Neo4j is unreachable (server down, expired
@@ -143,6 +148,14 @@ def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ApiError, api_error)
     app.add_exception_handler(UploadRejected, upload_rejected)
     app.add_exception_handler(StorageUnavailable, storage_unavailable)
+
+    async def email_unavailable(request: Request, exc: Exception) -> JSONResponse:
+        log.warning("email_unavailable", path=request.url.path, error=repr(exc))
+        return error_response(
+            request, "SERVICE_UNAVAILABLE", "login mail temporarily unavailable", 503
+        )
+
+    app.add_exception_handler(EmailUnavailable, email_unavailable)
     app.add_exception_handler(RequestValidationError, validation_error)
     app.add_exception_handler(StarletteHTTPException, http_error)
     app.add_exception_handler(IdempotencyConflictError, idempotency_conflict)

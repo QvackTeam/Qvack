@@ -24,6 +24,8 @@ from tests.session.helpers import parse_sse
 # Order of the T-E2 walk: each step may use ids created by the previous ones.
 IDEMPOTENT_WALK: tuple[tuple[str, str], ...] = (
     ("PATCH", "/v1/learner/preferences"),
+    ("POST", "/v1/consents"),
+    ("DELETE", "/v1/consents/research"),
     ("POST", "/v1/domains"),
     ("POST", "/v1/domains/{domain_id}/structure/propose"),
     ("POST", "/v1/domains/{domain_id}/structure/confirm"),
@@ -53,13 +55,20 @@ NO_OTHER_BODY = {
 
 
 async def _events(system: System, learner_id: UUID) -> int:
+    """Events of the learner in both logs: the Phase 3 one and, for the routes of WP18
+    (consents), the Phase 4 one (D-C-115) until the whole API moves over (D-C-112)."""
     async with system.session_factory() as session:
-        return int(
+        phase3 = int(
             await session.scalar(
                 text("SELECT count(*) FROM core.events WHERE learner_id = :l"), {"l": learner_id}
             )
             or 0
         )
+    row = await system.resources.db.fetch_one(
+        "SELECT count(*) AS n FROM core.events WHERE learner_id = %(learner_id)s",
+        {"learner_id": learner_id},
+    )
+    return phase3 + (0 if row is None else int(row["n"]))
 
 
 async def _send(
