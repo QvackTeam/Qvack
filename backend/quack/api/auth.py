@@ -13,11 +13,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal, Protocol
+from typing import Annotated, Literal, Protocol
 from uuid import UUID
 
 import jwt
-from fastapi import Request
+from fastapi import Depends, Request
 from sqlalchemy import text
 
 from quack.api.errors import ApiError
@@ -131,10 +131,12 @@ async def get_current_session(request: Request) -> CurrentSession:
     return session
 
 
-async def require_terms(request: Request) -> None:
+async def require_terms(
+    request: Request, session: Annotated[CurrentSession, Depends(get_current_session)]
+) -> None:
     """FastAPI dependency for starting a session (WP18.4): `403 CONSENT_REQUIRED` without
-    `consent.given {kind: terms}` of the current `terms_version` (Т-§19.4)."""
-    session = await get_current_session(request)
+    `consent.given {kind: terms}` of the current `terms_version` (Т-§19.4). The session comes
+    through `Depends`, so a route with both dependencies resolves the cookie once."""
     resources = get_resources(request)
     checker: TermsChecker = request.app.state.terms_checker
     if not await checker(resources.db, session.learner_id, resources.settings):
