@@ -97,13 +97,18 @@ class NeedsModel:
     part: str
 
 
+type NotYetReason = Literal["timeout", "compute_unavailable"]
+
+
 @dataclass(frozen=True)
 class NotYet:
-    """A fast check that did not finish within `timeout_ms`: nothing is written, the
-    insurance job `check.symbolic` checks later (Т-§6.1)."""
+    """A fast check that did not finish within `timeout_ms` or found compute down: the API
+    writes nothing, the insurance job `check.symbolic` checks later (Т-§6.1); the insurance
+    job itself turns it into `check.failed` with the same `reason` (D-B-126)."""
 
     answer_seq: int
     part: str
+    reason: NotYetReason = "timeout"
 
 
 type CheckResult = Verdict | CheckFailed | NeedsModel | NotYet
@@ -151,7 +156,10 @@ async def check(
                 help_step=help_used.hint_step,
                 solution_shown=help_used.solution_requested,
             )
-    # Fast types and numbers written as expressions go to compute (WP11.3, WP11.5).
+    # Fast types and numbers written as expressions go to compute (WP11.3, WP11.5). Without a
+    # compute call nothing is decided now: the insurance job checks later (Т-§6.1).
+    if compute is None:
+        return NotYet(answer_seq, part)
     raise NotImplementedError
 
 
