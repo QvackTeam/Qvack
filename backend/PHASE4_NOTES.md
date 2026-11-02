@@ -373,6 +373,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | S1 (зона C), этап I | интерфейсы `ObjectStore`, `EmbeddingClient`, `EmailSender`, `DeletionJournal`; поля `AppResources`; подмены; имена параметров §6.7 потока C. Продовые клиенты — `NotImplementedError` (WP18–WP20, WP25) | `tests/storage/test_s1_resources.py` — 8 passed |
 | S10, этап I + пул | `compute`: пул `pebble` (`quack_compute/pool.py`) с жёстким таймаутом — реализован; настройки, схемы и маршруты WP24 — тела `NotImplementedError`; `Renderer` (Chromium) — этап I. `backend`: `ComputeClient` — методы всех эндпоинтов WP24, `create_compute_client`; заглушка — очереди по эндпоинтам | `compute/tests/test_pool_and_contract.py` — 4 passed (`T-CM1` зелёный; в Linux, весь `compute` — 9 passed); `tests/storage/test_compute_client_s10.py` — 4 passed |
 | S13 (реализация подмен) | `tests/support/llm.py`: `ScriptedLLMProvider.stream_structured` — шаги с инструментами (`script_tools`, два вызова за шаг, `phase: commentary`), ответ дельтами с ключами по алфавиту, флаг `body_before_head`, сбои Фазы 3 по D-B-125 п.5, журнал `stream_calls`; `loadtest/meta_mock.py`: SSE при `stream: true` (D-B-125 п.3), после `function_call_output` на каждый вызов — ответ. Формат — D-B-125 (B, PR #86) | `tests/test_support_scripted_llm.py` — 21 passed; `tests/test_meta_mock.py` — 59 passed |
+| WP24 | `compute`: `/v1/pdf/pages` (PyMuPDF), `/v1/image/align`, `/v1/image/clean-drawing`, `/v1/image/render-strokes` (OpenCV), `/v1/render/pdf` (Playwright, A4, число страниц); Chromium запускается на первое задание и закрывается после `chromium_idle_close_s` простоя; образ с Chromium, `TMPDIR=/srv/quack/tmp`; шаг Chromium в CI. **Не сделано:** `/v1/render/snapshots` (BLOCKED-C-201), почасовая чистка `/srv/quack/tmp` (вопрос, см. D-C-110) | `compute` в Linux — 74 passed, 1 xfailed (`T-CM1`, `T-CM2` без снимков, `T-CM3`) |
 | S10: клиент math (WP24, по просьбе B) | `quack/compute_client/math_contracts.py` — копия `compute/quack_compute/math/schemas.py` (B); `ComputeClient.math_check`, `math_transition`, таймаут HTTP — `timeout_ms / 1000 + compute_timeout_sec`; очереди заглушки `/v1/math/check`, `/v1/math/transition`. `/v1/check/math` Фазы 3 остаётся до перевода `quack.practice` (WP11.3, B) | `tests/storage/test_compute_client_math.py` — 6 passed |
 
 ### D-C-102. Где живут `EmailSender` и `DeletionJournal`
@@ -477,6 +478,16 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `tests/test_support_scripted_llm.py` (`test_stream_*`), `tests/test_meta_mock.py` (`test_stream_*`).
 - Требует подтверждения владельцем: нет
 
+### D-C-110. WP24: числа обработки изображений, разрешение страниц PDF, чистка временных файлов
+- Класс: B
+- WP / место: WP24; `compute/quack_compute/work.py`, `compute/quack_compute/renderer.py`, `compute/Dockerfile`
+- Контекст: WP24, WP20.2, WP21.3, WP22.3, `Т-§17.6` называют, что делает каждый эндпоинт, но не числа: разрешение страниц PDF, качество WebP, пороги поиска контура листа, толщину линии пера; `Д-§4.2` говорит «чистится по возрасту раз в час», но не называет возраст и не говорит, кто чистит.
+- Решение: (1) страница PDF — разрешение PyMuPDF по умолчанию, WebP — качество OpenCV по умолчанию; (2) контур листа — обычный приём OpenCV: размытие 5, Canny 75/200, приближение многоугольником с точностью 0,02 периметра, лист — самый большой четырёхугольник не меньше 0,2 площади снимка; иначе снимок как есть (`aligned = false`). Числа — константы модуля, в `Settings` не выносятся: это не пороги логики ученика, а параметры алгоритма, и документы их не задают; (3) фон рисунка — порог Оцу (без числа), прозрачно всё вне маски `segmenter`; (4) линия пера — 2 px; (5) PDF — формат A4 Chromium; (6) почасовая чистка `/srv/quack/tmp` **не сделана**: удалить профиль работающего Chromium — сломать рендер, а возраст файлов документ не называет. Вопрос владельцу: чистит compute сам или cron хоста (WP9), и какого возраста файлы.
+- Почему: §0.4.3 п.5 (значения библиотек по умолчанию, где документ молчит), `Т-§1.2`.
+- Обратимость: константы одного модуля.
+- Тесты: `compute/tests/test_wp24_endpoints.py`.
+- Требует подтверждения владельцем: да — п.6 (чистка временных файлов). \[ПРОВЕРИТЬ\] п.1–2 на настоящих сканах и фото листов при WP20, WP22.
+
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
 Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
@@ -494,8 +505,10 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Заблокировано
 
+- **BLOCKED-C-201 (C ↔ B): как набор параметров попадает в страницу визуализации.** `Т-§13.6` п.2: compute рендерит HTML «при нескольких значениях параметров», но способ передачи не задан. Выход `viz_builder` (B, `VizBuilderOutput.parameter_values: list[str]`) и контракт compute (D-C-107, `RenderSnapshotsRequest.param_sets: list[dict]`) не совпадают. `/v1/render/snapshots` — `NotImplementedError`, тест `test_render_snapshots` — `xfail(strict=True)`. Нужно решение B (WP16.5): формат значений и то, как страница их читает.
 ## Красные прогоны
 
+- WP24 (C, `phase-4-c-wp24`, коммит `c98d1b8`): в Linux (контейнер uv python3.12-bookworm-slim + `playwright install --with-deps chromium`) `pytest tests/test_wp24_endpoints.py` — 7 failed (`NotImplementedError`), 1 xfailed. Зелёный: весь `compute` — 74 passed, 1 xfailed (BLOCKED-C-201).
 - S13, подмены (C, `phase-4-c-s13`, коммит `dbe6022`): `uv run pytest tests/test_meta_mock.py tests/test_support_scripted_llm.py` — `test_meta_mock.py`: 12 красных (нет SSE), 47 зелёных; `test_support_scripted_llm.py` — ошибка сборки (`ScriptedToolCall` нет). Зелёный: 80 passed; с затронутыми (`tests/llm`, `test_llm_runtime.py`, `tests/session/test_phase3_hot_path.py`) — 166 passed, 32 skipped (без инфраструктуры; их прогонит CI).
 - S13, сбои на шаге с инструментами (C, замечание B к #87): `test_stream_incomplete_on_a_tool_step_has_no_calls`, `test_stream_invalid_json_waits_for_the_answer_step` на прежнем `tests/support/llm.py` — 2 красных. Зелёный: `tests/test_support_scripted_llm.py` + `tests/test_meta_mock.py` — 82 passed.
 - Этап I G1 (B): `uv run pytest tests/session/test_phase4_contracts.py tests/llm/test_phase4_ai_layer.py tests/practice/test_tasks_markup.py tests/practice/test_check_instant.py tests/test_contracts.py` — 33 красных (`NotImplementedError`: `TurnStreamParser`, `next_step_input`, `validate_markup`, `check`), 26 зелёных (контракты, `T-AI1`, `T-A6`).

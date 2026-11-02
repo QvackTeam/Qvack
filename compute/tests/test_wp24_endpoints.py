@@ -147,7 +147,8 @@ def test_render_pdf_counts_a4_pages(client: TestClient) -> None:
     document = pymupdf.open(stream=base64.b64decode(body["pdf_b64"]), filetype="pdf")
     width, height = document[0].rect.width, document[0].rect.height
     document.close()
-    assert (round(width), round(height)) == (595, 842)  # A4 in points
+    # A4 is 595.3 × 841.9 pt; Chromium rounds the page to hundredths of an inch.
+    assert abs(width - 595.3) < 1.5 and abs(height - 841.9) < 1.5
 
     long_html = "".join(f"<p>Line {n}</p>" for n in range(300))
     assert client.post("/v1/render/pdf", json={"html": long_html}).json()["page_count"] > 1
