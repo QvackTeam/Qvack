@@ -20,6 +20,11 @@ type Scope = Literal["full", "companion"]
 
 # D-C-111: the documents name the flags and the domain of the cookie, not its name.
 SESSION_COOKIE = "quack_session"
+# The learner of a request is unknown until its session is found by the token (D-C-111).
+_SESSION_BY_TOKEN = (
+    "SELECT learner_id, scope, canvas_id, expires_at FROM core.auth_sessions "
+    "WHERE token_hash = %(hash)s AND revoked_at IS NULL AND expires_at > %(now)s"
+)
 
 
 @dataclass(frozen=True)
@@ -44,10 +49,10 @@ async def open_session(
     await db.execute(
         "INSERT INTO core.auth_sessions "
         "(token_hash, learner_id, scope, canvas_id, created_at, expires_at) "
-        "VALUES (%(hash)s, %(learner)s, %(scope)s, %(canvas)s, %(now)s, %(expires)s)",
+        "VALUES (%(hash)s, %(learner_id)s, %(scope)s, %(canvas)s, %(now)s, %(expires)s)",
         {
             "hash": token_hash(token),
-            "learner": learner_id,
+            "learner_id": learner_id,
             "scope": scope,
             "canvas": canvas_id,
             "now": now,
@@ -59,11 +64,7 @@ async def open_session(
 
 async def resolve_session(db: Db, *, token: str, now: datetime) -> AuthSession | None:
     """The live session of the token; `None` if unknown, expired or revoked."""
-    row = await db.fetch_one(
-        "SELECT learner_id, scope, canvas_id, expires_at FROM core.auth_sessions "
-        "WHERE token_hash = %(hash)s AND revoked_at IS NULL AND expires_at > %(now)s",
-        {"hash": token_hash(token), "now": now},
-    )
+    row = await db.fetch_one(_SESSION_BY_TOKEN, {"hash": token_hash(token), "now": now})
     if row is None:
         return None
     return AuthSession(
@@ -74,12 +75,13 @@ async def resolve_session(db: Db, *, token: str, now: datetime) -> AuthSession |
     )
 
 
-async def revoke_session(db: Db, *, token: str, now: datetime) -> None:
-    """`POST /auth/logout`: the next request with this token is 401."""
+async def revoke_session(db: Db, *, learner_id: UUID, token: str, now: datetime) -> None:
+    """`POST /auth/logout` of the learner of the session: the next request with this token is
+    401."""
     await db.execute(
         "UPDATE core.auth_sessions SET revoked_at = %(now)s "
-        "WHERE token_hash = %(hash)s AND revoked_at IS NULL",
-        {"hash": token_hash(token), "now": now},
+        "WHERE token_hash = %(hash)s AND learner_id = %(learner_id)s AND revoked_at IS NULL",
+        {"hash": token_hash(token), "learner_id": learner_id, "now": now},
     )
 
 

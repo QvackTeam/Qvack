@@ -64,9 +64,9 @@ async def has_current_terms(db: Db, learner_id: UUID, settings: Settings) -> boo
     if settings.terms_version is None:
         return False
     row = await db.fetch_one(
-        "SELECT 1 AS found FROM core.events WHERE learner_id = %(learner)s "
+        "SELECT 1 AS found FROM core.events WHERE learner_id = %(learner_id)s "
         "AND type = 'consent.given' AND payload->>'kind' = 'terms' "
         "AND payload->>'version' = %(version)s LIMIT 1",
-        {"learner": learner_id, "version": settings.terms_version},
+        {"learner_id": learner_id, "version": settings.terms_version},
     )
     return row is not None

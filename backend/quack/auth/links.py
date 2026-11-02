@@ -20,6 +20,8 @@ from quack.config import Settings
 from quack.db import Db
 
 _TOKEN_BYTES = 16  # 128 bits (WP18.1)
+# Before login the learner is unknown: the row is found by its address (D-C-111).
+_LEARNER_BY_EMAIL = "SELECT learner_id FROM core.learners WHERE email = %(email)s"
 _HOUR_S = 3600
 
 
@@ -118,13 +120,11 @@ async def learner_for_email(db: Db, email: str) -> UUID:
     """The learner of the address; a new `core.learners` row for a new one."""
     address = email.strip().lower()
     await db.execute(
-        "INSERT INTO core.learners (learner_id, email) VALUES (%(id)s, %(email)s) "
+        "INSERT INTO core.learners (learner_id, email) VALUES (%(learner_id)s, %(email)s) "
         "ON CONFLICT (email) DO NOTHING",
-        {"id": uuid4(), "email": address},
+        {"learner_id": uuid4(), "email": address},
     )
-    row = await db.fetch_one(
-        "SELECT learner_id FROM core.learners WHERE email = %(email)s", {"email": address}
-    )
+    row = await db.fetch_one(_LEARNER_BY_EMAIL, {"email": address})
     assert row is not None
     return row["learner_id"]
 

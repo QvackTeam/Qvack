@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from redis.asyncio import Redis
@@ -160,7 +160,10 @@ async def test_session_revocation(pg_db: Db, settings: Settings) -> None:
     expiry = NOW + timedelta(days=settings.auth_session_ttl_days, seconds=1)
     assert await resolve_session(pg_db, token=token, now=expiry) is None
 
-    await revoke_session(pg_db, token=token, now=NOW + timedelta(hours=2))
+    # Another learner cannot revoke it (isolation, Т-§3.5).
+    await revoke_session(pg_db, learner_id=uuid4(), token=token, now=NOW + timedelta(hours=2))
+    assert await resolve_session(pg_db, token=token, now=NOW + timedelta(hours=2)) is not None
+    await revoke_session(pg_db, learner_id=learner, token=token, now=NOW + timedelta(hours=2))
     assert await resolve_session(pg_db, token=token, now=NOW + timedelta(hours=3)) is None
     assert await resolve_session(pg_db, token="unknown", now=NOW) is None
 
