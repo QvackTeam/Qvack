@@ -252,7 +252,23 @@ class System:
             "Authorization": f"Bearer {body['token']}",
             "Cookie": f"{SESSION_COOKIE}={cookie}",
         }
+        # WP18.4: a session starts only after `consent.given {kind: terms}` of the current
+        # `terms_version`; the learner of the stand accepts it as the client would.
+        consent = await self.client.post(
+            "/v1/consents",
+            json={
+                "kind": "terms",
+                "version": self.settings.terms_version,
+                "idempotency_key": f"terms:{learner_id}",
+            },
+            headers=headers,
+        )
+        assert consent.status_code == 200, consent.text
         return Learner(learner_id, email, password, headers)
+
+
+# A test value of `terms_version` (the real one is the owner's, D-C-105).
+E2E_TERMS_VERSION = "e2e-terms"
 
 
 @dataclass(frozen=True)
@@ -271,6 +287,10 @@ async def build_system(
     redis: Redis | Any | None,
     db: Db,
 ) -> System:
+    # D-C-105: `terms_version` is the owner's value and is unset by default; the stand needs
+    # one so that its learners can accept the terms (WP18.4).
+    if settings.terms_version is None:
+        settings = settings.model_copy(update={"terms_version": E2E_TERMS_VERSION})
     llm = ScriptedLLMProvider()
     compute = ComputeScenario()
     resources = build_app_resources(

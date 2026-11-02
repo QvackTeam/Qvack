@@ -214,6 +214,16 @@ def test_known_check_request_is_the_known_claim_check() -> None:
     assert _one(later).priority_class == "P2"
 
 
+def test_known_check_request_without_topic_puts_no_job() -> None:
+    """Review B of #117: `check.known_claim` checks the skills of a topic (WP8.2); a request
+    without `params.topic_id` has nothing to check."""
+    event = _event(
+        "agent.requested",
+        payload={"kind": "known_check", "params": {}, "needed_in_session": True},
+    )
+    assert _kinds(event) == []
+
+
 def test_plan_update_cancels_agent_requests() -> None:
     """WP7.4, Т-§13.7: the teacher's `planUpdate.cancel_requests` cancels those requests."""
     first, second = UUID(int=31), UUID(int=32)

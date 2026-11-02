@@ -340,7 +340,10 @@ def _agent_requested(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
     cls: PriorityClass = "P1" if p.needed_in_session else "P2"
     payload: dict[str, Any] = {"request_id": str(p.request_id), "kind": p.kind}
     if kind == "check.known_claim":
-        # The same job as `known.claimed`: it reads the graph (skills of the topic).
+        # The same job as `known.claimed`: it checks the skills of a topic (WP8.2), so a
+        # request without a topic has nothing to check (review B of #117).
+        if p.params.topic_id is None:
+            return []
         payload["topic_id"] = str(p.params.topic_id)
         return [_plan(event, kind, cls=cls, graph=True, payload=payload)]
     return [_plan(event, kind, cls=cls, payload=payload)]
