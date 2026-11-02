@@ -5,6 +5,7 @@ description = "Quack backend: event log, projector, jobs and LLM gateway"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "aioboto3>=15.5.0",
     "alembic>=1.20.1",
     "asyncpg>=0.32.0",
     "fastapi>=0.162.0",

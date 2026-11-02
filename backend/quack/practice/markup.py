@@ -14,6 +14,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from quack.events.values import NewSkill
 from quack.practice.answer_spec import AnswerSpec
 from quack.practice.grammar import grammar_ok
 
@@ -24,13 +25,6 @@ type Level = Annotated[int, Field(ge=1, le=6)]
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
-
-
-class NewSkill(_Strict):
-    """Description of a new skill (Т-§4.4): name and the topic it belongs to in words."""
-
-    name: str
-    topic_hint: str
 
 
 class TestedLevel(_Strict):

@@ -102,8 +102,8 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | WP0 (зона B) | B | выполнен: аудит, п.3г, п.3д, п.5 | — (скрипт п.3г) |
 | Этап I G1 (B: S7, S8, S11, S13) | B | контракты в `phase-4-b`, тесты контрактов зелёные | см. «Красные прогоны» |
 | WP10.2–10.3 (B) | B | частично: разбор потока хода и вход шага цикла с инструментами — зелёные (`T-AI2`–`T-AI4`); адаптер `ResponsesClient.stream_structured` и цикл `run_tool_loop` (параллельные инструменты с таймаутом, повтор оборванного с удвоенным лимитом) — зелёные (`T-AI5`, `T-AI6` без строки `ops.llm_usage` — она в WP10.4); встраивание в шлюз (допуск, семафоры, учёт) — с WP13 | 19 passed |
-| WP11 (B) | B | частично: `check()` мгновенные типы (WP11.2) — зелёный `T-CH1` (чистая часть; «в той же транзакции» — с WP13.1 на `Db`); быстрые и медленные — дальше | 11 passed |
-| WP12.1–12.3 (B) | B | частично: `validate_markup` (WP12.3) — зелёный `T-TK2`; `content.tasks` + `task.created` (WP12.1) ждут `Db` и каталог (S2, S3, A) | 14 passed |
+| WP11 (B) | B | частично: `check()` мгновенные типы (WP11.2) — зелёный `T-CH1`, включая «в той же транзакции» (`record_answer`, WP11.4 — ветка `phase-4-b-wp12` поверх S2/S3 A); быстрые — с каркасом compute (S10); медленные — WP11.6 | 11 + 4 passed |
+| WP12.1–12.3 (B) | B | частично: `validate_markup` (WP12.3) — зелёный `T-TK2`; `content.tasks` + `task.created` (WP12.1, `quack/practice/task_store.py`) — зелёный `T-TK1` в ветке `phase-4-b-wp12` поверх S2/S3 A (#78, #80); PR — после их слияния | 14 + 4 passed |
 
 ## Аудит
 
@@ -342,6 +342,20 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `test_tool_loop_step_limit`.
 - Требует подтверждения владельцем: нет
 
+### D-B-121. Часть задачи без частей — `main`
+- Класс: B. WP11.4, `quack/practice/answers.py` (`DEFAULT_PART`): ключ вердикта `verdict:{answer_seq}:{part}` (`Т-§6.1`) требует часть, а у задачи без частей (`Т-§6.2`) её нет. Значение `main` — одна константа. Тесты: `test_instant_verdict_in_answer_transaction`. Подтверждение: нет.
+
+### D-B-122. Помощь по задаче — запрос B к `core.events` до ответа A
+- Класс: B
+- WP / место: WP11.2, `quack/practice/answers.py` (`help_in_session`)
+- Контекст: WP11.2 — помощь в вердикте вычисляет код по событиям задачи в сессии; общей функции чтения `core.events` в S2 нет (вопрос A в PR #78).
+- Варианты: (а) запрос в репозитории B (WP1.2: SQL — в модулях пакетов, [ОРИЕНТИР]); (б) ждать функцию A.
+- Решение: (а), параметры только `%(name)s`, фильтр по `learner_id` (`T-DB2`, `T-DB4`). Если A даст общую функцию в `quack.events` — заменить вызов.
+- Почему: §7.1 «не ждать гейт»; §0.4.3 п.4 — одна функция.
+- Обратимость: одна функция.
+- Тесты: `test_help_from_session_events_and_repeat`.
+- Требует подтверждения владельцем: нет
+
 ### D-B-120. Ядро математики WP11.5 — чистые функции до каркаса compute
 - Класс: B
 - WP / место: WP11.5, `compute/quack_compute/math/` (`grammar.py`, `equivalence.py`)
@@ -462,6 +476,21 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `test_actions_route_in_openapi` (B), T-A1 и тест 2xx (C, в #75), `T-E2`, `T-E3` — без изменений.
 - Требует подтверждения владельцем: нет
 
+### D-B-130. Наборы параметров визуализации: формат и как страница их читает (BLOCKED-C-201)
+- Класс: B
+- WP / место: WP16.5, `quack/agents/schemas.py` (`VizBuilderOutput.parameter_values`) → `RenderSnapshotsRequest.param_sets` (`quack/compute_client/contracts.py`, D-C-107) → страница в Chromium compute (WP24)
+- Контекст: `Т-§13.6` п.1–2 — модель пишет страницу «какие параметры», compute делает снимки «при нескольких значениях параметров»; формат значений и способ передачи не названы. Строгая схема не допускает свободных словарей (`Т-§11.1`), поэтому в выходе модели — `list[str]`; в запросе compute — `list[dict]`.
+- Варианты: (1) каждая строка — объект JSON, compute кладёт его в глобальную переменную до скриптов страницы; (2) параметры во фрагменте адреса `#…`; (3) отдельные поля «имя — значение» в схеме модели.
+- Решение: (1).
+  1. **Формат.** Каждый элемент `parameter_values` — строка с объектом JSON: имя параметра → число, строка или `true`/`false` (например `{"a": 2, "phase": 0.5}`). Один элемент — один снимок.
+  2. **Перевод в `param_sets`.** Код B (`quack.agents`, WP16.5) делает `json.loads` каждой строки. Не объект или вложенные значения — нарушение разметки, оно идёт в ту же единственную попытку исправления (`Т-§22.10`). Пустой список — один набор `{}`: снимок со значениями по умолчанию.
+  3. **Как страница читает.** compute перед загрузкой страницы задаёт `window.QUACK_VIZ_PARAMS = <набор>` (Playwright `add_init_script`, до любого скрипта страницы), затем `set_content(html)` и снимок. Страница берёт значения из `window.QUACK_VIZ_PARAMS`, а при его отсутствии — свои значения по умолчанию. У ученика (`GET /v1/viz/{id}`, iframe `sandbox="allow-scripts"`) переменной нет: страница открывается со значениями по умолчанию и меняет их своими элементами управления.
+  4. **Промпт.** Требование «читать `window.QUACK_VIZ_PARAMS`, иначе значения по умолчанию» входит в контракт роли `viz_builder` (`PROMPT_CONTRACTS.md`). Текст промпта ведётся отдельно (заготовки владельца), здесь не пишется.
+- Почему: §0.4.3 п.3 — схемы `VizBuilderOutput` и `RenderSnapshotsRequest` (D-C-107) не меняются; п.1 — без сети и без записи в страницу кода модели (CSP и sandbox `Т-§13.6`); п.5 — одна переменная, без нового протокола; страница одна и та же у compute и у ученика.
+- Обратимость: имя переменной и одна функция разбора.
+- Тесты: при реализации WP16.5 — разбор `parameter_values` (B, `tests/agents/`); снимок с набором, который страница читает из `window.QUACK_VIZ_PARAMS` (C, `compute/tests`).
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -490,6 +519,8 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | S10, этап I + пул | `compute`: пул `pebble` (`quack_compute/pool.py`) с жёстким таймаутом — реализован; настройки, схемы и маршруты WP24 — тела `NotImplementedError`; `Renderer` (Chromium) — этап I. `backend`: `ComputeClient` — методы всех эндпоинтов WP24, `create_compute_client`; заглушка — очереди по эндпоинтам | `compute/tests/test_pool_and_contract.py` — 4 passed (`T-CM1` зелёный; в Linux, весь `compute` — 9 passed); `tests/storage/test_compute_client_s10.py` — 4 passed |
 | S13 (реализация подмен) | `tests/support/llm.py`: `ScriptedLLMProvider.stream_structured` — шаги с инструментами (`script_tools`, два вызова за шаг, `phase: commentary`), ответ дельтами с ключами по алфавиту, флаг `body_before_head`, сбои Фазы 3 по D-B-125 п.5, журнал `stream_calls`; `loadtest/meta_mock.py`: SSE при `stream: true` (D-B-125 п.3), после `function_call_output` на каждый вызов — ответ. Формат — D-B-125 (B, PR #86) | `tests/test_support_scripted_llm.py` — 21 passed; `tests/test_meta_mock.py` — 59 passed |
 | S1: поле `db` (после #78) | `AppResources.db: Db` (§4.2): `create_app_resources` стала асинхронной и открывает пул `Db` без ожидания Postgres — API стартует и `/health/ready` отвечает 503 без базы (контракт готовности Фазы 3; `open_db` A ждёт пул — это для workers); закрывается последним. `engine` и `session_factory` остаются до WP1.3 (A). `tests/support/resources.build_app_resources(..., db=)`: без `db` — `Db` над закрытым пулом (`PoolClosed` при обращении) | `tests/storage/test_s1_resources.py`, `tests/test_api_llm_provider.py`, `tests/test_app_assembly.py` — 30 passed (Linux, инфраструктура) |
+| WP24 | `compute`: `/v1/pdf/pages` (PyMuPDF), `/v1/image/align`, `/v1/image/clean-drawing`, `/v1/image/render-strokes` (OpenCV), `/v1/render/pdf` (Playwright, A4, число страниц); Chromium запускается на первое задание и закрывается после `chromium_idle_close_s` простоя; образ с Chromium, `TMPDIR=/srv/quack/tmp`; шаг Chromium в CI. `/v1/render/snapshots` по D-B-130. **Не сделано:** почасовая чистка `/srv/quack/tmp` (вопрос, см. D-C-110) | `compute` в Linux — 76 passed (`T-CM1`, `T-CM2`, `T-CM3`) |
+| WP19 | `quack/storage/keys.py` — ключи `Т-§3.3` с ULID; `quack/storage/uploads.py` — тип по сигнатуре (PDF, PNG, JPEG, WebP), лимит `upload_max_mb`, `UploadRejected` 415/413; `S3ObjectStore` на `aioboto3` (path-style, подписанные ссылки, сбой → `StorageUnavailable`); `UPLOAD_REJECTED` и `StorageUnavailable` → `SERVICE_UNAVAILABLE` в `quack/api/errors.py`; снимок `openapi.json`. Эндпоинты загрузки — WP20 (материалы), WP22 (фото): там же вторая половина `T-ST3` («ход учителя работает») | `tests/storage/test_storage_wp19.py` — 12 passed (`T-ST1`, `T-ST2`, `T-ST3` — часть хранилища) |
 | S10: клиент math (WP24, по просьбе B) | `quack/compute_client/math_contracts.py` — копия `compute/quack_compute/math/schemas.py` (B); `ComputeClient.math_check`, `math_transition`, таймаут HTTP — `timeout_ms / 1000 + compute_timeout_sec`; очереди заглушки `/v1/math/check`, `/v1/math/transition`. `/v1/check/math` Фазы 3 остаётся до перевода `quack.practice` (WP11.3, B) | `tests/storage/test_compute_client_math.py` — 6 passed |
 
 ### D-C-102. Где живут `EmailSender` и `DeletionJournal`
@@ -594,6 +625,27 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `tests/test_support_scripted_llm.py` (`test_stream_*`), `tests/test_meta_mock.py` (`test_stream_*`).
 - Требует подтверждения владельцем: нет
 
+### D-C-110. WP24: числа обработки изображений, разрешение страниц PDF, чистка временных файлов
+- Класс: B
+- WP / место: WP24; `compute/quack_compute/work.py`, `compute/quack_compute/renderer.py`, `compute/Dockerfile`
+- Контекст: WP24, WP20.2, WP21.3, WP22.3, `Т-§17.6` называют, что делает каждый эндпоинт, но не числа: разрешение страниц PDF, качество WebP, пороги поиска контура листа, толщину линии пера; `Д-§4.2` говорит «чистится по возрасту раз в час», но не называет возраст и не говорит, кто чистит.
+- Решение: (1) страница PDF — разрешение PyMuPDF по умолчанию, WebP — качество OpenCV по умолчанию; (2) контур листа — обычный приём OpenCV: размытие 5, Canny 75/200, приближение многоугольником с точностью 0,02 периметра, лист — самый большой четырёхугольник не меньше 0,2 площади снимка; иначе снимок как есть (`aligned = false`). Числа — именованные поля `ComputeSettings` (`align_*`, `stroke_thickness_px`, переменные окружения — их имена заглавными) по ТЗ Ф4 §0.3, по замечанию B к #92; (3) фон рисунка — порог Оцу (без числа), прозрачно всё вне маски `segmenter`; (4) линия пера — 2 px; (5) PDF — формат A4 Chromium; (6) почасовая чистка `/srv/quack/tmp` **не сделана**: удалить профиль работающего Chromium — сломать рендер, а возраст файлов документ не называет. Вопрос владельцу: чистит compute сам или cron хоста (WP9), и какого возраста файлы.
+- Почему: §0.4.3 п.5 (значения библиотек по умолчанию, где документ молчит), `Т-§1.2`.
+- Обратимость: значения `ComputeSettings`.
+- Тесты: `compute/tests/test_wp24_endpoints.py`.
+- Снимки визуализаций (по D-B-130): набор задаётся `add_init_script("window.QUACK_VIZ_PARAMS = …")`, но страница открывается не через `set_content` (у Playwright скрипты инициализации выполняются при переходе, а не при `set_content` — проверено тестом), а переходом на внутренний адрес `http://viz.quack.internal/`, который `page.route` отдаёт из памяти — без сети. Для модели и для B ничего не меняется: переменная задана до любого скрипта страницы. Ошибки консоли — сообщения `console.error` и неперехваченные исключения страницы; `blank` — все пиксели снимка одного цвета.
+- Требует подтверждения владельцем: да — п.6 (чистка временных файлов). \[ПРОВЕРИТЬ\] п.1–2 на настоящих сканах и фото листов при WP20, WP22.
+
+### D-C-109. WP19: ULID, регион и повторы S3-клиента, код ошибки загрузки
+- Класс: B
+- WP / место: WP19; `quack/storage/keys.py`, `quack/storage/uploads.py`, `quack/storage/objects.py`, `quack/api/errors.py`
+- Контекст: `Т-§3.3` требует случайную часть ключа «например ULID», библиотеки для неё в §4.6 нет; `Д-§8.4` не называет регион бакета и таймауты клиента; ТЗ Ф4 §4.5 даёт `UPLOAD_REJECTED` 415/413 без разбивки.
+- Решение: (1) ULID — на стандартной библиотеке (48 бит миллисекунд + 80 случайных, Crockford base32), как Левенштейн в §4.6. ULID стоит в ключах, которые пишутся больше одного раза на id (штрихи, фото, кропы, экспорт, визуализации, миниатюры). `materials/{id}/original.{ext}` и `pages/{n}.webp` — ровно по раскладке `Т-§3.3`: id материала новый на каждую загрузку. (2) Регион, таймауты и повторы клиента — значения botocore по умолчанию: документы их не называют. (3) Неверный тип → 415, сверх `upload_max_mb` → 413. `detect_upload` принимает набор допустимых видов эндпоинта: фото канваса — только WebP (`Т-§22.6`). (4) `put` без условной записи (`If-None-Match`): поддержка на Contabo не проверена, неизменяемость держится на случайной части ключа. (5) Нет ключа при `get` — `KeyError`, как у подмены. Сеть, таймаут, 5xx → `StorageUnavailable` → `SERVICE_UNAVAILABLE` «file storage temporarily unavailable».
+- Почему: §0.4.3 п.5 (без новых зависимостей и параметров), `Т-§20.7`.
+- Обратимость: одна функция или один аргумент конфигурации клиента.
+- Тесты: `tests/storage/test_storage_wp19.py`.
+- Требует подтверждения владельцем: нет. \[ПРОВЕРИТЬ\] до первых загрузок (`Д-§8.4` «Проверить»): регион бакета Contabo для подписи, работа подписанных ссылок в path-style. Недоступное хранилище отвечает не сразу: botocore повторяет запрос со своей задержкой (в тесте на Windows — до ~18 с на вызов). Таймаут и число повторов — вопрос владельцу.
+
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
 Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
@@ -614,12 +666,15 @@ PR #77 (dbmate v2.36.0, sha256).
 ## Красные прогоны
 
 - Поле `db` (C, `phase-4-c-db-field`): `uv run pytest tests/storage/test_s1_resources.py` — 3 failed (нет поля `db`; `create_app_resources` не асинхронная). Зелёный — в Linux-контейнере против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` (на Windows async-psycopg не работает с Proactor-циклом pytest — `PoolTimeout`): `test_s1_resources.py`, `test_api_llm_provider.py`, `test_app_assembly.py` — 30 passed; все пользователи `build_app_resources` (`tests/session`, `tests/domains`, `tests/artifacts`, `tests/e2e`, `test_dispatcher.py`) — 281 passed (в первом прогоне один раз упал `test_mutating_endpoints_are_idempotent`, отдельно и при повторе — зелёный; на чистом `phase-4` тот же набор — 281 passed).
+- WP24 (C, `phase-4-c-wp24`, коммит `c98d1b8`): в Linux (контейнер uv python3.12-bookworm-slim + `playwright install --with-deps chromium`) `pytest tests/test_wp24_endpoints.py` — 7 failed (`NotImplementedError`), 1 xfailed. Зелёный: весь `compute` — 74 passed, 1 xfailed (BLOCKED-C-201).
+- WP19 (C, `phase-4-c-wp19`, коммит `4fb10f3`): `uv run pytest tests/storage/test_storage_wp19.py` — ошибка сборки (нет `quack.storage.keys`, `quack.storage.uploads`). Зелёный: 12 passed; `tests/storage` — 29 passed; с затронутыми (`test_app_assembly.py` — снимок OpenAPI, `test_neo4j_outage.py`, `test_ratelimit.py`, `test_infra.py`, `tests/session/test_degradation_and_workers.py`, `test_contracts.py`) — 27 passed, 42 skipped (без инфраструктуры; их прогонит CI).
 - WP2 (A), Этап I–II: схемы нагрузок (Этап I), шаблоны ключей — `NotImplementedError`: `pytest -q tests/events` — 2 failed (`T-EV3`), 71 passed (`T-EV1`, `T-EV2`, `T-EV5` на схемах Этапа I). Зелёный: 73 passed.
 - WP1 (A), коммит `8c9fe33` (Этап I–II): `QUACK_TEST_REQUIRE_INFRA=1 python -m pytest -q tests/db` — 13 errors (`NotImplementedError` в `open_db`: все `T-DB5`), 6 passed (`T-DB1` — миграция есть с Этапа I; `T-DB2`, `T-DB4` и их самопроверки; формат `actor`). Зелёный (`phase-4-a-wp1`): 19 passed.
 - S13, подмены (C, `phase-4-c-s13`, коммит `dbe6022`): `uv run pytest tests/test_meta_mock.py tests/test_support_scripted_llm.py` — `test_meta_mock.py`: 12 красных (нет SSE), 47 зелёных; `test_support_scripted_llm.py` — ошибка сборки (`ScriptedToolCall` нет). Зелёный: 80 passed; с затронутыми (`tests/llm`, `test_llm_runtime.py`, `tests/session/test_phase3_hot_path.py`) — 166 passed, 32 skipped (без инфраструктуры; их прогонит CI).
 - S13, сбои на шаге с инструментами (C, замечание B к #87): `test_stream_incomplete_on_a_tool_step_has_no_calls`, `test_stream_invalid_json_waits_for_the_answer_step` на прежнем `tests/support/llm.py` — 2 красных. Зелёный: `tests/test_support_scripted_llm.py` + `tests/test_meta_mock.py` — 82 passed.
 - Этап I G1 (B): `uv run pytest tests/session/test_phase4_contracts.py tests/llm/test_phase4_ai_layer.py tests/practice/test_tasks_markup.py tests/practice/test_check_instant.py tests/test_contracts.py` — 33 красных (`NotImplementedError`: `TurnStreamParser`, `next_step_input`, `validate_markup`, `check`), 26 зелёных (контракты, `T-AI1`, `T-A6`).
 - WP10.2–10.3 (адаптер и цикл): `tests/llm/test_phase4_stream_adapter.py` написан до реализации, но красный прогон не снят отдельно (до реализации тесты падали бы на импорте `quack.llm.tool_loop`). Зелёный: 9 passed; с затронутыми старыми (`tests/llm`, `test_llm_runtime.py`, `test_meta_mock.py`, `test_thresholds_in_settings.py`, `test_contracts.py`) — 127 passed.
+- WP12.1 (`T-TK1`, `tests/practice/test_tasks_store.py`): красный прогон отдельно не снят — тесты и код в одной итерации, до установки `dbmate` все 4 пропускались. Зелёный: `QUACK_TEST_REQUIRE_INFRA=1` — 4 passed (dbmate 2.37.0, Postgres 16).
 - WP11.5 ядро математики (#79, коммит `85e07f9`): один коммит, красный прогон не снят отдельно (замечание C по §7.4). Зелёный: `compute/tests/math` — 40 passed.
 - WP11.5, пороги через `Params` (D-B-124): `cd compute && uv run pytest tests/math/test_params.py` — красный на сборке (`TypeError: Params.__init__() got an unexpected keyword argument 'precision_digits'`), коммит `32db37f`. Зелёный: `compute/tests/math` — 43 passed.
 - WP11.5, эндпоинты без значений по умолчанию (D-B-124, #83): `cd compute && uv run pytest tests/math/test_service.py` — 11 failed, 4 passed (422 и `ValidationError`: `numeric`, `tolerance` не в схеме). Зелёный: весь `compute` — 67 passed.
@@ -630,6 +685,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.8 (`T-TT8`): `tests/session/test_turn_effort.py` — 6 failed, 3 passed (`TypeError`: нет флагов), коммит `00cb285`. Зелёный: 9 passed.
 - WP13.5 (`T-TT4`, часть): `tests/session/test_head_guards.py` — 15 failed (`NotImplementedError`), коммит `26755dd`. Зелёный: 15 passed.
 - WP13.4 (`T-TT3`, часть): `tests/session/test_holdback.py` — 4 failed (`NotImplementedError`), коммит `83675d3`. Зелёный: 5 passed; с затронутыми (`tests/session/test_spoiler_guard.py`, `test_phase3_hot_path.py::test_teacher_reasoning_effort_by_situation`, на инфраструктуре B) — 43 passed.
+- S3, модели B из ядра (Q-A-1 вариант (а)): `cd backend && uv run pytest tests/practice/test_core_models.py` — 11 failed (модели `quack.practice` — копии, не объекты `quack.events.values`), 3 passed (поля форм с метками и с id уже совпадают), коммит `ed6188c`. Зелёный: 14 passed; с затронутыми (`tests/practice`, `tests/events`, `tests/session/test_phase4_contracts.py`, `tests/llm/test_phase4_ai_layer.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 195 passed. `CheckFailed` теперь модель Pydantic ядра — вызовы B с именованными аргументами.
 
 ## Правки тестов
 
