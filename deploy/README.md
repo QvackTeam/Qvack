@@ -29,9 +29,15 @@
    ```bash
    ALLOW_NO_DUMP=1 ./deploy/deploy.sh <sha>
    ```
-   Дальше `ALLOW_NO_DUMP` не нужен: перед миграцией скрипт делает дамп.
+   Дальше `ALLOW_NO_DUMP` не нужен: перед миграцией скрипт делает дамп (`ops backup now`).
 
 Журнал выкаток — `/srv/quack/deploy.log`, текущий релиз — `/srv/quack/release.env`.
+
+## Бэкап
+
+`ops backup` (сервис `backup`, профиль `backup`: `docker compose up` его не стартует). Таймер `quack-backup.timer` ставит `setup-server.sh`, раз в 6 часов. Поток: `pg_dump -Fc --compress=zstd` → `age` (публичный ключ `BACKUP_AGE_PUBLIC_KEY`) → бакет `quack-backups/dumps/`; две последние копии без шифрования лежат в `/srv/quack/backups` (700/600). После успеха — пинг `HEARTBEAT_BACKUP_URL`, после неудачи — вебхук `ALERT_WEBHOOK_URL`. Приватный ключ `age` на сервере не хранится. Пока нет `ops db-roles`, дамп читает базу пользователем `quack`, а не `quack_reader`.
+
+Пробная проверка без R2: `BACKUP_S3_ENDPOINT=file:///путь` пишет в каталог.
 
 ## Откат
 
@@ -41,8 +47,7 @@
 
 ## Что пока не готово
 
-- **Дамп перед миграцией** и бэкап по таймеру: нужны `ops backup` и сервис `backup` (WP9.5). До них `deploy.sh` останавливается перед миграцией, если не первая выкатка.
-- **Тревоги** (`ops alerts`) и юниты systemd для `backup` и `alerts` (WP9.5).
+- **Тревоги** (`ops alerts`) и таймер systemd для `alerts` (WP9.5).
 - **Роли Postgres** (`ops db-roles`) и **восстановление** (`restore-check`, `replay-deletions`, `orphan-objects`): WP9.6. Сценарии восстановления — Д-§8.3.
 - **Job выкатки** в GitHub Actions и публикация образов в GHCR: WP9.3/9.4.
 - **CORS** API (`cors_origins` уже есть в конфиге, подключение к приложению — отдельный пакет).
