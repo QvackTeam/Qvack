@@ -1,10 +1,11 @@
-"""Model verdicts and the second opinion (Т-§6.8, Т-§7.7; ТЗ Ф4 WP11.6), pure part.
+"""Model verdicts and the second opinion (Т-§6.8, Т-§7.7; ТЗ Ф4 WP11.6).
 
-The job `check.model` (WP7.1, rules — seam S6) calls `verdict_proof` / `verdict_free`, turns
-the output into a `Verdict` here, asks `needs_second_opinion` with the state of the tested
-levels (from `quack.graph.read`, seam S4) and, if so, calls `second_opinion` and records the
-result with `with_second_opinion`. The tier (Т2 agreed, Т3 not) is set by code from
-`secondOpinion` (WP4.1, stream A), never here (law 4).
+The body of the job `check.model` (rules — seam S6): `check_with_model` calls `verdict_proof`
+or `verdict_free` with the condition, the rubric, the spec, the known misconceptions (labels
+`M…`) and the answer; turns the output into a `Verdict`; asks `needs_second_opinion` with the
+state of the tested levels (`quack.graph.read`, seam S4) and, if so, calls `second_opinion`;
+`record_verdict` writes `verdict.recorded` under `verdict:{answer_seq}:{part}`. The tier (Т2
+agreed, Т3 not) is set by code from `secondOpinion` (WP4.1, stream A), never here (law 4).
 """
 
 from __future__ import annotations
@@ -14,8 +15,12 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from quack.config import Settings
+from quack.db.db import Db
+from quack.events.event_types import AnswerSubmitted
+from quack.llm.gateway import LLMGateway
+from quack.practice.answer_spec import AnswerSpec, AnswerType
 from quack.practice.check import HelpUsed, RubricItemResult, SecondOpinion, Verdict
-from quack.practice.role_outputs import ModelVerdictOutput
+from quack.practice.role_outputs import ModelVerdictOutput, SolutionSpace, TaskCondition
 
 
 @dataclass(frozen=True)
@@ -90,3 +95,60 @@ def with_second_opinion(first: Verdict, second: ModelVerdictOutput) -> Verdict:
     the same outcome."""
     agreed = second.outcome == first.outcome
     return first.model_copy(update={"second_opinion": SecondOpinion(requested=True, agreed=agreed)})
+
+
+# --- the job body (WP11.6) ---
+
+
+@dataclass(frozen=True)
+class KnownMisconception:
+    """A misconception of the tested skills shown to the model with a label `M…`."""
+
+    misconception_id: UUID
+    statement: str
+
+
+def verdict_role(answer_type: AnswerType, *, failed: bool) -> str:
+    """Т-§6.8, Т-§22.7: `proof` — `verdict_proof`; a short free answer, a drawing and a fast
+    answer that did not check (`check.failed`) — `verdict_free`."""
+    raise NotImplementedError
+
+
+def verdict_inputs(
+    condition: TaskCondition,
+    spec: AnswerSpec,
+    solution_space: SolutionSpace | None,
+    answer: AnswerSubmitted,
+    misconceptions: Sequence[KnownMisconception],
+) -> dict[str, str]:
+    """Input blocks of `verdict_*@1` and `second_opinion@1` (PROMPT_CONTRACTS.md): the rubric
+    is the key steps of the solution space, else the key ideas of the spec (Т-§6.8)."""
+    raise NotImplementedError
+
+
+async def check_with_model(
+    gateway: LLMGateway,
+    settings: Settings,
+    *,
+    learner_id: UUID,
+    session_id: UUID | None,
+    condition: TaskCondition,
+    spec: AnswerSpec,
+    solution_space: SolutionSpace | None,
+    answer: AnswerSubmitted,
+    answer_seq: int,
+    part: str,
+    failed: bool,
+    misconceptions: Sequence[KnownMisconception],
+    levels: Sequence[LevelState],
+    help_used: HelpUsed,
+) -> Verdict:
+    """One call of the verdict role per answer, a second opinion only in doubt (Т-§7.7)."""
+    raise NotImplementedError
+
+
+async def record_verdict(
+    db: Db, verdict: Verdict, *, learner_id: UUID, session_id: UUID | None, domain_id: UUID | None
+) -> None:
+    """`verdict.recorded` under `verdict:{answer_seq}:{part}`: a repeat writes nothing new."""
+    raise NotImplementedError
