@@ -9,6 +9,11 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+
+from quack.config import Settings
+from quack.db.db import Db
+from quack.events.event_types import DomainCreated
+from quack.events.log import NewEvent, append_events
 from quack.session.sessions import (
     SessionConflictError,
     StartSession,
@@ -20,11 +25,6 @@ from quack.session.sessions import (
     resume_if_swept,
     start_session,
 )
-
-from quack.config import Settings
-from quack.db.db import Db
-from quack.events.event_types import DomainCreated
-from quack.events.log import NewEvent, append_events
 from tests.db.fixtures import create_learner
 
 SETTINGS = Settings()
