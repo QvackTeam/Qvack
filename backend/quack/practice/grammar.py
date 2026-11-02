@@ -1,8 +1,10 @@
 """Token grammar of math input (Т-§6.5, Т-§22.7) on the API side (ТЗ Ф4 WP12.3, D-B-115).
 
 The whitelist is a grammar of tokens, not a list of names: numbers (a dot only inside a
-number), operators, round and square brackets, comma, `=`, identifiers of letters and
-digits with one optional subscript (`v_0`, `F_net`) — no leading or double `_`. ASCII only:
+number), operators, round and square brackets, comma, relations `=`, `<`, `<=`, `>`, `>=`
+(the same tokens as the compute grammar, so an inequality of `interval` mode passes, D-B-144),
+identifiers of letters and digits with one optional subscript (`v_0`, `F_net`) — no leading or
+double `_`. ASCII only:
 Unicode look-alikes are refused. Anything else is a parse refusal. SymPy itself runs only in
 compute (`/v1/math/check`); this check lets `validate_markup` refuse a spec that compute
 would refuse, without a network call.
@@ -14,7 +16,7 @@ import re
 
 _TOKEN = re.compile(
     r"\s+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\.\d+|[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)?"
-    r"|\*\*|[*/+\-^()\[\],=]",
+    r"|\*\*|<=|>=|[*/+\-^()\[\],=<>]",
     re.ASCII,
 )
 _BRACKETS = {")": "(", "]": "["}

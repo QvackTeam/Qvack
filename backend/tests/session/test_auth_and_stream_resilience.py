@@ -1,4 +1,5 @@
-"""Auth revocation by `auth.users.deleted_at` and SSE stream resilience (S-5.4, S-5.5).
+"""Auth revocation by `auth.users.deleted_at` (until WP25) and SSE stream resilience (S-5.4,
+S-5.5).
 Sign-in is a Phase 4 session (ТЗ Ф4 WP18.3, D-C-112): 401 is `UNAUTHENTICATED` (§4.5)."""
 
 from __future__ import annotations
