@@ -38,13 +38,13 @@ def make_settings(tmp_path: Path, **values: object) -> Settings:
 class Calls:
     def __init__(self) -> None:
         self.pings: list[str] = []
-        self.alerts: list[tuple[str, str]] = []
+        self.alerts: list[tuple[Settings, str]] = []
 
     async def ping(self, url: str) -> None:
         self.pings.append(url)
 
-    async def alert(self, url: str, message: str) -> None:
-        self.alerts.append((url, message))
+    async def alert(self, settings: Settings, message: str) -> None:
+        self.alerts.append((settings, message))
 
 
 async def backup(
@@ -102,8 +102,7 @@ async def test_failed_dump_alerts_and_leaves_no_copy_and_no_heartbeat(tmp_path: 
 
     assert calls.pings == []
     assert len(calls.alerts) == 1
-    url, message = calls.alerts[0]
-    assert url == "https://chat.example/hook"
+    _, message = calls.alerts[0]
     assert "CRITICAL" in message and "pg_dump exited with 3" in message
     assert list((tmp_path / "local").glob("quack-*")) == []
     assert list((tmp_path / "r2").rglob("*.dump.age")) == []
@@ -123,7 +122,7 @@ async def test_failing_alert_and_heartbeat_do_not_change_the_result(tmp_path: Pa
         async def ping(self, url: str) -> None:
             raise RuntimeError("heartbeat down")
 
-        async def alert(self, url: str, message: str) -> None:
+        async def alert(self, settings: Settings, message: str) -> None:
             raise RuntimeError("chat down")
 
     assert await backup(tmp_path, Broken()) == 0

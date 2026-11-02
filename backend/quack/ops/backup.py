@@ -29,6 +29,7 @@ from aiobotocore.config import AioConfig  # pyright: ignore[reportMissingTypeStu
 
 from quack.config import Settings
 from quack.logging import get_logger
+from quack.ops.notify import post_alert
 
 log = get_logger(__name__)
 
@@ -162,13 +163,6 @@ async def _ping(url: str) -> None:
         (await http.get(url)).raise_for_status()
 
 
-async def _post_alert(url: str, message: str) -> None:
-    # The body shape of the team chat webhook is not fixed by the documents: `text` is the
-    # field of the common chat webhooks. TODO(owner): confirm with the chat that is chosen.
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_S) as http:
-        (await http.post(url, json={"text": message})).raise_for_status()
-
-
 def _dump_name(now: datetime, version: str) -> str:
     return f"quack-{now.strftime('%Y%m%dT%H%M%SZ')}-{version}.dump"
 
@@ -238,7 +232,7 @@ async def run_backup(
     uploader: ObjectUploader | None = None,
     commands: BackupCommands | None = None,
     ping: Callable[[str], Awaitable[None]] = _ping,
-    alert: Callable[[str, str], Awaitable[None]] = _post_alert,
+    alert: Callable[[Settings, str], Awaitable[None]] = post_alert,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> int:
     """One backup. Returns 0 after a successful dump, upload and heartbeat; 1 otherwise."""
@@ -264,14 +258,12 @@ async def run_backup(
         _prune_local(directory)
     except Exception as exc:
         log.error("backup_failed", error=str(exc), dump=name)
-        webhook = settings.alert_webhook_url.get_secret_value()
-        if webhook:
-            try:
-                await alert(
-                    webhook, f"CRITICAL: Postgres backup failed ({settings.quack_version}): {exc}"
-                )
-            except Exception as alert_exc:  # the exit code still reports the failure
-                log.error("backup_alert_failed", error=str(alert_exc))
+        try:
+            await alert(
+                settings, f"CRITICAL: Postgres backup failed ({settings.quack_version}): {exc}"
+            )
+        except Exception as alert_exc:  # the exit code still reports the failure
+            log.error("backup_alert_failed", error=str(alert_exc))
         return 1
     log.info("backup_done", dump=name, seconds=(now() - started).total_seconds())
     heartbeat = settings.heartbeat_backup_url.get_secret_value()
