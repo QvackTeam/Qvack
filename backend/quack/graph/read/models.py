@@ -70,6 +70,16 @@ class ExposureFact(_Fact):
     occurred_at_ms: int
 
 
+class RequiresLink(_Fact):
+    """`REQUIRES` between skills with its confidence (Т-§7.9); the guard rule "do not jump over
+    the frontier" (WP13.5) takes the links with `confidence >= requires_min_confidence`."""
+
+    skill_id: UUID
+    confidence: float = Field(ge=0.0, le=1.0)
+    has_exposure: bool = False
+    has_evidence: bool = False
+
+
 class SkillFact(_Fact):
     skill_id: UUID
     topic_id: UUID | None = None
@@ -81,6 +91,7 @@ class SkillFact(_Fact):
     consolidation_flag: bool = False
     gap_type: GapType | None = None
     exposures: list[ExposureFact] = []
+    requires: list[RequiresLink] = []
 
 
 class MisconceptionFact(_Fact):
@@ -203,6 +214,7 @@ class PrepContext(_Fact):
 
 class PrerequisiteFact(_Fact):
     skill_id: UUID
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     levels: list[LevelFact] = []
 
 

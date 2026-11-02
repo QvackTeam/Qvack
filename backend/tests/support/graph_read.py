@@ -28,6 +28,7 @@ from quack.graph.read import (
     PastSolution,
     PrepContext,
     PrerequisiteFact,
+    RequiresLink,
     ReviewCandidate,
     ReviewScope,
     RootCauseFact,
@@ -76,6 +77,13 @@ _LEVELS: dict[UUID, list[LevelFact]] = {
     ],
     SKILL_QUIET: [LevelFact(level=3, status="not_tested")],
 }
+# SKILL_FAILED requires SKILL_PROVEN (shown, evidenced) and SKILL_QUIET (weak link, untouched).
+_REQUIRES: dict[UUID, list[RequiresLink]] = {
+    SKILL_FAILED: [
+        RequiresLink(skill_id=SKILL_PROVEN, confidence=0.9, has_exposure=True, has_evidence=True),
+        RequiresLink(skill_id=SKILL_QUIET, confidence=0.4),
+    ]
+}
 _TOPIC_OF = {SKILL_PROVEN: TOPIC_READY, SKILL_FAILED: TOPIC_OPEN, SKILL_QUIET: TOPIC_OPEN}
 
 
@@ -100,6 +108,7 @@ def _skill(skill_id: UUID) -> SkillFact:
         topic_id=_TOPIC_OF[skill_id],
         domain_id=DOMAIN,
         levels=_LEVELS[skill_id],
+        requires=_REQUIRES.get(skill_id, []),
     )
 
 

@@ -79,3 +79,12 @@ def test_models_reject_unknown_fields_and_bad_values() -> None:
             status="suspected",
             quotes=["a", "b", "c"],
         )
+
+
+def test_requires_carry_confidence_for_the_guard_rule() -> None:
+    sl = asyncio.run(_reader().slice_for_turn(fx.LEARNER, UUID(int=1), SliceFocus()))
+    failed = next(s for s in sl.skills if s.skill_id == fx.SKILL_FAILED)
+    assert [(link.confidence, link.has_evidence) for link in failed.requires] == [
+        (0.9, True),
+        (0.4, False),
+    ]
