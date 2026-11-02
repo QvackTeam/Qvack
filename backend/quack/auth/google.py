@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
+from quack.auth.links import learner_for_email
 from quack.config import Settings
 from quack.db import Db
 
@@ -50,4 +51,6 @@ class AuthlibGoogleOIDC:
 
 async def learner_for_google(db: Db, identity: GoogleIdentity) -> UUID:
     """The learner of the verified address (a new row for a new one); `EmailNotVerified`."""
-    raise NotImplementedError
+    if not identity.email_verified:
+        raise EmailNotVerified("Google has not verified this address")
+    return await learner_for_email(db, identity.email)

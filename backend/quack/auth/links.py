@@ -7,14 +7,20 @@ a new address. Limits per address and per IP: `LinkLimiter` (Redis, local withou
 
 from __future__ import annotations
 
-from datetime import datetime
-from uuid import UUID
+import hashlib
+import secrets
+from datetime import datetime, timedelta
+from uuid import UUID, uuid4
 
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from quack.api.email import EmailSender
 from quack.config import Settings
 from quack.db import Db
+
+_TOKEN_BYTES = 16  # 128 bits (WP18.1)
+_HOUR_S = 3600
 
 
 class LinkInvalid(Exception):
@@ -31,25 +37,52 @@ class AuthRateLimited(Exception):
 
 def new_token() -> str:
     """128 random bits, URL-safe."""
-    raise NotImplementedError
+    return secrets.token_urlsafe(_TOKEN_BYTES)
 
 
 def token_hash(token: str) -> str:
     """What the database keeps instead of a token."""
-    raise NotImplementedError
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 class LinkLimiter:
     """`auth_link_per_email_per_hour` and `auth_link_per_ip_per_hour`: Redis counters, local
-    counters when Redis is `None` or down (Т-§19.1, Д-§10)."""
+    counters when Redis is `None` or down (Т-§19.1, Д-§10). A window is a clock hour
+    (D-C-111): counters of an hour expire with it."""
 
     def __init__(self, redis: Redis | None, settings: Settings) -> None:
         self._redis = redis
         self._settings = settings
+        self._local: dict[str, int] = {}
 
     async def hit(self, *, email: str, ip: str, now: datetime) -> None:
         """Count one request; `AuthRateLimited` over either limit."""
-        raise NotImplementedError
+        hour = int(now.timestamp()) // _HOUR_S
+        retry_after_s = (hour + 1) * _HOUR_S - int(now.timestamp())
+        limits = {
+            f"auth:link:email:{email.lower()}:{hour}": self._settings.auth_link_per_email_per_hour,
+            f"auth:link:ip:{ip}:{hour}": self._settings.auth_link_per_ip_per_hour,
+        }
+        counts = await self._count(list(limits))
+        if any(count > limits[key] for key, count in zip(limits, counts, strict=True)):
+            raise AuthRateLimited(retry_after_s)
+
+    async def _count(self, keys: list[str]) -> list[int]:
+        if self._redis is not None:
+            try:
+                pipe = self._redis.pipeline()
+                for key in keys:
+                    pipe.incr(key)
+                    pipe.expire(key, _HOUR_S, nx=True)
+                results = await pipe.execute()
+                return [int(results[2 * n]) for n in range(len(keys))]
+            except RedisError:
+                pass  # Д-§10: without Redis the limits are local
+        counts = []
+        for key in keys:
+            self._local[key] = self._local.get(key, 0) + 1
+            counts.append(self._local[key])
+        return counts
 
 
 async def request_link(
@@ -65,10 +98,47 @@ async def request_link(
 ) -> None:
     """Store the hash of a new token and mail `verify_url?token=…` to `email` (lower case).
     `verify_url` is the absolute URL of `GET /auth/link/verify` built by the router."""
-    raise NotImplementedError
+    address = email.strip().lower()
+    await limiter.hit(email=address, ip=ip, now=now)
+    token = new_token()
+    await db.execute(
+        "INSERT INTO core.auth_links (token_hash, email, created_at, expires_at) "
+        "VALUES (%(hash)s, %(email)s, %(now)s, %(expires)s)",
+        {
+            "hash": token_hash(token),
+            "email": address,
+            "now": now,
+            "expires": now + timedelta(minutes=settings.auth_link_ttl_min),
+        },
+    )
+    await email_sender.send_login_link(to=address, link=f"{verify_url}?token={token}")
+
+
+async def learner_for_email(db: Db, email: str) -> UUID:
+    """The learner of the address; a new `core.learners` row for a new one."""
+    address = email.strip().lower()
+    await db.execute(
+        "INSERT INTO core.learners (learner_id, email) VALUES (%(id)s, %(email)s) "
+        "ON CONFLICT (email) DO NOTHING",
+        {"id": uuid4(), "email": address},
+    )
+    row = await db.fetch_one(
+        "SELECT learner_id FROM core.learners WHERE email = %(email)s", {"email": address}
+    )
+    assert row is not None
+    return row["learner_id"]
 
 
 async def redeem_link(db: Db, *, token: str, now: datetime) -> UUID:
     """Redeem the token once; the learner of its address, a new `core.learners` row for a new
     address. `LinkInvalid` if unknown, expired or used."""
-    raise NotImplementedError
+    async with db.transaction():
+        row = await db.fetch_one(
+            "UPDATE core.auth_links SET used_at = %(now)s "
+            "WHERE token_hash = %(hash)s AND used_at IS NULL AND expires_at > %(now)s "
+            "RETURNING email",
+            {"hash": token_hash(token), "now": now},
+        )
+        if row is None:
+            raise LinkInvalid("login link is invalid or expired")
+        return await learner_for_email(db, row["email"])

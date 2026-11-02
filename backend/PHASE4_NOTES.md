@@ -489,6 +489,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | S1 (зона C), этап I | интерфейсы `ObjectStore`, `EmbeddingClient`, `EmailSender`, `DeletionJournal`; поля `AppResources`; подмены; имена параметров §6.7 потока C. Продовые клиенты — `NotImplementedError` (WP18–WP20, WP25) | `tests/storage/test_s1_resources.py` — 8 passed |
 | S10, этап I + пул | `compute`: пул `pebble` (`quack_compute/pool.py`) с жёстким таймаутом — реализован; настройки, схемы и маршруты WP24 — тела `NotImplementedError`; `Renderer` (Chromium) — этап I. `backend`: `ComputeClient` — методы всех эндпоинтов WP24, `create_compute_client`; заглушка — очереди по эндпоинтам | `compute/tests/test_pool_and_contract.py` — 4 passed (`T-CM1` зелёный; в Linux, весь `compute` — 9 passed); `tests/storage/test_compute_client_s10.py` — 4 passed |
 | S13 (реализация подмен) | `tests/support/llm.py`: `ScriptedLLMProvider.stream_structured` — шаги с инструментами (`script_tools`, два вызова за шаг, `phase: commentary`), ответ дельтами с ключами по алфавиту, флаг `body_before_head`, сбои Фазы 3 по D-B-125 п.5, журнал `stream_calls`; `loadtest/meta_mock.py`: SSE при `stream: true` (D-B-125 п.3), после `function_call_output` на каждый вызов — ответ. Формат — D-B-125 (B, PR #86) | `tests/test_support_scripted_llm.py` — 21 passed; `tests/test_meta_mock.py` — 59 passed |
+| WP18, библиотека | `quack/auth/`: ссылка по почте (128 бит, в базе хэш, одно погашение, `auth_link_ttl_min`), `LinkLimiter` (Redis, без него — локально), сессии (`core.auth_sessions`, хэш, отзыв, срок), параметры cookie, ученик по подтверждённому адресу Google, согласия событиями. `FakeOIDC` в `tests/support/oidc.py`. **Не сделано (этап II, часть 2):** маршруты `/auth/*`, `/v1/me`, `/v1/consents`, `PATCH /v1/learner/settings`; `AuthlibGoogleOIDC`; замена входа Фазы 3 (JWT, `auth.users`) на сессии во всех роутерах; коды `UNAUTHENTICATED`, `CONSENT_REQUIRED`; `T-AU5` | `tests/auth` — 7 passed (Linux, инфраструктура) |
 | S10: клиент math (WP24, по просьбе B) | `quack/compute_client/math_contracts.py` — копия `compute/quack_compute/math/schemas.py` (B); `ComputeClient.math_check`, `math_transition`, таймаут HTTP — `timeout_ms / 1000 + compute_timeout_sec`; очереди заглушки `/v1/math/check`, `/v1/math/transition`. `/v1/check/math` Фазы 3 остаётся до перевода `quack.practice` (WP11.3, B) | `tests/storage/test_compute_client_math.py` — 6 passed |
 
 ### D-C-102. Где живут `EmailSender` и `DeletionJournal`
@@ -593,6 +594,16 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `tests/test_support_scripted_llm.py` (`test_stream_*`), `tests/test_meta_mock.py` (`test_stream_*`).
 - Требует подтверждения владельцем: нет
 
+### D-C-111. WP18: имя cookie, окно лимитов, ключ согласия, адрес ссылки
+- Класс: B
+- WP / место: WP18; `quack/auth/links.py`, `quack/auth/sessions.py`, `quack/auth/consents.py`
+- Контекст: `Т-§19.1` и WP18 называют флаги и домен cookie, лимиты «в час», события согласия и путь `GET /auth/link/verify`, но не имя cookie, вид окна лимита, ключ идемпотентности согласия и базовый адрес ссылки в письме.
+- Решение: (1) cookie `quack_session`; (2) окно лимита — календарный час: счётчики `auth:link:{email|ip}:…:{час}` в Redis с `EXPIRE 3600`, без Redis или при его ошибке — локальные (`Д-§10`); `retry_after` — до конца часа; (3) ключ идемпотентности согласия берётся из запроса (`Idempotency-Key`, как у мутирующих эндпоинтов Фазы 3): согласие, данное снова после отзыва, — новое событие, а ключ из вида и версии его бы схлопнул (закон 5); (4) ссылка в письме — абсолютный адрес `GET /auth/link/verify`, который роутер строит из запроса, без нового параметра; (5) адрес приводится к нижнему регистру (`core.learners.email` с `CHECK (email = lower(email))`).
+- Почему: §0.4.3 п.5 (без новых параметров), закон 5.
+- Обратимость: константа и одна функция.
+- Тесты: `tests/auth/test_auth_wp18.py`.
+- Требует подтверждения владельцем: нет.
+
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
 Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
@@ -612,7 +623,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
-- WP18, этап I (C, `phase-4-c-wp18`): в Linux против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` и dbmate v2.36.0 `pytest tests/auth` — 7 failed (`NotImplementedError`: `request_link`, `redeem_link`, `LinkLimiter`, `cookie_params`, `learner_for_google`, сессии, согласия). `T-AU5` — с этапом II (весь API на сессиях).
+- WP18, этап I (C, `phase-4-c-wp18`): в Linux против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` и dbmate v2.36.0 `pytest tests/auth` — 7 failed (`NotImplementedError`: `request_link`, `redeem_link`, `LinkLimiter`, `cookie_params`, `learner_for_google`, сессии, согласия). Зелёный (библиотека): 7 passed. `T-AU5` — с маршрутами (весь API на сессиях).
 - WP2 (A), Этап I–II: схемы нагрузок (Этап I), шаблоны ключей — `NotImplementedError`: `pytest -q tests/events` — 2 failed (`T-EV3`), 71 passed (`T-EV1`, `T-EV2`, `T-EV5` на схемах Этапа I). Зелёный: 73 passed.
 - WP1 (A), коммит `8c9fe33` (Этап I–II): `QUACK_TEST_REQUIRE_INFRA=1 python -m pytest -q tests/db` — 13 errors (`NotImplementedError` в `open_db`: все `T-DB5`), 6 passed (`T-DB1` — миграция есть с Этапа I; `T-DB2`, `T-DB4` и их самопроверки; формат `actor`). Зелёный (`phase-4-a-wp1`): 19 passed.
 - S13, подмены (C, `phase-4-c-s13`, коммит `dbe6022`): `uv run pytest tests/test_meta_mock.py tests/test_support_scripted_llm.py` — `test_meta_mock.py`: 12 красных (нет SSE), 47 зелёных; `test_support_scripted_llm.py` — ошибка сборки (`ScriptedToolCall` нет). Зелёный: 80 passed; с затронутыми (`tests/llm`, `test_llm_runtime.py`, `tests/session/test_phase3_hot_path.py`) — 166 passed, 32 skipped (без инфраструктуры; их прогонит CI).

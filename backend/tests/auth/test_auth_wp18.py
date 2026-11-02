@@ -178,15 +178,17 @@ async def test_consent_required(pg_db: Db, settings: Settings) -> None:
     v1 = settings.model_copy(update={"terms_version": "2026-11"})
     assert await has_current_terms(pg_db, learner, v1) is False
 
-    await give_consent(pg_db, learner, kind="terms", version="2026-11")
+    await give_consent(pg_db, learner, kind="terms", version="2026-11", idempotency_key="c1")
     assert await has_current_terms(pg_db, learner, v1) is True
     v2 = settings.model_copy(update={"terms_version": "2026-12"})
     assert await has_current_terms(pg_db, learner, v2) is False
     unset = settings.model_copy(update={"terms_version": None})
     assert await has_current_terms(pg_db, learner, unset) is False
 
-    await give_consent(pg_db, learner, kind="research", version="2026-11")
-    await revoke_research(pg_db, learner, version="2026-11")
+    await give_consent(pg_db, learner, kind="research", version="2026-11", idempotency_key="c2")
+    await revoke_research(pg_db, learner, version="2026-11", idempotency_key="c3")
+    # Given again after the revocation: a new event, not a duplicate (law 5).
+    await give_consent(pg_db, learner, kind="research", version="2026-11", idempotency_key="c4")
     rows = await pg_db.fetch_all(
         "SELECT type, payload FROM core.events WHERE learner_id = %(id)s ORDER BY seq",
         {"id": learner},
@@ -195,4 +197,5 @@ async def test_consent_required(pg_db: Db, settings: Settings) -> None:
         ("consent.given", "terms"),
         ("consent.given", "research"),
         ("consent.revoked", "research"),
+        ("consent.given", "research"),
     ]

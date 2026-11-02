@@ -8,10 +8,11 @@ revocation time. `learner_id` comes only from the session, never from a request 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
 
+from quack.auth.links import new_token, token_hash
 from quack.config import Settings
 from quack.db import Db
 
@@ -39,20 +40,58 @@ async def open_session(
     canvas_id: UUID | None = None,
 ) -> str:
     """A new session; returns the token for the cookie."""
-    raise NotImplementedError
+    token = new_token()
+    await db.execute(
+        "INSERT INTO core.auth_sessions "
+        "(token_hash, learner_id, scope, canvas_id, created_at, expires_at) "
+        "VALUES (%(hash)s, %(learner)s, %(scope)s, %(canvas)s, %(now)s, %(expires)s)",
+        {
+            "hash": token_hash(token),
+            "learner": learner_id,
+            "scope": scope,
+            "canvas": canvas_id,
+            "now": now,
+            "expires": now + timedelta(days=settings.auth_session_ttl_days),
+        },
+    )
+    return token
 
 
 async def resolve_session(db: Db, *, token: str, now: datetime) -> AuthSession | None:
     """The live session of the token; `None` if unknown, expired or revoked."""
-    raise NotImplementedError
+    row = await db.fetch_one(
+        "SELECT learner_id, scope, canvas_id, expires_at FROM core.auth_sessions "
+        "WHERE token_hash = %(hash)s AND revoked_at IS NULL AND expires_at > %(now)s",
+        {"hash": token_hash(token), "now": now},
+    )
+    if row is None:
+        return None
+    return AuthSession(
+        learner_id=row["learner_id"],
+        scope=row["scope"],
+        canvas_id=row["canvas_id"],
+        expires_at=row["expires_at"],
+    )
 
 
 async def revoke_session(db: Db, *, token: str, now: datetime) -> None:
     """`POST /auth/logout`: the next request with this token is 401."""
-    raise NotImplementedError
+    await db.execute(
+        "UPDATE core.auth_sessions SET revoked_at = %(now)s "
+        "WHERE token_hash = %(hash)s AND revoked_at IS NULL",
+        {"hash": token_hash(token), "now": now},
+    )
 
 
 def cookie_params(settings: Settings) -> dict[str, Any]:
     """Arguments of `Response.set_cookie`: `HttpOnly`, `Secure`, `SameSite=Lax`,
     `Domain = session_cookie_domain`, max age `auth_session_ttl_days` (Т-§19.1)."""
-    raise NotImplementedError
+    return {
+        "key": SESSION_COOKIE,
+        "httponly": True,
+        "secure": True,
+        "samesite": "lax",
+        "domain": settings.session_cookie_domain,
+        "max_age": settings.auth_session_ttl_days * 24 * 3600,
+        "path": "/",
+    }
