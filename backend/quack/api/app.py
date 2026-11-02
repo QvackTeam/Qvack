@@ -28,6 +28,7 @@ from quack.auth.sessions import resolve_session
 from quack.config import Settings, get_settings
 from quack.domains.router import router as domains_router
 from quack.logging import configure_logging, get_logger, log_context
+from quack.materials.router import router as materials_router
 from quack.session.router import router as session_router
 
 log = get_logger(__name__)
@@ -190,6 +191,7 @@ def create_app(
     app.include_router(artifacts_router)
     app.include_router(learner_stream_router)
     app.include_router(auth_router)
+    app.include_router(materials_router)
     return app
 
 

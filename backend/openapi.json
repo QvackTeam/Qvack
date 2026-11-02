@@ -417,6 +417,32 @@
         "title": "AuthResponse",
         "type": "object"
       },
+      "Body_upload_material_v1_domains__domain_id__materials_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_material_v1_domains__domain_id__materials_post",
+        "type": "object"
+      },
       "CheatsheetRefreshRequest": {
         "properties": {
           "domain_id": {
@@ -1576,6 +1602,145 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "MaterialDetailView": {
+        "properties": {
+          "file_url": {
+            "title": "File Url",
+            "type": "string"
+          },
+          "material": {
+            "$ref": "#/components/schemas/MaterialView"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/MaterialPageView"
+            },
+            "title": "Pages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "material",
+          "file_url",
+          "pages"
+        ],
+        "title": "MaterialDetailView",
+        "type": "object"
+      },
+      "MaterialList": {
+        "properties": {
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/MaterialView"
+            },
+            "title": "Materials",
+            "type": "array"
+          }
+        },
+        "required": [
+          "materials"
+        ],
+        "title": "MaterialList",
+        "type": "object"
+      },
+      "MaterialPageView": {
+        "properties": {
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page",
+          "text",
+          "image_url"
+        ],
+        "title": "MaterialPageView",
+        "type": "object"
+      },
+      "MaterialView": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "domain_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain Id"
+          },
+          "material_id": {
+            "format": "uuid",
+            "title": "Material Id",
+            "type": "string"
+          },
+          "mime": {
+            "title": "Mime",
+            "type": "string"
+          },
+          "pages_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages Count"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_id",
+          "domain_id",
+          "session_id",
+          "mime",
+          "status",
+          "pages_count",
+          "created_at"
+        ],
+        "title": "MaterialView",
+        "type": "object"
+      },
       "Me": {
         "properties": {
           "client": {
@@ -2099,6 +2264,59 @@
           "password"
         ],
         "title": "RegisterRequest",
+        "type": "object"
+      },
+      "SearchHitView": {
+        "description": "WP20.5: the session, `seq`, the snippet and the type of a found event.",
+        "properties": {
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "snippet": {
+            "title": "Snippet",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "seq",
+          "type",
+          "snippet"
+        ],
+        "title": "SearchHitView",
+        "type": "object"
+      },
+      "SearchHits": {
+        "properties": {
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHitView"
+            },
+            "title": "Hits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hits"
+        ],
+        "title": "SearchHits",
         "type": "object"
       },
       "SearchResponse": {
@@ -5178,6 +5396,180 @@
         ]
       }
     },
+    "/v1/domains/{domain_id}/materials": {
+      "get": {
+        "operationId": "list_materials_v1_domains__domain_id__materials_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "List Materials",
+        "tags": [
+          "materials"
+        ]
+      },
+      "post": {
+        "operationId": "upload_material_v1_domains__domain_id__materials_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_material_v1_domains__domain_id__materials_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Upload Material",
+        "tags": [
+          "materials"
+        ]
+      }
+    },
     "/v1/domains/{domain_id}/structure": {
       "patch": {
         "operationId": "edit_structure_endpoint_v1_domains__domain_id__structure_patch",
@@ -5949,6 +6341,79 @@
         ]
       }
     },
+    "/v1/materials/{material_id}": {
+      "get": {
+        "operationId": "get_material_v1_materials__material_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "material_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Material Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialDetailView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Get Material",
+        "tags": [
+          "materials"
+        ]
+      }
+    },
     "/v1/me": {
       "get": {
         "operationId": "me_v1_me_get",
@@ -5987,6 +6452,102 @@
         "summary": "Me",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/v1/search": {
+      "get": {
+        "description": "D-C-116: the query length and the size of the answer follow the Phase 3 search\n(`search_min_query_len`, `search_default_limit`, `search_max_limit`).",
+        "operationId": "search_v1_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "domain_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchHits"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Search",
+        "tags": [
+          "materials"
         ]
       }
     },

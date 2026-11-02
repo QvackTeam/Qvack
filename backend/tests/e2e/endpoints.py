@@ -15,6 +15,9 @@ NO_IDEMPOTENCY_KEY: dict[tuple[str, str], str] = {
     ("DELETE", "/v1/learner"): "one tombstone per learner; a repeat is a no-op",
     # ТЗ Ф4 §6.4: the body is `{timezone}` only; no event, a repeat sets the same value.
     ("PATCH", "/v1/learner/settings"): "no event; sets core.learners.settings",
+    # ТЗ Ф4 WP20.1: a multipart upload with an optional `session_id`; every upload is a new
+    # material with its own `material.uploaded` key (D-C-116).
+    ("POST", "/v1/domains/{domain_id}/materials"): "multipart; each upload is a new material",
     ("POST", "/v1/sessions/{session_id}/heartbeat"): "no event; refreshes presence only",
     # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
     ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): "no event; the job coalesces",
@@ -34,6 +37,10 @@ def mutating_routes(app: FastAPI) -> set[tuple[str, str]]:
     }
 
 
+# The walks upload no material: routes with `{material_id}` get an id nobody has.
+NO_MATERIAL = UUID(int=0)
+
+
 @dataclass(frozen=True)
 class Ids:
     """Objects of one learner that the bodies and paths refer to."""
@@ -47,6 +54,7 @@ class Ids:
     diagnostic_session_id: UUID
     diagnostic_task_id: UUID
     structure_version: int
+    material_id: UUID = NO_MATERIAL
 
 
 def path_for(path: str, ids: Ids) -> str:
@@ -56,7 +64,16 @@ def path_for(path: str, ids: Ids) -> str:
         session_id=ids.session_id,
         task_id=ids.task_id,
         artifact_id=ids.artifact_id,
+        material_id=ids.material_id,
     )
+
+
+# Routes with a multipart body instead of JSON: the files of a valid request.
+MULTIPART: dict[tuple[str, str], dict[str, tuple[str, bytes, str]]] = {
+    ("POST", "/v1/domains/{domain_id}/materials"): {
+        "file": ("notes.pdf", b"%PDF-1.7\n1 0 obj\n", "application/pdf")
+    },
+}
 
 
 def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> dict[str, Any]:

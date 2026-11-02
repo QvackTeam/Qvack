@@ -1053,6 +1053,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/auth/test_auth_routes.py`, `tests/test_app_assembly.py`.
 - Требует подтверждения владельцем: нет.
 
+### D-C-116. WP20.1, WP20.5: маршруты материалов и поиска на сессиях
+- Класс: B
+- WP / место: WP20.1, WP20.5; `quack/materials/router.py`, `quack/materials/library.py`, `tests/e2e/endpoints.py`
+- Контекст: §6.4 называет `POST/GET /v1/domains/{id}/materials`, `GET /v1/materials/{id}`, `GET /v1/search`; WP20.1 — multipart с необязательным `session_id`. Не названы: ключ идемпотентности загрузки, размер выдачи и минимальная длина запроса поиска (D-C-113 п.4), ответ на список материалов чужого домена.
+- Решение: (1) Вход — только кука сессии (`get_current_session`, WP18.3), не JWT Фазы 3 (D-C-113 п.5); без сессии — 401 `UNAUTHENTICATED`. (2) Загрузка — без `idempotency_key`: WP20.1 его не называет, каждая загрузка — новый материал со своим ключом `material.uploaded:{material_id}`; в обходе `T-E2` маршрут — в `NO_IDEMPOTENCY_KEY` с причиной. (3) Поиск берёт параметры полнотекстового поиска Фазы 3: `search_min_query_len`, `search_default_limit`, `search_max_limit` (те же проверки, что у `GET /v1/artifacts/search`, 422 `VALIDATION_ERROR`). (4) Список материалов чужого или неизвестного домена — 404 `NOT_FOUND`, не пустой список (`T-E3`); проверка домена — та же, что у загрузки (D-C-113 п.1). (5) Ответы: материал — `material_id, domain_id, session_id, mime, status, pages_count, created_at`; карточка — материал, `file_url`, страницы `page, text, image_url`; поиск — `hits` из `session_id, seq, type, snippet`.
+- Почему: §0.4.3 п.5, §4.5, WP18.3.
+- Обратимость: один модуль маршрутов.
+- Тесты: `tests/materials/test_materials_routes.py`, `tests/e2e/test_isolation_and_idempotency.py` (`T-E2`, `T-E3`), `tests/test_app_assembly.py`.
+- Риск перехода: домен проверяется по `domain.created` в журнале Фазы 4, а домены пока создаёт маршрут A Фазы 3 в старом журнале — загрузить материал через API можно будет, когда создание домена перейдёт на `Db` (R-W, A). Компаньон (`scope = companion`, `T-CP1` → 403) — общей проверкой в WP22, не здесь.
+- Требует подтверждения владельцем: нет.
+
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
 Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
@@ -1074,6 +1085,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP20, маршруты (C, `phase-4-c-api-sessions`, коммит `e2fb068`): в Linux против `quack-test-*` с dbmate `pytest tests/materials/test_materials_routes.py` — 4 failed (маршрутов нет: 404 вместо 201/401/415/200). Зелёный: `tests/materials`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/auth` — 66 passed.
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
 - WP18, этап I (C, `phase-4-c-wp18`): в Linux против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` и dbmate v2.36.0 `pytest tests/auth` — 7 failed (`NotImplementedError`: `request_link`, `redeem_link`, `LinkLimiter`, `cookie_params`, `learner_for_google`, сессии, согласия). Зелёный (библиотека): 7 passed. `T-AU5` — с маршрутами (весь API на сессиях).
 - WP20.1, WP20.5 (C, `phase-4-c-wp20`, коммит `d161aed`): в Linux против `quack-test-*` с dbmate — `tests/materials` 4 failed (`NotImplementedError`). Зелёный: `tests/materials`, `test_contracts.py`, `tests/db/test_sql_static.py` — 15 passed.
