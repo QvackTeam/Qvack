@@ -1,4 +1,4 @@
-"""ТЗ Ф4 §8.9 T-TT2, T-TT3, T-TT4, T-TT6 at the turn graph (WP13.2, WP13.4, WP13.5).
+"""ТЗ Ф4 §8.9 T-TT2, T-TT3, T-TT4, T-TT5, T-TT6 at the turn graph (WP13.2, WP13.4, WP13.5).
 
 The graph runs on the seam S13 provider (`ScriptedLLMProvider.stream_structured`) and on
 in-memory ports: admission, context, tools, the write and the frames are the caller's
@@ -26,9 +26,11 @@ from quack.session.actions import (
     TurnCommittedFrame,
     VerdictFrame,
 )
+from quack.session.teacher_output import TurnTask
 from quack.session.turn_graph import (
     AssembledTurn,
     GuardInputs,
+    MarkupFix,
     Role,
     TurnSlots,
     TurnToCommit,
@@ -164,6 +166,8 @@ class Ports:
     frames: list[Any] = field(default_factory=list)
     committed: list[TurnToCommit] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
+    fixes: list[dict[str, Any]] = field(default_factory=list)
+    fix_calls: list[MarkupFix] = field(default_factory=list)
 
     async def admit(self) -> Role:
         return "teacher"
@@ -181,6 +185,14 @@ class Ports:
 
     async def emit(self, frame: Any) -> None:
         self.frames.append(frame)
+
+    async def fix_markup(self, fix: MarkupFix) -> TurnTask | None:
+        """The n-th fix answer is `fixes[n]` (the last repeats); none — no fix."""
+        self.fix_calls.append(fix)
+        if not self.fixes:
+            return None
+        answer = self.fixes.pop(0) if len(self.fixes) > 1 else self.fixes[0]
+        return TurnTask.model_validate(answer)
 
 
 def _ports(verdict: Verdict | None = None, frame: VerdictFrame | None = None) -> Ports:
@@ -410,6 +422,57 @@ async def test_invalid_task_markup_removes_element() -> None:
     assert turn.text == CLEAN_PREFIX
     assert turn.output.p3_markup.elements == [] and turn.output.p3_markup.tasks == []
     assert [b.block_id for b in turn.output.p2_body.blocks] == ["b1"]
+
+
+# --- T-TT5 ---
+
+
+async def test_markup_fix_keeps_text() -> None:
+    """Bad task markup → a separate fix call with the shown text and the problems; the text
+    is not generated again; the fixed markup is shown and committed."""
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(tasks=[_task(level=1)]))
+    ports = _ports()
+    ports.fixes = [_task(level=3)]
+
+    await _run(ports, provider)
+
+    assert len(provider.stream_calls) == 1
+    assert not [f for f in ports.frames if isinstance(f, ResetFrame)]
+    assert _shown(ports.frames) == CLEAN_PREFIX
+    [fix] = ports.fix_calls
+    assert fix.text == CLEAN_PREFIX and fix.element.element_id == "e1"
+    assert fix.task is not None and fix.problems == ["level_1_needs_options"]
+    assert [f.block_id for f in ports.frames if isinstance(f, ElementFrame)] == ["b2"]
+    [turn] = ports.committed
+    assert turn.text == CLEAN_PREFIX
+    assert [t.tests[0].level for t in turn.output.p3_markup.tasks] == [3]
+
+
+async def test_markup_fix_after_retries_removes_element() -> None:
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(tasks=[_task(level=1)]))
+    ports = _ports()
+    ports.fixes = [_task(level=1)]  # every fix is still bad
+
+    await _run(ports, provider, guard_max_retries=2)
+
+    assert len(ports.fix_calls) == 2 and len(provider.stream_calls) == 1
+    assert not [f for f in ports.frames if isinstance(f, ElementFrame)]
+    [turn] = ports.committed
+    assert turn.output.p3_markup.tasks == [] and turn.text == CLEAN_PREFIX
+
+
+async def test_markup_fix_for_another_element_is_not_taken() -> None:
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(tasks=[_task(level=1)]))
+    ports = _ports()
+    ports.fixes = [{**_task(level=3), "element_id": "e9"}]
+
+    await _run(ports, provider, guard_max_retries=1)
+
+    assert not [f for f in ports.frames if isinstance(f, ElementFrame)]
+    assert ports.committed[0].output.p3_markup.tasks == []
 
 
 # --- T-TT6 ---
