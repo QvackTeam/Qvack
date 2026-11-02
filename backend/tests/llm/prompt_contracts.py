@@ -71,18 +71,10 @@ ALL_PROMPT_SCHEMAS: dict[str, tuple[type[BaseModel], ...]] = {
 }
 
 # Prompts that run on a stub until the owner's doctrine arrives (ТЗ Ф4 §0.4.3, §7.6 п.5):
-# reference → BLOCKED number of `PHASE4_NOTES.md` §«Заблокировано».
+# reference → BLOCKED number of `PHASE4_NOTES.md` §«Заблокировано». Empty since the owner's
+# decision of 2026-11-02: the stand drafts of the eight stub roles closed BLOCKED-B-101…108.
 DOCTRINE_PENDING_MARKER = "Doctrine for this role is pending from the owner"
-DOCTRINE_PENDING: dict[str, str] = {
-    "task_checker@1": "BLOCKED-B-101",
-    "task_arbiter@1": "BLOCKED-B-102",
-    "solution_space@1": "BLOCKED-B-103",
-    "misconception_describer@1": "BLOCKED-B-104",
-    "today_planner@1": "BLOCKED-B-105",
-    "domain_classifier@1": "BLOCKED-B-106",
-    "viz_builder@1": "BLOCKED-B-107",
-    "release_judge@1": "BLOCKED-B-108",
-}
+DOCTRINE_PENDING: dict[str, str] = {}
 
 # Fields whose values are labels of `LabelMap` (WP14.1, Т-§4.5).
 LABEL_FIELDS: dict[str, list[str]] = {

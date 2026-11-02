@@ -65,6 +65,17 @@ def test_label_map_roundtrip_and_limits(settings: Settings) -> None:
     assert table["M2"] == str(misconceptions[1])
 
 
+def test_label_map_labels_domains(settings: Settings) -> None:
+    """D-B-131: the learner's domains get `D` labels (Т-§4.9, `domain_classifier@1`)."""
+    domains = _ids(3)
+    labels = LabelMap.build(settings, domains=domains)
+
+    assert [labels.label("domain", d) for d in domains] == ["D1", "D2", "D3"]
+    assert labels.resolve("domain", "D2") == domains[1]
+    with pytest.raises(UnknownLabelError):
+        labels.resolve("domain", "D4")
+
+
 def test_label_map_rejects_unknown_and_foreign_labels(settings: Settings) -> None:
     """T-M1: a label beyond the table or of another kind is an `UnknownLabelError`."""
     labels = LabelMap.build(settings, skills=_ids(2), tasks=_ids(1))
