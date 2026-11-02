@@ -373,6 +373,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | S1 (зона C), этап I | интерфейсы `ObjectStore`, `EmbeddingClient`, `EmailSender`, `DeletionJournal`; поля `AppResources`; подмены; имена параметров §6.7 потока C. Продовые клиенты — `NotImplementedError` (WP18–WP20, WP25) | `tests/storage/test_s1_resources.py` — 8 passed |
 | S10, этап I + пул | `compute`: пул `pebble` (`quack_compute/pool.py`) с жёстким таймаутом — реализован; настройки, схемы и маршруты WP24 — тела `NotImplementedError`; `Renderer` (Chromium) — этап I. `backend`: `ComputeClient` — методы всех эндпоинтов WP24, `create_compute_client`; заглушка — очереди по эндпоинтам | `compute/tests/test_pool_and_contract.py` — 4 passed (`T-CM1` зелёный; в Linux, весь `compute` — 9 passed); `tests/storage/test_compute_client_s10.py` — 4 passed |
 | S13 (реализация подмен) | `tests/support/llm.py`: `ScriptedLLMProvider.stream_structured` — шаги с инструментами (`script_tools`, два вызова за шаг, `phase: commentary`), ответ дельтами с ключами по алфавиту, флаг `body_before_head`, сбои Фазы 3 по D-B-125 п.5, журнал `stream_calls`; `loadtest/meta_mock.py`: SSE при `stream: true` (D-B-125 п.3), после `function_call_output` на каждый вызов — ответ. Формат — D-B-125 (B, PR #86) | `tests/test_support_scripted_llm.py` — 21 passed; `tests/test_meta_mock.py` — 59 passed |
+| WP19 | `quack/storage/keys.py` — ключи `Т-§3.3` с ULID; `quack/storage/uploads.py` — тип по сигнатуре (PDF, PNG, JPEG, WebP), лимит `upload_max_mb`, `UploadRejected` 415/413; `S3ObjectStore` на `aioboto3` (path-style, подписанные ссылки, сбой → `StorageUnavailable`); `UPLOAD_REJECTED` и `StorageUnavailable` → `SERVICE_UNAVAILABLE` в `quack/api/errors.py`; снимок `openapi.json`. Эндпоинты загрузки — WP20 (материалы), WP22 (фото): там же вторая половина `T-ST3` («ход учителя работает») | `tests/storage/test_storage_wp19.py` — 12 passed (`T-ST1`, `T-ST2`, `T-ST3` — часть хранилища) |
 | S10: клиент math (WP24, по просьбе B) | `quack/compute_client/math_contracts.py` — копия `compute/quack_compute/math/schemas.py` (B); `ComputeClient.math_check`, `math_transition`, таймаут HTTP — `timeout_ms / 1000 + compute_timeout_sec`; очереди заглушки `/v1/math/check`, `/v1/math/transition`. `/v1/check/math` Фазы 3 остаётся до перевода `quack.practice` (WP11.3, B) | `tests/storage/test_compute_client_math.py` — 6 passed |
 
 ### D-C-102. Где живут `EmailSender` и `DeletionJournal`
@@ -477,6 +478,16 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `tests/test_support_scripted_llm.py` (`test_stream_*`), `tests/test_meta_mock.py` (`test_stream_*`).
 - Требует подтверждения владельцем: нет
 
+### D-C-109. WP19: ULID, регион и повторы S3-клиента, код ошибки загрузки
+- Класс: B
+- WP / место: WP19; `quack/storage/keys.py`, `quack/storage/uploads.py`, `quack/storage/objects.py`, `quack/api/errors.py`
+- Контекст: `Т-§3.3` требует случайную часть ключа «например ULID», библиотеки для неё в §4.6 нет; `Д-§8.4` не называет регион бакета и таймауты клиента; ТЗ Ф4 §4.5 даёт `UPLOAD_REJECTED` 415/413 без разбивки.
+- Решение: (1) ULID — на стандартной библиотеке (48 бит миллисекунд + 80 случайных, Crockford base32), как Левенштейн в §4.6. ULID стоит в ключах, которые пишутся больше одного раза на id (штрихи, фото, кропы, экспорт, визуализации, миниатюры). `materials/{id}/original.{ext}` и `pages/{n}.webp` — ровно по раскладке `Т-§3.3`: id материала новый на каждую загрузку. (2) Регион, таймауты и повторы клиента — значения botocore по умолчанию: документы их не называют. (3) Неверный тип → 415, сверх `upload_max_mb` → 413. `detect_upload` принимает набор допустимых видов эндпоинта: фото канваса — только WebP (`Т-§22.6`). (4) `put` без условной записи (`If-None-Match`): поддержка на Contabo не проверена, неизменяемость держится на случайной части ключа. (5) Нет ключа при `get` — `KeyError`, как у подмены. Сеть, таймаут, 5xx → `StorageUnavailable` → `SERVICE_UNAVAILABLE` «file storage temporarily unavailable».
+- Почему: §0.4.3 п.5 (без новых зависимостей и параметров), `Т-§20.7`.
+- Обратимость: одна функция или один аргумент конфигурации клиента.
+- Тесты: `tests/storage/test_storage_wp19.py`.
+- Требует подтверждения владельцем: нет. \[ПРОВЕРИТЬ\] до первых загрузок (`Д-§8.4` «Проверить»): регион бакета Contabo для подписи, работа подписанных ссылок в path-style. Недоступное хранилище отвечает не сразу: botocore повторяет запрос со своей задержкой (в тесте на Windows — до ~18 с на вызов). Таймаут и число повторов — вопрос владельцу.
+
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
 Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
@@ -496,6 +507,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP19 (C, `phase-4-c-wp19`, коммит `4fb10f3`): `uv run pytest tests/storage/test_storage_wp19.py` — ошибка сборки (нет `quack.storage.keys`, `quack.storage.uploads`). Зелёный: 12 passed; `tests/storage` — 29 passed; с затронутыми (`test_app_assembly.py` — снимок OpenAPI, `test_neo4j_outage.py`, `test_ratelimit.py`, `test_infra.py`, `tests/session/test_degradation_and_workers.py`, `test_contracts.py`) — 27 passed, 42 skipped (без инфраструктуры; их прогонит CI).
 - S13, подмены (C, `phase-4-c-s13`, коммит `dbe6022`): `uv run pytest tests/test_meta_mock.py tests/test_support_scripted_llm.py` — `test_meta_mock.py`: 12 красных (нет SSE), 47 зелёных; `test_support_scripted_llm.py` — ошибка сборки (`ScriptedToolCall` нет). Зелёный: 80 passed; с затронутыми (`tests/llm`, `test_llm_runtime.py`, `tests/session/test_phase3_hot_path.py`) — 166 passed, 32 skipped (без инфраструктуры; их прогонит CI).
 - S13, сбои на шаге с инструментами (C, замечание B к #87): `test_stream_incomplete_on_a_tool_step_has_no_calls`, `test_stream_invalid_json_waits_for_the_answer_step` на прежнем `tests/support/llm.py` — 2 красных. Зелёный: `tests/test_support_scripted_llm.py` + `tests/test_meta_mock.py` — 82 passed.
 - Этап I G1 (B): `uv run pytest tests/session/test_phase4_contracts.py tests/llm/test_phase4_ai_layer.py tests/practice/test_tasks_markup.py tests/practice/test_check_instant.py tests/test_contracts.py` — 33 красных (`NotImplementedError`: `TurnStreamParser`, `next_step_input`, `validate_markup`, `check`), 26 зелёных (контракты, `T-AI1`, `T-A6`).

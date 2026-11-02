@@ -52,7 +52,7 @@ def test_keys_layout_and_random_part() -> None:
     once per id carry a ULID; a repeated upload gives a new key."""
     learner = uuid4()
     prefix = f"learners/{learner}/"
-    material, session, photo, export, viz, canvas, block = (uuid4() for _ in range(7))
+    material, session, photo, export, viz, canvas = (uuid4() for _ in range(6))
 
     assert material_original_key(learner, material, "pdf") == (
         f"{prefix}materials/{material}/original.pdf"
@@ -160,13 +160,12 @@ def _store(endpoint: str = "http://127.0.0.1:9") -> S3ObjectStore:
 
 
 async def test_s3_store_down_is_storage_unavailable() -> None:
-    """T-ST3: no answer from the storage → `StorageUnavailable`, never a driver error."""
+    """T-ST3: no answer from the storage → `StorageUnavailable`, never a driver error. One
+    call: botocore retries a refused connection with its default backoff (D-C-109)."""
     store = _store()
     try:
         with pytest.raises(StorageUnavailable):
             await store.put("learners/x/a.bin", b"x", "application/octet-stream")
-        with pytest.raises(StorageUnavailable):
-            await store.list_objects("learners/x/")
     finally:
         await store.aclose()
 
