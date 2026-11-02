@@ -34,8 +34,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
+from quack.api.auth import SESSION_COOKIE
 from quack.api.resources import AppResources
+from quack.auth.sessions import open_session
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.graph.worker import ProjectorWorker
 from quack.jobs.dispatcher import Dispatcher
@@ -231,9 +234,37 @@ class System:
         )
         assert response.status_code == 201, response.text
         body = response.json()
-        return Learner(
-            UUID(body["learner_id"]), email, password, {"Authorization": f"Bearer {body['token']}"}
+        learner_id = UUID(body["learner_id"])
+        # Routes of WP18 read the session cookie from the Phase 4 database (D-C-115); until the
+        # whole API moves to sessions (D-C-112) the learner has both the token and the cookie.
+        await self.resources.db.execute(
+            "INSERT INTO core.learners (learner_id, email) VALUES (%(learner_id)s, %(email)s)",
+            {"learner_id": learner_id, "email": email},
         )
+        cookie = await open_session(
+            self.resources.db, self.settings, learner_id=learner_id, now=datetime.now(UTC)
+        )
+        headers = {
+            "Authorization": f"Bearer {body['token']}",
+            "Cookie": f"{SESSION_COOKIE}={cookie}",
+        }
+        # WP18.4: a session starts only after `consent.given {kind: terms}` of the current
+        # `terms_version`; the learner of the stand accepts it as the client would.
+        consent = await self.client.post(
+            "/v1/consents",
+            json={
+                "kind": "terms",
+                "version": self.settings.terms_version,
+                "idempotency_key": f"terms:{learner_id}",
+            },
+            headers=headers,
+        )
+        assert consent.status_code == 200, consent.text
+        return Learner(learner_id, email, password, headers)
+
+
+# A test value of `terms_version` (the real one is the owner's, D-C-105).
+E2E_TERMS_VERSION = "e2e-terms"
 
 
 @dataclass(frozen=True)
@@ -250,7 +281,12 @@ async def build_system(
     session_factory: SessionFactory,
     neo4j: AsyncDriver,
     redis: Redis | Any | None,
+    db: Db,
 ) -> System:
+    # D-C-105: `terms_version` is the owner's value and is unset by default; the stand needs
+    # one so that its learners can accept the terms (WP18.4).
+    if settings.terms_version is None:
+        settings = settings.model_copy(update={"terms_version": E2E_TERMS_VERSION})
     llm = ScriptedLLMProvider()
     compute = ComputeScenario()
     resources = build_app_resources(
@@ -258,6 +294,7 @@ async def build_system(
         engine,
         neo4j,
         redis,
+        db=db,
         session_factory=session_factory,
         provider=llm,
         compute=scripted_compute(compute),

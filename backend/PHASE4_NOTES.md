@@ -264,7 +264,11 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 
 ## Реестр отклонений от основных документов
 
-Как в ТЗ Фазы 4 §2.4 (R4-1…R4-4). Новых строк нет.
+Как в ТЗ Фазы 4 §2.4 (R4-1…R4-4).
+
+| # | Что | Отступление | Основание | Возврат |
+| :-- | :-- | :-- | :-- | :-- |
+| R4-C1 | Зависимости backend (§4.6) | Добавлен `python-multipart` — его нет в §4.6, но без него FastAPI не разбирает multipart, который требует WP20.1 | Решение владельца 2026-11-02 («конечно ставь тогда»), D-C-113 п.3 | Внести `python-multipart` в таблицу §4.6 |
 
 ## Журнал решений
 
@@ -849,6 +853,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Требует подтверждения владельцем: нет
 - Следствие для промптов: режим `interval` можно вернуть в контракты `teacher@2` и `task_generator@1` (D-B-137) — с оговоркой «одно неравенство с одной переменной, без объединений».
 
+### D-B-147. Запись действий WP13.1: намерение без текста, ответ на элемент-задание
+- Класс: B
+- WP / место: WP13.1, `quack/session/record.py` (`record_action`)
+- Контекст: таблица WP13.1 задаёт событие каждого вида (`ACTION_EVENT_TYPES`). Не названо: (а) поле `text` у `message.sent` для намерения (в каталоге оно обязательное); (б) откуда взять задачу у `element_response`, если элемент — задание (в действии `task_id` нет); (в) ключ второго события того же действия.
+- Решение: (а) намерение — `message.sent {text: "", intent, topic_id | hub_id}`: слов у кнопки нет (`Т-§12.7` «событие действия с намерением и темой»). (б) Задача — та, которую разметка хода поставила за `element_id` (`turn.committed.markup.tasks[].task_id`, WP2.2); нет такого хода или элемента — `LookupError` (роутер отвечает ошибкой). (в) `answer.submitted` за элементом пишется под `{idempotency_key}:answer` в той же транзакции, что `element.responded`, с мгновенным вердиктом (WP11.2). Ответ, `hint_request`, `solution_request` и `check_skip` ищут задачу ученика (`content.tasks` по `learner_id`); чужая или несуществующая — `LookupError`, ничего не пишется (ревью C #108).
+- Почему: §0.4.3 п.1 (идемпотентность: повтор действия ничего не дублирует), п.3 (схемы S3 и S11 не меняются).
+- Обратимость: одна функция.
+- Тесты: `tests/session/test_record_action.py` (часть `T-TT1`). Проверено и на неверной реализации: подмена события у `hint_request` и отсутствие ответа за элементом — тесты падают.
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -876,6 +890,9 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 | S1 (зона C), этап I | интерфейсы `ObjectStore`, `EmbeddingClient`, `EmailSender`, `DeletionJournal`; поля `AppResources`; подмены; имена параметров §6.7 потока C. Продовые клиенты — `NotImplementedError` (WP18–WP20, WP25) | `tests/storage/test_s1_resources.py` — 8 passed |
 | S10, этап I + пул | `compute`: пул `pebble` (`quack_compute/pool.py`) с жёстким таймаутом — реализован; настройки, схемы и маршруты WP24 — тела `NotImplementedError`; `Renderer` (Chromium) — этап I. `backend`: `ComputeClient` — методы всех эндпоинтов WP24, `create_compute_client`; заглушка — очереди по эндпоинтам | `compute/tests/test_pool_and_contract.py` — 4 passed (`T-CM1` зелёный; в Linux, весь `compute` — 9 passed); `tests/storage/test_compute_client_s10.py` — 4 passed |
 | S13 (реализация подмен) | `tests/support/llm.py`: `ScriptedLLMProvider.stream_structured` — шаги с инструментами (`script_tools`, два вызова за шаг, `phase: commentary`), ответ дельтами с ключами по алфавиту, флаг `body_before_head`, сбои Фазы 3 по D-B-125 п.5, журнал `stream_calls`; `loadtest/meta_mock.py`: SSE при `stream: true` (D-B-125 п.3), после `function_call_output` на каждый вызов — ответ. Формат — D-B-125 (B, PR #86) | `tests/test_support_scripted_llm.py` — 21 passed; `tests/test_meta_mock.py` — 59 passed |
+| WP18, библиотека | `quack/auth/`: ссылка по почте (128 бит, в базе хэш, одно погашение, `auth_link_ttl_min`), `LinkLimiter` (Redis, без него — локально), сессии (`core.auth_sessions`, хэш, отзыв, срок), параметры cookie, ученик по подтверждённому адресу Google, согласия событиями. `FakeOIDC` в `tests/support/oidc.py`. **Не сделано (этап II, часть 2):** маршруты `/auth/*`, `/v1/me`, `/v1/consents`, `PATCH /v1/learner/settings`; `AuthlibGoogleOIDC`; замена входа Фазы 3 (JWT, `auth.users`) на сессии во всех роутерах; коды `UNAUTHENTICATED`, `CONSENT_REQUIRED`; `T-AU5` | `tests/auth` — 7 passed (Linux, инфраструктура) |
+| WP18, маршруты | `quack/auth/router.py`: `POST /auth/link`, `GET /auth/link/verify`, `GET /auth/google/start`, `GET /auth/google/callback`, `POST /auth/logout`, `GET /v1/me` (с параметрами клиента §6.7), `PATCH /v1/learner/settings` (часовой пояс), `POST /v1/consents`, `DELETE /v1/consents/research`; основание API `quack/api/auth.py`: `get_current_session`, `require_terms` (для старта сессии, B), кука `quack_session`; коды `UNAUTHENTICATED`, `CONSENT_REQUIRED`; `EmailUnavailable` → `SERVICE_UNAVAILABLE`. **Не сделано:** перевод `get_current_learner_id` всех роутеров на сессии и удаление `/v1/auth/register|login` (D-C-112, ждёт согласия A на правку `quack/domains/router.py`, `quack/domains/auth.py`); `AuthlibGoogleOIDC` (настоящий Google, нужен клиент Google OIDC — действие владельца) | `tests/auth` — 14 passed (Linux, инфраструктура); `test_app_assembly.py` + `test_contracts.py` — 26 passed |
+| WP20.1, WP20.5 (библиотека) | `quack/materials/library.py`: загрузка (тип по содержимому, объект, затем строка `content.materials` и `material.uploaded` одной транзакцией), список материалов домена, карточка с текстом страниц и подписанными ссылками; `quack/materials/search.py`: полнотекстовый поиск по событиям тем же выражением и типами, что индекс WP1.1. **Не сделано:** маршруты (с переводом входа на сессии, D-C-112; загрузка multipart — `python-multipart` добавлен по решению владельца, D-C-113), WP20.2 (ждёт очередь A, `builder` B, слой 2 `material_parser`), WP20.3 (Modal — действия владельца), WP20.4 (ждёт узлы кусков в графе, проектор A) | `tests/materials` — 4 passed (`T-MT5`; Linux, инфраструктура) |
 | WP21.2, журнал штрихов | `quack/canvas/strokes.py`: формат куска (MessagePack + zstd, точки разностью, стирание — операция), `StrokeJournal` (пачки в памяти, кусок раз в `stroke_chunk_seconds`, `ack` только после записи, повтор `batch_no` отсекается, хранилище недоступно — `ack` нет). **Не сделано:** WebSocket и Redis pub/sub (с переводом входа на сессии, D-C-112), доска WP21.1, распознавание WP21.3, проверка шагов и пометки WP21.4–21.5, голос и проигрывание WP21.6 | `tests/canvas` — 4 passed (`T-CV1`, `T-CV2`) |
 | S1: поле `db` (после #78) | `AppResources.db: Db` (§4.2): `create_app_resources` стала асинхронной и открывает пул `Db` без ожидания Postgres — API стартует и `/health/ready` отвечает 503 без базы (контракт готовности Фазы 3; `open_db` A ждёт пул — это для workers); закрывается последним. `engine` и `session_factory` остаются до WP1.3 (A). `tests/support/resources.build_app_resources(..., db=)`: без `db` — `Db` над закрытым пулом (`PoolClosed` при обращении) | `tests/storage/test_s1_resources.py`, `tests/test_api_llm_provider.py`, `tests/test_app_assembly.py` — 30 passed (Linux, инфраструктура) |
 | WP24 | `compute`: `/v1/pdf/pages` (PyMuPDF), `/v1/image/align`, `/v1/image/clean-drawing`, `/v1/image/render-strokes` (OpenCV), `/v1/render/pdf` (Playwright, A4, число страниц); Chromium запускается на первое задание и закрывается после `chromium_idle_close_s` простоя; образ с Chromium, `TMPDIR=/srv/quack/tmp`; шаг Chromium в CI. `/v1/render/snapshots` по D-B-130. **Не сделано:** почасовая чистка `/srv/quack/tmp` (вопрос, см. D-C-110) | `compute` в Linux — 76 passed (`T-CM1`, `T-CM2`, `T-CM3`) |
@@ -984,6 +1001,28 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/test_support_scripted_llm.py` (`test_stream_*`), `tests/test_meta_mock.py` (`test_stream_*`).
 - Требует подтверждения владельцем: нет
 
+### D-C-111. WP18: имя cookie, окно лимитов, ключ согласия, адрес ссылки
+- Класс: B
+- WP / место: WP18; `quack/auth/links.py`, `quack/auth/sessions.py`, `quack/auth/consents.py`
+- Контекст: `Т-§19.1` и WP18 называют флаги и домен cookie, лимиты «в час», события согласия и путь `GET /auth/link/verify`, но не имя cookie, вид окна лимита, ключ идемпотентности согласия и базовый адрес ссылки в письме.
+- Решение: (1) cookie `quack_session`; (2) окно лимита — календарный час: счётчики `auth:link:{email|ip}:…:{час}` в Redis с `EXPIRE 3600`, без Redis или при его ошибке — локальные (`Д-§10`); `retry_after` — до конца часа; (3) ключ идемпотентности согласия берётся из запроса (`Idempotency-Key`, как у мутирующих эндпоинтов Фазы 3): согласие, данное снова после отзыва, — новое событие, а ключ из вида и версии его бы схлопнул (закон 5); (4) ссылка в письме — абсолютный адрес `GET /auth/link/verify`, который роутер строит из запроса, без нового параметра; (5) адрес приводится к нижнему регистру (`core.learners.email` с `CHECK (email = lower(email))`). (6) Изоляция (`tests/db/test_sql_static.py`, A): все запросы `quack.auth` берут `%(learner_id)s`, кроме двух запросов до входа, где ученик ещё неизвестен: `quack/auth/links.py:_LEARNER_BY_EMAIL` (ученик по адресу) и `quack/auth/sessions.py:_SESSION_BY_TOKEN` (сессия по хэшу токена). Нужны записи в `CROSS_LEARNER_ALLOWED` — запрос к A. Выход (`revoke_session`) отзывает только сессию своего ученика.
+- Почему: §0.4.3 п.5 (без новых параметров), закон 5.
+- Обратимость: константа и одна функция.
+- Тесты: `tests/auth/test_auth_wp18.py`.
+- Требует подтверждения владельцем: нет.
+
+### D-C-112. Перевод входа API с JWT на сессии (WP18.3) — предложение потокам A и B
+- Класс: B (пересечение зон, §7.3) — **ждёт ответа A и B**
+- WP / место: WP18.3, WP18.4; `quack/api/auth.py` (C), объявления в роутерах A и B
+- Контекст: §2.3 строка 3 удаляет пароль, JWT, `auth.users`, `/v1/auth/register|login`; WP18.3 — `learner_id` только из сессии. На входе Фазы 3 (`get_current_learner_id`) сидят роутеры всех потоков: A — `quack/domains/router.py`; B — `quack/session/deps.py`; C — `quack/artifacts/router.py`, `quack/api/learner_stream.py`, `quack/api/ratelimit.py`. Токены JWT выпускают тесты: A — `tests/domains/*` (8 файлов); B — `tests/session/*` (5); корневые `test_app_assembly`, `test_dispatcher`, `test_jobs_phase3`, `test_learner_stream`, `test_loadtest_scenario`, `test_neo4j_outage`, `test_ops_phase3`; C — `tests/artifacts/conftest.py`, `tests/e2e/system.py`, `tests/support/auth.py`.
+- Предложение:
+  1. `quack.api.auth.get_current_learner_id` сохраняет имя и подпись (возвращает `UUID`), но читает cookie сессии (`quack.auth.sessions.resolve_session`); нет или отозвана — 401 `UNAUTHENTICATED`. **Код роутеров A и B не меняется.**
+  2. Тестовый вход: `tests/support/auth.py` получает `login(client, db, learner_id)` — строка `core.auth_sessions` и cookie на клиенте; `ensure_users_hook` и выпуск JWT уходят. Тесты A и B меняют только способ входа (одна строка на клиент). C делает это одним PR с ревью A и B (§7.3); если A или B хотят править свои тесты сами — тот же хелпер, их PR после PR C.
+  3. `CONSENT_REQUIRED` на старте сессии (WP18.4): зависимость `quack.auth.require_terms` (C) объявляется на `POST` старта сессии в `quack/session/router.py` (B) — в чужом роутере только объявление (§7.3 п.3).
+  4. Удаление `auth.users` и старой миграции — в WP1.3 (A), не здесь.
+- Нужно: A — согласие с п.1, п.2 для `tests/domains` и корневых тестов A, п.4; B — согласие с п.2 для `tests/session` и с п.3.
+- Требует подтверждения владельцем: нет (решение потоков); значения `terms_version`, `auth_success_redirect_url` — по-прежнему за владельцем (D-C-105).
+
 ### D-C-110. WP24: числа обработки изображений, разрешение страниц PDF, чистка временных файлов
 - Класс: B
 - WP / место: WP24; `compute/quack_compute/work.py`, `compute/quack_compute/renderer.py`, `compute/Dockerfile`
@@ -1005,6 +1044,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/storage/test_storage_wp19.py`.
 - Требует подтверждения владельцем: нет. \[ПРОВЕРИТЬ\] до первых загрузок (`Д-§8.4` «Проверить»): регион бакета Contabo для подписи, работа подписанных ссылок в path-style. Недоступное хранилище отвечает не сразу: botocore повторяет запрос со своей задержкой (в тесте на Windows — до ~18 с на вызов). Таймаут и число повторов — вопрос владельцу.
 
+### D-C-113. WP20.1, WP20.5: проверка домена, статус материала, multipart, размер выдачи поиска
+- Класс: B; п.3 — класс C (зависимость)
+- WP / место: WP20.1, WP20.5; `quack/materials/library.py`, `quack/materials/search.py`
+- Контекст: WP20.1 называет `POST /v1/domains/{id}/materials` (multipart), строку, событие и одну транзакцию, но не то, как проверить домен, какие значения у `content.materials.status`, и чем разбирать multipart; WP20.5 не называет размер выдачи.
+- Решение: (1) домен ученика проверяется по `domain.created` в журнале (закон 1): таблицы доменов в Postgres нет, а `quack.graph.read` (S4) ещё не готов; после S4 — через него. (2) Статус после загрузки — `uploaded`; следующий ставит разбор WP20.2. (3) **Multipart:** FastAPI разбирает формы через `python-multipart`, его нет в §4.6 и в зависимостях. Варианты: добавить `python-multipart` (стандартная зависимость FastAPI для форм) или принимать файл телом запроса с `Content-Type` (отступление от «multipart» в WP20.1). **Решение владельца 2026-11-02:** добавить `python-multipart` («конечно ставь тогда»); отдельный коммит, строка R4-C1 в реестре отклонений. (4) Размер выдачи полнотекстового поиска — аргумент `limit` функции; число задаёт маршрут, и оно будет вопросом при маршрутах — в документах его нет. (5) Маршруты WP20 делаются вместе с переводом входа на сессии (D-C-112), чтобы не писать их на JWT Фазы 3.
+- Почему: §0.4.3 п.5, закон 1, §4.6.
+- Обратимость: одна функция проверки домена; одно значение статуса.
+- Тесты: `tests/materials/test_materials_wp20.py`.
+- Требует подтверждения владельцем: п.3 — подтверждено 2026-11-02.
+
 ### D-C-114. WP21.2: структура куска штрихов, отсечение повторов, порог переполнения
 - Класс: B; п.3 — вопрос владельцу
 - WP / место: WP21.2; `quack/canvas/strokes.py`
@@ -1014,6 +1063,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Обратимость: одна функция кодирования (у куска нет потребителей, кроме проигрывания).
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: п.3.
+
+### D-C-115. WP18: маршруты входа, слои, ответы
+- Класс: B
+- WP / место: WP18; `quack/auth/router.py`, `quack/api/auth.py`, `quack/api/app.py`
+- Контекст: §6.4 называет маршруты входа, WP18 — их смысл; не названы коды ответов, хранение `state` для Google, поведение без `auth_success_redirect_url` (D-C-105), и как зависимость сессии попадает в роутеры других потоков при запрете импорта между продуктовыми пакетами (§4.1).
+- Решение: (1) **Слои.** Зависимости `get_current_session` и `require_terms` и кука `quack_session` — в основании API (`quack/api/auth.py`), функции продукта `quack.auth` (`resolve_session`, `has_current_terms`) подставляет сборка через `app.state`. Поэтому B объявляет `Depends(require_terms)` из `quack.api.auth`, а не из `quack.auth` (импорт `quack.session` → `quack.auth` запрещён §4.1). (2) Ответы — модели (контракт WP8.7: у каждого маршрута один 2xx с телом): `POST /auth/link` → `{"status": "sent"}` для любого адреса; вход → 303 на `auth_success_redirect_url` с кукой, без него — 200 `{learner_id}`; выход → `{"status": "signed_out"}`; согласия → `{kind, version, given}`; настройки → `{settings}`. `GET /auth/google/start` — только редирект 302. (3) `state` Google — 128 бит в своей куке `quack_oidc_state` (те же флаги, срок `auth_link_ttl_min`); неверный `state` или неподтверждённый адрес — 401 `UNAUTHENTICATED`. (4) Лимит ссылок — 429 `RATE_LIMITED` с `Retry-After`; почта недоступна — 503 `SERVICE_UNAVAILABLE` (§4.4). (5) Часовой пояс — проверка IANA (`zoneinfo`), пишется в `core.learners.settings.timezone` без события (WP18.3 называет место — строку ученика). (6) Ключ идемпотентности согласия — в теле, как у мутирующих маршрутов Фазы 3; отзыв `research` берёт `version` из тела. (7) Маршруты на сессиях отвечают `UNAUTHENTICATED`, маршруты Фазы 3 — `UNAUTHORIZED`, пока весь API не перейдёт на сессии (D-C-112).
+- Почему: §4.1, §4.5, WP8.7, §0.4.3 п.5.
+- Обратимость: модели ответов и один модуль маршрутов.
+- Тесты: `tests/auth/test_auth_routes.py`, `tests/test_app_assembly.py`.
+- Требует подтверждения владельцем: нет.
 
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
@@ -1036,6 +1095,9 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
+- WP18, этап I (C, `phase-4-c-wp18`): в Linux против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` и dbmate v2.36.0 `pytest tests/auth` — 7 failed (`NotImplementedError`: `request_link`, `redeem_link`, `LinkLimiter`, `cookie_params`, `learner_for_google`, сессии, согласия). Зелёный (библиотека): 7 passed. `T-AU5` — с маршрутами (весь API на сессиях).
+- WP20.1, WP20.5 (C, `phase-4-c-wp20`, коммит `d161aed`): в Linux против `quack-test-*` с dbmate — `tests/materials` 4 failed (`NotImplementedError`). Зелёный: `tests/materials`, `test_contracts.py`, `tests/db/test_sql_static.py` — 15 passed.
 - WP21.2, журнал штрихов (C, `phase-4-c-wp21`, коммит `79079de`): `uv run pytest tests/canvas` — 4 failed (`NotImplementedError`). Зелёный: `tests/canvas` + `test_contracts.py` — 11 passed.
 - Поле `db` (C, `phase-4-c-db-field`): `uv run pytest tests/storage/test_s1_resources.py` — 3 failed (нет поля `db`; `create_app_resources` не асинхронная). Зелёный — в Linux-контейнере против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` (на Windows async-psycopg не работает с Proactor-циклом pytest — `PoolTimeout`): `test_s1_resources.py`, `test_api_llm_provider.py`, `test_app_assembly.py` — 30 passed; все пользователи `build_app_resources` (`tests/session`, `tests/domains`, `tests/artifacts`, `tests/e2e`, `test_dispatcher.py`) — 281 passed (в первом прогоне один раз упал `test_mutating_endpoints_are_idempotent`, отдельно и при повторе — зелёный; на чистом `phase-4` тот же набор — 281 passed).
 - WP24 (C, `phase-4-c-wp24`, коммит `c98d1b8`): в Linux (контейнер uv python3.12-bookworm-slim + `playwright install --with-deps chromium`) `pytest tests/test_wp24_endpoints.py` — 7 failed (`NotImplementedError`), 1 xfailed. Зелёный: весь `compute` — 74 passed, 1 xfailed (BLOCKED-C-201).
@@ -1070,6 +1132,8 @@ PR #77 (dbmate v2.36.0, sha256).
 - S3/S4/S6 (A, `phase-4-a-s4-s6`): тесты и код писались в одной итерации, красный прогон отдельно не снят (`Verdict` split, `RejectedElementRecord.index`, `quack.graph.read`, `rules_p4.py`). Зелёный: `tests/graph/test_read_stub.py`, `tests/jobs`, `tests/events/test_rejected_element.py`, `tests/practice/test_second_opinion.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` (`T-A6`) — локально без инфраструктуры; тесты с Postgres/dbmate (`tests/db`, `tests/events/test_catalog.py`, `tests/practice/test_answer_transaction.py`, `tests/practice/test_tasks_store.py`) локально не запускались (нет `dbmate`) — их прогонит CI.
 - WP11.6, тело `check.model` (D-B-145): `cd backend && uv run pytest tests/practice/test_check_model.py` — 12 failed (`NotImplementedError`), коммит `63ba969`. Зелёный: 12 passed; с затронутыми (`tests/practice`, `tests/llm`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 196 passed.
 - WP11.3, тело `check.symbolic` (D-B-146): `cd backend && uv run pytest tests/practice/test_check_symbolic_job.py` — 5 failed (`NotImplementedError`), коммит `2ead504`. Зелёный: 5 passed; с `tests/db/test_sql_static.py` — 9 passed.
+- WP13.1, запись действий (D-B-147): `cd backend && uv run pytest tests/session/test_record_action.py` — 12 failed (`NotImplementedError`), коммит `52c769a`; на неверной реализации (другое событие у `hint_request`, нет ответа за элементом) — 2 failed. Зелёный: 12 passed; с затронутыми (`tests/session/test_phase4_contracts.py`, `tests/practice`, `tests/db/test_sql_static.py`, `tests/test_contracts.py`, инфраструктура B) — 149 passed.
+- WP13.1, задача ученика у `hint_request`, `solution_request`, `check_skip` (D-B-147, ревью C #108): `uv run pytest tests/session/test_record_action.py -k another` — 3 failed (событие с чужой задачей записано), коммит `918cc9f`. Зелёный: 16 passed.
 
 ## Правки тестов
 
