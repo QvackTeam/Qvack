@@ -10,16 +10,24 @@ agreed, Т3 not) is set by code from `secondOpinion` (WP4.1, stream A), never he
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
 from quack.config import Settings
 from quack.db.db import Db
 from quack.events.event_types import AnswerSubmitted
+from quack.events.keys import verdict_key
+from quack.events.log import NewEvent, append_events
 from quack.llm.gateway import LLMGateway
 from quack.practice.answer_spec import AnswerSpec, AnswerType
-from quack.practice.check import HelpUsed, RubricItemResult, SecondOpinion, Verdict
+from quack.practice.check import (
+    HelpUsed,
+    RubricItemResult,
+    SecondOpinion,
+    Verdict,
+    apply_reading,
+)
 from quack.practice.role_outputs import ModelVerdictOutput, SolutionSpace, TaskCondition
 
 
@@ -111,7 +119,7 @@ class KnownMisconception:
 def verdict_role(answer_type: AnswerType, *, failed: bool) -> str:
     """Т-§6.8, Т-§22.7: `proof` — `verdict_proof`; a short free answer, a drawing and a fast
     answer that did not check (`check.failed`) — `verdict_free`."""
-    raise NotImplementedError
+    return "verdict_proof" if answer_type == "proof" and not failed else "verdict_free"
 
 
 def verdict_inputs(
@@ -122,8 +130,24 @@ def verdict_inputs(
     misconceptions: Sequence[KnownMisconception],
 ) -> dict[str, str]:
     """Input blocks of `verdict_*@1` and `second_opinion@1` (PROMPT_CONTRACTS.md): the rubric
-    is the key steps of the solution space, else the key ideas of the spec (Т-§6.8)."""
-    raise NotImplementedError
+    is the key steps of the solution space, else the key ideas of the spec (Т-§6.8). Rubric
+    items are `R1…`, misconceptions `M1…` in the given order (D-B-145)."""
+    points = (
+        [step.statement for step in solution_space.key_steps]
+        if solution_space is not None
+        else list(spec.key_ideas or [])
+    )
+    problem = condition.text if condition.latex is None else f"{condition.text}\n{condition.latex}"
+    learner = (
+        answer.answer.value if answer.text is None else f"{answer.answer.value}\n{answer.text}"
+    )
+    return {
+        "problem": problem,
+        "rubric": _numbered("R", points),
+        "answer_spec": spec.model_dump_json(exclude_none=True),
+        "known_misconceptions": _numbered("M", [m.statement for m in misconceptions]),
+        "learner_answer": learner,
+    }
 
 
 async def check_with_model(
@@ -144,11 +168,100 @@ async def check_with_model(
     help_used: HelpUsed,
 ) -> Verdict:
     """One call of the verdict role per answer, a second opinion only in doubt (Т-§7.7)."""
-    raise NotImplementedError
+    variables = verdict_inputs(condition, spec, solution_space, answer, misconceptions)
+    rubric_size = len(variables["rubric"].splitlines()) if variables["rubric"] != NONE else 0
+    label_check = _label_check(rubric_size, len(misconceptions))
+    known = [m.misconception_id for m in misconceptions]
+    role = verdict_role(spec.type, failed=failed)
+    first = await gateway.generate_structured(
+        role,
+        _prompt_version(settings, role),
+        ModelVerdictOutput,
+        variables,
+        learner_id,
+        session_id,
+        None,
+        f"check.model:{answer_seq}:{part}",
+        check=label_check,
+    )
+    verdict = model_verdict(
+        first.value,
+        answer_seq=answer_seq,
+        part=part,
+        help_used=help_used,
+        known_misconceptions=known,
+    )
+    # The doubt of Т-§7.7 is the model's own; an unsure reading is answered by showing the
+    # reading (WP11.7), not by a second model, so it applies last (D-B-145).
+    if not needs_second_opinion(verdict, levels, settings):
+        return apply_reading(verdict, answer.recognition_confidence, settings)
+    second = await gateway.generate_structured(
+        SECOND_OPINION_ROLE,
+        _prompt_version(settings, SECOND_OPINION_ROLE),
+        ModelVerdictOutput,
+        variables,
+        learner_id,
+        session_id,
+        None,
+        f"{SECOND_OPINION_ROLE}:{answer_seq}:{part}",
+        check=label_check,
+    )
+    verdict = with_second_opinion(verdict, second.value)
+    return apply_reading(verdict, answer.recognition_confidence, settings)
 
 
 async def record_verdict(
     db: Db, verdict: Verdict, *, learner_id: UUID, session_id: UUID | None, domain_id: UUID | None
 ) -> None:
     """`verdict.recorded` under `verdict:{answer_seq}:{part}`: a repeat writes nothing new."""
-    raise NotImplementedError
+    await append_events(
+        db,
+        learner_id,
+        [
+            NewEvent(
+                type="verdict.recorded",
+                payload=verdict.model_dump(mode="json"),
+                actor="code",
+                idempotency_key=verdict_key(verdict.answer_seq, verdict.part),
+                domain_id=domain_id,
+                session_id=session_id,
+                causation_seq=verdict.answer_seq,
+            )
+        ],
+    )
+
+
+SECOND_OPINION_ROLE = "second_opinion"
+# The block of an empty list (no rubric, no known misconceptions).
+NONE = "none"
+
+
+def _numbered(prefix: str, points: Sequence[str]) -> str:
+    if not points:
+        return NONE
+    return "\n".join(f"{prefix}{i}. {point}" for i, point in enumerate(points, 1))
+
+
+def _prompt_version(settings: Settings, role: str) -> int:
+    """The version of `role@N` in the role table (Т-§11.1, WP10.1)."""
+    prompt = settings.llm_roles[role].prompt
+    if prompt is None:
+        raise ValueError(f"role {role!r} has no prompt")
+    return int(prompt.rsplit("@", 1)[1])
+
+
+def _label_check(
+    rubric_size: int, misconceptions: int
+) -> Callable[[ModelVerdictOutput], str | None]:
+    """Т-§4.5: an unknown label goes back to the model (the gateway's repair path); what is
+    still unknown after it, `model_verdict` drops."""
+    rubric = {f"R{i}" for i in range(1, rubric_size + 1)}
+    known = {f"M{i}" for i in range(1, misconceptions + 1)}
+
+    def check(output: ModelVerdictOutput) -> str | None:
+        errors = [f"unknown rubric item {i.item}" for i in output.items if i.item not in rubric]
+        if output.misconception is not None and output.misconception not in known:
+            errors.append(f"unknown misconception label {output.misconception}")
+        return "; ".join(errors) or None
+
+    return check
