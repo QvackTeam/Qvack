@@ -2,7 +2,7 @@
 
 Chromium starts on the first render job, serves the next jobs with new pages and closes after
 `chromium_idle_close_s` without jobs (Д-§4.1, `T-CM3`). One browser per service process.
-`snapshots` waits for the way a param set reaches the page (BLOCKED-C-201, Т-§13.6).
+Visualizations get their param set as `window.QUACK_VIZ_PARAMS` (D-B-130).
 """
 
 from __future__ import annotations
@@ -10,16 +10,29 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import json
+from typing import Any
 
+import cv2
+import numpy as np
 import pymupdf
-from playwright.async_api import Browser, Playwright, async_playwright
+from playwright.async_api import Browser, ConsoleMessage, Playwright, async_playwright
 
 from quack_compute.contracts import (
     RenderPdfRequest,
     RenderPdfResponse,
     RenderSnapshotsRequest,
     RenderSnapshotsResponse,
+    Snapshot,
 )
+
+# D-B-130: the address a visualization page is served at inside Chromium.
+VIZ_PAGE_URL = "http://viz.quack.internal/"
+
+
+def _console_error(errors: list[str], message: ConsoleMessage) -> None:
+    if message.type == "error":
+        errors.append(message.text)
 
 
 class Renderer:
@@ -36,7 +49,47 @@ class Renderer:
         return self._browser is not None
 
     async def snapshots(self, request: RenderSnapshotsRequest) -> RenderSnapshotsResponse:
-        raise NotImplementedError("BLOCKED-C-201: how a param set reaches the page")
+        """A snapshot per param set (Т-§13.6 п.2, D-B-130): the set goes to the page as
+        `window.QUACK_VIZ_PARAMS` before any of its scripts; console errors and uncaught page
+        errors are collected; `blank` — every pixel of the snapshot has the same colour."""
+        browser = await self._acquire()
+        try:
+            snapshots = [
+                await self._snapshot(browser, request.html, params)
+                for params in request.param_sets or [{}]
+            ]
+        finally:
+            self._release()
+        return RenderSnapshotsResponse(snapshots=snapshots)
+
+    async def _snapshot(self, browser: Browser, html: str, params: dict[str, Any]) -> Snapshot:
+        page = await browser.new_page()
+        errors: list[str] = []
+        page.on("console", lambda message: _console_error(errors, message))
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        try:
+            await page.add_init_script(f"window.QUACK_VIZ_PARAMS = {json.dumps(params)};")
+            # Init scripts run on navigation, not on `set_content`: the page is served from
+            # memory at an internal address (no network, Д-§3.2).
+            await page.route(
+                VIZ_PAGE_URL,
+                lambda route: route.fulfill(body=html, content_type="text/html; charset=utf-8"),
+            )
+            await page.goto(VIZ_PAGE_URL, wait_until="load")
+            png = await page.screenshot(full_page=True)
+        finally:
+            await page.close()
+        image = cv2.imdecode(np.frombuffer(png, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            raise ValueError("the snapshot is not an image")
+        ok, webp = cv2.imencode(".webp", image)
+        if not ok:
+            raise ValueError("WebP encoding failed")
+        return Snapshot(
+            image_webp_b64=base64.b64encode(webp.tobytes()).decode(),
+            console_errors=errors,
+            blank=bool((image == image[0, 0]).all()),
+        )
 
     async def pdf(self, request: RenderPdfRequest) -> RenderPdfResponse:
         """HTML → A4 PDF and its page count (Т-§17.6: the one-page check of a cheat sheet)."""

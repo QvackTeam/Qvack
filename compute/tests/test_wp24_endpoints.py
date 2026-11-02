@@ -154,19 +154,35 @@ def test_render_pdf_counts_a4_pages(client: TestClient) -> None:
     assert client.post("/v1/render/pdf", json={"html": long_html}).json()["page_count"] > 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BLOCKED-C-201: how a param set reaches the page is not in the documents "
-    "(Т-§13.6; viz_builder gives `parameter_values: list[str]`, compute takes `param_sets`)",
-)
 def test_render_snapshots(client: TestClient) -> None:
-    """T-CM2: HTML + param sets → a snapshot per set, console errors, blank canvas."""
-    html = "<canvas id='c'></canvas><script>console.error('boom')</script>"
-    response = client.post("/v1/render/snapshots", json={"html": html, "param_sets": [{}]})
+    """T-CM2: HTML + param sets → a snapshot per set, console errors, blank canvas. The page
+    reads its set from `window.QUACK_VIZ_PARAMS` (D-B-130)."""
+    html = (
+        "<body style='margin:0;background:#fff'><canvas id='c' width='200' height='100'></canvas>"
+        "<script>const p = window.QUACK_VIZ_PARAMS || {};"
+        "if (p.fill) { const g = document.getElementById('c').getContext('2d');"
+        "g.fillStyle = '#c00'; g.fillRect(0, 0, 200, 100); }"
+        "if (p.fail) { console.error('boom'); }</script></body>"
+    )
+    response = client.post(
+        "/v1/render/snapshots",
+        json={"html": html, "param_sets": [{"fill": True}, {}, {"fail": True}]},
+    )
     assert response.status_code == 200
+    drawn, empty, failed = response.json()["snapshots"]
+    assert drawn["blank"] is False and drawn["console_errors"] == []
+    assert empty["blank"] is True and empty["console_errors"] == []
+    assert failed["console_errors"] == ["boom"]
+    for snapshot in (drawn, empty, failed):
+        assert _is_webp(snapshot["image_webp_b64"])
+
+
+def test_render_snapshots_report_uncaught_errors(client: TestClient) -> None:
+    """Т-§13.6 п.3: an uncaught exception of the page is a console error too."""
+    html = "<script>throw new Error('kaput')</script>"
+    response = client.post("/v1/render/snapshots", json={"html": html, "param_sets": []})
     [snapshot] = response.json()["snapshots"]
-    assert snapshot["console_errors"] == ["boom"]
-    assert snapshot["blank"] is True
+    assert any("kaput" in error for error in snapshot["console_errors"])
 
 
 async def test_chromium_idle_close() -> None:

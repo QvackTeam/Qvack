@@ -1,10 +1,12 @@
 """Settings of the compute service (ТЗ Фазы 4 §6.7, WP24; Т-§21.3, Д-§4.1, Д-§4.2).
 
-Read from the environment once per process; no secrets (compute has none, Т-§19.2).
+Read from the environment once per process (the upper-case field name); no secrets (compute
+has none, Т-§19.2). Numbers the documents do not give are named here (ТЗ Ф4 §0.3), not in code.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from dataclasses import dataclass
 
@@ -20,17 +22,23 @@ class ComputeSettings:
     compute_task_timeout_s: float = 60.0
     # Д-§4.2: the only place compute writes temporary files.
     compute_tmp_dir: str = "/srv/quack/tmp"
+    # WP22.3 п.1, sheet contour search — the documents give no numbers; Phase 4 decision D-C-110:
+    # blur kernel, Canny thresholds, polygon precision as a share of the contour perimeter and
+    # the least area of the sheet as a share of the photo.
+    align_blur_kernel: int = 5
+    align_canny_low: int = 75
+    align_canny_high: int = 200
+    align_contour_epsilon_share: float = 0.02
+    align_min_sheet_area_share: float = 0.2
+    # WP21.3, a pen line of `render-strokes` in pixels; D-C-110.
+    stroke_thickness_px: int = 2
 
     @classmethod
     def from_env(cls) -> ComputeSettings:
-        defaults = cls()
-        return cls(
-            compute_workers=int(os.environ.get("COMPUTE_WORKERS", defaults.compute_workers)),
-            chromium_idle_close_s=int(
-                os.environ.get("CHROMIUM_IDLE_CLOSE_S", defaults.chromium_idle_close_s)
-            ),
-            compute_task_timeout_s=float(
-                os.environ.get("COMPUTE_TASK_TIMEOUT_S", defaults.compute_task_timeout_s)
-            ),
-            compute_tmp_dir=os.environ.get("COMPUTE_TMP_DIR", defaults.compute_tmp_dir),
-        )
+        values: dict[str, object] = {}
+        for item in dataclasses.fields(cls):
+            raw = os.environ.get(item.name.upper())
+            if raw is not None:
+                default = getattr(cls, item.name)
+                values[item.name] = type(default)(raw)
+        return cls(**values)  # pyright: ignore[reportArgumentType]

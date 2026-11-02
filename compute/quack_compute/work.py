@@ -2,7 +2,7 @@
 
 PyMuPDF (`pdf_pages`) and OpenCV (`image_*`), Т-§1.2. Rendering lives in
 `quack_compute.renderer` (one Chromium per service). Images go out as WebP with the
-encoder's default quality; numbers the documents do not give are Phase 4 decision D-C-110.
+encoder's default quality; the numbers of the algorithms come from `ComputeSettings` (D-C-110).
 """
 
 from __future__ import annotations
@@ -23,15 +23,7 @@ from quack_compute.contracts import (
     PdfPagesResponse,
     RenderStrokesRequest,
 )
-
-# D-C-110: sheet contour search (WP22.3 п.1) — the usual Canny + polygon approximation.
-BLUR_KERNEL = 5
-CANNY_LOW = 75
-CANNY_HIGH = 200
-CONTOUR_EPSILON_SHARE = 0.02  # of the contour perimeter
-MIN_SHEET_AREA_SHARE = 0.2  # of the photo: a smaller quadrilateral is not the sheet
-# D-C-110: a pen line in `render-strokes`, pixels.
-STROKE_THICKNESS = 2
+from quack_compute.settings import ComputeSettings
 
 type Image = np.ndarray
 
@@ -85,26 +77,31 @@ def _ordered(corners: Image) -> Image:
     )
 
 
-def _sheet_corners(image: Image) -> Image | None:
+def _sheet_corners(image: Image, settings: ComputeSettings) -> Image | None:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    edges = cv2.Canny(cv2.GaussianBlur(gray, (BLUR_KERNEL, BLUR_KERNEL), 0), CANNY_LOW, CANNY_HIGH)
+    kernel = settings.align_blur_kernel
+    edges = cv2.Canny(
+        cv2.GaussianBlur(gray, (kernel, kernel), 0),
+        settings.align_canny_low,
+        settings.align_canny_high,
+    )
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    min_area = MIN_SHEET_AREA_SHARE * image.shape[0] * image.shape[1]
+    min_area = settings.align_min_sheet_area_share * image.shape[0] * image.shape[1]
     for contour in sorted(contours, key=cv2.contourArea, reverse=True):
         if cv2.contourArea(contour) < min_area:
             return None
         polygon = cv2.approxPolyDP(
-            contour, CONTOUR_EPSILON_SHARE * cv2.arcLength(contour, True), True
+            contour, settings.align_contour_epsilon_share * cv2.arcLength(contour, True), True
         )
         if len(polygon) == 4:
             return _ordered(polygon)
     return None
 
 
-def image_align(request: ImageRequest) -> AlignResponse:
+def image_align(request: ImageRequest, settings: ComputeSettings) -> AlignResponse:
     """Straighten the sheet by its contour; no contour — the photo as is (WP22.3 п.1)."""
     image = _decode(request.image_b64)
-    corners = _sheet_corners(image)
+    corners = _sheet_corners(image, settings)
     if corners is None:
         return AlignResponse(aligned=False, image_webp_b64=_webp(image))
     tl, tr, br, bl = corners
@@ -134,13 +131,14 @@ def image_clean_drawing(request: CleanDrawingRequest) -> ImageResponse:
     return ImageResponse(image_webp_b64=_webp(cleaned))
 
 
-def image_render_strokes(request: RenderStrokesRequest) -> ImageResponse:
+def image_render_strokes(request: RenderStrokesRequest, settings: ComputeSettings) -> ImageResponse:
     """Pen strokes of one line as dark lines on white, `width` × `height` (WP21.3)."""
     canvas = np.full((request.height, request.width), 255, dtype=np.uint8)
+    thickness = settings.stroke_thickness_px
     for stroke in request.strokes:
         points = np.array([[round(x), round(y)] for x, y in stroke.points], dtype=np.int32)
         if len(points) == 1:
-            cv2.circle(canvas, tuple(int(v) for v in points[0]), STROKE_THICKNESS, 0, -1)
+            cv2.circle(canvas, tuple(int(v) for v in points[0]), thickness, 0, -1)
         else:
-            cv2.polylines(canvas, [points], False, 0, STROKE_THICKNESS, cv2.LINE_AA)
+            cv2.polylines(canvas, [points], False, 0, thickness, cv2.LINE_AA)
     return ImageResponse(image_webp_b64=_webp(canvas))
