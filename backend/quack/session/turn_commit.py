@@ -8,7 +8,8 @@ when the learner's words the model quotes are in a learner message of the sessio
 turn answered adds `hint.shown` (a hint request; the step is counted by code) and
 `task.closed` (solved, skipped, solution shown). D-B-149. `commit_turn` writes the batch with
 one `append_events` call, the documents of the new tasks and the `ops.turn_manifests` row in
-one transaction: a failure writes none of them; a repeat of the same batch writes nothing new.
+one transaction, with the session plan document (`content.session_plans`, WP13.6): a failure
+writes none of them; a repeat of the same batch writes nothing new.
 """
 
 from __future__ import annotations
@@ -65,6 +66,16 @@ INSERT INTO ops.turn_manifests (
     %(context_text)s, %(degraded_mode)s
 )
 ON CONFLICT (manifest_id) DO NOTHING
+"""
+
+# WP13.6: the plan document of the session follows the turn; a session of another learner
+# is never touched (no row comes back).
+_UPSERT_PLAN = """
+INSERT INTO content.session_plans (session_id, learner_id, plan, status, updated_at)
+VALUES (%(session_id)s, %(learner_id)s, %(plan)s, 'active', now())
+ON CONFLICT (session_id) DO UPDATE SET plan = EXCLUDED.plan, status = 'active', updated_at = now()
+WHERE content.session_plans.learner_id = EXCLUDED.learner_id
+RETURNING session_id
 """
 
 # Hints shown for the task in the session before this turn (Т-§7.4: steps 1–3).
@@ -155,6 +166,7 @@ class TurnBatch:
     manifest: TurnManifestRow
     domain_id: UUID | None
     common: dict[str, Any] = field(default_factory=dict)
+    plan: dict[str, Any] = field(default_factory=dict)
     hint_task_id: UUID | None = None
     close: tuple[UUID, Literal["solved", "skipped", "solution_shown"]] | None = None
 
@@ -280,6 +292,7 @@ def turn_batch(
         manifest=manifest,
         domain_id=domain_id,
         common=common,
+        plan=markup.plan_update.model_dump(mode="json"),
         hint_task_id=hint_task_id,
         close=close,
     )
@@ -411,6 +424,16 @@ async def commit_turn(
                 created_seq=by_key[task.idempotency_key].seq,
             )
         await db.execute(_INSERT_MANIFEST, _manifest_params(manifest))
+        planned = await db.fetch_one(
+            _UPSERT_PLAN,
+            {
+                "session_id": manifest.session_id,
+                "learner_id": learner_id,
+                "plan": Jsonb(batch.plan),
+            },
+        )
+        if planned is None:
+            raise LookupError(f"session {manifest.session_id} is not the learner's")
     [turn] = [event for event in stored if event.type == "turn.committed"]
     return turn.seq
 
