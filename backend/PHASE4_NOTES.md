@@ -859,6 +859,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/session/test_turn_graph.py` (`T-TT2`, `T-TT3`, `T-TT4` без «опоры», `T-TT6`). Проверено на неверной реализации: 8 подмен (нет проверки шапки, тело до шапки показывается, нет буфера, нет отмены, нет проверки элементов, нет `settle_stance`, нет `reset` по разметке, нет удаления предложения) — каждая роняет хотя бы один тест.
 - Требует подтверждения владельцем: нет
 
+### D-B-149. Запись хода: пачка событий, ключи, задачи хода, дедлайн нового хаба
+- Класс: B (п. г, д — C)
+- WP / место: WP2.2, WP13.3, WP13.9, `quack/session/turn_commit.py` (`turn_batch`, `commit_turn`)
+- Контекст: WP2.2 — `turn.committed` и порождённые события одним `append_events`; WP13.9 — манифест вместе с `turn.committed`; WP13.3 — метки → id. Не названо: (а) порядок событий в пачке; (б) ключи идемпотентности; (в) семья, условие и проверка задачи, которую ход показывает; (г) дедлайн для нового хаба (`new_hub_name`); (д) `hint.shown`, `task.closed` — в разметке `teacher@2` (WP13.3) для них полей нет.
+- Решение: (а) `task.created…` → `turn.committed` → `agent.requested…` → `hub.deadline_set`: задача есть в журнале раньше хода, который на неё ссылается (`TurnTaskRecord.task_id`). (б) `turn:{manifest_id}`, `…:task:{element_id}`, `…:agent:{i}`, `…:deadline`; повтор той же пачки ничего не дублирует (закон 5): события — по ключу, документ задачи — если его нет, манифест — `ON CONFLICT DO NOTHING`. Ключ не от `action_seq`: новый ход по тому же действию после обрыва (`Т-§12.1`) даёт другой текст и конфликт хэша. (в) `task_id` — UUIDv4 сервера (§4.9), `family_id = task_id` (своя семья, как у сгенерированных Фазы 3); `variantOf` переводится в id, но семью не меняет \[ПРОВЕРИТЬ\]; условие — текст элемента (`prompt`, у каркаса — `text`), без `latex`; `source: teacher`, `verification: unchecked` (параллельная проверка — WP12.5). (г) `new_hub_name` остаётся только в разметке хода, `hub.created` не пишется (лог `turn_deadline_new_hub_not_written`): у разметки нет значений `kind`, `origin`, `control_type` \[ПРОВЕРИТЬ\]. (д) Этот код их не пишет \[ПРОВЕРИТЬ\]: откуда они в ходе — вопрос владельцу.
+- Почему: §0.4.3 п.1 (идемпотентность), п.2 (WP2.2, WP13.9), п.5.
+- Обратимость: один модуль.
+- Тесты: `tests/session/test_turn_commit.py` (`T-TT7`, часть `T-EV4` потока B). Проверено на неверной реализации: 6 подмен (без транзакции, манифест после транзакции, без `ON CONFLICT`, без документа задачи, без `hub.deadline_set`, `turn.committed` раньше задач) — каждая роняет 1–2 теста.
+- Требует подтверждения владельцем: да — п. (г) и (д)
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -1081,6 +1091,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP11.3, тело `check.symbolic` (D-B-146): `cd backend && uv run pytest tests/practice/test_check_symbolic_job.py` — 5 failed (`NotImplementedError`), коммит `2ead504`. Зелёный: 5 passed; с `tests/db/test_sql_static.py` — 9 passed.
 - WP13.1, запись действий (D-B-147): `cd backend && uv run pytest tests/session/test_record_action.py` — 12 failed (`NotImplementedError`), коммит `52c769a`; на неверной реализации (другое событие у `hint_request`, нет ответа за элементом) — 2 failed. Зелёный: 12 passed; с затронутыми (`tests/session/test_phase4_contracts.py`, `tests/practice`, `tests/db/test_sql_static.py`, `tests/test_contracts.py`, инфраструктура B) — 149 passed.
 - WP13.2, граф хода (D-B-148): `cd backend && uv run pytest tests/session/test_turn_graph.py` — ошибка сбора (нет `quack.session.turn_graph`), коммит `14afaaf`; на неверной реализации (8 подмен) — каждая роняет 1–3 теста. Зелёный: 11 passed.
+- WP13.9, запись хода (D-B-149): `cd backend && uv run pytest tests/session/test_turn_commit.py` — ошибка сбора (нет `quack.session.turn_commit`), коммит `d7972cc`; на неверной реализации (6 подмен) — каждая роняет 1–2 теста. Зелёный: 6 passed.
 
 ## Правки тестов
 
