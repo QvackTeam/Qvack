@@ -4,7 +4,7 @@ row on the same skill; `low` otherwise; `teacher_fallback` — always `low`."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Literal
 
 import pytest
 
@@ -13,23 +13,27 @@ from quack.session.turn_policy import teacher_reasoning_effort
 HIGH_SITUATIONS = ["is_first_turn", "goal_changed", "builds_plan", "proof_answer"]
 
 
-def _effort(role: str = "teacher", **situation: Any) -> str:
+def _effort(
+    situation: str | None = None, role: Literal["teacher", "teacher_fallback"] = "teacher"
+) -> str:
     return teacher_reasoning_effort(
-        role=role,  # type: ignore[arg-type]
-        is_first_turn=situation.pop("is_first_turn", False),
+        role=role,
+        is_first_turn=situation == "is_first_turn",
         session_evaluations=[],
-        **situation,
+        goal_changed=situation == "goal_changed",
+        builds_plan=situation == "builds_plan",
+        proof_answer=situation == "proof_answer",
     )
 
 
 @pytest.mark.parametrize("situation", HIGH_SITUATIONS)
 def test_table_situations_are_high(situation: str) -> None:
-    assert _effort(**{situation: True}) == "high"
+    assert _effort(situation) == "high"
 
 
 @pytest.mark.parametrize("situation", HIGH_SITUATIONS)
 def test_fallback_is_always_low(situation: str) -> None:
-    assert _effort("teacher_fallback", **{situation: True}) == "low"
+    assert _effort(situation, "teacher_fallback") == "low"
 
 
 def test_everything_else_is_low() -> None:
