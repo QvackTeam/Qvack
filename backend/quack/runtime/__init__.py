@@ -12,7 +12,7 @@ from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from quack.compute_client.client import ComputeClient
+from quack.compute_client.client import create_compute_client
 from quack.config import Settings
 from quack.db.neo4j import create_driver
 from quack.db.postgres import SessionFactory, create_engine, create_session_factory
@@ -46,7 +46,7 @@ async def create_job_context(settings: Settings) -> JobContext:
         neo4j=neo4j,
         redis=redis,
         llm=LLMGateway(session_factory, provider, settings),
-        compute=ComputeClient(settings.compute_url, settings.compute_timeout_sec),
+        compute=create_compute_client(settings),
     )
 
 

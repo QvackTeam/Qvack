@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -19,6 +20,8 @@ from quack.practice.model_check import (
 )
 from quack.practice.role_outputs import ModelVerdictOutput
 
+M_ONE = UUID(int=1)
+M_TWO = UUID(int=2)
 SETTINGS = Settings()
 SURE = (1 + SETTINGS.verdict_min_confidence) / 2
 UNSURE = SETTINGS.verdict_min_confidence / 2
@@ -53,6 +56,7 @@ def test_model_output_becomes_a_model_class_verdict() -> None:
         answer_seq=5,
         part="main",
         help_used=HelpUsed(hint_step=2, solution_requested=True),
+        known_misconceptions=[M_ONE, M_TWO],
     )
     assert verdict == Verdict(
         answer_seq=5,
@@ -67,7 +71,7 @@ def test_model_output_becomes_a_model_class_verdict() -> None:
             RubricItemResult(item="R1", status="found", quote="a = b"),
             RubricItemResult(item="R2", status="missing", quote=None),
         ],
-        misconception="M2",
+        misconception_id=M_TWO,
     )
 
 
@@ -75,7 +79,16 @@ def test_misconception_hypothesis_in_words_is_kept() -> None:
     verdict = model_verdict(
         _output(misconception_hypothesis="thinks the minus distributes"), answer_seq=5, part="m"
     )
-    assert verdict.misconception == "thinks the minus distributes"
+    assert verdict.misconception_id is None
+    assert verdict.misconception_hypothesis == "thinks the minus distributes"
+
+
+def test_unknown_label_is_dropped_not_stored() -> None:
+    verdict = model_verdict(
+        _output(misconception="M9"), answer_seq=5, part="m", known_misconceptions=[M_ONE]
+    )
+    assert verdict.misconception_id is None
+    assert verdict.misconception_hypothesis is None
 
 
 @pytest.mark.parametrize(
