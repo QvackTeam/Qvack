@@ -27,7 +27,9 @@
           {
             "$ref": "#/components/schemas/ErrorFrame"
           }
-        ]
+        ],
+        "description": "The `data` of one SSE frame of `POST /v1/sessions/{id}/actions` (ТЗ Ф4 §4.7); the SSE\nevent name is `FRAME_EVENTS[type(frame)]`. The `: keepalive` comment is not a frame.",
+        "title": "ActionFrame"
       },
       "ActionRecordedFrame": {
         "additionalProperties": false,
@@ -7678,7 +7680,7 @@
     },
     "/v1/sessions/{session_id}/actions": {
       "post": {
-        "description": "ТЗ Ф4 WP13.1 (`Т-§1.4`): one learner action. Stage I of WP13 (§0.3): declared for the\nOpenAPI draft of G1 (seam S11); the body lands with WP13.",
+        "description": "ТЗ Ф4 WP13.1 (`Т-§1.4`): one learner action of an open session of the learner. A kind\nwithout a teacher turn answers `201 {seq}`; a kind with one — SSE frames of §4.7 (D-B-156);\na session the inactivity sweep ended comes back first (WP13.10). The learner is the one of\nthe session cookie (Т-§19.1).",
         "operationId": "post_action_v1_sessions__session_id__actions_post",
         "parameters": [
           {
@@ -7773,6 +7775,10 @@
                     "data"
                   ],
                   "type": "object"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ActionFrame",
+                  "type": "string"
                 }
               }
             },

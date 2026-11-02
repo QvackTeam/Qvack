@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from quack.practice.answer_spec import LearnerAnswer
 from quack.session.elements import Element
@@ -253,15 +253,17 @@ class ActionAccepted(BaseModel):
     seq: int
 
 
-# One SSE frame of `POST /v1/sessions/{id}/actions` (ТЗ Ф4 §4.7); the SSE event name is
-# `FRAME_EVENTS[type(frame)]`. The `: keepalive` comment is not a frame.
-type ActionFrame = (
-    ActionRecordedFrame
-    | StatusFrame
-    | VerdictFrame
-    | TokenFrame
-    | ResetFrame
-    | ElementFrame
-    | TurnCommittedFrame
-    | ErrorFrame
-)
+class ActionFrame(
+    RootModel[
+        ActionRecordedFrame
+        | StatusFrame
+        | VerdictFrame
+        | TokenFrame
+        | ResetFrame
+        | ElementFrame
+        | TurnCommittedFrame
+        | ErrorFrame
+    ]
+):
+    """The `data` of one SSE frame of `POST /v1/sessions/{id}/actions` (ТЗ Ф4 §4.7); the SSE
+    event name is `FRAME_EVENTS[type(frame)]`. The `: keepalive` comment is not a frame."""

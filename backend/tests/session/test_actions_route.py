@@ -18,7 +18,6 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from neo4j import AsyncDriver
-from quack.session.action_turn import TurnRequest, TurnSetup
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -33,11 +32,13 @@ from quack.events.log import NewEvent, append_events
 from quack.llm.labels import LabelMap
 from quack.llm.provider import ProviderRequest
 from quack.llm.streaming import StreamRequest
+from quack.session.action_turn import TurnRequest, TurnSetup
 from quack.session.router import get_turn_context_source
 from quack.session.sessions import StartSession, end_if_inactive, end_session, start_session
 from quack.session.turn_commit import TurnManifestRow
 from quack.session.turn_graph import AssembledTurn, GuardInputs
-from tests.session.helpers import parse_sse
+from tests.session.helpers import make_token, parse_sse
+from tests.support.auth import ensure_users_hook
 from tests.support.llm import ScriptedFailure, ScriptedLLMProvider
 
 pytest_plugins = ["tests.session.fixtures"]
@@ -161,9 +162,14 @@ def source(app: FastAPI, settings: Settings) -> FixedSource:
 
 
 @pytest.fixture
-async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
+async def client(app: FastAPI, db: SessionFactory) -> AsyncIterator[httpx.AsyncClient]:
+    """Until D-C-119 the session router keeps the Phase 3 token gate of its rate limit; the
+    route itself takes the learner from the session cookie only (as the e2e stand, D-C-115)."""
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+    hooks = {"request": [ensure_users_hook(db)]}
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", event_hooks=hooks
+    ) as http:
         yield http
 
 
@@ -172,6 +178,7 @@ class Learner:
     learner_id: UUID
     session_id: UUID
     cookies: dict[str, str]
+    token: dict[str, str]
 
 
 async def _learner(pg_db: Db, settings: Settings) -> Learner:
@@ -198,7 +205,8 @@ async def _learner(pg_db: Db, settings: Settings) -> Learner:
         body=StartSession(domain_id=domain_id, intent="learn", idempotency_key=uuid4()),
     )
     token = await open_session(pg_db, settings, learner_id=learner_id, now=datetime.now(UTC))
-    return Learner(learner_id, started.session_id, {SESSION_COOKIE: token})
+    bearer = {"Authorization": f"Bearer {make_token(settings, learner_id)}"}
+    return Learner(learner_id, started.session_id, {SESSION_COOKIE: token}, bearer)
 
 
 async def _post(
@@ -208,6 +216,7 @@ async def _post(
         f"/v1/sessions/{session_id or who.session_id}/actions",
         json={"idempotency_key": str(uuid4()), **body},
         cookies=who.cookies,
+        headers=who.token,
     )
 
 
@@ -294,6 +303,7 @@ async def test_without_a_session_cookie_is_unauthenticated(
     response = await client.post(
         f"/v1/sessions/{who.session_id}/actions",
         json={"kind": "message", "text": "hi", "idempotency_key": str(uuid4())},
+        headers=who.token,  # a Phase 3 token is not a session (WP18.3)
     )
 
     assert response.status_code == 401
@@ -352,3 +362,17 @@ async def test_error_before_the_write_is_a_frame_and_no_turn(
     error = frames[-1][1]
     assert error["code"] == "LLM_DEGRADED" and error["retryable"] is True
     assert "turn.committed" not in await _types(pg_db, who.learner_id)
+
+
+async def test_turn_lock_is_released_for_the_next_action(
+    client: httpx.AsyncClient, source: FixedSource, pg_db: Db, settings: Settings
+) -> None:
+    """The Redis turn lock of a session is freed after the turn: the next action has its turn."""
+    who = await _learner(pg_db, settings)
+
+    first = await _post(client, who, {"kind": "message", "text": "one"})
+    second = await _post(client, who, {"kind": "message", "text": "two"})
+
+    for response in (first, second):
+        assert _names(parse_sse(response.text))[-1] == "turn_committed", response.text
+    assert (await _types(pg_db, who.learner_id)).count("turn.committed") == 2
