@@ -29,8 +29,9 @@ CORE = {
     "prompts",
     "compute_client",
 }
-# ТЗ Ф4 §4.1: `agents` (stream B) is a product package; other new packages join with their WPs.
-PRODUCT = {"domains", "session", "artifacts", "practice", "agents"}
+# ТЗ Ф4 §4.1: `agents` (stream B) and `materials` (stream C, WP20) are product packages; other
+# new packages join with their WPs.
+PRODUCT = {"domains", "session", "artifacts", "practice", "agents", "materials"}
 ASSEMBLY_MODULES = ("quack.api.app", "quack.runtime", "quack.cli", "quack.ops")
 
 # Imports that still violate §4.1 because the importing file belongs to stream B and stream C
