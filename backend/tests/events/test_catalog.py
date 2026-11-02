@@ -159,6 +159,13 @@ def test_shared_models_are_the_payloads() -> None:
     assert validate_payload("verdict.recorded", verdict) is verdict
 
 
+def test_check_failed_unsupported_goes_to_the_model() -> None:
+    """Т-§6.6, Т-§22.7 (D-B-146): a form without a structural check is `unsupported`."""
+    payload = {**sample_payload("check.failed"), "reason": "unsupported"}
+    checked = validate_payload("check.failed", payload)
+    assert isinstance(checked, CheckFailed) and checked.reason == "unsupported"
+
+
 def test_derived_keys_deterministic() -> None:
     session, node = uuid4(), uuid4()
     pairs = [

@@ -106,12 +106,16 @@ def job_context(resources: AppResources) -> JobContext:
     """The `workers` resources of §4.2 over the stand's ones: one process, one set (WP2.1)."""
     return JobContext(
         settings=resources.settings,
+        db=resources.db,
         session_factory=resources.session_factory,
         engine=resources.engine,
         neo4j=resources.neo4j,
         redis=resources.redis,
         llm=resources.llm,
         compute=resources.compute,
+        storage=resources.storage,
+        embeddings=resources.embeddings,
+        deletions=resources.deletions,
     )
 
 

@@ -95,9 +95,13 @@ class SkillFact(_Fact):
 
 
 class MisconceptionFact(_Fact):
+    """`statement` — the extractor's wording of a new one, rewritten by the analyst on
+    confirmation (Т-§9.3); `check.model` shows it to the model (D-B-145)."""
+
     misconception_id: UUID
     skill_id: UUID
     status: MisconceptionStatus
+    statement: str
     confused_with_skill_id: UUID | None = None
     manifestation_count: int = Field(default=0, ge=0)
     quotes: list[str] = Field(default=[], max_length=2)
