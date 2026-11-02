@@ -21,7 +21,7 @@ from quack.compute_client.contracts import (
     RenderPdfResponse,
 )
 from quack.config import Settings
-from tests.support.compute import WP24_PATHS, ComputeScenario, scripted_compute
+from tests.support.compute import MATH_PATHS, WP24_PATHS, ComputeScenario, scripted_compute
 
 
 async def test_wp24_methods_post_their_endpoint_and_parse_the_answer() -> None:
@@ -61,7 +61,7 @@ async def test_job_timeout_and_unavailable() -> None:
 
 
 def test_stub_covers_every_wp24_endpoint() -> None:
-    assert set(ComputeScenario().answers) == set(WP24_PATHS)
+    assert set(ComputeScenario().answers) == {*MATH_PATHS, *WP24_PATHS}
 
 
 async def test_job_timeout_is_longer_than_the_compute_one() -> None:

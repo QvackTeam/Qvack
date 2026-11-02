@@ -1,5 +1,5 @@
-"""HTTP client of the isolated compute service: `POST /v1/check/math` (spec §8.4) and the
-WP24 endpoints (ТЗ Фазы 4 WP24, seam S10). Math endpoints of WP11.5 are added by stream B.
+"""HTTP client of the isolated compute service: `POST /v1/check/math` (spec §8.4), the math
+endpoints of WP11.5 and the WP24 endpoints (ТЗ Фазы 4 WP24, seam S10).
 """
 
 from __future__ import annotations
@@ -22,6 +22,13 @@ from quack.compute_client.contracts import (
     RenderSnapshotsResponse,
     RenderStrokesRequest,
 )
+from quack.compute_client.math_contracts import (
+    MathCheckRequest as MathCheckRequestV2,
+)
+from quack.compute_client.math_contracts import (
+    MathCheckResponse as MathCheckResponseV2,
+)
+from quack.compute_client.math_contracts import TransitionRequest, TransitionResponse
 from quack.config import Settings
 
 type MathMode = Literal[
@@ -90,6 +97,22 @@ class ComputeClient:
         except ValueError as exc:
             raise ComputeUnavailableError("compute returned an invalid response") from exc
 
+    async def math_check(self, request: MathCheckRequestV2) -> MathCheckResponseV2:
+        """`POST /v1/math/check` (WP11.5); waits the call budget `timeout_ms` plus
+        `timeout_sec`, so compute answers 504 first."""
+        return await self._post(
+            "/v1/math/check", request, MathCheckResponseV2, wait_s=self._math_timeout(request)
+        )
+
+    async def math_transition(self, request: TransitionRequest) -> TransitionResponse:
+        """`POST /v1/math/transition` (Т-§15.4 п.1); timeout as in `math_check`."""
+        return await self._post(
+            "/v1/math/transition", request, TransitionResponse, wait_s=self._math_timeout(request)
+        )
+
+    def _math_timeout(self, request: MathCheckRequestV2 | TransitionRequest) -> float:
+        return request.timeout_ms / 1000 + self.timeout_sec
+
     async def pdf_pages(self, request: PdfPagesRequest) -> PdfPagesResponse:
         return await self._post("/v1/pdf/pages", request, PdfPagesResponse)
 
@@ -108,12 +131,14 @@ class ComputeClient:
     async def render_pdf(self, request: RenderPdfRequest) -> RenderPdfResponse:
         return await self._post("/v1/render/pdf", request, RenderPdfResponse)
 
-    async def _post[M: BaseModel](self, path: str, body: BaseModel, model: type[M]) -> M:
+    async def _post[M: BaseModel](
+        self, path: str, body: BaseModel, model: type[M], *, wait_s: float | None = None
+    ) -> M:
         try:
             response = await self.client.post(
                 f"{self.base_url}{path}",
                 json=body.model_dump(mode="json"),
-                timeout=self.job_timeout_sec,
+                timeout=self.job_timeout_sec if wait_s is None else wait_s,
             )
         except httpx.HTTPError as exc:
             raise ComputeUnavailableError(f"compute request failed: {exc!r}") from exc
