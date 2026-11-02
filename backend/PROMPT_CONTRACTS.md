@@ -286,6 +286,8 @@ Output fields:
 - `p3_markup.deadline.new_hub_name`: string | null
 - `p3_markup.deadline.deadline_at`: string
 - `p3_markup.deadline.coverage`: list[string]
+- `p3_markup.deadline.quote`: string
+- `p3_markup.deadline.control_type`: "tasks" | "colloquium_proofs" | "oral_theory" | null
 
 Input blocks: `tools_and_elements`, `profile`, `domain_and_goals`, `conversation`, `session_plan`, `memory_picture`, `materials`, `labels`, `tail`, `guard_feedback`
 Label fields: `p1_head.targetSkills`, `p3_markup.tasks.tests.skill`, `p3_markup.tasks.variantOf`, `p3_markup.tasks.options.misconception`, `p3_markup.tasks.pairTaskId`, `p3_markup.exposures.skill`, `p3_markup.targetsMisconception`, `p3_markup.planUpdate.cancel_requests`, `p3_markup.agentRequests.params.skill`, `p3_markup.agentRequests.params.topic`, `p3_markup.agentRequests.params.task`, `p3_markup.agentRequests.params.misconception`, `p3_markup.deadline.hub_label`, `p3_markup.deadline.coverage`
