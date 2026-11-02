@@ -27,7 +27,8 @@ Not here yet: «generated is checked» (WP12.5).
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Mapping
+import contextlib
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol, TypedDict
@@ -338,6 +339,26 @@ class _State(TypedDict):
 type _Update = dict[str, Any]
 
 
+async def _cancellable[T](run: _Run, work: Coroutine[Any, Any, T]) -> T:
+    """Run `work` until it ends or a new action cancels the turn (WP13.2 «стримящий ход
+    прерывается»): a step without text (thinking, tools, a markup fix) stops too."""
+    if run.cancel.is_set():
+        work.close()
+        raise TurnCancelled
+    task = asyncio.ensure_future(work)
+    waiter = asyncio.ensure_future(run.cancel.wait())
+    try:
+        await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        waiter.cancel()
+    if not task.done():
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+        raise TurnCancelled
+    return task.result()
+
+
 def _run_of(config: RunnableConfig) -> _Run:
     return config.get("configurable", {})["run"]
 
@@ -377,7 +398,7 @@ async def _model(state: _State, config: RunnableConfig) -> _Update:
     request = state["request"]
     usage = state["usage"]
     try:
-        step = await stream_step(run.provider, request, attempt.on_text)
+        step = await _cancellable(run, stream_step(run.provider, request, attempt.on_text))
         usage = add_usage(usage, step.completed.usage)
         if step.completed.status == "incomplete":
             # Т-§11.1: a cut answer is never parsed; once more with the doubled limit.
@@ -407,7 +428,9 @@ async def _tools(state: _State, config: RunnableConfig) -> _Update:
     calls = tool_calls(state["step"].items)
     for call in calls:
         await run.ports.emit(StatusFrame(state="tool", tool=call.name))
-    outputs = await run_tools(run.ports.execute_tool, calls, run.settings.tool_timeout_ms)
+    outputs = await _cancellable(
+        run, run_tools(run.ports.execute_tool, calls, run.settings.tool_timeout_ms)
+    )
     request = state["request"]
     items = next_step_input(request.input_items, state["step"].items, outputs)
     return {"request": replace(request, input_items=items), "steps": steps}
@@ -514,7 +537,8 @@ async def _elements(run: _Run, output: TeacherOutputV2, text: str) -> TeacherOut
     markup = markup.model_copy(
         update={
             "elements": [e for e in markup.elements if e.element_id not in removed],
-            "tasks": [tasks[t.element_id] for t in markup.tasks if t.element_id not in removed],
+            # Review C #109: a task fixed from no markup at all is kept too (insertion order).
+            "tasks": [task for eid, task in tasks.items() if eid not in removed],
         }
     )
     blocks = [b for b in output.p2_body.blocks if b.element_id not in removed]
@@ -531,8 +555,11 @@ async def _checked_task(
     for attempt in range(1, run.settings.guard_max_retries + 1):
         if not problems:
             return task
-        fixed = await run.ports.fix_markup(
-            MarkupFix(element=element, task=task, problems=problems, text=text, attempt=attempt)
+        fixed = await _cancellable(
+            run,
+            run.ports.fix_markup(
+                MarkupFix(element=element, task=task, problems=problems, text=text, attempt=attempt)
+            ),
         )
         if fixed is None:
             break

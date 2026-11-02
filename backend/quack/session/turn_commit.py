@@ -407,7 +407,8 @@ async def commit_turn(
     db: Db, batch: TurnBatch, *, learner_id: UUID, redis: Redis | None = None
 ) -> int:
     """Write the batch, the task documents and the manifest row in one transaction; the seq
-    of `turn.committed`."""
+    of `turn.committed`. A retry of the write passes the same `TurnBatch` object: a batch
+    built again has new ids (tasks, requests, hub) under the same keys and conflicts."""
     manifest = batch.manifest
     if manifest.learner_id != learner_id:
         raise ValueError("the manifest belongs to another learner")
