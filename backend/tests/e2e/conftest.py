@@ -11,6 +11,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from tests.e2e.system import System, build_system
 from tests.support.broken import BrokenRedis
@@ -44,8 +45,9 @@ async def system(
     db: SessionFactory,
     neo4j: AsyncDriver,
     redis: Redis,
+    pg_db: Db,
 ) -> AsyncIterator[System]:
-    async with _running(await build_system(settings, pg_engine, db, neo4j, redis)) as stand:
+    async with _running(await build_system(settings, pg_engine, db, neo4j, redis, pg_db)) as stand:
         yield stand
 
 
@@ -56,18 +58,23 @@ async def system_for_walk(
     db: SessionFactory,
     neo4j: AsyncDriver,
     redis: Redis,
+    pg_db: Db,
 ) -> AsyncIterator[System]:
     walk = settings.model_copy(update={"learner_actions_per_min": WALK_ACTIONS_PER_MIN})
-    async with _running(await build_system(walk, pg_engine, db, neo4j, redis)) as stand:
+    async with _running(await build_system(walk, pg_engine, db, neo4j, redis, pg_db)) as stand:
         yield stand
 
 
 @pytest.fixture
 async def system_without_redis(
-    settings: Settings, pg_engine: AsyncEngine, db: SessionFactory, neo4j: AsyncDriver
+    settings: Settings,
+    pg_engine: AsyncEngine,
+    db: SessionFactory,
+    neo4j: AsyncDriver,
+    pg_db: Db,
 ) -> AsyncIterator[System]:
     broken = settings.model_copy(update={"redis_url": DEAD_REDIS_URL})
-    stand = await build_system(broken, pg_engine, db, neo4j, BrokenRedis())
+    stand = await build_system(broken, pg_engine, db, neo4j, BrokenRedis(), pg_db)
     async with _running(stand) as running:
         yield running
 
@@ -79,8 +86,9 @@ async def system_without_llm(
     db: SessionFactory,
     neo4j: AsyncDriver,
     redis: Redis,
+    pg_db: Db,
 ) -> AsyncIterator[System]:
-    stand = await build_system(settings, pg_engine, db, neo4j, redis)
+    stand = await build_system(settings, pg_engine, db, neo4j, redis, pg_db)
     stand.llm.fail(ScriptedFailure("unavailable", times=ALWAYS))
     async with _running(stand) as running:
         yield running

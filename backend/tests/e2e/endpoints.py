@@ -13,6 +13,8 @@ NO_IDEMPOTENCY_KEY: dict[tuple[str, str], str] = {
     ("POST", "/v1/auth/register"): "creates the account; a repeat is 409 by email",
     ("POST", "/v1/auth/login"): "reads only; issues a new token",
     ("DELETE", "/v1/learner"): "one tombstone per learner; a repeat is a no-op",
+    # ТЗ Ф4 §6.4: the body is `{timezone}` only; no event, a repeat sets the same value.
+    ("PATCH", "/v1/learner/settings"): "no event; sets core.learners.settings",
     ("POST", "/v1/sessions/{session_id}/heartbeat"): "no event; refreshes presence only",
     # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
     ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): "no event; the job coalesces",
@@ -62,6 +64,8 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
     v = variant
     bodies: dict[tuple[str, str], dict[str, Any]] = {
         ("PATCH", "/v1/learner/preferences"): {"preferences": {"language": ["en", "de"][v]}},
+        ("POST", "/v1/consents"): {"kind": ["terms", "research"][v], "version": "2026-11"},
+        ("DELETE", "/v1/consents/research"): {"version": ["2026-11", "2026-12"][v]},
         ("POST", "/v1/domains"): {"name": ["Physics", "Chemistry"][v]},
         ("POST", "/v1/domains/{domain_id}/archive"): {"reason": ["done", "moved"][v]},
         ("POST", "/v1/domains/{domain_id}/structure/propose"): {
