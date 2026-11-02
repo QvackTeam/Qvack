@@ -98,7 +98,7 @@ def create_app(settings: ComputeSettings | None = None) -> FastAPI:
 
     @app.post("/v1/image/align")
     async def image_align(body: ImageRequest, request: Request) -> AlignResponse:
-        return await in_pool(request, work.image_align, body)
+        return await in_pool(request, work.image_align, body, request.app.state.settings)
 
     @app.post("/v1/image/clean-drawing")
     async def image_clean_drawing(body: CleanDrawingRequest, request: Request) -> ImageResponse:
@@ -106,7 +106,7 @@ def create_app(settings: ComputeSettings | None = None) -> FastAPI:
 
     @app.post("/v1/image/render-strokes")
     async def image_render_strokes(body: RenderStrokesRequest, request: Request) -> ImageResponse:
-        return await in_pool(request, work.image_render_strokes, body)
+        return await in_pool(request, work.image_render_strokes, body, request.app.state.settings)
 
     @app.post("/v1/render/snapshots")
     async def render_snapshots(
