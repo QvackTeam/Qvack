@@ -5,14 +5,18 @@ from __future__ import annotations
 import dataclasses
 import math
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import uuid4
 
 import pytest
+from psycopg_pool import PoolClosed
 from pydantic import SecretStr
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.email import EmailSender, EmailUnavailable, ResendEmailSender, create_email_sender
-from quack.api.resources import AppResources
+from quack.api.resources import AppResources, create_app_resources
 from quack.config import Settings
+from quack.db import Db
 from quack.embeddings.client import (
     EmbeddingClient,
     EmbeddingsUnavailable,
@@ -36,14 +40,16 @@ from quack.storage.objects import (
 from tests.support.deletions import FakeDeletionJournal
 from tests.support.email import FakeEmailSender
 from tests.support.embeddings import FakeEmbeddingClient
+from tests.support.resources import build_app_resources
 from tests.support.storage import BrokenObjectStore, InMemoryObjectStore
 
 
 def test_app_resources_fields() -> None:
-    # §4.2 contract minus `db` (S2, stream A, WP1.2); `engine` and `session_factory` leave in WP1.3.
+    # §4.2 contract; `engine` and `session_factory` leave in WP1.3 (stream A).
     names = {f.name for f in dataclasses.fields(AppResources)}
     assert names == {
         "settings",
+        "db",
         "engine",
         "session_factory",
         "neo4j",
@@ -149,3 +155,26 @@ async def test_fake_deletion_journal_lists_since_and_can_be_down() -> None:
     journal.available = False
     with pytest.raises(DeletionJournalUnavailable):
         await journal.write(old)
+
+
+@pytest.mark.usefixtures("pg_engine")  # Postgres up, else skipped (failed under REQUIRE_INFRA)
+async def test_api_resources_open_db_and_close_it(settings: Settings) -> None:
+    """§4.2: the API process opens one `Db` (seam S2) and closes it with the other resources."""
+    resources = await create_app_resources(settings)
+    try:
+        assert isinstance(resources.db, Db)
+        async with resources.db.transaction() as conn:
+            row = await (await conn.execute("SELECT 1")).fetchone()
+        assert row == (1,)
+    finally:
+        await resources.close()
+    assert resources.db.pool.closed
+
+
+async def test_test_resources_without_db_fail_loudly(settings: Settings) -> None:
+    """`build_app_resources` without a `Db` gives one over a closed pool: a test that touches
+    Postgres without passing `pg_db` fails instead of reaching a real database."""
+    resources = build_app_resources(settings, cast(AsyncEngine, None), None, None)
+    with pytest.raises(PoolClosed):
+        async with resources.db.transaction():
+            pass
