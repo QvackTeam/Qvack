@@ -612,6 +612,9 @@ class Settings(BaseSettings):
     backup_local_dir: str = "/backups"
     heartbeat_backup_url: SecretStr = SecretStr("")
     alert_webhook_url: SecretStr = SecretStr("")
+    # Д-§14.3: the chat is not chosen yet, the body shape follows the setting (ops/notify.py).
+    alert_webhook_format: Literal["slack", "discord", "telegram"] = "slack"
+    alert_webhook_chat_id: str = ""
     cors_origins: list[str] = Field(
         default_factory=lambda: ["https://app.qvack.online", "https://preview.qvack.online"]
     )
