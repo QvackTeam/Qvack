@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Duck as FlatDuck } from "@/components/quack/duck";
 import { useT } from "@/lib/i18n/provider";
@@ -19,10 +18,9 @@ import type { Scanline } from "./scanline/scanline";
  * Тяжёлое (three, канвас, утка) подгружается отдельными чанками — в основной бандл не попадает.
  */
 
-// three и движок — отдельным чанком, только в браузере
-const ScanlineCanvas = dynamic(() => import("./scanline/scanline-canvas").then((m) => m.ScanlineCanvas), {
-  ssr: false,
-});
+// three и движок — отдельным чанком, грузим в эффекте после монтирования. Не next/dynamic с ssr:false:
+// в layout он ломает проверку instant-навигации (Cache Components) — «Browser-only rendering was requested».
+type CanvasComp = typeof import("./scanline/scanline-canvas").ScanlineCanvas;
 
 const MIN_MS = 1800; // минимум показа (счёт 0→100)
 const REDUCED_MS = 700; // то же при prefers-reduced-motion
@@ -51,6 +49,7 @@ export function Preloader() {
   const [phase, setPhase] = useState<Phase>("show");
   const [percent, setPercent] = useState(0);
   const [lib, setLib] = useState<DuckLib | null>(null);
+  const [Canvas, setCanvas] = useState<CanvasComp | null>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const wordmarkRef = useRef<HTMLDivElement>(null);
@@ -78,11 +77,12 @@ export function Preloader() {
     (fonts ? fonts.ready : Promise.resolve()).then(() => {
       if (alive) ready.current.fonts = true;
     });
-    import("./scanline/duck-3d").then(
-      (m) => {
+    Promise.all([import("./scanline/duck-3d"), import("./scanline/scanline-canvas")]).then(
+      ([m, c]) => {
         if (!alive) return;
         libRef.current = m;
         setLib(m);
+        setCanvas(() => c.ScanlineCanvas);
       },
       () => {}, // чанк не загрузился: дождёмся таймаута и просто уйдём
     );
@@ -220,7 +220,11 @@ export function Preloader() {
 
           {/* свободное место между верхними подписями и нижними: контейнер даёт размеры в cqw/cqh, утка по ним не вылезает на подписи */}
           <div className="grid min-h-0 flex-1 place-items-center py-4 [container-type:size]">
-            <ScanlineCanvas className={CANVAS_CLASS} options={options} onFrame={onFrame} />
+            {Canvas ? (
+              <Canvas className={CANVAS_CLASS} options={options} onFrame={onFrame} />
+            ) : (
+              <div className={CANVAS_CLASS} aria-hidden />
+            )}
           </div>
 
           <div className="flex items-end justify-between gap-6 pb-4 sm:pb-6">
