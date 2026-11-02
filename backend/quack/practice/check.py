@@ -18,8 +18,6 @@ from decimal import Decimal
 from fractions import Fraction
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from quack.compute_client.client import ComputeClient, ComputeJobTimeout, ComputeUnavailableError
 from quack.compute_client.math_contracts import (
     MathCheckRequest,
@@ -30,6 +28,17 @@ from quack.compute_client.math_contracts import (
 )
 from quack.compute_client.math_contracts import Variable as MathVariable
 from quack.config import Settings
+from quack.events.values import (
+    CheckFailed,
+    CheckFailedReason,
+    ErrorHint,
+    Method,
+    Outcome,
+    RubricItemResult,
+    SecondOpinion,
+    Verdict,
+    Verification,
+)
 from quack.practice.answer_spec import (
     INSTANT_TYPES,
     SLOW_TYPES,
@@ -37,65 +46,24 @@ from quack.practice.answer_spec import (
     LearnerAnswer,
 )
 
-type Outcome = Literal["correct", "incorrect", "partial", "unclear"]
-type Method = Literal["exact", "numeric", "symbolic", "units", "model"]
-type Verification = Literal["code", "model"]
-# Т-§6.2 ориентир: cheap deterministic checks of a wrong answer.
-type ErrorHint = Literal["sign", "coefficient", "dimension"]
-type CheckFailedReason = Literal["unparsed", "too_few_points", "timeout", "compute_unavailable"]
-
-
-class SecondOpinion(BaseModel):
-    """Т-§7.7: whether a second opinion was asked and whether it agreed (null — not asked)."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    requested: bool
-    agreed: bool | None = None
-
-
-class RubricItemResult(BaseModel):
-    """One rubric item of a model verdict (Т-§6.8): found / missing / wrong, with a quote."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    item: str
-    status: Literal["found", "missing", "wrong"]
-    quote: str | None = None
-
-
-class Verdict(BaseModel):
-    """`verdict.recorded` payload without the event envelope (Т-§6.2, ТЗ Ф4 WP11.4).
-
-    `help_step` / `solution_shown` — help computed by code from the task events of the
-    session (WP11.2); `misconception` — a label or a hypothesis in words (model verdicts).
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    answer_seq: int
-    part: str
-    outcome: Outcome
-    method: Method
-    verification: Verification
-    numeric_only: bool = False
-    error_hint: ErrorHint | None = None
-    second_opinion: SecondOpinion | None = None
-    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
-    help_step: int = Field(default=0, ge=0, le=3)
-    solution_shown: bool = False
-    rubric: list[RubricItemResult] | None = None
-    misconception: str | None = None
-    needs_reading_confirmation: bool = False
-
-
-@dataclass(frozen=True)
-class CheckFailed:
-    """`check.failed {answer_seq, part, reason}` (Т-§22.7): goes to `check.model`."""
-
-    answer_seq: int
-    part: str
-    reason: CheckFailedReason
+# `verdict.recorded` and `check.failed` payloads live in the core (seam S3, Q-A-1 variant (a)).
+__all__ = [
+    "CheckFailed",
+    "CheckFailedReason",
+    "CheckResult",
+    "ErrorHint",
+    "HelpUsed",
+    "Method",
+    "NeedsModel",
+    "NotYet",
+    "Outcome",
+    "RubricItemResult",
+    "SecondOpinion",
+    "Verdict",
+    "Verification",
+    "apply_reading",
+    "check",
+]
 
 
 @dataclass(frozen=True)
@@ -172,7 +140,7 @@ async def check(
         return NotYet(answer_seq, part)
     request = _math_request(answer, spec, settings, timeout_ms)
     if request is None:
-        return CheckFailed(answer_seq, part, "unparsed")
+        return CheckFailed(answer_seq=answer_seq, part=part, reason="unparsed")
     try:
         response = await asyncio.wait_for(compute.math_check(request), request.timeout_ms / 1000)
     except (TimeoutError, ComputeJobTimeout):
@@ -275,11 +243,11 @@ def _from_compute(
 ) -> CheckResult:
     if response.status == "failed":
         if response.reason in ("unparsed", "too_few_points"):
-            return CheckFailed(answer_seq, part, response.reason)
+            return CheckFailed(answer_seq=answer_seq, part=part, reason=response.reason)
         # `unsupported`: no code check for this form — the model decides (Т-§6.6).
         return NeedsModel(answer_seq, part)
     if response.outcome is None or response.method is None:
-        return CheckFailed(answer_seq, part, "unparsed")
+        return CheckFailed(answer_seq=answer_seq, part=part, reason="unparsed")
     return Verdict(
         answer_seq=answer_seq,
         part=part,

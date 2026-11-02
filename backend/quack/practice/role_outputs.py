@@ -12,14 +12,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from quack.events.values import GapType
 from quack.practice.answer_spec import MathValue
 from quack.practice.markup import TaskMarkup
-
-# Т-§7.6, П-6.4: gap types; positive elements carry `none`. Shared by the extractor, the
-# wrong branches of a solution space (Т-§5.5) and `gapType` (Т-§8.4).
-type GapType = Literal[
-    "no_idea", "when_to_apply", "confusion", "execution", "slip", "misconception", "none"
-]
 
 
 class _Strict(BaseModel):
