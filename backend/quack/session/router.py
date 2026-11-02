@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
+from quack.api.auth import require_terms
 from quack.api.errors import ApiError
 from quack.api.resources import AppResources, get_resources
 from quack.compute_client.client import ComputeClient
@@ -41,7 +42,9 @@ Resources = Annotated[AppResources, Depends(get_resources)]
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 
 
-@router.post("/sessions", status_code=201)
+# ТЗ Ф4 WP13.1, WP18.4 (D-C-112 п.3): no session without `consent.given {kind: terms}` of the
+# current `terms_version` — `403 CONSENT_REQUIRED`.
+@router.post("/sessions", status_code=201, dependencies=[Depends(require_terms)])
 async def start_session(
     body: StartSessionRequest, learner_id: LearnerId, resources: Resources, settings: SettingsDep
 ) -> SessionStarted:
