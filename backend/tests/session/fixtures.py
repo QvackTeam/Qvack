@@ -25,6 +25,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
+from quack.api.auth import require_terms
 from quack.compute_client.client import (
     ComputeClient,
     ComputeUnavailableError,
@@ -73,7 +74,11 @@ async def session_app(
     and the pools are owned (and closed) by the infrastructure fixtures.
     """
     resources = build_app_resources(settings, pg_engine, neo4j, redis, session_factory=db)
-    return create_app(settings, resources=resources)
+    app = create_app(settings, resources=resources)
+    # Phase 3 tests sign in with a Bearer token and have no cookie session or consent; the
+    # consent gate of the session start (WP18.4) has its own test (`test_session_terms.py`).
+    app.dependency_overrides[require_terms] = lambda: None
+    return app
 
 
 @pytest.fixture
