@@ -4,27 +4,39 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Переплёт задачника: тёмный коленкор, бумажный текст, охра тиснения */
+/* Два цвета: тёмно-коричневый фон и бежевый акцент (как на sondaven.com) */
 :root {
-  --cloth: #1c1915;
-  --cloth-deep: #171410;
-  --cloth-raised: #24201a;
-  --cloth-hover: #2c2720;
-  --seam: #3a3329;
-  --seam-soft: #2e2921;
-  --paper: #e6dccb;
-  --paper-dim: #a99e8b;
-  --rule: #6f6657;
-  --duck: #cdc2ad;
-  --ribbon: #e5863b;
-  --ribbon-hover: #ec9a57;
-  --ribbon-soft: #e5863b29;
-  --on-ribbon: #1c1915;
+  --cloth: #2c2824;
+  --cloth-deep: #25211e;
+  --cloth-raised: #332e29;
+  --cloth-hover: #3a342e;
+  /* швы — бежевый с альфой: одинаково ложатся на любую поверхность */
+  --seam: #a8947440;
+  --seam-soft: #a894741f;
+  --paper: #e2d5bd;
+  --paper-dim: #b8a583; /* светлее ориентира #a89474: ≥4.5:1 и на cloth-hover */
+  --rule: #7f735f;
+  --duck: #a89474;
+  --ribbon: #a89474;
+  --ribbon-hover: #bfae8e;
+  --ribbon-soft: #a8947429;
+  --on-ribbon: #2c2824;
 
-  --st-solid: #8fb08a;
-  --st-review: #86a8c6;
-  --st-confused: #d6727c;
-  --st-new: #9a8f7d;
+  /* статусы приглушены к бежевой палитре */
+  --st-solid: #9bb08a;
+  --st-review: #8fa8bb;
+  --st-confused: #d98a8c;
+  --st-new: #928775;
+
+  /* движение */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-s: 0.3s;
+  --dur-m: 0.6s;
+  --dur-l: 1.2s;
+
+  /* шрифты (next/font задаёт --font-forum и --font-montserrat) */
+  --font-display: var(--font-forum), "Times New Roman", serif;
+  --font-label: var(--font-montserrat), system-ui, sans-serif;
 
   /* shadcn */
   --background: var(--cloth);
@@ -45,7 +57,7 @@
   --border: var(--seam);
   --input: var(--seam);
   --ring: var(--ribbon);
-  --radius: 0.75rem;
+  --radius: 2px; /* карточки и панели почти квадратные */
   --sidebar: var(--cloth-deep);
   --sidebar-foreground: var(--paper);
   --sidebar-primary: var(--ribbon);
@@ -85,9 +97,11 @@
 
   --font-sans: var(--font-golos);
   --font-mono: var(--font-jetbrains);
-  --font-serif: var(--font-pt-serif);
+  --font-display: var(--font-forum), "Times New Roman", serif;
+  --font-label: var(--font-montserrat), system-ui, sans-serif;
+  --font-serif: var(--font-forum), "Times New Roman", serif;
   --font-hand: var(--font-caveat);
-  --font-heading: var(--font-pt-serif);
+  --font-heading: var(--font-forum), "Times New Roman", serif;
 
   /* Три кегля на весь экран + дисплей для названия домена */
   --text-small: 0.8125rem;
@@ -135,12 +149,16 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-  /* DESIGN: control 11px — кнопки и поля; option 10px — строки списков и пункты меню */
-  --radius-control: 11px;
-  --radius-option: 10px;
+  /* control — поля и строки; option — пункты меню; pill — кнопки и теги */
+  --radius-control: 3px;
+  --radius-option: 2px;
+  --radius-pill: 9999px;
 
-  --animate-found: found 1.6s cubic-bezier(0.16, 1, 0.3, 1) 2;
-  --animate-toast: toast 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-found: found 1.6s var(--ease-out) 2;
+  --animate-toast: toast 0.35s var(--ease-out);
+  /* шторка: --mask-y уходит 0% -> 100% (скрыть) или обратно (показать) */
+  --animate-wipe-out: wipe-out var(--dur-m) var(--ease-out) both;
+  --animate-wipe-in: wipe-in var(--dur-m) var(--ease-out) both;
 
   --animate-breathe: breathe 3s ease-in-out infinite;
 
@@ -156,6 +174,21 @@
     from { transform: translateY(8px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
   }
+  @keyframes wipe-out {
+    from { --mask-y: 0%; }
+    to { --mask-y: 100%; }
+  }
+  @keyframes wipe-in {
+    from { --mask-y: 100%; }
+    to { --mask-y: 0%; }
+  }
+}
+
+/* чтобы --mask-y можно было анимировать */
+@property --mask-y {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
 }
 
 @layer base {
@@ -165,6 +198,8 @@
   html {
     @apply font-sans;
     font-feature-settings: "kern";
+    /* у Forum один вес: без синтетического жирного */
+    font-synthesis-weight: none;
   }
   body {
     @apply bg-cloth text-paper text-body;
@@ -189,7 +224,7 @@
 }
 
 [data-flash] {
-  border-radius: 8px;
+  border-radius: 2px;
   animation: flash 1.5s ease-out forwards;
 }
 @keyframes flash {
@@ -201,6 +236,59 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+}
+
+/* мелкая подпись: капс с разрядкой; размер — через [--caps-size:0.75rem] */
+@utility caps {
+  font-family: var(--font-label);
+  font-size: var(--caps-size, 0.6875rem);
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* заголовок антиквой капсом (названия, пункты меню) */
+@utility display-caps {
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* полосатый текст: вертикальные штрихи + рваный край (фильтр #quack-ragged лежит в layout.tsx) */
+@utility text-striped {
+  -webkit-mask-image: repeating-linear-gradient(
+    90deg,
+    #000 0 var(--stripe-line, 2px),
+    transparent var(--stripe-line, 2px) var(--stripe-step, 3px)
+  );
+  mask-image: repeating-linear-gradient(
+    90deg,
+    #000 0 var(--stripe-line, 2px),
+    transparent var(--stripe-line, 2px) var(--stripe-step, 3px)
+  );
+  filter: url(#quack-ragged);
+}
+
+/* лёгкий шум поверх цвета фона: bg-cloth grain (слой background-image, текст не трогает) */
+@utility grain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.66 0 0 0 0 0.58 0 0 0 0 0.45 0.12 0 0 0 -0.025'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
+/* шторка как у референса: вверху сплошно, внизу мягко в прозрачность;
+   --mask-y: 0% — виден весь элемент, 100% — скрыт (маска уезжает вверх) */
+@utility mask-wipe {
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 50%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0, #000 50%, transparent 100%);
+  -webkit-mask-size: 100% 200%;
+  mask-size: 100% 200%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: 0 calc(var(--mask-y, 0%) * 2);
+  mask-position: 0 calc(var(--mask-y, 0%) * 2);
 }
 
 @media (prefers-reduced-motion: reduce) {

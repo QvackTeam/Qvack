@@ -9,7 +9,7 @@ import { useStartSession } from "./live/use-start-session";
 import { useSoon } from "./soon";
 
 const CARD =
-  "flex h-[88px] w-[260px] shrink-0 flex-col justify-center gap-0.5 rounded-[16px] border border-seam bg-cloth-raised px-3.5 text-left transition-colors hover:border-rule hover:bg-cloth-hover md:w-auto md:min-w-0 md:max-w-[calc((100%-1.25rem)/3)] md:flex-1";
+  "flex h-[88px] w-[260px] shrink-0 flex-col justify-center gap-0.5 rounded-[2px] border border-seam px-3.5 text-left transition-colors duration-[var(--dur-s)] ease-out hover:border-rule hover:bg-cloth-raised md:w-auto md:min-w-0 md:max-w-[calc((100%-1.25rem)/3)] md:flex-1";
 
 /** «С чего начнём?»: 1–3 компактные карточки в ряд, над полем ввода */
 export function TodayList({ items, idPrefix = "" }: { items: TodayItem[]; idPrefix?: string }) {
@@ -24,18 +24,18 @@ export function TodayList({ items, idPrefix = "" }: { items: TodayItem[]; idPref
   return (
     <section aria-labelledby={`${idPrefix}today-h`} className="shrink-0">
       <div className="flex items-baseline gap-3 pb-1.5">
-        <h2 id={`${idPrefix}today-h`} className="text-body font-semibold text-paper">
+        <h2 id={`${idPrefix}today-h`} className="caps text-paper">
           {t.today.heading}
         </h2>
         {total !== null && <span className="num text-small text-paper-dim">≈ {t.today.min(total)}</span>}
       </div>
-      <ol className="-mx-4 flex gap-2.5 overflow-x-auto px-4 pb-1 md:mx-0 md:overflow-visible md:px-0 md:pb-0">
+      <ol className="-mx-4 flex items-stretch gap-2.5 overflow-x-auto px-4 pb-1 md:mx-0 md:overflow-visible md:px-0 md:pb-0">
         {items.map((it, i) => {
           const body = (
             <>
               <span className="flex items-baseline gap-2">
-                <span className="num shrink-0 text-small text-paper-dim">{t.today.num(i + 1)}</span>
-                <span className="min-w-0 flex-1 truncate font-medium text-paper">{it.title}</span>
+                <span className="caps shrink-0 text-paper-dim">{t.today.num(i + 1)}</span>
+                <span className="display-caps line-clamp-2 min-w-0 flex-1 text-[1rem] text-paper">{it.title}</span>
               </span>
               <span className="flex items-baseline gap-2 text-small text-paper-dim">
                 <span className="line-clamp-2 min-w-0 flex-1">{it.reason}</span>

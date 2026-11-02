@@ -8,6 +8,9 @@ import { useT } from "@/lib/i18n/provider";
 import { Duck } from "../duck";
 import { FIELD, Field, PRIMARY_BTN, StubNote } from "./stub-parts";
 
+/** Поле входа — только линия снизу */
+const LINE_FIELD = `${FIELD} rounded-none border-0 border-b bg-transparent px-0`;
+
 /** Log in / sign up. With the backend it gets a JWT; on mocks submitting just opens the app. */
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const t = useT().stubs.auth;
@@ -53,14 +56,17 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   };
 
   return (
-    <main className="flex h-full overflow-y-auto bg-cloth px-4 py-10">
-      <div className="m-auto w-full max-w-[400px]">
+    <main className="grain flex h-full overflow-y-auto bg-cloth px-4 py-10">
+      <div className="m-auto w-full max-w-[420px]">
         <Duck className="size-14" />
-        <h1 className="mt-4 font-serif text-[28px] leading-tight font-bold text-paper">{signup ? t.signupTitle : t.loginTitle}</h1>
-        <p className="mt-2 text-body text-paper-dim">{signup ? t.signupBody : t.loginBody}</p>
+        {/* крупный заголовок-«вывеска»: антиква капсом, штриховка, как логотип референса */}
+        <h1 className="display-caps text-striped mt-6 text-[clamp(2.75rem,12vw,4.5rem)] leading-[0.95] text-ribbon [--stripe-line:3px] [--stripe-step:4px]">
+          {signup ? t.signupTitle : t.loginTitle}
+        </h1>
+        <p className="mt-4 text-body text-paper-dim">{signup ? t.signupBody : t.loginBody}</p>
 
         <form
-          className="mt-2"
+          className="mt-4"
           onSubmit={(e) => {
             e.preventDefault();
             void submit(new FormData(e.currentTarget));
@@ -68,11 +74,11 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
         >
           {signup && (
             <Field id={`${id}-name`} label={t.name}>
-              <input id={`${id}-name`} name="name" autoComplete="nickname" placeholder={t.namePh} className={FIELD} />
+              <input id={`${id}-name`} name="name" autoComplete="nickname" placeholder={t.namePh} className={LINE_FIELD} />
             </Field>
           )}
           <Field id={`${id}-email`} label={t.email}>
-            <input id={`${id}-email`} name="email" type="email" required autoComplete="email" placeholder={t.emailPh} className={FIELD} />
+            <input id={`${id}-email`} name="email" type="email" required autoComplete="email" placeholder={t.emailPh} className={LINE_FIELD} />
           </Field>
           <Field id={`${id}-pw`} label={t.password} help={signup ? t.passwordHelp : undefined}>
             <input
@@ -82,7 +88,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
               required
               minLength={signup ? 8 : 1}
               autoComplete={signup ? "new-password" : "current-password"}
-              className={FIELD}
+              className={LINE_FIELD}
             />
           </Field>
           {error && (
@@ -90,14 +96,14 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
               {error}
             </p>
           )}
-          <button type="submit" disabled={busy} className={`${PRIMARY_BTN} mt-6 w-full`}>
+          <button type="submit" disabled={busy} className={`${PRIMARY_BTN} mt-8 h-12 w-full`}>
             {signup ? t.signup : t.login}
           </button>
         </form>
 
-        <p className="mt-5 text-small text-paper-dim">
+        <p className="caps mt-6 text-paper-dim">
           {signup ? t.haveAccount : t.noAccount}{" "}
-          <Link href={signup ? "/login" : "/signup"} className="text-paper underline decoration-seam underline-offset-4 hover:decoration-paper-dim">
+          <Link href={signup ? "/login" : "/signup"} className="text-ribbon underline decoration-seam underline-offset-4 transition-colors duration-(--dur-s) ease-out hover:decoration-ribbon">
             {signup ? t.toLogin : t.toSignup}
           </Link>
         </p>

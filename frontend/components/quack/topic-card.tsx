@@ -42,15 +42,15 @@ export function TopicCardBody({ topic, hubLabel }: { topic: Topic; hubLabel?: st
   return (
     <>
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="font-semibold">
+        <h3 className="display-caps text-[1.0625rem]">
           <Link href={`/topic/${topic.id}`} className="text-paper underline decoration-seam decoration-1 underline-offset-4 hover:decoration-rule">
             {topic.title}
           </Link>
         </h3>
-        {hubLabel && <span className="num shrink-0 text-small text-paper-dim">{hubLabel}</span>}
+        {hubLabel && <span className="caps shrink-0 text-paper-dim">{hubLabel}</span>}
       </div>
       <p className="mt-1 text-small text-paper-dim">{topic.simple}</p>
-      <p className="mt-3 flex items-center gap-2 text-small text-paper">
+      <p className="caps mt-3 flex items-center gap-2 text-paper">
         <StateDot state={topic.state} />
         {t.states[topic.state]}
       </p>
@@ -63,7 +63,7 @@ export function TopicCardBody({ topic, hubLabel }: { topic: Topic; hubLabel?: st
             <Link
               key={a}
               href={`/practice/${topic.id}`}
-              className="inline-flex h-10 items-center justify-center rounded-control border border-seam px-3 text-small text-paper transition-colors hover:border-rule hover:bg-cloth-hover"
+              className="caps inline-flex h-10 items-center justify-center rounded-pill border border-seam px-3 text-paper transition-colors duration-[var(--dur-s)] ease-out hover:border-rule hover:bg-cloth-hover"
             >
               {a}
             </Link>
@@ -77,7 +77,7 @@ export function TopicCardBody({ topic, hubLabel }: { topic: Topic; hubLabel?: st
               if (m) void start({ domainId: domain.id, topicId: topic.id, mode: m });
               else soon(t.soon.topicAction(a, topic.title));
             }}
-            className="h-10 disabled:opacity-50 rounded-control border border-seam px-3 text-small text-paper transition-colors hover:border-rule hover:bg-cloth-hover"
+            className="caps h-10 rounded-pill border border-seam px-3 text-paper transition-colors duration-[var(--dur-s)] ease-out hover:border-rule hover:bg-cloth-hover disabled:opacity-50"
           >
             {a}
           </button>

@@ -41,7 +41,7 @@ function ViewToggle({ view, onChange, count, panelId }: { view: View; onChange: 
       role="tablist"
       aria-label={tx.domain.viewLabel}
       onKeyDown={onKey}
-      className="flex h-11 w-full gap-0.5 rounded-control border border-seam bg-cloth-deep p-0.5 sm:w-auto"
+      className="flex h-11 w-full gap-0.5 rounded-pill border border-seam bg-cloth-deep p-0.5 sm:w-auto"
     >
       {TABS.map((t) => {
         const on = view === t.id;
@@ -59,8 +59,8 @@ function ViewToggle({ view, onChange, count, panelId }: { view: View; onChange: 
             tabIndex={on ? 0 : -1}
             onClick={() => onChange(t.id)}
             className={cn(
-              "inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-[9px] px-4 text-body whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ribbon sm:flex-none",
-              on ? "bg-cloth-raised font-medium text-paper" : "text-paper-dim hover:text-paper",
+              "caps inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-pill border px-5 whitespace-nowrap transition-colors duration-(--dur-s) ease-(--ease-out) focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ribbon sm:flex-none",
+              on ? "border-ribbon/70 bg-cloth-raised text-paper" : "border-transparent text-paper-dim hover:text-paper",
             )}
           >
             {t.label}
@@ -130,9 +130,9 @@ export function DomainView() {
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pt-4 pb-3 md:overflow-hidden md:px-7 md:pt-6">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-6">
           <div className="min-w-0">
-            <h1 className="font-serif text-display font-bold tracking-[-0.01em] text-paper">{domain.title}</h1>
+            <h1 className="display-caps text-[clamp(1.875rem,3.4vw,2.75rem)] text-paper">{domain.title}</h1>
             {deadlineHub?.deadline ? (
-              <p className="mt-1.5 text-paper-dim">
+              <p className="caps mt-2.5 text-paper-dim">
                 <span className="whitespace-nowrap">{deadlineHub.deadline.label}</span> ·{" "}
                 <span className="whitespace-nowrap text-ribbon">
                   <NumText text={`${fullDate(deadlineHub.deadline.date)}, ${inDays(deadlineHub.deadline.date)}`} />
@@ -147,7 +147,7 @@ export function DomainView() {
                 )}
               </p>
             ) : (
-              <p className="mt-1.5 text-paper-dim">{tx.domain.noDeadlines}</p>
+              <p className="caps mt-2.5 text-paper-dim">{tx.domain.noDeadlines}</p>
             )}
             {domain.lagging && (
               <p role="status" className="mt-1 text-small text-paper-dim">

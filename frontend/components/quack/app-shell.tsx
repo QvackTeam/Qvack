@@ -1,8 +1,8 @@
 "use client";
 
-import { History, Menu, X } from "lucide-react";
+import { History, PanelLeft, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { createContext, Suspense, useContext, useEffect, useRef, useState } from "react";
+import { createContext, Suspense, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { GraphMode } from "@/lib/graph-layout";
 import { EMPTY_DOMAIN } from "@/lib/api/adapters";
 import { API_MODE } from "@/lib/api/client";
@@ -13,6 +13,8 @@ import type { Domain, Session } from "@/lib/mock/types";
 import { cn } from "@/lib/utils";
 import { DomainSidebar } from "./domain-sidebar";
 import { IconButton } from "./icon-button";
+import { MenuToggle } from "./menu-toggle";
+import { SiteMenu } from "./site-menu";
 import { SessionsPanel } from "./sessions-panel";
 import { SoonProvider } from "./soon";
 
@@ -32,6 +34,10 @@ type Shell = {
   closeDrawer: () => void;
   /** Сделать домен текущим без перехода (страница темы или сессии реального домена) */
   focusDomain: (id: string) => void;
+  /** Полноэкранное меню: открыть из кнопки-триггера (откуда берём место и куда вернуть фокус) или закрыть */
+  menuOpen: boolean;
+  openMenu: (trigger: HTMLElement | null) => void;
+  closeMenu: () => void;
 };
 
 const ShellContext = createContext<Shell | null>(null);
@@ -79,6 +85,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [sessionsPref, setSessionsPref] = useState<boolean | null>(null);
   const [graphMode, setGraphMode] = useState<GraphMode>({ kind: "overview" });
   const [drawer, setDrawer] = useState<"domains" | "sessions" | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<{ left: number; top: number } | null>(null);
+  const menuOpener = useRef<HTMLElement | null>(null);
+  const barToggle = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLElement | null>(null);
   const closeBtn = useRef<HTMLButtonElement | null>(null);
   const openDrawer = (side: "domains" | "sessions", el: HTMLElement) => {
@@ -127,6 +137,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const openMenu = (el: HTMLElement | null) => {
+    menuOpener.current = el;
+    const r = el?.getBoundingClientRect();
+    setMenuAnchor(r ? { left: r.left, top: r.top } : null);
+    setMenuOpen(true);
+  };
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+
+  // любой переход (в том числе «назад») закрывает меню
+  const [menuPath, setMenuPath] = useState(pathname);
+  if (menuPath !== pathname) {
+    setMenuPath(pathname);
+    setMenuOpen(false);
+  }
+
   const selectDomain = (id: string) => {
     setDomainId(id);
     setGraphMode({ kind: "overview" });
@@ -172,18 +197,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Suspense fallback={null}>
         <DomainFromQuery domains={domains} onDomain={setDomainId} />
       </Suspense>
-      <ShellContext.Provider value={{ domain, selectDomain, pending, pendingTopic, startSession, graphMode, setGraphMode, openGraph, closeDrawer: () => setDrawer(null), focusDomain: setDomainId }}>
+      <ShellContext.Provider value={{ domain, selectDomain, pending, pendingTopic, startSession, graphMode, setGraphMode, openGraph, closeDrawer: () => setDrawer(null), focusDomain: setDomainId, menuOpen, openMenu, closeMenu }}>
         <a
           href="#main"
           onClick={(e) => {
             e.preventDefault();
             document.getElementById("main")?.focus();
           }}
-          className="fixed top-2 left-2 z-[60] -translate-y-16 rounded-control border border-seam bg-cloth-raised px-4 py-2.5 text-body font-semibold text-paper focus:translate-y-0"
+          className="caps fixed top-2 left-2 z-[60] -translate-y-16 rounded-pill border border-seam bg-cloth-raised px-4 py-2.5 text-paper focus:translate-y-0"
         >
           {t.shell.skip}
         </a>
-        <div inert={!!drawer} className="flex h-dvh">
+        <div inert={!!drawer || menuOpen} className="flex h-dvh">
           {!fullscreen && (
             <aside aria-label={t.shell.subjects} className="hidden w-62 shrink-0 border-r border-seam-soft md:block">
               <DomainSidebar domains={domains} activeId={activeId} onSelect={selectDomain} />
@@ -193,10 +218,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <main id="main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
             {!fullscreen && <div className="flex items-center gap-1 border-b border-seam-soft px-2 py-1.5 md:hidden">
               <IconButton label={t.shell.subjects} onClick={(e) => openDrawer("domains", e.currentTarget)}>
-                <Menu />
+                <PanelLeft />
               </IconButton>
-              <p className="font-serif text-body font-bold">Quack!</p>
-              {!inSettings && <IconButton label={t.shell.sessions} className="ml-auto" onClick={(e) => openDrawer("sessions", e.currentTarget)}>
+              <p className="display-caps text-[1.125rem] text-paper">Quack!</p>
+              {/* на телефоне кнопка меню в верхней полосе */}
+              <div ref={barToggle} data-menu-anchor className="ml-auto">
+                <MenuToggle
+                  open={menuOpen}
+                  onClick={() => (menuOpen ? closeMenu() : openMenu(barToggle.current?.querySelector("button") ?? null))}
+                  labelOpen={t.menu.open}
+                  labelClose={t.menu.close}
+                />
+              </div>
+              {!inSettings && <IconButton label={t.shell.sessions} onClick={(e) => openDrawer("sessions", e.currentTarget)}>
                 <History />
               </IconButton>}
             </div>}
@@ -208,7 +242,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <button
                   type="button"
                   onClick={() => void data.reload()}
-                  className="mt-4 inline-flex h-10 items-center rounded-control border border-seam px-4 text-body font-semibold text-paper transition-colors hover:border-rule hover:bg-cloth-hover"
+                  className="caps mt-4 inline-flex h-10 items-center rounded-pill border border-seam px-5 text-paper transition-colors hover:border-rule hover:bg-cloth-hover"
                 >
                   {t.live.retry}
                 </button>
@@ -241,7 +275,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           aria-hidden
           onClick={() => setDrawer(null)}
           className={cn(
-            "fixed inset-0 z-40 bg-black/50 transition-opacity duration-300 md:hidden",
+            "fixed inset-0 z-40 bg-cloth-deep/70 transition-opacity duration-300 md:hidden",
             drawer ? "opacity-100" : "pointer-events-none opacity-0",
           )}
         />
@@ -265,13 +299,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <X />
               </IconButton>
               {side === "domains" ? (
-                <DomainSidebar domains={domains} activeId={activeId} onSelect={selectDomain} />
+                <DomainSidebar domains={domains} activeId={activeId} onSelect={selectDomain} withMenu={false} />
               ) : (
                 panel()
               )}
             </div>
           );
         })}
+
+        <SiteMenu open={menuOpen && !fullscreen} onClose={closeMenu} anchor={menuAnchor} returnFocusRef={menuOpener} />
       </ShellContext.Provider>
     </SoonProvider>
   );

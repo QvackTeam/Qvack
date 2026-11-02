@@ -19,6 +19,9 @@ export function StubsIndex() {
     { href: "/session/radius/summary", title: s.summary.title, api: "POST /v1/sessions/{id}/finish" },
     { href: "/library", title: s.library.title, api: "GET /v1/artifacts, /artifacts/search, …/export" },
     { href: "/notes/new", title: s.note.newTitle, api: "POST|PATCH|DELETE /v1/artifacts/notes" },
+    { href: "/stubs/scanline", title: s.index.scanlineTitle, api: s.index.demoApi },
+    { href: "/stubs/reeds", title: s.index.reedsTitle, api: s.index.demoApi },
+    { href: "/stubs/duck", title: s.index.duckTitle, api: s.index.demoApi },
   ];
   return (
     <PageShell>
