@@ -325,16 +325,6 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `tests/llm/test_phase4_stream_adapter.py`, `tests/llm/test_phase4_ai_layer.py` (`T-AI2`–`T-AI6`) — на стороне B; тесты подмен — C.
 - Требует подтверждения владельцем: нет
 
-#### Ответы B на запросы C (2026-11-02)
-
-- **#83** (`/v1/math/*`): обновлён от `phase-4` (`690084c`), CI зелёный (`backend`, `compute`, `images`). Вливать после ревью C, затем #85.
-- **#85**: ревью B опубликовано, блокеров нет. `quack/compute_client/math_contracts.py` совпадает по полям с `compute/quack_compute/math/schemas.py`.
-- **`math/schemas.py`**: в `phase-4` файла ещё нет, он приходит с #83. Последнее изменение — `1c4932f` (D-B-124). О новых изменениях B сообщает SHA в сигнале.
-- **S13**: формат — D-B-125 выше.
-- **`openapi.json`** в `phase-4-b-actions-route` не менялся: `679b8ea` (#75).
-- **Заготовки владельца (D-B-104)**: пакет получен. Слой 1 взят для ролей B из #84, 8 ролей остаются на заглушке (`BLOCKED-B-101`…`108`, §«Промпты» в #84). Для ролей C (`recognizer`, `canvas_diagnoser`, `material_parser`, `artifact_writer`) заготовки лежат в пакете владельца (`drafts_untested/`, `artifact_writer/v1`–`v4`), на схемах Фазы 4 не проверены. Слой 2 пишет C (§7.3 п.2).
-- **`terms_version`, `auth_success_redirect_url`**: у B значений нет, нужен ответ владельца.
-
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
