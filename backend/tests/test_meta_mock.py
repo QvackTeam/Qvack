@@ -7,6 +7,7 @@ The request bodies follow the Responses API contract of `T-L8`; `T-O5` goes thro
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -475,17 +476,23 @@ TOOL = {
 
 
 def _stream_request(
-    output: type[BaseModel], input_items: tuple[dict[str, Any], ...] = (), *, tools: bool = False
+    output: type[BaseModel], input_items: tuple[Mapping[str, Any], ...] = (), *, tools: bool = False
 ) -> StreamRequest:
     return StreamRequest(_request(output), input_items, (TOOL,) if tools else ())
 
 
-async def _stream(request: StreamRequest, config: MetaMockConfig = ZERO) -> list[StreamEvent]:
-    adapter = _adapter(config)
+async def _stream(
+    request: StreamRequest,
+    config: MetaMockConfig = ZERO,
+    adapter: ResponsesClient | None = None,
+) -> list[StreamEvent]:
+    """Events of one streamed call; `adapter` keeps one meta-mock across calls."""
+    client = adapter or _adapter(config)
     try:
-        return [event async for event in adapter.stream_structured(request)]
+        return [event async for event in client.stream_structured(request)]
     finally:
-        await adapter.aclose()
+        if adapter is None:
+            await client.aclose()
 
 
 def _streamed_text(events: list[StreamEvent]) -> str:
@@ -545,18 +552,25 @@ async def test_stream_tool_step_then_answer() -> None:
     is not an answer delta); with a `function_call_output` for every call the next step is
     the answer (D-B-125 п.2)."""
     counts: set[int] = set()
-    for _ in range(2):
-        first = await _stream(_stream_request(TeacherOutput, tools=True))
-        assert _streamed_text(first) == ""
-        items = _done_items(first)
-        assert items[1]["type"] == "message" and items[1]["phase"] == "commentary"
-        calls = tool_calls(items)
-        assert calls and all(call.name == "check_answer" for call in calls)
-        counts.add(len(calls))
-        follow = next_step_input((), items, {call.call_id: '{"ok": true}' for call in calls})
-        second = await _stream(_stream_request(TeacherOutput, follow, tools=True))
-        TeacherOutput.model_validate_json(_streamed_text(second))
-        assert not tool_calls(_done_items(second))
+    adapter = _adapter()
+    try:
+        for _ in range(2):
+            first = await _stream(_stream_request(TeacherOutput, tools=True), adapter=adapter)
+            assert _streamed_text(first) == ""
+            items = _done_items(first)
+            assert items[1]["type"] == "message" and items[1]["phase"] == "commentary"
+            calls = tool_calls(items)
+            assert calls and all(call.name == "check_answer" for call in calls)
+            counts.add(len(calls))
+            outputs = {call.call_id: '{"ok": true}' for call in calls}
+            follow = next_step_input((), items, outputs)
+            second = await _stream(
+                _stream_request(TeacherOutput, follow, tools=True), adapter=adapter
+            )
+            TeacherOutput.model_validate_json(_streamed_text(second))
+            assert not tool_calls(_done_items(second))
+    finally:
+        await adapter.aclose()
     assert counts == {1, 2}
 
 

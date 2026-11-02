@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from typing import Any
 
 import orjson
@@ -146,7 +147,7 @@ def test_unknown_failure_kind_is_rejected() -> None:
 
 def _stream_request(
     schema_name: str,
-    input_items: tuple[dict[str, Any], ...] = (),
+    input_items: tuple[Mapping[str, Any], ...] = (),
     *,
     tools: bool = False,
 ) -> StreamRequest:
