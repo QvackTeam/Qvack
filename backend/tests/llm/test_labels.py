@@ -21,6 +21,7 @@ from tests.llm.prompt_contracts import (
     CONTRACTS_PATH,
     DOCTRINE_PENDING,
     DOCTRINE_PENDING_MARKER,
+    MARKERS,
     render_contracts,
     undeclared_names,
 )
@@ -107,6 +108,15 @@ def test_prompt_mentions_only_declared_fields(ref: str) -> None:
     role, version = ref.split("@")
     text = PromptRegistry().load(role, int(version)).text
     assert undeclared_names(ref, text) == []
+
+
+@pytest.mark.parametrize("ref", sorted(MARKERS))
+def test_prompt_has_its_markers(ref: str) -> None:
+    """ТЗ Ф4 §7.6 п.2: a phrase the code relies on (the memory-unavailable marker, the variable
+    the visualization page reads, D-B-130) is in the prompt text."""
+    role, version = ref.split("@")
+    text = PromptRegistry().load(role, int(version)).text
+    assert [m for m in MARKERS[ref] if m not in text] == []
 
 
 @pytest.mark.parametrize(

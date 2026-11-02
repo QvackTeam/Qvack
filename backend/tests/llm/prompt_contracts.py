@@ -123,9 +123,13 @@ LABEL_FIELDS: dict[str, list[str]] = {
     "today_planner@1": ["items.tasks"],
 }
 
+# Phrases the code relies on: each must appear in the prompt text (`test_prompt_has_its_markers`).
+# `viz_builder@1`: the page reads its parameter set from this variable (D-B-130).
+VIZ_PARAMS_MARKER = "window.QUACK_VIZ_PARAMS"
 MARKERS: dict[str, list[str]] = {
     "teacher@1": [MEMORY_UNAVAILABLE_MARKER],
     "teacher@2": [MEMORY_UNAVAILABLE_MARKER],
+    "viz_builder@1": [VIZ_PARAMS_MARKER],
 }
 
 # §7.6 п.2: places that may still change after G1.
