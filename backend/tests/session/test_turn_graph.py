@@ -173,6 +173,8 @@ class Ports:
     tools: list[str] = field(default_factory=list)
     fixes: list[dict[str, Any]] = field(default_factory=list)
     fix_calls: list[MarkupFix] = field(default_factory=list)
+    tool_gate: asyncio.Event | None = None
+    tool_started: asyncio.Event = field(default_factory=asyncio.Event)
 
     async def admit(self) -> Role:
         return "teacher"
@@ -182,6 +184,9 @@ class Ports:
 
     async def execute_tool(self, name: str, arguments: str) -> str:
         self.tools.append(name)
+        if self.tool_gate is not None:
+            self.tool_started.set()
+            await self.tool_gate.wait()
         return f"history of {name}"
 
     async def commit(self, turn: TurnToCommit) -> int:
@@ -526,6 +531,58 @@ async def test_markup_fix_for_another_element_is_not_taken() -> None:
 
 
 # --- T-TT6 ---
+
+
+async def test_markup_fix_of_a_task_without_markup_is_committed() -> None:
+    """Review C #109: a task element without any markup, fixed by the fix call, is in the
+    committed markup (else its answer finds no task, WP13.5, T-TT10)."""
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(tasks=[]))
+    ports = _ports()
+    ports.fixes = [_task(level=3)]
+
+    await _run(ports, provider)
+
+    [fix] = ports.fix_calls
+    assert fix.task is None and fix.problems == ["no task markup"]
+    assert [f.block_id for f in ports.frames if isinstance(f, ElementFrame)] == ["b2"]
+    [turn] = ports.committed
+    assert [t.element_id for t in turn.output.p3_markup.tasks] == ["e1"]
+
+
+async def test_cancel_during_a_tool_call_stops_the_turn() -> None:
+    """Review C #109 п.1: a step without text (a tool call) is cancelled too, the turn frees
+    its slot at once and writes nothing."""
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn())
+    provider.script_tools(SCHEMA, ScriptedToolStep((ScriptedToolCall("skill_history", {}),)))
+    ports = _ports()
+    ports.tool_gate = asyncio.Event()  # the tool never finishes by itself
+    cancel = asyncio.Event()
+
+    turn = asyncio.create_task(run_turn(ports, provider, settings=_settings(), cancel=cancel))
+    await ports.tool_started.wait()
+    cancel.set()
+
+    assert await asyncio.wait_for(turn, 1) is None
+    assert ports.committed == []
+
+
+async def test_cancel_before_a_markup_fix_writes_nothing() -> None:
+    provider = ScriptedLLMProvider()
+    _answers(provider, _turn(tasks=[_task(level=1)]))
+    ports = _ports()
+    cancel = asyncio.Event()
+
+    async def fix_and_cancel(fix: MarkupFix) -> TurnTask | None:
+        cancel.set()  # a new action arrives while the fix call runs
+        ports.fix_calls.append(fix)
+        return TurnTask.model_validate(_task(level=3))
+
+    ports.fix_markup = fix_and_cancel  # type: ignore[method-assign]
+
+    assert await run_turn(ports, provider, settings=_settings(), cancel=cancel) is None
+    assert ports.committed == [] and len(ports.fix_calls) == 1
 
 
 async def test_new_action_cancels_turn() -> None:
