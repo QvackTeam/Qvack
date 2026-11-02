@@ -3,7 +3,9 @@
 A canvas belongs to a session (`session.started` of the learner in the log, law 1). Opened by a
 task, the board gets a task block; a task made on the fly (`source = teacher`) without a
 solution space also writes `agent.requested {kind: solution_space, task_id}` in the same
-transaction as the row (WP12.4). The domain of a canvas is the domain of its session.
+transaction as the row (WP12.4), once per task: the key and the request id come from the task
+(law 5, `Т-§1.1`), so a second canvas on the task writes nothing. The domain of a canvas is the
+domain of its session.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from psycopg.types.json import Jsonb
 from redis.asyncio import Redis
@@ -21,12 +23,14 @@ from quack.db import Db
 from quack.events.event_types import AgentRequested
 from quack.events.log import NewEvent, append_events
 from quack.events.records import AgentParamsRecord
+from quack.graph.ids import QUACK_UUID_NS
 
 # WP12.4: a task of the teacher's turn has no solution space until its agent builds one.
 ON_THE_FLY_SOURCE = "teacher"
 
 _SESSION_OF_LEARNER = (
-    "SELECT 1 AS found FROM core.events WHERE learner_id = %(learner_id)s "
+    "SELECT (payload ->> 'domain_id')::uuid AS domain_id FROM core.events "
+    "WHERE learner_id = %(learner_id)s "
     "AND type = 'session.started' AND payload ->> 'session_id' = %(session_id)s LIMIT 1"
 )
 _DOMAIN_OF_LEARNER = (
@@ -79,12 +83,10 @@ async def open_canvas(
     redis: Redis | None = None,
 ) -> Canvas:
     """`POST /v1/sessions/{id}/canvases {task_id?}`."""
-    if (
-        await db.fetch_one(
-            _SESSION_OF_LEARNER, {"learner_id": learner_id, "session_id": str(session_id)}
-        )
-        is None
-    ):
+    started = await db.fetch_one(
+        _SESSION_OF_LEARNER, {"learner_id": learner_id, "session_id": str(session_id)}
+    )
+    if started is None:
         raise CanvasNotFound(f"session {session_id} not found")
     needs_space = False
     if task_id is not None:
@@ -106,8 +108,9 @@ async def open_canvas(
             },
         )
         if needs_space:
+            key = f"solution_space:{task_id}"
             request = AgentRequested(
-                request_id=uuid4(),
+                request_id=uuid5(QUACK_UUID_NS, key),
                 kind="solution_space",
                 params=AgentParamsRecord(task_id=task_id),
                 needed_in_session=True,
@@ -115,8 +118,9 @@ async def open_canvas(
             event = NewEvent(
                 type="agent.requested",
                 payload=request,
-                actor="system",
-                idempotency_key=f"canvas:{canvas_id}:solution_space",
+                actor="code",
+                idempotency_key=key,
+                domain_id=started["domain_id"],
                 session_id=session_id,
             )
             await append_events(db, learner_id, [event], redis=redis)
