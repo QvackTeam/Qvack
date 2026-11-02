@@ -6,6 +6,11 @@ A batch is acknowledged only after its chunk is written; a repeated `batch_no` i
 the store down nothing is acknowledged and the client sends again (Т-§20.7). Chunk format:
 points as deltas `(dx, dy, dt, pressure)`, MessagePack, zstd. An erasure is an operation of
 the journal, never a deletion.
+
+`batch_no` seen before is remembered by the journal of one API process only: after a restart a
+batch that was written but not yet acknowledged comes again and lands in a second chunk. Strokes
+are raw material, not events, so this is allowed; the replay (Т-§15.7, WP21.6) must tolerate a
+repeated `batch_no` and `stroke_id` and order chunks by their key (the ULID), not by number.
 """
 
 from __future__ import annotations
@@ -149,18 +154,17 @@ class StrokeJournal:
         if batch.batch_no in state.seen:
             return False
         state.seen.add(batch.batch_no)
-        if not state.pending:
-            state.oldest_at = now
-        state.pending.append(batch)
+        state.pending.append((batch, now))
         return True
 
     async def flush_due(self, *, now: datetime) -> list[int]:
         """Write a chunk if the oldest pending batch waited `chunk_seconds`; the acknowledged
         batch numbers (empty when nothing was due or the store is down)."""
         state = self._state
-        if not state.pending or state.oldest_at is None:
+        if not state.pending:
             return []
-        if now - state.oldest_at < timedelta(seconds=self._chunk_seconds):
+        oldest_at = state.pending[0][1]
+        if now - oldest_at < timedelta(seconds=self._chunk_seconds):
             return []
         return await self.flush()
 
@@ -169,21 +173,23 @@ class StrokeJournal:
         state = self._state
         if not state.pending:
             return []
-        batches = list(state.pending)
+        batches = [batch for batch, _ in state.pending]
         key = canvas_chunk_key(self._learner_id, self._session_id, state.next_chunk)
         try:
             await self._storage.put(key, encode_chunk(batches), CHUNK_CONTENT_TYPE)
         except StorageUnavailable:
             return []  # no ack: the batches stay pending, the client repeats (Т-§20.7)
         state.next_chunk += 1
+        # Batches added while the chunk was being written stay pending with their own time.
         state.pending = state.pending[len(batches) :]
-        state.oldest_at = None
         return [batch.batch_no for batch in batches]
 
 
 @dataclass
 class _JournalState:
     seen: set[int] = field(default_factory=set[int])
-    pending: list[StrokeBatch] = field(default_factory=list[StrokeBatch])
-    oldest_at: datetime | None = None
+    # Pending batches with the time each was added, oldest first.
+    pending: list[tuple[StrokeBatch, datetime]] = field(
+        default_factory=list[tuple[StrokeBatch, datetime]]
+    )
     next_chunk: int = 0

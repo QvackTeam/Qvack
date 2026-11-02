@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -17,7 +18,8 @@ from quack.canvas.strokes import (
     decode_chunk,
     encode_chunk,
 )
-from tests.support.storage import BrokenObjectStore, InMemoryObjectStore
+from quack.storage.objects import StorageUnavailable
+from tests.support.storage import InMemoryObjectStore
 
 NOW = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
 ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
@@ -81,15 +83,59 @@ async def test_stroke_ack_after_write() -> None:
     assert len(storage.objects) == 1
 
 
+class _SwitchableStore(InMemoryObjectStore):
+    """Goes down and comes back."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.available = True
+
+    async def put(self, key: str, data: bytes, content_type: str) -> None:
+        if not self.available:
+            raise StorageUnavailable("store is down")
+        await super().put(key, data, content_type)
+
+
+class _GatedStore(InMemoryObjectStore):
+    """`put` waits until released, so the journal can be used while a chunk is written."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def put(self, key: str, data: bytes, content_type: str) -> None:
+        self.entered.set()
+        await self.release.wait()
+        await super().put(key, data, content_type)
+
+
 async def test_store_down_gives_no_ack_and_keeps_batches() -> None:
     """T-CV1, Т-§20.7: the store is down — no `ack`, the batches wait for the next write."""
-    journal = _journal(BrokenObjectStore())
+    storage = _SwitchableStore()
+    storage.available = False
+    journal = _journal(storage)
     journal.add(_batch(1), now=NOW)
     assert await journal.flush_due(now=NOW + timedelta(seconds=10)) == []
-    working = InMemoryObjectStore()
-    journal._storage = working  # the store is back  # pyright: ignore[reportPrivateUsage]
+    storage.available = True
     assert await journal.flush_due(now=NOW + timedelta(seconds=11)) == [1]
-    assert len(working.objects) == 1
+    assert len(storage.objects) == 1
+
+
+async def test_batch_added_during_a_write_keeps_its_timer() -> None:
+    """A batch that arrives while a chunk is being written waits `chunk_seconds` from its own
+    arrival and is then written (review of #99)."""
+    storage = _GatedStore()
+    journal = _journal(storage)
+    journal.add(_batch(1), now=NOW)
+    writing = asyncio.create_task(journal.flush())
+    await asyncio.wait_for(storage.entered.wait(), timeout=5)
+    journal.add(_batch(2), now=NOW + timedelta(seconds=1))
+    storage.release.set()
+    assert await asyncio.wait_for(writing, timeout=5) == [1]
+    assert await journal.flush_due(now=NOW + timedelta(seconds=10)) == []
+    assert await journal.flush_due(now=NOW + timedelta(seconds=11)) == [2]
+    assert len(storage.objects) == 2
 
 
 async def test_flush_writes_everything_and_chunks_get_new_keys() -> None:
