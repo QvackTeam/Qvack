@@ -27,7 +27,12 @@ _TABLE_REF = re.compile(r"\b(core|content|ops)\.([a-z_]+)\b")
 _WHERE_LEARNER = re.compile(r"\bWHERE\b[\s\S]*\blearner_id\s*=\s*%\(learner_id\)s", re.I)
 
 # Statements over learner tables that are cross-learner by design. Each entry needs a reason.
-CROSS_LEARNER_ALLOWED: dict[str, str] = {}
+CROSS_LEARNER_ALLOWED: dict[str, str] = {
+    # D-C-111 (#97): before login the learner is unknown, the row is found by its address.
+    "quack/auth/links.py:_LEARNER_BY_EMAIL": "learner of a mail address, unknown before login",
+    # D-C-111 (#97): the learner of a request is found by the token of its session.
+    "quack/auth/sessions.py:_SESSION_BY_TOKEN": "learner of a session token, unknown before auth",
+}
 
 
 def _modules() -> Iterator[tuple[Path, ast.Module]]:
