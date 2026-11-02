@@ -14,13 +14,14 @@ with the turn lock, context assembly (WP14), tool execution (WP14.4), the write 
   message, D-B-148), up to `guard_max_retries`; after the retries: `code` stance lowered to
   `formative`, an unmarked turn shown and logged, a spoiler sentence removed by code. It
   checks `p3_markup` (labels of exposures and of `targetsMisconception`; `reset {guard}` if
-  the body was shown) and the markup of each element (Т-§5.3): a bad element is not shown
-  and leaves the committed turn.
+  the body was shown) and the markup of each task element (Т-§5.3): bad markup goes to a
+  separate fix call «fix the markup for this text» (`TurnPorts.fix_markup`, WP13.4 п.4,
+  D-B-150), the text stays; still bad after `guard_max_retries` fixes — the element is not
+  shown and leaves the committed turn.
 - **commit** writes through the port unless the turn was cancelled (`TurnCancelled`): a new
   action during the turn cancels it without a write (Т-§12.1, `TurnSlots`).
 
-Not here yet: the separate «fix the markup» call (WP13.4 п.4, T-TT5), «do not jump the
-boundary» (S4 `REQUIRES`), «generated is checked» (WP12.5).
+Not here yet: «do not jump the boundary» (S4 `REQUIRES`), «generated is checked» (WP12.5).
 """
 
 from __future__ import annotations
@@ -70,7 +71,7 @@ from quack.session.actions import (
     TurnCommittedFrame,
     VerdictFrame,
 )
-from quack.session.elements import TASK_ELEMENT_KINDS
+from quack.session.elements import TASK_ELEMENT_KINDS, Element
 from quack.session.guards import (
     GuardViolation,
     head_violations,
@@ -78,7 +79,7 @@ from quack.session.guards import (
     settle_stance,
 )
 from quack.session.holdback import HoldbackBuffer, SpoilerDetected
-from quack.session.teacher_output import TeacherOutputV2, TurnHead
+from quack.session.teacher_output import TeacherOutputV2, TurnHead, TurnTask
 
 log = get_logger(__name__)
 
@@ -136,6 +137,19 @@ class TurnToCommit:
     usage: StreamUsage
 
 
+@dataclass(frozen=True)
+class MarkupFix:
+    """A fix call of one task element (WP13.4 п.4): the element, its markup as the model wrote
+    it (`None` if missing), what code found wrong (`validate_markup` rules), the body text as
+    shown, the fix attempt (1…`guard_max_retries`)."""
+
+    element: Element
+    task: TurnTask | None
+    problems: list[str]
+    text: str
+    attempt: int
+
+
 class TurnPorts(Protocol):
     async def admit(self) -> Role:
         """Turn lock and admission to the model (WP13.2 admit); the role that answers."""
@@ -150,6 +164,10 @@ class TurnPorts(Protocol):
         ...
 
     async def emit(self, frame: Frame) -> None: ...
+
+    async def fix_markup(self, fix: MarkupFix) -> TurnTask | None:
+        """The model call «fix the markup for this text»; `None` — no fix came."""
+        ...
 
 
 class TurnSlots:
@@ -417,7 +435,7 @@ async def _guard(state: _State, config: RunnableConfig) -> _Update:
         output = _without_spoiler(output, guard.remove_spoiler)
         text = guard.remove_spoiler(text)
         await run.ports.emit(TokenFrame(text=text))
-    output = await _elements(run, output)
+    output = await _elements(run, output, text)
     return {"output": output, "text": text, "outcome": "answer"}
 
 
@@ -459,10 +477,11 @@ def _without_spoiler(output: TeacherOutputV2, remove: Callable[[str], str]) -> T
     return output.model_copy(update={"p2_body": body})
 
 
-async def _elements(run: _Run, output: TeacherOutputV2) -> TeacherOutputV2:
-    """Elements of the body after their markup passed the code check (WP13.4 stage 4);
-    a failing one is removed with its task and its block («every task is marked»)."""
-    guard = run.guard
+async def _elements(run: _Run, output: TeacherOutputV2, text: str) -> TeacherOutputV2:
+    """Elements of the body after their markup passed the code check (WP13.4 stage 4).
+    Bad task markup goes to the fix call, the text stays (п.4); still bad after
+    `guard_max_retries` fixes, or no element behind the block — the element is removed with
+    its task and its block («every task is marked»)."""
     markup = output.p3_markup
     elements = {e.element_id: e for e in markup.elements}
     tasks = {t.element_id: t for t in markup.tasks}
@@ -471,42 +490,71 @@ async def _elements(run: _Run, output: TeacherOutputV2) -> TeacherOutputV2:
         if block.element_id is None:
             continue
         element = elements.get(block.element_id)
-        problems: list[str] = []
         if element is None:
-            problems = ["no element"]
-        elif element.kind in TASK_ELEMENT_KINDS:
-            task = tasks.get(element.element_id)
-            if task is None:
-                problems = ["no task markup"]
-            else:
-                problems = [
-                    v.rule
-                    for v in validate_markup(
-                        task,
-                        skill_labels=guard.skill_labels,
-                        misconception_labels=guard.misconception_labels,
-                        task_labels=guard.task_labels,
-                    )
-                ]
-        if problems:
             removed.add(block.element_id)
             log.warning(
-                "guard_violation", rule="task_markup", element_id=block.element_id, reasons=problems
+                "guard_violation",
+                rule="task_markup",
+                element_id=block.element_id,
+                reasons=["no element"],
             )
             continue
-        assert element is not None
+        if element.kind in TASK_ELEMENT_KINDS:
+            task = await _checked_task(run, element, tasks.get(element.element_id), text)
+            if task is None:
+                removed.add(element.element_id)
+                continue
+            tasks[element.element_id] = task
         await run.ports.emit(ElementFrame(block_id=block.block_id, element=element))
-    if not removed:
-        return output
-    blocks = [b for b in output.p2_body.blocks if b.element_id not in removed]
     markup = markup.model_copy(
         update={
             "elements": [e for e in markup.elements if e.element_id not in removed],
-            "tasks": [t for t in markup.tasks if t.element_id not in removed],
+            "tasks": [tasks[t.element_id] for t in markup.tasks if t.element_id not in removed],
         }
     )
+    blocks = [b for b in output.p2_body.blocks if b.element_id not in removed]
     body = output.p2_body.model_copy(update={"blocks": blocks})
     return output.model_copy(update={"p2_body": body, "p3_markup": markup})
+
+
+async def _checked_task(
+    run: _Run, element: Element, task: TurnTask | None, text: str
+) -> TurnTask | None:
+    """The task markup of `element` that passes `validate_markup`, after up to
+    `guard_max_retries` fix calls; `None` — none passed."""
+    problems = _task_problems(run.guard, task)
+    for attempt in range(1, run.settings.guard_max_retries + 1):
+        if not problems:
+            return task
+        fixed = await run.ports.fix_markup(
+            MarkupFix(element=element, task=task, problems=problems, text=text, attempt=attempt)
+        )
+        if fixed is None:
+            break
+        if fixed.element_id != element.element_id:
+            problems = ["fix for another element"]
+            continue
+        task, problems = fixed, _task_problems(run.guard, fixed)
+    if not problems:
+        return task
+    log.warning(
+        "guard_violation", rule="task_markup", element_id=element.element_id, reasons=problems
+    )
+    return None
+
+
+def _task_problems(guard: GuardInputs, task: TurnTask | None) -> list[str]:
+    if task is None:
+        return ["no task markup"]
+    return [
+        v.rule
+        for v in validate_markup(
+            task,
+            skill_labels=guard.skill_labels,
+            misconception_labels=guard.misconception_labels,
+            task_labels=guard.task_labels,
+        )
+    ]
 
 
 async def _commit(state: _State, config: RunnableConfig) -> _Update:
@@ -590,6 +638,7 @@ async def run_turn(
 __all__ = [
     "AssembledTurn",
     "GuardInputs",
+    "MarkupFix",
     "Role",
     "TurnCancelled",
     "TurnPorts",
