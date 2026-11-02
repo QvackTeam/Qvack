@@ -387,6 +387,28 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 - Тесты: `tests/practice/test_check_fast.py` (чистая часть `T-CH2`, `T-CH3`).
 - Требует подтверждения владельцем: нет
 
+### D-B-127. Распознанный ответ: порог «неуверенного» прочтения и снижение уверенности вердикта
+- Класс: B
+- WP / место: WP11.7, `quack/practice/check.py` (`apply_reading`), `quack/config.py` (блок B, `recognition_min_confidence`)
+- Контекст: `Т-§6.9`, `Т-§16.3`: «уверенность распознавания понижает уверенность вердикта»; «неуверенное распознавание + отрицательный вердикт → сначала прочтение». Числа порога и способа понижения в документах нет; `mark_min_confidence` (`Т-§15.4`) — о диагнозе строки, не о прочтении.
+- Варианты: (1) новый параметр `recognition_min_confidence`, понижение умножением; (2) взять `mark_min_confidence`; (3) понижение минимумом.
+- Решение: (1). `recognition_min_confidence` = 0.8 (консервативно: чаще показываем прочтение до отрицательного вердикта; то же число, что у `mark_min_confidence`). Уверенность вердикта кода (её нет) становится уверенностью распознавания; уверенность модели умножается на неё. «Отрицательный» — `incorrect` и `partial` (консервативно: ученик видит прочтение раньше частичного вердикта). Набранный ответ (`recognition_confidence = None`) не меняется.
+- Почему: §0.3 и §0.4.3 последний абзац — параметра нет в документах, значение консервативное, в `Settings`; п.4 — одна функция и один параметр.
+- Обратимость: `apply_reading` и параметр в блоке B.
+- Тесты: `tests/practice/test_check_reading.py` (`T-CH8`).
+- Требует подтверждения владельцем: нет
+
+### D-B-128. Второе мнение: что считается «отрицательным», «согласием» и чей вердикт
+- Класс: B
+- WP / место: WP11.6, `quack/practice/model_check.py` (`model_verdict`, `needs_second_opinion`, `with_second_opinion`)
+- Контекст: `Т-§7.7` называет триггеры и результат, но не говорит: (а) входит ли `partial` в «отрицательный» и «положительный»; (б) что такое «согласно»; (в) как одна задача с несколькими уровнями даёт триггер; (г) куда идёт гипотеза заблуждения, пока `Verdict.misconception` одно поле (Q-A-2 п.1 не закрыт).
+- Варианты: (а) `partial` — триггер или нет; (б) равенство `outcome` или совпадение пунктов рубрики; (в) любой уровень или все.
+- Решение: (а) `partial` — не триггер: спайк `Т-§7.7` прямо отверг «partial на уровне 4 и выше» как новый триггер; (б) согласно — тот же `outcome`; (в) любой проверяемый уровень задачи; (г) `misconception` — метка, иначе гипотеза словами (`WP11.4` «метка или формулировка»), до разделения полей по Q-A-2. Вердикт кода второго мнения не получает (`Т-§7.7`: «только для вердикта модели»), даже с уверенностью распознавания (D-B-127). Ярус по `secondOpinion` ставит код A (WP4.1).
+- Почему: §0.4.3 п.2 — буква `Т-§7.7` и его спайка; п.5 — без новых параметров.
+- Обратимость: одна функция `needs_second_opinion`.
+- Тесты: `tests/practice/test_second_opinion.py` (чистая часть `T-CH6`).
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -547,6 +569,8 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP11.5, эндпоинты без значений по умолчанию (D-B-124, #83): `cd compute && uv run pytest tests/math/test_service.py` — 11 failed, 4 passed (422 и `ValidationError`: `numeric`, `tolerance` не в схеме). Зелёный: весь `compute` — 67 passed.
 - Зелёный прогон (B, `phase-4-b`): те же файлы — 59 passed. Полный прогон набора на итоговом SHA (§0.4.7) — job `backend` CI (`QUACK_TEST_REQUIRE_INFRA=1`); SHA и итог — в описании PR #72.
 - WP11.3, быстрая проверка (D-B-126): `cd backend && uv run pytest tests/practice/test_check_fast.py` — 11 failed (`NotImplementedError` в `check()`), коммит `6f32612`. Зелёный: 11 passed; с затронутыми (`tests/practice`, `tests/test_contracts.py`, `tests/storage/test_compute_client_math.py`, `tests/test_thresholds_in_settings.py`) — 67 passed.
+- WP11.7 (D-B-127): `cd backend && uv run pytest tests/practice/test_check_reading.py` — 4 failed, 1 passed (набранный ответ не меняется уже сейчас), коммит `883b237`. Зелёный: `tests/practice` — 55 passed.
+- WP11.6, чистая часть (D-B-128): `cd backend && uv run pytest tests/practice/test_second_opinion.py` — 14 failed (`NotImplementedError`), коммит `6e3de38`. Зелёный: 14 passed; с затронутыми (`tests/practice`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`) — 81 passed.
 
 ## Правки тестов
 
