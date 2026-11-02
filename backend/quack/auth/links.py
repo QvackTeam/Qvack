@@ -56,10 +56,15 @@ class LinkLimiter:
         self._redis = redis
         self._settings = settings
         self._local: dict[str, int] = {}
+        self._local_hour: int | None = None
 
     async def hit(self, *, email: str, ip: str, now: datetime) -> None:
         """Count one request; `AuthRateLimited` over either limit."""
         hour = int(now.timestamp()) // _HOUR_S
+        if hour != self._local_hour:
+            # Local counters of past hours are not needed any more (review of #97).
+            self._local.clear()
+            self._local_hour = hour
         retry_after_s = (hour + 1) * _HOUR_S - int(now.timestamp())
         limits = {
             f"auth:link:email:{email.lower()}:{hour}": self._settings.auth_link_per_email_per_hour,
