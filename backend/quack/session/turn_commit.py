@@ -78,6 +78,11 @@ WHERE content.session_plans.learner_id = EXCLUDED.learner_id
 RETURNING session_id
 """
 
+_CURRENT_PLAN = (
+    "SELECT plan FROM content.session_plans "
+    "WHERE session_id = %(session_id)s AND learner_id = %(learner_id)s FOR UPDATE"
+)
+
 # Hints shown for the task in the session before this turn (Т-§7.4: steps 1–3).
 _PRIOR_HINT_STEP = (
     "SELECT coalesce(max((payload->>'step')::int), 0) AS step FROM core.events "
@@ -424,18 +429,24 @@ async def commit_turn(
                 created_seq=by_key[task.idempotency_key].seq,
             )
         await db.execute(_INSERT_MANIFEST, _manifest_params(manifest))
-        planned = await db.fetch_one(
-            _UPSERT_PLAN,
-            {
-                "session_id": manifest.session_id,
-                "learner_id": learner_id,
-                "plan": Jsonb(batch.plan),
-            },
-        )
+        keys = {"session_id": manifest.session_id, "learner_id": learner_id}
+        current = await db.fetch_one(_CURRENT_PLAN, keys)
+        plan = _with_history(batch.plan, current["plan"] if current else None)
+        planned = await db.fetch_one(_UPSERT_PLAN, {**keys, "plan": Jsonb(plan)})
         if planned is None:
             raise LookupError(f"session {manifest.session_id} is not the learner's")
     [turn] = [event for event in stored if event.type == "turn.committed"]
     return turn.seq
+
+
+def _with_history(plan: dict[str, Any], current: dict[str, Any] | None) -> dict[str, Any]:
+    """П-4.6: done steps are a history that does not change — the done steps of the document
+    stay in order, the turn only adds new ones."""
+    if current is None:
+        return plan
+    done = list(current.get("completed_steps", []))
+    done += [s for s in plan["completed_steps"] if s not in done]
+    return {**plan, "completed_steps": done}
 
 
 async def _help_events(db: Db, batch: TurnBatch, learner_id: UUID) -> list[NewEvent]:
