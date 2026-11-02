@@ -35,7 +35,7 @@
 
 ## Бэкап
 
-`ops backup` (сервис `backup`, профиль `backup`: `docker compose up` его не стартует). Таймер `quack-backup.timer` ставит `setup-server.sh`, раз в 6 часов. Поток: `pg_dump -Fc --compress=zstd` → `age` (публичный ключ `BACKUP_AGE_PUBLIC_KEY`) → бакет `quack-backups/dumps/`; две последние копии без шифрования лежат в `/srv/quack/backups` (700/600). После успеха — пинг `HEARTBEAT_BACKUP_URL`, после неудачи — вебхук `ALERT_WEBHOOK_URL`. Приватный ключ `age` на сервере не хранится. Пока нет `ops db-roles`, дамп читает базу пользователем `quack`, а не `quack_reader`.
+`ops backup` (сервис `backup`, профиль `backup`: `docker compose up` его не стартует). Таймер `quack-backup.timer` ставит `setup-server.sh`, раз в 6 часов. Поток: `pg_dump -Fc --compress=zstd` → `age` (публичный ключ `BACKUP_AGE_PUBLIC_KEY`) → бакет `quack-backups/dumps/`; две последние копии без шифрования лежат в `/srv/quack/backups` (700/600). После успеха — пинг `HEARTBEAT_BACKUP_URL`, после неудачи — вебхук `ALERT_WEBHOOK_URL`. Приватный ключ `age` на сервере не хранится. Дамп читает базу ролью `quack_reader`: её создаёт `ops db-roles`, `deploy.sh` запускает его перед дампом и миграцией.
 
 Пробная проверка без R2: `BACKUP_S3_ENDPOINT=file:///путь` пишет в каталог.
 
@@ -48,7 +48,8 @@
 ## Что пока не готово
 
 - **Тревоги** (`ops alerts`) и таймер systemd для `alerts` (WP9.5).
-- **Роли Postgres** (`ops db-roles`) и **восстановление** (`restore-check`, `replay-deletions`, `orphan-objects`): WP9.6. Сценарии восстановления — Д-§8.3.
+- **Перевод `api`, `workers`, `projector` и `migrate` на роли `quack_app` и `quack_migrator`**: ждёт перехода слоя данных на dbmate (поток A), пока они работают под `quack`.
+- **Команды восстановления** `restore-check`, `replay-deletions`, `orphan-objects` (WP9.6); сценарии — Д-§8.3.
 - **Job выкатки** в GitHub Actions и публикация образов в GHCR: WP9.3/9.4.
 - **CORS** API (`cors_origins` уже есть в конфиге, подключение к приложению — отдельный пакет).
 
