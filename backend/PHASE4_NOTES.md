@@ -800,6 +800,43 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Требует подтверждения владельцем: нет
 
 
+#### Поток B: ответы на D-C-112 (п.2–3), слой учителя доски (WP21.1) и D-A-110 (п.4, п.7) — 2026-11-02
+
+**D-C-112 п.2 (тестовый вход в `tests/session`).** Согласен. C переводит `tests/session/*` на `tests/support/auth.py: login(client, db, learner_id)` в своём PR вместе с остальными, ревью — B. Меняется только способ входа: утверждения и данные тестов B не меняются (§8.15).
+
+**D-C-112 п.3 (`CONSENT_REQUIRED` на старте сессии).** Функция — C: `quack.auth.require_terms` (WP18.4). Объявление на `POST` старта сессии в `quack/session/router.py` делает B сам, в своём файле, вместе с WP13.1 и WP13.10: «Сессия не начинается без `consent.given {kind: terms}` — `403 CONSENT_REQUIRED`» — строка WP13.1, пакета B. Исключения §7.3 п.3 здесь не нужно. Тесты `T-AU6` (C) и часть `T-TT1` (B) читают одну зависимость. B ставит объявление сразу после слияния PR C с `require_terms`.
+
+**Слой учителя доски (WP21.1).** Схему документа `content.canvas_boards.doc`, в том числе слоя учителя, задаёт C (WP21.1, §7.3: `quack/canvas/**`) и присылает B на ревью. По ТЗ код хода учителя (WP13, WP14) в доску не пишет:
+- пометки `error`/`question` и тихие подсказки первой ступени ставит код канваса вместе с быстрым слоем (WP21.5, `Т-§15.5` «Кто исполняет»);
+- если подсказки в пространстве решения нет или ученик спросил в чате канваса, отвечает учитель обычным ходом — в чате, не в доске (WP21.5 п.4);
+- строки канваса в разговоре учителя берутся из событий `canvas.line_committed` / `canvas.line_erased` / `handwriting.corrected` с номерами (WP14.3, WP21.6), не из документа доски.
+
+Полей пометки и подсказки коду B не нужно. Если появится место, где ход учителя кладёт визуализацию или каркас на доску, это пробел ТЗ (WP21.1 называет «визуализации, каркасы» в слое учителя, но не называет писателя), и B вернёт вопрос, а не решит сам.
+
+**D-A-110 п.4 (описание гипотезы заблуждения).** Отдельного правила не нужно, таблица A верна. `Т-§9.3`: новое заблуждение создаётся как `suspected`; описание (`statement`, `triggers`) пишется «при подтверждении и при каждом новом проявлении подтверждённого»; WP16.2: задача сначала читает статус и завершается, если заблуждение не подтверждено. Гипотеза словами подтверждённой быть не может, поэтому `misconception.describe` по ней всё равно завершилась бы сразу. После того как проектор создаст узел, следующие проявления ссылаются на его id (метка в контексте, `Т-§4.5`). Событие с `misconception_id`, которое переводит заблуждение в подтверждённое, само ставит `misconception.describe` по строке таблицы.
+
+**D-A-110 п.7 (`agent.requested {kind: known_check}`).** Пишет код хода учителя (B, WP13.2, шаг `commit`) из `p3_markup.agentRequests` (`AgentRequestKind` включает `known_check`, WP16.6). Например, ученик сказал в чате «я это уже знаю», и учитель просит проверку темы (`params.topic`). Задача нужна, и это `check.known_claim`: в §6.5 вида `agent.known_check` нет, а `check.known_claim` делает ровно эту работу (1–3 задачи по навыкам темы через `task_generator`, итог — `agent.completed {kind: known_check, task_ids}`, WP8.2). Предлагаемая строка таблицы S6: `agent.requested`, `kind = known_check` → `check.known_claim`, класс P1 при `needed_in_session`, иначе P2 (WP16.6), `lock_key`/`coalesce_key` — как у строки `known.claimed`. Решение класса B для A (таблица S6 — файл A).
+
+### D-B-145. Тело `check.model`: вход ролей вердикта, метки, порядок второго мнения и прочтения
+- Класс: B
+- WP / место: WP11.6, `quack/practice/model_check.py` (`verdict_role`, `verdict_inputs`, `check_with_model`, `record_verdict`)
+- Контекст: `Т-§6.8`, `Т-§7.7`, `Т-§22.7` и контракты `verdict_free@1`, `verdict_proof@1`, `second_opinion@1` (#84) задают роли, блоки входа и выход. Не названо: (а) вид рубрики и списка заблуждений во входе; (б) рубрики нет ни в пространстве решения, ни в спецификации; (в) порядок второго мнения и понижения уверенности распознанного ответа (WP11.7); (г) ключи идемпотентности вызовов.
+- Решение: (а) рубрика — `R1. …`, `R2. …` из ключевых шагов пространства решения, иначе из `key_ideas`; заблуждения — `M1. …` в порядке, который даёт вызывающий; `answer_spec` — JSON спецификации без пустых полей; ответ — `value` и рассуждение `text` с новой строки. (б) Пустой список — блок `none`, модель сверяет со спецификацией. (в) Решение о втором мнении — по уверенности самой модели; понижение по распознаванию (D-B-127) применяется последним: неуверенное прочтение лечится показом прочтения, а не второй моделью. (г) `check.model:{answer_seq}:{part}` и `second_opinion:{answer_seq}:{part}` — повтор задачи берёт ответ из исходящих шлюза. Неизвестная метка `R…`/`M…` возвращается модели через `check` шлюза (`Т-§4.5`); что осталось неизвестным после исправления, `model_verdict` отбрасывает. Регистрация обработчика `check.model` — с диспетчером Фазы 4 (A, WP7.1, G2): тело принимает `Db`, шлюз и факты памяти (`LevelFact` → `LevelState`, заблуждения навыков — `KnownMisconception`) от вызывающего.
+- Почему: §0.4.3 п.2 (`Т-§6.8`: «рубрика — ключевые шаги … или ключевые идеи»; `Т-§7.7`: «при сомнении» — сомнении вердикта), п.5.
+- Обратимость: одна функция входа и порядок двух строк.
+- Тесты: `tests/practice/test_check_model.py`.
+- Требует подтверждения владельцем: нет
+- Открыто: рисунок (`drawing`) идёт в `verdict_free` текстом `value`. Изображения в запросе шлюз пока не передаёт (`Т-§6.8` «Spark с изображением»); нужен вход-изображение в `generate_structured` (B, WP10.2) — до него ответ-рисунок проверяется по описанию. У `MisconceptionFact` (S4) нет формулировки заблуждения — для `KnownMisconception.statement` нужна она (вопрос A).
+
+### D-B-146. Тело страховки `check.symbolic`: чтение `core.events` B и ответ `unsupported`
+- Класс: B
+- WP / место: WP11.3, `quack/practice/symbolic_job.py` (`insure_symbolic`), `quack/practice/repo.py`
+- Контекст: WP11.3 — страховка ищет вердикт по `verdict:{answer_seq}:{part}`, иначе проверяет с `symbolic_background_timeout_ms` и пишет вердикт; «не разобралось или не набралось точек» — `check.failed`. A ответил на D-B-122: чтения `core.events` B пишет в своих модулях. Не названо: что пишет страховка, если compute ответил `unsupported` (нет структурной проверки вида, `Т-§6.6`), — в `CheckFailedReason` каталога такого значения нет.
+- Решение: чтения по ключу и по `seq` — `quack/practice/repo.py` (параметры `%(name)s`, фильтр `learner_id`, `T-DB2`, `T-DB4`). `NotYet` (таймаут, compute недоступен, D-B-126) страховка пишет как `check.failed` с той же причиной под `check_failed:{answer_seq}:{part}`. `unsupported` → `NeedsModel`: страховка не пишет ничего, пока в каталоге нет причины, — модель такой ответ сейчас не проверит. **Вопрос A:** добавить `unsupported` в `CheckFailedReason` (`quack/events/values.py`); тогда страховка пишет `check.failed {reason: unsupported}`, и диспетчер ставит `check.model` (`Т-§6.6`: «нет её — проверка моделью»).
+- Почему: §0.4.3 п.1 (без изменения каталога в чужом файле), п.3.
+- Обратимость: одна ветка в `insure_symbolic`.
+- Тесты: `tests/practice/test_check_symbolic_job.py`.
+- Требует подтверждения владельцем: нет
 ### D-B-144. Грамматика API пускает отношения — режим `interval` проходит проверку разметки
 - Класс: B
 - WP / место: WP12.3, WP11.5; `quack/practice/grammar.py` (`grammar_ok`, D-B-115)
@@ -839,6 +876,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 | S1 (зона C), этап I | интерфейсы `ObjectStore`, `EmbeddingClient`, `EmailSender`, `DeletionJournal`; поля `AppResources`; подмены; имена параметров §6.7 потока C. Продовые клиенты — `NotImplementedError` (WP18–WP20, WP25) | `tests/storage/test_s1_resources.py` — 8 passed |
 | S10, этап I + пул | `compute`: пул `pebble` (`quack_compute/pool.py`) с жёстким таймаутом — реализован; настройки, схемы и маршруты WP24 — тела `NotImplementedError`; `Renderer` (Chromium) — этап I. `backend`: `ComputeClient` — методы всех эндпоинтов WP24, `create_compute_client`; заглушка — очереди по эндпоинтам | `compute/tests/test_pool_and_contract.py` — 4 passed (`T-CM1` зелёный; в Linux, весь `compute` — 9 passed); `tests/storage/test_compute_client_s10.py` — 4 passed |
 | S13 (реализация подмен) | `tests/support/llm.py`: `ScriptedLLMProvider.stream_structured` — шаги с инструментами (`script_tools`, два вызова за шаг, `phase: commentary`), ответ дельтами с ключами по алфавиту, флаг `body_before_head`, сбои Фазы 3 по D-B-125 п.5, журнал `stream_calls`; `loadtest/meta_mock.py`: SSE при `stream: true` (D-B-125 п.3), после `function_call_output` на каждый вызов — ответ. Формат — D-B-125 (B, PR #86) | `tests/test_support_scripted_llm.py` — 21 passed; `tests/test_meta_mock.py` — 59 passed |
+| WP21.2, журнал штрихов | `quack/canvas/strokes.py`: формат куска (MessagePack + zstd, точки разностью, стирание — операция), `StrokeJournal` (пачки в памяти, кусок раз в `stroke_chunk_seconds`, `ack` только после записи, повтор `batch_no` отсекается, хранилище недоступно — `ack` нет). **Не сделано:** WebSocket и Redis pub/sub (с переводом входа на сессии, D-C-112), доска WP21.1, распознавание WP21.3, проверка шагов и пометки WP21.4–21.5, голос и проигрывание WP21.6 | `tests/canvas` — 4 passed (`T-CV1`, `T-CV2`) |
 | S1: поле `db` (после #78) | `AppResources.db: Db` (§4.2): `create_app_resources` стала асинхронной и открывает пул `Db` без ожидания Postgres — API стартует и `/health/ready` отвечает 503 без базы (контракт готовности Фазы 3; `open_db` A ждёт пул — это для workers); закрывается последним. `engine` и `session_factory` остаются до WP1.3 (A). `tests/support/resources.build_app_resources(..., db=)`: без `db` — `Db` над закрытым пулом (`PoolClosed` при обращении) | `tests/storage/test_s1_resources.py`, `tests/test_api_llm_provider.py`, `tests/test_app_assembly.py` — 30 passed (Linux, инфраструктура) |
 | WP24 | `compute`: `/v1/pdf/pages` (PyMuPDF), `/v1/image/align`, `/v1/image/clean-drawing`, `/v1/image/render-strokes` (OpenCV), `/v1/render/pdf` (Playwright, A4, число страниц); Chromium запускается на первое задание и закрывается после `chromium_idle_close_s` простоя; образ с Chromium, `TMPDIR=/srv/quack/tmp`; шаг Chromium в CI. `/v1/render/snapshots` по D-B-130. **Не сделано:** почасовая чистка `/srv/quack/tmp` (вопрос, см. D-C-110) | `compute` в Linux — 76 passed (`T-CM1`, `T-CM2`, `T-CM3`) |
 | WP19 | `quack/storage/keys.py` — ключи `Т-§3.3` с ULID; `quack/storage/uploads.py` — тип по сигнатуре (PDF, PNG, JPEG, WebP), лимит `upload_max_mb`, `UploadRejected` 415/413; `S3ObjectStore` на `aioboto3` (path-style, подписанные ссылки, сбой → `StorageUnavailable`); `UPLOAD_REJECTED` и `StorageUnavailable` → `SERVICE_UNAVAILABLE` в `quack/api/errors.py`; снимок `openapi.json`. Эндпоинты загрузки — WP20 (материалы), WP22 (фото): там же вторая половина `T-ST3` («ход учителя работает») | `tests/storage/test_storage_wp19.py` — 12 passed (`T-ST1`, `T-ST2`, `T-ST3` — часть хранилища) |
@@ -967,6 +1005,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/storage/test_storage_wp19.py`.
 - Требует подтверждения владельцем: нет. \[ПРОВЕРИТЬ\] до первых загрузок (`Д-§8.4` «Проверить»): регион бакета Contabo для подписи, работа подписанных ссылок в path-style. Недоступное хранилище отвечает не сразу: botocore повторяет запрос со своей задержкой (в тесте на Windows — до ~18 с на вызов). Таймаут и число повторов — вопрос владельцу.
 
+### D-C-114. WP21.2: структура куска штрихов, отсечение повторов, порог переполнения
+- Класс: B; п.3 — вопрос владельцу
+- WP / место: WP21.2; `quack/canvas/strokes.py`
+- Контекст: `Т-§15.1`–`Т-§15.2` и WP21.2 задают формат точек (`dx, dy, dt, нажим`), MessagePack, zstd, кусок раз в `stroke_chunk_seconds` «или при переполнении», `ack` после записи и отсечение повтора по номеру пачки; не названы структура документа куска и порог переполнения.
+- Решение: (1) кусок — `{"batches": [{"batch_no", "strokes": [{"stroke_id", "points"}], "erasures": [{"stroke_ids", "at_ms"}]}]}`; первая точка штриха абсолютная, следующие — разностью; номер пачки хранится в куске для проигрывания. (2) Отсечение повторов — множество виденных `batch_no` журнала канваса в процессе API; ключ куска — `canvas_chunk_key` с ULID, поэтому два процесса не перезапишут кусок друг друга. (3) **Порог переполнения** документы не называют: сейчас кусок пишется по времени и при закрытии сокета (`flush`). Вопрос владельцу: нужен ли порог (число точек или байт) и какое значение — тогда это новый параметр `Settings`.
+- Почему: §0.4.3 п.5, `Т-§3.3`.
+- Обратимость: одна функция кодирования (у куска нет потребителей, кроме проигрывания).
+- Тесты: `tests/canvas/test_strokes_wp21.py`.
+- Требует подтверждения владельцем: п.3.
+
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
 Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
@@ -988,6 +1036,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP21.2, журнал штрихов (C, `phase-4-c-wp21`, коммит `79079de`): `uv run pytest tests/canvas` — 4 failed (`NotImplementedError`). Зелёный: `tests/canvas` + `test_contracts.py` — 11 passed.
 - Поле `db` (C, `phase-4-c-db-field`): `uv run pytest tests/storage/test_s1_resources.py` — 3 failed (нет поля `db`; `create_app_resources` не асинхронная). Зелёный — в Linux-контейнере против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` (на Windows async-psycopg не работает с Proactor-циклом pytest — `PoolTimeout`): `test_s1_resources.py`, `test_api_llm_provider.py`, `test_app_assembly.py` — 30 passed; все пользователи `build_app_resources` (`tests/session`, `tests/domains`, `tests/artifacts`, `tests/e2e`, `test_dispatcher.py`) — 281 passed (в первом прогоне один раз упал `test_mutating_endpoints_are_idempotent`, отдельно и при повторе — зелёный; на чистом `phase-4` тот же набор — 281 passed).
 - WP24 (C, `phase-4-c-wp24`, коммит `c98d1b8`): в Linux (контейнер uv python3.12-bookworm-slim + `playwright install --with-deps chromium`) `pytest tests/test_wp24_endpoints.py` — 7 failed (`NotImplementedError`), 1 xfailed. Зелёный: весь `compute` — 74 passed, 1 xfailed (BLOCKED-C-201).
 - WP10.5 `viz_builder@1` по D-B-130 (B): `uv run pytest tests/llm/test_labels.py` — 2 failed (`test_prompt_has_its_markers[viz_builder@1]`, устаревший `PROMPT_CONTRACTS.md`), 54 passed, коммит `1d7572d`. Зелёный: `tests/llm` — 76 passed.
@@ -1019,6 +1068,8 @@ PR #77 (dbmate v2.36.0, sha256).
 - D-B-144 (грамматика API, отношения): `cd backend && uv run pytest tests/practice/test_grammar_relations.py` — 5 failed, 4 passed (отказы и так отказы), коммит `b2d0309`. Зелёный: 9 passed; с затронутыми (`tests/practice`, `tests/session/test_phase4_contracts.py`, `tests/test_contracts.py`) — 116 passed.
 
 - S3/S4/S6 (A, `phase-4-a-s4-s6`): тесты и код писались в одной итерации, красный прогон отдельно не снят (`Verdict` split, `RejectedElementRecord.index`, `quack.graph.read`, `rules_p4.py`). Зелёный: `tests/graph/test_read_stub.py`, `tests/jobs`, `tests/events/test_rejected_element.py`, `tests/practice/test_second_opinion.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` (`T-A6`) — локально без инфраструктуры; тесты с Postgres/dbmate (`tests/db`, `tests/events/test_catalog.py`, `tests/practice/test_answer_transaction.py`, `tests/practice/test_tasks_store.py`) локально не запускались (нет `dbmate`) — их прогонит CI.
+- WP11.6, тело `check.model` (D-B-145): `cd backend && uv run pytest tests/practice/test_check_model.py` — 12 failed (`NotImplementedError`), коммит `63ba969`. Зелёный: 12 passed; с затронутыми (`tests/practice`, `tests/llm`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 196 passed.
+- WP11.3, тело `check.symbolic` (D-B-146): `cd backend && uv run pytest tests/practice/test_check_symbolic_job.py` — 5 failed (`NotImplementedError`), коммит `2ead504`. Зелёный: 5 passed; с `tests/db/test_sql_static.py` — 9 passed.
 
 ## Правки тестов
 
