@@ -812,6 +812,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Требует подтверждения владельцем: нет
 - Открыто: рисунок (`drawing`) идёт в `verdict_free` текстом `value`. Изображения в запросе шлюз пока не передаёт (`Т-§6.8` «Spark с изображением»); нужен вход-изображение в `generate_structured` (B, WP10.2) — до него ответ-рисунок проверяется по описанию. У `MisconceptionFact` (S4) нет формулировки заблуждения — для `KnownMisconception.statement` нужна она (вопрос A).
 
+### D-B-146. Тело страховки `check.symbolic`: чтение `core.events` B и ответ `unsupported`
+- Класс: B
+- WP / место: WP11.3, `quack/practice/symbolic_job.py` (`insure_symbolic`), `quack/practice/repo.py`
+- Контекст: WP11.3 — страховка ищет вердикт по `verdict:{answer_seq}:{part}`, иначе проверяет с `symbolic_background_timeout_ms` и пишет вердикт; «не разобралось или не набралось точек» — `check.failed`. A ответил на D-B-122: чтения `core.events` B пишет в своих модулях. Не названо: что пишет страховка, если compute ответил `unsupported` (нет структурной проверки вида, `Т-§6.6`), — в `CheckFailedReason` каталога такого значения нет.
+- Решение: чтения по ключу и по `seq` — `quack/practice/repo.py` (параметры `%(name)s`, фильтр `learner_id`, `T-DB2`, `T-DB4`). `NotYet` (таймаут, compute недоступен, D-B-126) страховка пишет как `check.failed` с той же причиной под `check_failed:{answer_seq}:{part}`. `unsupported` → `NeedsModel`: страховка не пишет ничего, пока в каталоге нет причины, — модель такой ответ сейчас не проверит. **Вопрос A:** добавить `unsupported` в `CheckFailedReason` (`quack/events/values.py`); тогда страховка пишет `check.failed {reason: unsupported}`, и диспетчер ставит `check.model` (`Т-§6.6`: «нет её — проверка моделью»).
+- Почему: §0.4.3 п.1 (без изменения каталога в чужом файле), п.3.
+- Обратимость: одна ветка в `insure_symbolic`.
+- Тесты: `tests/practice/test_check_symbolic_job.py`.
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -1019,6 +1029,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 - S3/S4/S6 (A, `phase-4-a-s4-s6`): тесты и код писались в одной итерации, красный прогон отдельно не снят (`Verdict` split, `RejectedElementRecord.index`, `quack.graph.read`, `rules_p4.py`). Зелёный: `tests/graph/test_read_stub.py`, `tests/jobs`, `tests/events/test_rejected_element.py`, `tests/practice/test_second_opinion.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` (`T-A6`) — локально без инфраструктуры; тесты с Postgres/dbmate (`tests/db`, `tests/events/test_catalog.py`, `tests/practice/test_answer_transaction.py`, `tests/practice/test_tasks_store.py`) локально не запускались (нет `dbmate`) — их прогонит CI.
 - WP11.6, тело `check.model` (D-B-145): `cd backend && uv run pytest tests/practice/test_check_model.py` — 12 failed (`NotImplementedError`), коммит `63ba969`. Зелёный: 12 passed; с затронутыми (`tests/practice`, `tests/llm`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 196 passed.
+- WP11.3, тело `check.symbolic` (D-B-146): `cd backend && uv run pytest tests/practice/test_check_symbolic_job.py` — 5 failed (`NotImplementedError`), коммит `2ead504`. Зелёный: 5 passed; с `tests/db/test_sql_static.py` — 9 passed.
 
 ## Правки тестов
 
