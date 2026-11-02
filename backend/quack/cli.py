@@ -30,6 +30,7 @@ from quack.jobs.dispatcher import Dispatcher, supervise
 from quack.jobs.periodic import PeriodicScheduler
 from quack.jobs.runner import JobRunner
 from quack.logging import configure_logging, get_logger
+from quack.ops.backup import run_backup
 from quack.ops.commands import migrate, purge_deleted, replay_dlq
 from quack.ops.registry import can_rollback, seen_pairs, write_event_registry
 from quack.ops.seed import SeedRefusedError, seed_learners, write_learners
@@ -85,6 +86,8 @@ def build_parser() -> argparse.ArgumentParser:
     replay = ops_sub.add_parser("replay-dlq", help="replay DLQ entries")
     replay.add_argument("--id", action="append", dest="ids", help="DLQ entry id (repeatable)")
     ops_sub.add_parser("purge-deleted", help="physically delete learners with tombstones")
+    backup = ops_sub.add_parser("backup", help="encrypted Postgres dump to R2 and local copies")
+    backup.add_argument("when", nargs="?", choices=["now"], help="an out-of-schedule dump")
     ops_sub.add_parser("status", help="print the state of the system as one JSON object")
     registry = ops_sub.add_parser("event-registry", help="write the event registry JSON")
     registry.add_argument("--out", required=True, help="path of the registry to write")
@@ -278,6 +281,8 @@ async def _ops(settings: Settings, args: argparse.Namespace) -> int:
             return 1
         log.info("neo4j_schema_ok")
         return 0
+    if args.op == "backup":
+        return await run_backup(settings)
     if args.op == "openapi":
         # Imported here: the function is stream C's (WP8.7) and needs no resources.
         from quack.api.app import write_openapi
