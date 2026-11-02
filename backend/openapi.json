@@ -417,6 +417,67 @@
         "title": "AuthResponse",
         "type": "object"
       },
+      "Block": {
+        "additionalProperties": false,
+        "description": "П-9.4: task (condition and room for the solution), visualization, hint, reference card.",
+        "properties": {
+          "block_id": {
+            "title": "Block Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "task",
+              "visualization",
+              "hint",
+              "reference_card"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/Layout"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "block_id",
+          "kind"
+        ],
+        "title": "Block",
+        "type": "object"
+      },
+      "BoardDoc": {
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/Block"
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "learner": {
+            "$ref": "#/components/schemas/LearnerLayer"
+          },
+          "teacher": {
+            "$ref": "#/components/schemas/TeacherLayer"
+          }
+        },
+        "title": "BoardDoc",
+        "type": "object"
+      },
       "Body_upload_material_v1_domains__domain_id__materials_post": {
         "properties": {
           "file": {
@@ -441,6 +502,77 @@
           "file"
         ],
         "title": "Body_upload_material_v1_domains__domain_id__materials_post",
+        "type": "object"
+      },
+      "CanvasList": {
+        "properties": {
+          "canvases": {
+            "items": {
+              "$ref": "#/components/schemas/CanvasView"
+            },
+            "title": "Canvases",
+            "type": "array"
+          }
+        },
+        "required": [
+          "canvases"
+        ],
+        "title": "CanvasList",
+        "type": "object"
+      },
+      "CanvasView": {
+        "properties": {
+          "canvas_id": {
+            "format": "uuid",
+            "title": "Canvas Id",
+            "type": "string"
+          },
+          "doc": {
+            "$ref": "#/components/schemas/BoardDoc"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "canvas_id",
+          "session_id",
+          "task_id",
+          "doc",
+          "version",
+          "updated_at"
+        ],
+        "title": "CanvasView",
         "type": "object"
       },
       "CheatsheetRefreshRequest": {
@@ -1432,6 +1564,50 @@
         "title": "HeartbeatResponse",
         "type": "object"
       },
+      "Hint": {
+        "additionalProperties": false,
+        "description": "A quiet hint near the place where the learner is stuck, one step at a time (П-9.5).",
+        "properties": {
+          "hint_id": {
+            "title": "Hint Id",
+            "type": "string"
+          },
+          "line_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Id"
+          },
+          "step": {
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Step",
+            "type": "integer"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hint_id",
+          "task_id",
+          "step",
+          "text"
+        ],
+        "title": "Hint",
+        "type": "object"
+      },
       "HintRequest": {
         "properties": {
           "idempotency_key": {
@@ -1483,6 +1659,66 @@
           "seq"
         ],
         "title": "HintResponse",
+        "type": "object"
+      },
+      "Layout": {
+        "additionalProperties": false,
+        "description": "Where a block lies and whether it is collapsed (П-9.4 «двигать, сворачивать»).",
+        "properties": {
+          "collapsed": {
+            "default": false,
+            "title": "Collapsed",
+            "type": "boolean"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "x": {
+            "default": 0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "default": 0,
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "title": "Layout",
+        "type": "object"
+      },
+      "LearnerLayer": {
+        "additionalProperties": false,
+        "description": "The learner's strokes are in the journal; here — what the learner typed.",
+        "properties": {
+          "typed_formulas": {
+            "items": {
+              "$ref": "#/components/schemas/TypedFormula"
+            },
+            "title": "Typed Formulas",
+            "type": "array"
+          }
+        },
+        "title": "LearnerLayer",
         "type": "object"
       },
       "LearnerMeResponse": {
@@ -1600,6 +1836,40 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "Mark": {
+        "additionalProperties": false,
+        "description": "A mark on a step (WP21.5): `error` confirmed, `question` when unsure (Т-§12.4).",
+        "properties": {
+          "kind": {
+            "enum": [
+              "error",
+              "question"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "line_id": {
+            "title": "Line Id",
+            "type": "string"
+          },
+          "mark_id": {
+            "title": "Mark Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mark_id",
+          "line_id",
+          "kind",
+          "text"
+        ],
+        "title": "Mark",
         "type": "object"
       },
       "MaterialDetailView": {
@@ -2113,6 +2383,24 @@
         "title": "NoteUpdateResponse",
         "type": "object"
       },
+      "OpenCanvas": {
+        "properties": {
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "title": "OpenCanvas",
+        "type": "object"
+      },
       "PrereqEdge": {
         "additionalProperties": false,
         "description": "`from_topic_id` is a prerequisite of `to_topic_id`: (from)-[:PREREQ_OF]->(to).",
@@ -2264,6 +2552,31 @@
           "password"
         ],
         "title": "RegisterRequest",
+        "type": "object"
+      },
+      "Scaffold": {
+        "additionalProperties": false,
+        "description": "A scaffold of the solution with gaps the learner fills with the pen (П-9.5).",
+        "properties": {
+          "block_id": {
+            "title": "Block Id",
+            "type": "string"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "block_id",
+          "text"
+        ],
+        "title": "Scaffold",
         "type": "object"
       },
       "SearchHitView": {
@@ -3045,6 +3358,41 @@
         "title": "SubmitResponse",
         "type": "object"
       },
+      "TeacherLayer": {
+        "additionalProperties": false,
+        "properties": {
+          "hints": {
+            "items": {
+              "$ref": "#/components/schemas/Hint"
+            },
+            "title": "Hints",
+            "type": "array"
+          },
+          "marks": {
+            "items": {
+              "$ref": "#/components/schemas/Mark"
+            },
+            "title": "Marks",
+            "type": "array"
+          },
+          "scaffolds": {
+            "items": {
+              "$ref": "#/components/schemas/Scaffold"
+            },
+            "title": "Scaffolds",
+            "type": "array"
+          },
+          "visualizations": {
+            "items": {
+              "$ref": "#/components/schemas/Visualization"
+            },
+            "title": "Visualizations",
+            "type": "array"
+          }
+        },
+        "title": "TeacherLayer",
+        "type": "object"
+      },
       "TopicDetailResponse": {
         "properties": {
           "artifacts": {
@@ -3393,6 +3741,26 @@
         "title": "TurnView",
         "type": "object"
       },
+      "TypedFormula": {
+        "additionalProperties": false,
+        "description": "A formula typed in a typing block (`typed_formula {block_id, latex}`, WP21.2).",
+        "properties": {
+          "block_id": {
+            "title": "Block Id",
+            "type": "string"
+          },
+          "latex": {
+            "title": "Latex",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_id",
+          "latex"
+        ],
+        "title": "TypedFormula",
+        "type": "object"
+      },
       "UpdatePreferencesRequest": {
         "properties": {
           "idempotency_key": {
@@ -3489,6 +3857,32 @@
           "seq"
         ],
         "title": "UpdateTopicStatusResponse",
+        "type": "object"
+      },
+      "Visualization": {
+        "additionalProperties": false,
+        "description": "A visualization laid next to the solution (П-9.5; artifact `Т-§13.6`).",
+        "properties": {
+          "artifact_id": {
+            "format": "uuid",
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "block_id": {
+            "title": "Block Id",
+            "type": "string"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "block_id",
+          "artifact_id"
+        ],
+        "title": "Visualization",
         "type": "object"
       }
     }
@@ -4429,6 +4823,79 @@
         ]
       }
     },
+    "/v1/canvases/{canvas_id}": {
+      "get": {
+        "operationId": "get_canvas_v1_canvases__canvas_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "canvas_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Canvas Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CanvasView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Get Canvas",
+        "tags": [
+          "canvas"
+        ]
+      }
+    },
     "/v1/consents": {
       "post": {
         "operationId": "post_consent_v1_consents_post",
@@ -4906,6 +5373,79 @@
         "summary": "Archive Domain Endpoint",
         "tags": [
           "domains"
+        ]
+      }
+    },
+    "/v1/domains/{domain_id}/canvases": {
+      "get": {
+        "operationId": "domain_canvases_v1_domains__domain_id__canvases_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CanvasList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Domain Canvases",
+        "tags": [
+          "canvas"
         ]
       }
     },
@@ -6824,6 +7364,109 @@
           }
         },
         "summary": "Get Session"
+      }
+    },
+    "/v1/sessions/{session_id}/canvases": {
+      "post": {
+        "operationId": "open_canvas_v1_sessions__session_id__canvases_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenCanvas"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CanvasView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Open Canvas",
+        "tags": [
+          "canvas"
+        ]
       }
     },
     "/v1/sessions/{session_id}/events": {

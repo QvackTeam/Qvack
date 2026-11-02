@@ -54,6 +54,12 @@ async def _event(db: Db, learner: UUID, type_: str, payload: dict[str, Any]) -> 
     )
 
 
+async def _domain(db: Db, learner: UUID) -> UUID:
+    domain_id = uuid4()
+    await _event(db, learner, "domain.created", {"domain_id": str(domain_id), "name": "Calculus"})
+    return domain_id
+
+
 async def _session(db: Db, learner: UUID, domain: UUID) -> UUID:
     session_id = uuid4()
     await _event(
@@ -109,7 +115,7 @@ async def test_open_canvas_by_task_and_read_it(pg_db: Db, client_for: ClientFor)
     on-the-fly task without a solution space writes `agent.requested {kind: solution_space}`;
     the canvas is in the list of its domain."""
     learner = await create_learner(pg_db)
-    domain = uuid4()
+    domain = await _domain(pg_db, learner)
     session_id = await _session(pg_db, learner, domain)
     task_id = await _task(pg_db, learner, source="teacher", solution_space=False)
     client = await client_for(learner)
@@ -153,7 +159,7 @@ async def test_isolation_and_no_session(pg_db: Db, client_for: ClientFor) -> Non
     """WP18.3, T-E3: a session, task, canvas or domain of another learner — 404; without a
     session — 401 `UNAUTHENTICATED`."""
     owner, other = await create_learner(pg_db), await create_learner(pg_db)
-    domain = uuid4()
+    domain = await _domain(pg_db, owner)
     session_id = await _session(pg_db, owner, domain)
     task_id = await _task(pg_db, owner, source="teacher", solution_space=False)
     canvas_id = (

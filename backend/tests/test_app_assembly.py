@@ -54,6 +54,10 @@ SESSION_ROUTES = {
     ("GET", "/v1/domains/{domain_id}/materials"),
     ("GET", "/v1/materials/{material_id}"),
     ("GET", "/v1/search"),
+    # ТЗ Ф4 WP21.1
+    ("POST", "/v1/sessions/{session_id}/canvases"),
+    ("GET", "/v1/canvases/{canvas_id}"),
+    ("GET", "/v1/domains/{domain_id}/canvases"),
 }
 # Т-§19.1: the start of the Google flow is a redirect only, it has no 2xx body.
 REDIRECT_ONLY_ROUTES = {("GET", "/auth/google/start")}
@@ -192,6 +196,10 @@ EXPECTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/v1/domains/{domain_id}/materials"),
         ("GET", "/v1/materials/{material_id}"),
         ("GET", "/v1/search"),
+        # ТЗ Ф4 WP21.1 (stream C)
+        ("POST", "/v1/sessions/{session_id}/canvases"),
+        ("GET", "/v1/canvases/{canvas_id}"),
+        ("GET", "/v1/domains/{domain_id}/canvases"),
         # stream 1
         ("POST", "/v1/auth/register"),
         ("POST", "/v1/auth/login"),

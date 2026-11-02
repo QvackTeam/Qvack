@@ -1064,6 +1064,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Риск перехода: домен проверяется по `domain.created` в журнале Фазы 4, а домены пока создаёт маршрут A Фазы 3 в старом журнале — загрузить материал через API можно будет, когда создание домена перейдёт на `Db` (R-W, A). Компаньон (`scope = companion`, `T-CP1` → 403) — общей проверкой в WP22, не здесь.
 - Требует подтверждения владельцем: нет.
 
+### D-C-118. WP21.1: документ доски и маршруты канвасов
+- Класс: B; схема документа — на ревью B (B #103)
+- WP / место: WP21.1; `quack/canvas/board.py`, `quack/canvas/boards.py`, `quack/canvas/router.py`
+- Контекст: `Т-§15.1` и П-9.4 задают состав доски (блоки, расположение, слой учителя, версии) и два слоя разными структурами; WP21.1 — три маршрута и `agent.requested {kind: solution_space}` для задачи на лету без пространства. Не названы: поля документа, ключ идемпотентности открытия, проверка сессии и домена, отличие «задачи на лету».
+- Решение: (1) **Документ** `BoardDoc` (строгий, `extra=forbid`): `blocks` (`block_id`, `kind`: task | visualization | hint | reference_card, `task_id?`, `layout {x, y, width?, height?, collapsed}`); `learner` — `typed_formulas {block_id, latex}` (штрихи — в журнале штрихов, строки — события); `teacher` — `marks {mark_id, line_id, kind: error|question, text}`, `hints {hint_id, task_id, step 1–3, text, line_id?}`, `visualizations {item_id, block_id, artifact_id}`, `scaffolds {item_id, block_id, text}`. Слои — разные модели: элемент учителя в слой ученика не проходит проверку. Версия — колонка `version`. (2) Открытие по задаче — блок `task` (`b1`). (3) «Задача на лету» — `content.tasks.source = teacher`; без `solution_space` — `agent.requested {kind: solution_space, params.task_id, needed_in_session: true}` под ключом `canvas:{canvas_id}:solution_space` в одной транзакции со строкой; у задач банка пространство строит `task.solution_space` по `task.created` (WP12.4). (4) Сессия ученика — по `session.started` в журнале, домен — по `domain.created` (закон 1, как D-C-113); чужое — 404. Домен канваса — домен его сессии. (5) Открытие без ключа: каждый вызов — новый канвас; в обходе `T-E2` — `NO_IDEMPOTENCY_KEY` с причиной.
+- Почему: §0.4.3 п.5, закон 1, WP18.3.
+- Обратимость: модели документа (данных нет, §0.3).
+- Тесты: `tests/canvas/test_boards_wp21.py`, `tests/e2e/test_isolation_and_idempotency.py`, `tests/test_app_assembly.py`.
+- Риск перехода: сессии пока стартуют маршрутом B Фазы 3 в старом журнале — открыть канвас через API можно, когда старт сессии пишет `session.started` в журнал Фазы 4.
+- Требует подтверждения владельцем: нет; поля документа — ревью B.
+
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
 Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
@@ -1085,6 +1096,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP21.1, доска и канвасы (C, `phase-4-c-wp21-boards`, коммит `0012acb`): в Linux `pytest tests/canvas/test_boards_wp21.py` — ошибка сбора (нет `quack.canvas.board`); на неверной реализации (запрос пространства для любой задачи без него) — 1 failed. Зелёный: `tests/canvas`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/materials` — 61 passed. Правка теста красного коммита: домен в тестах создаётся событием `domain.created` (проверка домена — D-C-118 п.4).
 - WP20, маршруты (C, `phase-4-c-api-sessions`, коммит `e2fb068`): в Linux против `quack-test-*` с dbmate `pytest tests/materials/test_materials_routes.py` — 4 failed (маршрутов нет: 404 вместо 201/401/415/200). Зелёный: `tests/materials`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/auth` — 66 passed.
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
 - WP18, этап I (C, `phase-4-c-wp18`): в Linux против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` и dbmate v2.36.0 `pytest tests/auth` — 7 failed (`NotImplementedError`: `request_link`, `redeem_link`, `LinkLimiter`, `cookie_params`, `learner_for_google`, сессии, согласия). Зелёный (библиотека): 7 passed. `T-AU5` — с маршрутами (весь API на сессиях).

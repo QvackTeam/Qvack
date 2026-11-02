@@ -25,6 +25,7 @@ from quack.auth.consents import has_current_terms
 from quack.auth.google import AuthlibGoogleOIDC, GoogleOIDC
 from quack.auth.router import router as auth_router
 from quack.auth.sessions import resolve_session
+from quack.canvas.router import router as canvas_router
 from quack.config import Settings, get_settings
 from quack.domains.router import router as domains_router
 from quack.logging import configure_logging, get_logger, log_context
@@ -192,6 +193,7 @@ def create_app(
     app.include_router(learner_stream_router)
     app.include_router(auth_router)
     app.include_router(materials_router)
+    app.include_router(canvas_router)
     return app
 
 
