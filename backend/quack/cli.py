@@ -19,6 +19,7 @@ import structlog
 from sqlalchemy import text
 
 from quack.config import Settings, get_settings
+from quack.db import open_db
 from quack.db.neo4j import create_driver, verify_schema
 from quack.db.postgres import create_engine, create_session_factory
 from quack.db.redis import create_redis
@@ -242,15 +243,14 @@ async def _rebuild(settings: Settings, args: argparse.Namespace) -> int:
 
 
 async def _seed_learners(settings: Settings, args: argparse.Namespace) -> int:
-    """WP8.6 (Д-§11): exit code 2 when refused on prod or without JWT_SECRET (the `ops` role
-    requires no secrets, Д-§7; tokens signed with an empty key are useless)."""
-    if not settings.jwt_secret.get_secret_value():
-        log.error("seed_learners_refused", reason="JWT_SECRET is not set; run it in `api`")
-        return 2
+    """WP8.6 (Д-§11): exit code 2 when refused on prod. Tokens are sessions in
+    `core.auth_sessions` (ТЗ Ф4 WP18.3), so the `ops` role needs no secret (Д-§7)."""
     engine = create_engine(settings)
+    db = await open_db(settings)
     try:
         learners = await seed_learners(
             create_session_factory(engine),
+            db,
             settings,
             count=args.count,
             fixture=args.fixture,
@@ -260,6 +260,7 @@ async def _seed_learners(settings: Settings, args: argparse.Namespace) -> int:
         log.error("seed_learners_refused", reason=str(exc))
         return 2
     finally:
+        await db.close()
         await engine.dispose()
     write_learners(Path(args.out), learners)
     log.info("seed_learners_done", count=len(learners), out=args.out)

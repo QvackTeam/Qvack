@@ -991,7 +991,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Требует подтверждения владельцем: нет.
 
 ### D-C-112. Перевод входа API с JWT на сессии (WP18.3) — предложение потокам A и B
-- Класс: B (пересечение зон, §7.3) — **ждёт ответа A и B**
+- Класс: B (пересечение зон, §7.3) — принято A (D-A-112, D-A-113) и B (#103); п.1–2 выполнены в D-C-119, п.3 — B, п.4 — A (WP1.3)
 - WP / место: WP18.3, WP18.4; `quack/api/auth.py` (C), объявления в роутерах A и B
 - Контекст: §2.3 строка 3 удаляет пароль, JWT, `auth.users`, `/v1/auth/register|login`; WP18.3 — `learner_id` только из сессии. На входе Фазы 3 (`get_current_learner_id`) сидят роутеры всех потоков: A — `quack/domains/router.py`; B — `quack/session/deps.py`; C — `quack/artifacts/router.py`, `quack/api/learner_stream.py`, `quack/api/ratelimit.py`. Токены JWT выпускают тесты: A — `tests/domains/*` (8 файлов); B — `tests/session/*` (5); корневые `test_app_assembly`, `test_dispatcher`, `test_jobs_phase3`, `test_learner_stream`, `test_loadtest_scenario`, `test_neo4j_outage`, `test_ops_phase3`; C — `tests/artifacts/conftest.py`, `tests/e2e/system.py`, `tests/support/auth.py`.
 - Предложение:
@@ -1053,6 +1053,20 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/auth/test_auth_routes.py`, `tests/test_app_assembly.py`.
 - Требует подтверждения владельцем: нет.
 
+### D-C-119. Весь API на сессиях; пароль, JWT и `/v1/auth/register|login|me` удалены (D-C-112 п.1–2, D-A-113)
+- Класс: B (правка файлов A и B по согласованию, §7.3; D-A-112, D-A-113, B в #103)
+- WP / место: WP18.3, §2.3 строка 3, §4.5, §8.15; `quack/api/auth.py`, `quack/domains/router.py`, `quack/domains/auth.py` (удалён), `quack/domains/schemas.py`, `quack/api/ratelimit.py`, `quack/api/openapi.py`, `quack/config.py`, `quack/ops/seed.py`, `quack/cli.py`, `loadtest/scenario.py`, `compose.yaml`, `.env.example`, `tests/support/auth.py`
+- Решение:
+  1. `get_current_learner_id(request) -> UUID` — имя и подпись те же, роутеры A, B, C не менялись: ученик берётся из куки сессии (`get_current_session`); без сессии, с истёкшей или отозванной — 401 `UNAUTHENTICATED` (§4.5). Переходно, до переноса удаления на `Db` (WP25, A): ученик с `auth.users.deleted_at` или строкой `ops.deletion_tombstones` тоже отклоняется (D-C-004) — так `test_two_phase_account_deletion`, `T-A3` и проверка надгробия в артефактах сохраняют утверждения. Наличие строки `auth.users` больше не требуется (вход — сессия ученика `core.learners`).
+  2. Удалены по D-A-113: `POST /v1/auth/register`, `POST /v1/auth/login`, `GET /v1/auth/me`, публичный роутер с лимитом `auth`, `quack/domains/auth.py` целиком (`register_learner`, `login_learner`, `get_learner_me`, `hash_password`, `verify_password`, `normalize_email`), выпуск и проверка JWT (`issue_access_token`, `decode_access_token`, `DEV_JWT_SECRET`, `JWT_ALGORITHM`), схемы `RegisterRequest`, `LoginRequest`, `AuthResponse`, `LearnerMeResponse`. Вместе с ними — то, что без них мертво: `enforce_auth_rate_limit` и `auth_requests_per_ip_per_min` (лимиты входа теперь — `auth_link_per_*`, WP18), `jwt_secret`, `jwt_ttl_days`, проверка `JWT_SECRET` в prod, `JWT_SECRET` в `compose.yaml` и `.env.example`. Код `UNAUTHORIZED` в `ErrorCode` остаётся (§4.5: «остальные коды Фазы 3 не меняются»).
+  3. `ops seed-learners`: токен в файле — сессия `core.auth_sessions` (`open_session`), не JWT; проверка `JWT_SECRET` снята, роль `ops` по-прежнему без секретов (Д-§7). `loadtest/scenario.py` шлёт куку `quack_session` вместо `Authorization`.
+  4. Тестовый вход (D-C-112 п.2): `tests/support/auth.py` — `login` (кука на клиенте), `session_token` + `session_cookie` (кука одного запроса), `learner_headers` + `login_hook` (клиент, который ходит за многих учеников: хук открывает сессию ученика один раз и шлёт её куку вместо пометки). API пометку не читает: запрос с ней без хука — 401 (`test_request_without_session_is_rejected`). `ensure_users_hook` и JWT в тестах удалены; `ensure_user` остаётся для строки `auth.users`, пока на ней работают удаление и настройки Фазы 3.
+  5. `auth.users`, старая миграция и `learner.registered` журнала Фазы 3 не трогаются — WP1.3 (A, D-C-112 п.4). E2E-ученик и ученик `T-A3`/`T-A5` получают те же строки, что писал удалённый маршрут, и сессию.
+- Почему: §2.3 строка 3, WP18.3 («пароль, JWT, `auth.users`, `/v1/auth/register|login` удаляются»), §6.4 «старый → новый», §8.15 п.1–2, D-A-113.
+- Обратимость: одна зависимость `get_current_learner_id`; удалённое — в истории git.
+- Тесты: всё затронутое — в описании PR; «Правки тестов» — ниже.
+- Требует подтверждения владельцем: нет. \[ПРОВЕРИТЬ\] Д-§7 ещё называет `JWT_SECRET` у `api` — документ DevOps расходится с ТЗ Ф4 §2.3 (вопрос владельцу в сигнале). Компаньон (`scope = companion`) на маршрутах Фазы 3 пока проходит как полная сессия — запрет (`T-CP1`, 403) делает WP22.
+
 ### D-C-116. WP20.1, WP20.5: маршруты материалов и поиска на сессиях
 - Класс: B
 - WP / место: WP20.1, WP20.5; `quack/materials/router.py`, `quack/materials/library.py`, `tests/e2e/endpoints.py`
@@ -1085,6 +1099,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- D-C-119, весь API на сессиях (C, `phase-4-c-d112`, коммит `e8a6aee`): в Linux против `quack-test-*` с dbmate `pytest tests/test_app_assembly.py tests/domains/test_auth_and_learner.py tests/session/test_auth_and_stream_resilience.py` — 14 failed (старый вход: сессия не принимается маршрутами Фазы 3, код 401 `UNAUTHORIZED`, `/v1/auth/register|login|me` ещё смонтированы, лимит без Redis считает только `auth`), 11 passed. Зелёный — в описании PR.
 - WP20, маршруты (C, `phase-4-c-api-sessions`, коммит `e2fb068`): в Linux против `quack-test-*` с dbmate `pytest tests/materials/test_materials_routes.py` — 4 failed (маршрутов нет: 404 вместо 201/401/415/200). Зелёный: `tests/materials`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/auth` — 66 passed.
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
 - WP18, этап I (C, `phase-4-c-wp18`): в Linux против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` и dbmate v2.36.0 `pytest tests/auth` — 7 failed (`NotImplementedError`: `request_link`, `redeem_link`, `LinkLimiter`, `cookie_params`, `learner_for_google`, сессии, согласия). Зелёный (библиотека): 7 passed. `T-AU5` — с маршрутами (весь API на сессиях).
@@ -1129,6 +1144,12 @@ PR #77 (dbmate v2.36.0, sha256).
 - `tests/llm/test_phase4_ai_layer.py` (`T111`): `max_output_tokens` десяти ролей — по замеру (D-B-134); `Т-§11.1` разрешает менять конфиг по замеру. Сила проверки не меняется.
 - `tests/test_contracts.py` (`T-A6`): в `PRODUCT` добавлен `agents` (ТЗ Ф4 §4.1). Сила проверки не меняется.
 - `compute/tests/math/test_equivalence.py`: `PARAMS` берётся из `test_params.py` (у `Params` новые поля, D-B-124). Утверждения не менялись.
+
+- D-C-119 (C, по D-A-113 и D-C-112 п.2): удалены вместе с кодом (§8.15 п.1) — `tests/domains/test_auth_and_learner.py::test_register_normalizes_email_and_rejects_duplicate` (вход по ссылке и ученик по адресу — `T-AU1` `test_magic_link_flow`), `::test_login_and_me_jwt_validation` (сессия, отзыв, 401 без неё — `T-AU4` `test_session_revocation`, `tests/auth/test_auth_routes.py::test_bad_link_and_no_session_are_401`), `::test_auth_rate_limiting_per_ip` (лимиты входа на адрес и IP — `T-AU2` `test_link_rate_limits_*`); `tests/session/test_fixtures.py::test_token_uses_dev_secret_when_jwt_secret_is_empty` (JWT нет); `tests/test_ops_phase3.py::test_seed_learners_refuses_without_jwt_secret` (JWT_SECRET нет, сессия не требует секрета); `tests/test_settings_meta_api.py::test_prod_jwt_secret_is_at_least_32_bytes` (JWT нет).
+- D-C-119, перенос на сессии (§8.15 п.2), утверждения те же: способ входа — `login`/`session_cookie`/`learner_headers` вместо Bearer (`tests/domains/*`, `tests/session/*`, `tests/artifacts/conftest.py`, `tests/e2e/system.py`, корневые `test_dispatcher`, `test_jobs_phase3`, `test_learner_stream`, `test_neo4j_outage`, `test_ops_phase3`); `test_update_preferences_and_idempotency` и `test_two_phase_account_deletion` — только вход (D-A-113). Код 401 — `UNAUTHENTICATED` вместо `UNAUTHORIZED` (§4.5) в `test_auth_and_stream_resilience.py`, `test_artifacts_search_export.py`, `test_app_assembly.py` (`T-A2`, `T-A3`), `test_two_phase_account_deletion`.
+- D-C-119, замена удалённого маршрута равным: «после удаления запрос отклонён» в `test_two_phase_account_deletion` проверяется на `PATCH /v1/learner/preferences` (был `GET /v1/auth/me`); «токены сида работают» в `test_seed_learners` и «после удаления вход отклонён» в `T-E` (`test_journey_and_laws.py`) — на `GET /v1/domains` (были `/v1/auth/me` и `/v1/auth/login`); `T-A3` переименован в `test_single_session_contract_across_packages`: чужая подпись JWT → неизвестная кука. `test_learner_without_auth_user_row_is_rejected` → `test_request_without_session_is_rejected` (без сессии — 401; строки `auth.users` для входа больше нет).
+- D-C-119, локальный лимитёр без Redis (`T-A4`, `T-E8` в `test_degradation.py`): лимит `auth` по IP ушёл с `/v1/auth/login`; та же проверка «N проходят, N+1 — 429 `RATE_LIMITED` без Redis» — на лимите `actions` (`learner_actions_per_min`), утверждения те же.
+- `tests/test_thresholds_in_settings.py`, `tests/test_infra.py`, `tests/test_settings_meta_api.py`: убраны `auth_requests_per_ip_per_min`, `jwt_ttl_days`, `jwt_secret` (параметры удалены, D-C-119); остальные утверждения те же. `tests/test_loadtest_scenario.py`: заголовок ученика — кука `quack_session`.
 
 ## Вопросы к команде
 
