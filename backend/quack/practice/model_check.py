@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from quack.config import Settings
-from quack.practice.check import HelpUsed, Verdict
+from quack.practice.check import HelpUsed, RubricItemResult, SecondOpinion, Verdict
 from quack.practice.role_outputs import ModelVerdictOutput
 
 
@@ -32,7 +32,21 @@ def model_verdict(
 ) -> Verdict:
     """`verdict.recorded` of a model verdict (Т-§6.8, WP11.4): class model, rubric items with
     quotes, confidence, a misconception label or hypothesis."""
-    raise NotImplementedError
+    help_used = help_used or HelpUsed()
+    return Verdict(
+        answer_seq=answer_seq,
+        part=part,
+        outcome=output.outcome,
+        method="model",
+        verification="model",
+        confidence=output.confidence,
+        help_step=help_used.hint_step,
+        solution_shown=help_used.solution_requested,
+        rubric=[
+            RubricItemResult(item=i.item, status=i.status, quote=i.quote) for i in output.items
+        ],
+        misconception=output.misconception or output.misconception_hypothesis,
+    )
 
 
 def needs_second_opinion(
@@ -40,10 +54,20 @@ def needs_second_opinion(
 ) -> bool:
     """Т-§7.7: only a model verdict and only in doubt — confidence below
     `verdict_min_confidence`, or `incorrect` on a level proven by a direct Т1/Т2, or `correct`
-    on a level whose latest Т1 failed."""
-    raise NotImplementedError
+    on a level whose latest Т1 failed. `partial` contradicts neither (Т-§7.7, spike)."""
+    if verdict.verification != "model":
+        return False
+    if verdict.confidence is not None and verdict.confidence < settings.verdict_min_confidence:
+        return True
+    if verdict.outcome == "incorrect":
+        return any(level.proven_by_direct for level in levels)
+    if verdict.outcome == "correct":
+        return any(level.last_t1_failed for level in levels)
+    return False
 
 
 def with_second_opinion(first: Verdict, second: ModelVerdictOutput) -> Verdict:
-    """The first verdict with `secondOpinion {requested: true, agreed}` (Т-§7.7)."""
-    raise NotImplementedError
+    """The first verdict with `secondOpinion {requested: true, agreed}` (Т-§7.7): agreed —
+    the same outcome."""
+    agreed = second.outcome == first.outcome
+    return first.model_copy(update={"second_opinion": SecondOpinion(requested=True, agreed=agreed)})
