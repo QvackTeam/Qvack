@@ -12,7 +12,6 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from neo4j import AsyncDriver
-from pydantic import SecretStr
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -20,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from quack import cli
 from quack.api.app import create_app
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.db.redis import llm_circuit_key, llm_pressure_key
 from quack.events import append_events
@@ -31,6 +31,7 @@ from quack.jobs.queue import enqueue_job
 from quack.ops.registry import can_rollback, event_registry, registry_gaps
 from quack.ops.seed import SeedRefusedError, seed_learners, write_learners
 from quack.ops.status import collect_status
+from tests.support.auth import session_cookie
 from tests.support.broken import BrokenRedis
 from tests.support.resources import build_app_resources
 
@@ -54,13 +55,14 @@ _SEEDED_EVENTS = (
 
 async def test_seed_learners(
     db: SessionFactory,
+    pg_db: Db,
     settings: Settings,
     pg_engine: AsyncEngine,
     neo4j: AsyncDriver,
     redis: Redis,
     tmp_path: Path,
 ) -> None:
-    learners = await seed_learners(db, settings, count=3)
+    learners = await seed_learners(db, pg_db, settings, count=3)
     out = tmp_path / "learners.json"
     write_learners(out, learners)
     rows = json.loads(out.read_text(encoding="utf-8"))
@@ -90,33 +92,33 @@ async def test_seed_learners(
         record = await result.single()
     assert record is not None and record["n"] == 3
 
-    # The tokens pass GET /v1/auth/me.
+    # The tokens are sessions (ТЗ Ф4 WP18.3): they pass a route of the learner.
     app = create_app(
         settings,
-        resources=build_app_resources(settings, pg_engine, neo4j, redis, session_factory=db),
+        resources=build_app_resources(
+            settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db
+        ),
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         for row in rows:
-            me = await client.get(
-                "/v1/auth/me", headers={"Authorization": f"Bearer {row['token']}"}
-            )
+            me = await client.get("/v1/domains", headers=session_cookie(row["token"]))
             assert me.status_code == 200, me.text
 
     # A second run with the same N duplicates nothing.
     events = await _count(db, _SEEDED_EVENTS)
-    again = await seed_learners(db, settings, count=3)
+    again = await seed_learners(db, pg_db, settings, count=3)
     assert [x.learner_id for x in again] == [x.learner_id for x in learners]
     assert await _count(db, _SEEDED_USERS) == 3
     assert await _count(db, _SEEDED_EVENTS) == events
 
 
 async def test_seed_learners_refuses_on_prod(
-    db: SessionFactory, settings: Settings, tmp_path: Path
+    db: SessionFactory, pg_db: Db, settings: Settings, tmp_path: Path
 ) -> None:
     prod = settings.model_copy(update={"env": "prod"})
     with pytest.raises(SeedRefusedError):
-        await seed_learners(db, prod, count=1)
+        await seed_learners(db, pg_db, prod, count=1)
     # A real user (without preferences.seeded) is present: refused even with --confirm.
     async with db() as session, session.begin():
         await session.execute(
@@ -126,7 +128,7 @@ async def test_seed_learners_refuses_on_prod(
             )
         )
     with pytest.raises(SeedRefusedError):
-        await seed_learners(db, prod, count=1, confirm=True)
+        await seed_learners(db, pg_db, prod, count=1, confirm=True)
     assert await _count(db, _SEEDED_USERS) == 0
 
     # The CLI maps the refusal to exit code 2.
@@ -214,24 +216,6 @@ def test_cli_sets_process_role_before_settings(
     finally:
         structlog.contextvars.unbind_contextvars("process", "version")
     assert seen == ["ops"]
-
-
-def test_seed_learners_refuses_without_jwt_secret(
-    settings: Settings, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """`ops` requires no secrets (Д-§7), so seeding checks JWT_SECRET itself: tokens signed
-    with an empty key are refused (exit 2, nothing written)."""
-    import structlog
-
-    monkeypatch.setattr(
-        cli, "get_settings", lambda: settings.model_copy(update={"jwt_secret": SecretStr("")})
-    )
-    out = tmp_path / "learners.json"
-    try:
-        assert cli.main(["ops", "seed-learners", "--count", "1", "--out", str(out)]) == 2
-    finally:
-        structlog.contextvars.unbind_contextvars("process", "version")
-    assert not out.exists()
 
 
 # --- T-O1: ops status ------------------------------------------------------------------

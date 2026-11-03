@@ -198,7 +198,7 @@ async def test_notes_crud(
 
     r = await client.get("/v1/artifacts")
     assert r.status_code == 401, r.text
-    assert r.json()["error"]["code"] == "UNAUTHORIZED"
+    assert r.json()["error"]["code"] == "UNAUTHENTICATED"
 
     deleted = await seed.learner()
     async with db() as session, session.begin():
@@ -211,7 +211,7 @@ async def test_notes_crud(
         )
     r = await client.get("/v1/artifacts", headers=auth(deleted))
     assert r.status_code == 401, r.text
-    assert r.json()["error"]["code"] == "UNAUTHORIZED"
+    assert r.json()["error"]["code"] == "UNAUTHENTICATED"
 
 
 async def test_cheatsheet_refresh_is_versioned_and_notifies(

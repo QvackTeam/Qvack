@@ -16,6 +16,7 @@ from fastapi import Request
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
+from starlette.requests import HTTPConnection
 
 from quack.api.email import EmailSender, create_email_sender
 from quack.compute_client.client import ComputeClient, create_compute_client
@@ -97,8 +98,9 @@ async def create_app_resources(settings: Settings) -> AppResources:
     )
 
 
-def get_resources(request: Request) -> AppResources:
-    """`AppResources` of the running application; `RuntimeError` if not initialized."""
+def get_resources(request: HTTPConnection) -> AppResources:
+    """`AppResources` of the running application (a request or a WebSocket); `RuntimeError` if
+    not initialized."""
     resources: AppResources | None = getattr(request.app.state, "resources", None)
     if resources is None:
         raise RuntimeError("application resources are not initialized")

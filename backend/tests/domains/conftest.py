@@ -7,11 +7,9 @@ with `ASGITransport` and attaching existing test pools directly to `app.state.re
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
-import jwt
 import pytest
 from fastapi import FastAPI
 from neo4j import AsyncDriver
@@ -20,11 +18,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
-from quack.api.auth import DEV_JWT_SECRET, JWT_ALGORITHM
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.events.append import append_events
 from quack.events.models import NewEvent
+from tests.support.auth import session_token
 from tests.support.llm import FakeLLMProvider, QueuedLLMItem
 from tests.support.resources import build_app_resources
 
@@ -41,12 +40,19 @@ def domains_app(
     settings: Settings,
     pg_engine: AsyncEngine,
     db: SessionFactory,
+    pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
     fake_llm_provider: FakeLLMProvider,
 ) -> FastAPI:
     resources = build_app_resources(
-        settings, pg_engine, neo4j, redis, session_factory=db, provider=fake_llm_provider
+        settings,
+        pg_engine,
+        neo4j,
+        redis,
+        db=pg_db,
+        session_factory=db,
+        provider=fake_llm_provider,
     )
     return create_app(settings, resources=resources)
 
@@ -61,11 +67,12 @@ async def api_client(domains_app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
 @pytest.fixture
 async def seeded_learner(
     db: SessionFactory,
+    pg_db: Db,
     settings: Settings,
 ) -> tuple[UUID, str]:
     """Seed a test learner directly into `auth.users` + `core.events` (`learner.registered`)
-    and return `(learner_id, bearer_jwt)` so Contour 2 and Contour 3 tests do not depend on
-    `/v1/auth/register` being implemented yet.
+    and return `(learner_id, session_token)`: the learner signs in with a Phase 4 session
+    (ТЗ Ф4 WP18.3, D-A-113); requests send it with `tests.support.auth.session_cookie`.
     """
     learner_id = uuid4()
     email = f"learner-{learner_id.hex[:8]}@example.com"
@@ -100,15 +107,4 @@ async def seeded_learner(
             ],
             publish_wakeup=False,
         )
-    now = datetime.now(UTC)
-    secret = settings.jwt_secret.get_secret_value() or DEV_JWT_SECRET
-    token = jwt.encode(
-        {
-            "sub": str(learner_id),
-            "iat": int(now.timestamp()),
-            "exp": int((now + timedelta(days=7)).timestamp()),
-        },
-        secret,
-        algorithm=JWT_ALGORITHM,
-    )
-    return learner_id, token
+    return learner_id, await session_token(pg_db, learner_id, settings)

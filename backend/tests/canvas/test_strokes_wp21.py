@@ -15,9 +15,11 @@ from quack.canvas.strokes import (
     Stroke,
     StrokeBatch,
     StrokeJournal,
+    chunk_max_batches,
     decode_chunk,
     encode_chunk,
 )
+from quack.config import Settings
 from quack.storage.objects import StorageUnavailable
 from tests.support.storage import InMemoryObjectStore
 
@@ -54,13 +56,36 @@ def test_chunk_format() -> None:
 # --- T-CV1 -----------------------------------------------------------------------------------
 
 
-def _journal(storage: object, chunk_seconds: int = 10) -> StrokeJournal:
+def _journal(storage: object, chunk_seconds: int = 10, max_batches: int = 1000) -> StrokeJournal:
     return StrokeJournal(
         storage,  # type: ignore[arg-type]
         learner_id=uuid4(),
         session_id=uuid4(),
         chunk_seconds=chunk_seconds,
+        max_batches=max_batches,
     )
+
+
+def test_chunk_batches_from_the_settings() -> None:
+    """D-C-122: a chunk holds as many batches as the client sends in `stroke_chunk_seconds`
+    every `stroke_batch_ms` (10 s / 300 ms → 34); more pending is an overflow (Т-§15.2)."""
+    assert chunk_max_batches(Settings()) == 34
+    cfg = Settings().model_copy(update={"stroke_chunk_seconds": 1, "stroke_batch_ms": 400})
+    assert chunk_max_batches(cfg) == 3
+
+
+async def test_overflow_writes_the_chunk_before_its_time() -> None:
+    """Т-§15.2 «или при переполнении» (D-C-122): with `max_batches` pending the chunk is written
+    at once, without waiting `chunk_seconds`."""
+    storage = InMemoryObjectStore()
+    journal = _journal(storage, chunk_seconds=10, max_batches=2)
+    journal.add(_batch(1), now=NOW)
+    assert await journal.flush_due(now=NOW) == []
+    assert journal.due_in(now=NOW) == 10.0
+    journal.add(_batch(2), now=NOW)
+    assert journal.due_in(now=NOW) == 0.0
+    assert await journal.flush_due(now=NOW) == [1, 2]
+    assert len(storage.objects) == 1
 
 
 async def test_stroke_ack_after_write() -> None:
