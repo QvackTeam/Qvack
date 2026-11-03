@@ -1,12 +1,14 @@
 "use client";
 
-import { Maximize2, Minus, Plus } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Maximize2, Minus, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { GAP_X, GAP_Y, layoutGraph, loadPositions, savePositions } from "@/lib/graph/layout";
 import { onGraph, type GraphModel, type GraphTopic } from "@/lib/graph/types";
-import { enterDomain, LEARNER, leaveDomain, saveAllVisits, updateDomain } from "@/lib/graph/visit-store";
+import { clearIndicators, getIndicators, getIndicatorsServer, publishIndicators, subscribeIndicators, unmountIndicators } from "@/lib/graph/indicator-store";
+import { computeIndicators, INDICATORS, type IndicatorId } from "@/lib/graph/indicators";
+import { enterDomain, getVisit, LEARNER, leaveDomain, saveAllVisits, subscribeVisit, updateDomain } from "@/lib/graph/visit-store";
 import { loadCamera, restoreCenter, saveCamera, type SavedCamera } from "@/lib/graph/visit";
 import { useT } from "@/lib/i18n/provider";
 import type { Domain, TopicState } from "@/lib/mock/types";
@@ -17,7 +19,9 @@ export type GraphHandle = { focusTopic: (id: string) => void };
 
 type View = { k: number; tx: number; ty: number };
 type Pt = { x: number; y: number };
-type Colors = Record<"paper" | "dim" | "ribbon" | "cloth" | TopicState, string> & { label: string; body: string; ribbonRgb: string };
+type Colors = Record<"paper" | "dim" | "ribbon" | "cloth" | TopicState, string> & { label: string; body: string; ribbonRgb: string; ind: Record<IndicatorId, string> };
+type Arrow = { id: string; dir: "up" | "down" | "left" | "right"; ind: IndicatorId; n: number; x: number; y: number; key: string };
+const IND_VAR: Record<IndicatorId, string> = { new: "var(--ind-new)", relevant: "var(--ind-relevant)", deadline: "var(--ind-deadline)", weak: "var(--ind-weak)", review: "var(--ind-review)" };
 
 const K_MIN = 0.04;
 const K_MAX = 2.4;
@@ -28,6 +32,8 @@ const TWEEN_MS = 450;
 const MOVE_MS = 900;
 /** Width of the left column. It is fixed on screen, so the labels stay readable at any zoom */
 const COL_W = 208;
+/** Smallest zoom at which labels still read. An indicator never zooms out past it: what does not fit gets an arrow */
+const K_READ = 0.6;
 const CARD_W = 320;
 /** How long a changed node pulses */
 const FLASH_MS = 1800;
@@ -73,6 +79,13 @@ function readColors(host: HTMLElement): Colors {
     review: probe("text-st-review", "color"),
     confused: probe("text-st-confused", "color"),
     new: probe("text-st-new", "color"),
+    ind: {
+      new: probe("text-ind-new", "color"),
+      relevant: probe("text-ind-relevant", "color"),
+      deadline: probe("text-ind-deadline", "color"),
+      weak: probe("text-ind-weak", "color"),
+      review: probe("text-ind-review", "color"),
+    },
     label: probe("font-label", "fontFamily"),
     body: probe("font-sans", "fontFamily"),
   };
@@ -95,6 +108,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const canvas = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [arrows, setArrows] = useState<Arrow[]>([]);
 
   // The draw loop reads refs, so panning does not re-render React
   const view = useRef<View>({ k: 1, tx: 0, ty: 0 });
@@ -109,6 +123,16 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const lastDraw = useRef(0);
   const flash = useRef(new Map<string, number>());
   const lit = useRef<string[]>([]);
+  // Indicators: which indicators light which node, how bright each halo is now, where the camera stood before the first click
+  const marks = useRef(new Map<string, IndicatorId[]>());
+  const halo = useRef(new Map<string, number>());
+  const haloAt = useRef(new Map<string, Pt>());
+  const lastHalo = useRef(0);
+  const activeRef = useRef<ReadonlySet<IndicatorId>>(new Set());
+  const before = useRef<View | null>(null);
+  const prevActive = useRef<ReadonlySet<IndicatorId>>(new Set());
+  const arrowSig = useRef("");
+  const arrowAt = useRef(0);
   const camTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const colY = useRef(new Map<string, number>());
   const colEls = useRef(new Map<string, HTMLElement>());
@@ -300,6 +324,125 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       ctx.fill();
     }
 
+    // Indicator halos. Each indicator has its own colour and its own form, so colour is never the only clue.
+    // A node under several indicators gets several rings, one outside the other, never a mixed colour.
+    // A halo fades in and out on its own clock, and a node that disappeared lets its halo fade where it stood.
+    const hnow = performance.now();
+    const hEase = 1 - Math.exp(-Math.min(100, hnow - lastHalo.current) / 140);
+    lastHalo.current = hnow;
+    let haloSettling = false;
+    const wanted = new Set<string>();
+    for (const [key, ids] of marks.current) for (const id of ids) wanted.add(`${key}|${id}`);
+    for (const hk of wanted) if (!halo.current.has(hk)) halo.current.set(hk, 0);
+    const rings = new Map<string, { id: IndicatorId; v: number }[]>();
+    for (const [hk, v0] of halo.current) {
+      const target = wanted.has(hk) ? 1 : 0;
+      const v = Math.abs(target - v0) < 0.015 ? target : v0 + (target - v0) * hEase;
+      if (v !== target) haloSettling = true;
+      if (target === 0 && v === 0) {
+        halo.current.delete(hk);
+        continue;
+      }
+      halo.current.set(hk, v);
+      const [key, id] = hk.split("|") as [string, IndicatorId];
+      rings.set(key, [...(rings.get(key) ?? []), { id, v }]);
+    }
+    for (const [key, list] of rings) {
+      const live = pos(key);
+      if (live) haloAt.current.set(key, live);
+      const p = live ?? haloAt.current.get(key);
+      if (!p) continue;
+      const x = sx(p.x), y = sy(p.y);
+      if (!near(x, y, 60)) continue;
+      list.sort((a, b) => INDICATORS.indexOf(a.id) - INDICATORS.indexOf(b.id));
+      const base = (key.startsWith("h:") ? ringR : rT) + 4;
+      list.forEach(({ id, v }, i) => {
+        const rr = base + 5 * i;
+        ctx.save();
+        ctx.globalAlpha = 0.95 * v;
+        ctx.strokeStyle = col.ind[id];
+        ctx.shadowColor = col.ind[id];
+        ctx.shadowBlur = 9;
+        ctx.lineWidth = 2;
+        if (id === "relevant") ctx.setLineDash([4, 3]);
+        if (id === "review") {
+          ctx.setLineDash([0.1, 4]);
+          ctx.lineCap = "round";
+          ctx.lineWidth = 2.6;
+        }
+        ctx.beginPath();
+        ctx.arc(x, y, id === "weak" ? rr + 1.5 : rr, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.shadowBlur = 0;
+        if (id === "weak") {
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.arc(x, y, rr - 2, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        if (id === "deadline") {
+          // Ticks like a dial
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          for (let q = 0; q < 12; q++) {
+            const a = (q * Math.PI) / 6;
+            ctx.moveTo(x + Math.cos(a) * (rr + 1), y + Math.sin(a) * (rr + 1));
+            ctx.lineTo(x + Math.cos(a) * (rr + 4.5), y + Math.sin(a) * (rr + 4.5));
+          }
+          ctx.stroke();
+        }
+        ctx.restore();
+      });
+    }
+
+    // What the camera does not show: an arrow toward it, per direction and indicator. Review gets none: its few nodes are not a debt to chase
+    if (marks.current.size) {
+      const areaW = w - colW;
+      const cxA = colW + areaW / 2, cyA = h / 2;
+      const groups = new Map<string, { dir: Arrow["dir"]; ind: IndicatorId; n: number; key: string; d: number; sx: number; sy: number }>();
+      for (const [key, ids] of marks.current) {
+        const p = pos(key);
+        if (!p) continue;
+        const x = sx(p.x), y = sy(p.y);
+        if (x > colW + 6 && x < w - 6 && y > 6 && y < h - 6) continue;
+        const dx = x - cxA, dy = y - cyA;
+        const dir: Arrow["dir"] = Math.abs(dx) / (areaW / 2) > Math.abs(dy) / (h / 2) ? (dx < 0 ? "left" : "right") : dy < 0 ? "up" : "down";
+        const d = Math.hypot(dx, dy);
+        for (const id of ids) {
+          if (id === "review") continue;
+          const gk = `${dir}|${id}`;
+          const g = groups.get(gk);
+          if (!g) groups.set(gk, { dir, ind: id, n: 1, key, d, sx: x, sy: y });
+          else {
+            g.n++;
+            if (d < g.d) Object.assign(g, { key, d, sx: x, sy: y });
+          }
+        }
+      }
+      const seenDir = new Map<string, number>();
+      const list: Arrow[] = [...groups.values()]
+        .sort((a, b) => INDICATORS.indexOf(a.ind) - INDICATORS.indexOf(b.ind))
+        .map((g) => {
+          const idx = seenDir.get(g.dir) ?? 0;
+          seenDir.set(g.dir, idx + 1);
+          const along = (v: number, lo: number, hi: number) => clamp(v, lo, hi);
+          const off = idx * 46;
+          const x = g.dir === "left" ? colW + 22 : g.dir === "right" ? w - 22 : along(g.sx, colW + 40, w - 40) + off;
+          const y = g.dir === "up" ? 22 : g.dir === "down" ? h - 22 : along(g.sy, 40, h - 40) + off;
+          return { id: `${g.dir}|${g.ind}`, dir: g.dir, ind: g.ind, n: g.n, x: Math.round(x), y: Math.round(y), key: g.key };
+        });
+      const sig = list.map((a) => `${a.id}:${a.n}:${Math.round(a.x / 12)}:${Math.round(a.y / 12)}`).join(",");
+      if (sig !== arrowSig.current && hnow - arrowAt.current > 70) {
+        arrowSig.current = sig;
+        arrowAt.current = hnow;
+        setArrows(list);
+      }
+    } else if (arrowSig.current) {
+      arrowSig.current = "";
+      setArrows([]);
+    }
+
     // The topic or hub of the "Today" card under the pointer
     if (lit.current.length) {
       for (const key of lit.current) {
@@ -360,7 +503,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       if (!p) continue;
       const x = sx(p.x), y = sy(p.y);
       if (!near(x, y, 120)) continue;
-      labels.push({ key: n.key, text: (hubs.get(n.id)?.name ?? "").toUpperCase(), x, y: y - rH - 5, above: true, prio: 3, fade: fadeHub, deg: 0, fill: col.paper, font: hubFont });
+      labels.push({ key: n.key, text: (hubs.get(n.id)?.name ?? "").toUpperCase(), x, y: y - rH - 5, above: true, prio: 3, fade: marks.current.has(n.key) ? 1 : fadeHub, deg: 0, fill: col.paper, font: hubFont });
     }
     for (const n of L.topics) {
       const p = pos(n.key);
@@ -369,7 +512,9 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       const x = sx(p.x), y = sy(p.y);
       if (!near(x, y, 120)) continue;
       const hot = n.key === hovered;
-      labels.push({ key: n.key, text: t.name, x, y: y + rT + 4, above: false, prio: hot ? 2 : 1, fade: hot ? 1 : fadeTopic, deg: links.degree.get(n.id) ?? 0, fill: hot ? col.paper : col.dim, font: topicFont });
+      // The label of a node an indicator lights is shown at any zoom
+      const pin = marks.current.has(n.key);
+      labels.push({ key: n.key, text: t.name, x, y: y + rT + 4, above: false, prio: pin ? 3 : hot ? 2 : 1, fade: pin || hot ? 1 : fadeTopic, deg: links.degree.get(n.id) ?? 0, fill: hot ? col.paper : col.dim, font: topicFont });
     }
     labels.sort((a, b) => b.prio - a.prio || b.deg - a.deg || (a.key < b.key ? -1 : 1));
     // Boxes already taken, in a coarse grid so a crowded graph stays cheap
@@ -419,7 +564,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       ctx.fillText(lb.text, lb.x, lb.y);
     }
     ctx.globalAlpha = 1;
-    return settling || flash.current.size > 0;
+    return settling || haloSettling || flash.current.size > 0;
   }, []);
 
   const frame = useCallback(
@@ -465,7 +610,8 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     const { w, h } = sizeRef.current;
     if (!w || !h) return;
     const cw = scene.current.colW;
-    const v = view.current;
+    // While an indicator holds the camera, the place worth keeping is the one from before the click
+    const v = activeRef.current.size && before.current ? before.current : view.current;
     const cx = (cw + (w - cw) / 2 - v.tx) / v.k;
     const cy = (h / 2 - v.ty) / v.k;
     const near = [...target.current]
@@ -478,6 +624,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     saveCamera(LEARNER, scene.current.model.domainId, cam);
   }, []);
   const queueSave = useCallback(() => {
+    if (activeRef.current.size) return;
     clearTimeout(camTimer.current);
     camTimer.current = setTimeout(saveNow, 500);
   }, [saveNow]);
@@ -623,6 +770,99 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       leaveDomain(domainId);
     };
   }, [model.domainId, saveNow]);
+
+  // Indicators. What each would light is published for the pills; what is switched on lights the graph
+  const visit = useSyncExternalStore(subscribeVisit, () => getVisit(model.domainId), () => getVisit(model.domainId));
+  const selections = useMemo(() => computeIndicators(model, visit), [model, visit]);
+  const ind = useSyncExternalStore(subscribeIndicators, getIndicators, getIndicatorsServer);
+  useEffect(() => {
+    publishIndicators(model.domainId, selections);
+  }, [model.domainId, selections]);
+  useEffect(() => () => unmountIndicators(model.domainId), [model.domainId]);
+
+  useEffect(() => {
+    const m = new Map<string, IndicatorId[]>();
+    for (const id of ind.active) {
+      const s = ind.selections[id];
+      for (const t of s.topics) if (layout.nodes.has(t)) m.set(t, [...(m.get(t) ?? []), id]);
+      for (const h of s.hubs) if (layout.nodes.has(`h:${h}`)) m.set(`h:${h}`, [...(m.get(`h:${h}`) ?? []), id]);
+    }
+    marks.current = m;
+    activeRef.current = ind.active;
+    schedule();
+  }, [ind, layout, schedule]);
+
+  // Switching an indicator on or off moves the camera so that everything lit is in view, with its labels. Data updates never do
+  useEffect(() => {
+    const act = ind.active;
+    const was = prevActive.current;
+    prevActive.current = act;
+    if (act === was) return;
+    if (act.size === 0) {
+      if (before.current) {
+        moveView(before.current, true);
+        before.current = null;
+      }
+      return;
+    }
+    if (was.size === 0 && !before.current) before.current = viewTween.current?.to ?? view.current;
+    const pts: Pt[] = [];
+    for (const id of act) {
+      const s = ind.selections[id];
+      for (const t of s.topics) {
+        const p = target.current.get(t);
+        if (p) pts.push(p);
+      }
+      for (const h of s.hubs) {
+        const p = target.current.get(`h:${h}`);
+        if (p) pts.push(p);
+      }
+    }
+    if (!pts.length) return;
+    const { w, h } = sizeRef.current;
+    const cw = scene.current.colW;
+    const aw = w - cw;
+    const M = 90;
+    const x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x));
+    const y0 = Math.min(...pts.map((p) => p.y)), y1 = Math.max(...pts.map((p) => p.y));
+    const fit = Math.min((aw - 2 * M) / Math.max(1, x1 - x0), (h - 2 * M) / Math.max(1, y1 - y0));
+    let k: number, cx: number, cy: number;
+    if (fit >= K_READ) {
+      k = Math.min(fit, 1);
+      cx = (x0 + x1) / 2;
+      cy = (y0 + y1) / 2;
+    } else {
+      // Too spread out to read: stand on the densest cluster at a readable zoom; the rest gets arrows
+      k = K_READ;
+      const hw = (aw / 2 - M) / k, hh = (h / 2 - M) / k;
+      let best = { n: -1, cx: pts[0].x, cy: pts[0].y };
+      for (const c of pts) {
+        const inside = pts.filter((p) => Math.abs(p.x - c.x) <= hw && Math.abs(p.y - c.y) <= hh);
+        if (inside.length > best.n) best = { n: inside.length, cx: inside.reduce((a, p) => a + p.x, 0) / inside.length, cy: inside.reduce((a, p) => a + p.y, 0) / inside.length };
+      }
+      cx = best.cx;
+      cy = best.cy;
+    }
+    moveView({ k: clamp(k, K_MIN, K_MAX), tx: cw + aw / 2 - cx * k, ty: h / 2 - cy * k }, true);
+  }, [ind, moveView]);
+
+  // Esc switches every indicator off and the camera goes back
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && activeRef.current.size) clearIndicators();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const goToArrow = (a: Arrow) => {
+    const p = target.current.get(a.key);
+    if (!p) return;
+    const { w, h } = sizeRef.current;
+    const cw = scene.current.colW;
+    const k = clamp(Math.max(view.current.k, K_READ), K_MIN, K_MAX);
+    moveView({ k, tx: cw + (w - cw) / 2 - p.x * k, ty: h / 2 - p.y * k }, true);
+  };
 
   // A "Today" card under the pointer lights its node
   useEffect(() => {
@@ -862,6 +1102,28 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
           onPointerCancel={onPointerUp}
           onPointerLeave={() => !drag.current && setHoverKey(null)}
         />
+
+        {arrows.length > 0 && (
+          <ul className="pointer-events-none absolute inset-0 z-[6]">
+            {arrows.map((a) => {
+              const Icon = a.dir === "up" ? ArrowUp : a.dir === "down" ? ArrowDown : a.dir === "left" ? ArrowLeft : ArrowRight;
+              return (
+                <li key={a.id} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: a.x, top: a.y }}>
+                  <button
+                    type="button"
+                    onClick={() => goToArrow(a)}
+                    aria-label={tx.graphInd.arrow(tx.graphInd[a.ind], tx.graphInd[a.dir], a.n)}
+                    style={{ borderColor: IND_VAR[a.ind], color: IND_VAR[a.ind] }}
+                    className="pointer-events-auto inline-flex h-10 min-w-10 items-center justify-center gap-1 rounded-pill border bg-cloth-deep px-2.5 transition-colors duration-(--dur-s) ease-(--ease-out) hover:bg-cloth-raised focus-visible:outline-2 focus-visible:outline-ribbon"
+                  >
+                    <Icon className="size-4" aria-hidden />
+                    <span className="num text-small">{a.n}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
 
         {column.width > 0 && (
           <nav

@@ -28,6 +28,13 @@
   --st-confused: #d98a8c;
   --st-new: #928775;
 
+  /* индикаторы графа: свои цвета, не пересекаются с цветами состояний тем */
+  --ind-new: #4f9dff;
+  --ind-relevant: #a68bff;
+  --ind-deadline: #2ec4b6;
+  --ind-weak: #e75cc4;
+  --ind-review: #ff9f43;
+
   /* движение */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-s: 0.3s;
@@ -94,6 +101,11 @@
   --color-st-review: var(--st-review);
   --color-st-confused: var(--st-confused);
   --color-st-new: var(--st-new);
+  --color-ind-new: var(--ind-new);
+  --color-ind-relevant: var(--ind-relevant);
+  --color-ind-deadline: var(--ind-deadline);
+  --color-ind-weak: var(--ind-weak);
+  --color-ind-review: var(--ind-review);
 
   --font-sans: var(--font-golos);
   --font-mono: var(--font-jetbrains);

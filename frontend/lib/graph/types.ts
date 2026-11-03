@@ -72,6 +72,9 @@ export type TodayRec = {
   href?: string;
 };
 
+/** Source for "Relevant": topics worked on in a session (the same data as the sessions panel) */
+export type RecentSession = { id: string; atMs: number; topicIds: string[] };
+
 export type GraphModel = {
   domainId: string;
   domainName: string;
@@ -81,6 +84,7 @@ export type GraphModel = {
   requires: RequiresEdge[];
   /** Topics from other subjects shown here in the left column. Topics with status `off_domain` are in `topics` */
   otherDomain: OtherDomainTopic[];
+  recentSessions: RecentSession[];
   today: TodayRec[];
   /** Mock "now"; the real API uses `Date.now()` */
   nowMs: number;
