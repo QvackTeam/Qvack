@@ -37,6 +37,7 @@ from quack.events.event_types import (
 from quack.events.log import StoredEvent
 from quack.events.records import (
     BodyBlockRecord,
+    ElementRecord,
     ExposureRecord,
     PlanUpdateRecord,
     TaskElementRecord,
@@ -100,7 +101,7 @@ def _committed(action_seq: int, text: str, *, task: bool = False) -> TurnCommitt
         if task
         else []
     )
-    elements = (
+    elements: list[ElementRecord] = (
         [
             TaskElementRecord(
                 element_id="e1",
@@ -187,6 +188,8 @@ def test_extraction_window() -> None:
     ]
     none = extraction_window(log.events, from_seq, to_seq, Settings(episode_context_turns=0))
     assert none.before == []
+    # zero context turns and no turn before the episode: still nothing before it
+    assert extraction_window(log.events, 2, 3, Settings(episode_context_turns=0)).before == []
     # fewer turns than the setting: all of them
     first = extraction_window(log.events, 4, 6, SETTINGS)
     assert [e.seq for e in first.before] == [1, 2, 3]
@@ -252,6 +255,8 @@ def test_extractor_input() -> None:
     ]
     labels = window_labels(window, candidates, known, SETTINGS)
     variables = extractor_variables(window, candidates, known, labels)
+    # only the misconceptions of the candidates get labels
+    assert list(labels.labels("misconception").values()) == [MISCONCEPTION]
 
     assert variables["events_before"].splitlines() == [
         "[1] learner: question 1",

@@ -24,9 +24,24 @@ from uuid import UUID
 from quack.agents.schemas import ExtractorOutputV3
 from quack.config import Settings
 from quack.events.event_types import (
+    AnswerSubmitted,
+    CanvasLineCommitted,
+    CanvasLineErased,
+    CheckSkipped,
+    ElementResponded,
+    HandwritingCorrected,
+    HintRequested,
+    HintShown,
+    ItemFlaggedUnclear,
+    MessageSent,
+    SolutionRequested,
+    TaskClosed,
     TurnCommitted,
+    TypoDeclared,
+    VoiceTranscribed,
 )
 from quack.events.log import StoredEvent
+from quack.events.values import CheckFailed, Verdict
 from quack.llm.gateway import LLMGateway
 from quack.llm.labels import LabelMap
 
@@ -78,31 +93,138 @@ def extraction_window(
     """The episode and the `episode_context_turns` turns before it (Т-§7.5). A turn ends with
     its `turn.committed`; the events of its own append (`causation_seq` = its `action_seq`,
     WP2.2) stay with it."""
-    raise NotImplementedError
+    ordered = sorted(session_events, key=lambda e: e.seq)
+    episode = [e for e in ordered if from_seq <= e.seq <= to_seq]
+    earlier = [e for e in ordered if e.seq < from_seq]
+    commits = [e for e in earlier if e.type == "turn.committed"]
+    keep = settings.episode_context_turns
+    if keep <= 0:
+        return EpisodeWindow(before=[], episode=episode)
+    if len(commits) <= keep:
+        return EpisodeWindow(before=earlier, episode=episode)
+    boundary = commits[-keep - 1]
+    outside = {int(e.payload["action_seq"]) for e in commits[: len(commits) - keep]}
+    before = [
+        e
+        for e in earlier
+        if e.seq > boundary.seq and (e.causation_seq is None or e.causation_seq not in outside)
+    ]
+    return EpisodeWindow(before=before, episode=episode)
 
 
 def candidate_skill_ids(
     session_skill_ids: Sequence[UUID], nearest_skill_ids: Sequence[UUID], settings: Settings
 ) -> list[UUID]:
     """Skills of the session topics first, then the nearest by vector; `candidate_skills_k`."""
-    raise NotImplementedError
+    unique = list(dict.fromkeys([*session_skill_ids, *nearest_skill_ids]))
+    return unique[: settings.candidate_skills_k]
 
 
 def _task(labels: LabelMap, task_id: UUID) -> str:
-    raise NotImplementedError
+    return labels.label("task", task_id) or "a task"
 
 
 def _turn_lines(seq: int, turn: TurnCommitted, labels: LabelMap) -> list[str]:
-    raise NotImplementedError
+    lines = [f"[{seq}] teacher: {turn.text}"]
+    prompts = {
+        element.element_id: prompt
+        for element in turn.markup.elements
+        if isinstance(prompt := getattr(element, "prompt", None), str)
+    }
+    for task in turn.markup.tasks:
+        tests = ", ".join(
+            f"{labels.label('skill', t.skill_id) or 'a new skill'} level {t.level}"
+            if t.skill_id is not None
+            else f"a new skill level {t.level}"
+            for t in task.tests
+        )
+        line = f"[{seq}] problem given {_task(labels, task.task_id)} (tests: {tests})"
+        statement = prompts.get(task.element_id)
+        lines.append(f"{line}: {statement}" if statement else line)
+    for exposure in turn.markup.exposures:
+        skill = labels.label("skill", exposure.skill_id) or "a skill"
+        lines.append(f"[{seq}] teacher showed for {skill}: {exposure.kind.replace('_', ' ')}")
+    return lines
 
 
 def event_lines(event: StoredEvent, labels: LabelMap, answers: dict[int, UUID]) -> list[str]:
     """One event as numbered lines (`[seq] who: text`); events without text give none."""
-    raise NotImplementedError
+    data, head = event.payload, f"[{event.seq}]"
+    match event.type:
+        case "message.sent":
+            text = MessageSent.model_validate(data).text
+            return [f"{head} learner: {text}"] if text else []
+        case "answer.submitted":
+            answer = AnswerSubmitted.model_validate(data)
+            part = f" part {answer.part}" if answer.part else ""
+            lines = [
+                f"{head} learner's answer to {_task(labels, answer.task_id)}{part}: "
+                f"{answer.answer.latex or answer.answer.value}"
+            ]
+            if answer.text:
+                lines.append(f"{head} learner's reasoning: {answer.text}")
+            return lines
+        case "verdict.recorded":
+            verdict = Verdict.model_validate(data)
+            task_id = answers.get(verdict.answer_seq)
+            target = f" to {_task(labels, task_id)}" if task_id else ""
+            by = "the checking code" if verdict.verification == "code" else "a model"
+            words = _OUTCOME.get(verdict.outcome, verdict.outcome)
+            return [f"{head} check by {by} of the answer [{verdict.answer_seq}]{target}: {words}"]
+        case "check.failed":
+            failed = CheckFailed.model_validate(data)
+            return [f"{head} the checking code could not check the answer [{failed.answer_seq}]"]
+        case "typo.declared":
+            typo = TypoDeclared.model_validate(data)
+            return [f"{head} learner says the answer [{typo.answer_seq}] was a typo"]
+        case "element.responded":
+            response = ElementResponded.model_validate(data)
+            lines = [
+                f"{head} learner's response to element {response.element_id}: {response.response}"
+            ]
+            if response.text:
+                lines.append(f"{head} learner's reasoning: {response.text}")
+            return lines
+        case "hint.requested":
+            task_id = HintRequested.model_validate(data).task_id
+            return [f"{head} learner asked for a hint on {_task(labels, task_id)}"]
+        case "solution.requested":
+            task_id = SolutionRequested.model_validate(data).task_id
+            return [f"{head} learner asked for the solution of {_task(labels, task_id)}"]
+        case "check.skipped":
+            task_id = CheckSkipped.model_validate(data).task_id
+            return [f"{head} learner skipped the check of {_task(labels, task_id)}"]
+        case "item.flagged_unclear":
+            flag = ItemFlaggedUnclear.model_validate(data)
+            return [f'{head} learner marked as unclear: "{flag.text}"']
+        case "canvas.line_committed":
+            line = CanvasLineCommitted.model_validate(data)
+            crossed = " (crossed out)" if line.crossed_out else ""
+            return [f"{head} learner wrote on the canvas{crossed}: {line.text}"]
+        case "canvas.line_erased":
+            erased = CanvasLineErased.model_validate(data)
+            return [f"{head} learner erased the canvas line: {erased.text}"]
+        case "handwriting.corrected":
+            fixed = HandwritingCorrected.model_validate(data)
+            return [f"{head} learner corrected the reading of a canvas line: {fixed.text}"]
+        case "voice.transcribed":
+            return [f"{head} learner said: {VoiceTranscribed.model_validate(data).text}"]
+        case "turn.committed":
+            return _turn_lines(event.seq, TurnCommitted.model_validate(data), labels)
+        case "hint.shown":
+            hint = HintShown.model_validate(data)
+            return [f"{head} hint, step {hint.step} of 3, on {_task(labels, hint.task_id)}"]
+        case "task.closed":
+            closed = TaskClosed.model_validate(data)
+            how = closed.how.replace("_", " ")
+            return [f"{head} {_task(labels, closed.task_id)} closed: {how}"]
+        case _:
+            return []
 
 
 def render_events(events: Sequence[StoredEvent], labels: LabelMap, answers: dict[int, UUID]) -> str:
-    raise NotImplementedError
+    lines = [line for event in events for line in event_lines(event, labels, answers)]
+    return "\n".join(lines) or NONE_LINE
 
 
 def window_labels(
@@ -113,7 +235,17 @@ def window_labels(
 ) -> LabelMap:
     """Labels of the call: candidates in their order, the tasks of the window by appearance,
     the known misconceptions of the candidates."""
-    raise NotImplementedError
+    tasks: list[UUID] = []
+    for event in [*window.before, *window.episode]:
+        if event.type == "turn.committed":
+            tasks.extend(
+                t.task_id for t in TurnCommitted.model_validate(event.payload).markup.tasks
+            )
+        elif "task_id" in event.payload:
+            tasks.append(UUID(str(event.payload["task_id"])))
+    skills = [c.skill_id for c in candidates]
+    known = [m.misconception_id for m in misconceptions if m.skill_id in set(skills)]
+    return LabelMap.build(settings, skills=skills, tasks=tasks, misconceptions=known)
 
 
 def extractor_variables(
@@ -123,17 +255,49 @@ def extractor_variables(
     labels: LabelMap,
 ) -> dict[str, str]:
     """The five input blocks of `extractor@3`."""
-    raise NotImplementedError
+    answers = {
+        e.seq: AnswerSubmitted.model_validate(e.payload).task_id
+        for e in [*window.before, *window.episode]
+        if e.type == "answer.submitted"
+    }
+    skill_lines = [
+        f"{label}: {c.name}" for c in candidates if (label := labels.label("skill", c.skill_id))
+    ]
+    misconception_lines = [
+        f"{label} (skill {skill}): {m.statement}"
+        for m in misconceptions
+        if (label := labels.label("misconception", m.misconception_id))
+        and (skill := labels.label("skill", m.skill_id))
+    ]
+    return {
+        "events_before": render_events(window.before, labels, answers),
+        "episode": render_events(window.episode, labels, answers),
+        "candidate_skills": "\n".join(skill_lines) or NONE_LINE,
+        "known_misconceptions": "\n".join(misconception_lines) or NONE_LINE,
+        "gap_types": GAP_TYPE_TABLE,
+    }
 
 
 def label_errors(output: ExtractorOutputV3, labels: LabelMap) -> str | None:
     """Т-§4.5: a label the call did not give goes back to the model once."""
-    raise NotImplementedError
+    skills = labels.labels("skill")
+    known = labels.labels("misconception")
+    unknown: list[str] = []
+    for element in output.elements:
+        if element.skill is not None and element.skill not in skills:
+            unknown.append(element.skill)
+        if element.misconception is not None and element.misconception not in known:
+            unknown.append(element.misconception)
+        if element.root_cause is not None and element.root_cause.skill not in skills:
+            unknown.append(element.root_cause.skill)
+    if not unknown:
+        return None
+    return "unknown labels: " + ", ".join(dict.fromkeys(unknown)) + "; use only the given labels"
 
 
 def extraction_key(episode_seq: int, prompt: str, trigger_seq: int) -> str:
     """WP15 п.5: `obs:{episode_seq}:{extractor@3}:{trigger_seq}` — the call carries the same key."""
-    raise NotImplementedError
+    return f"obs:{episode_seq}:{prompt}:{trigger_seq}"
 
 
 async def call_extractor(
@@ -148,4 +312,18 @@ async def call_extractor(
     labels: LabelMap,
 ) -> ExtractorOutputV3:
     """One call of `extractor@3` per episode and trigger; no second opinion (Т-§7.7)."""
-    raise NotImplementedError
+    prompt = settings.llm_roles[EXTRACTOR_ROLE].prompt
+    if prompt is None:
+        raise ValueError("role 'extractor' has no prompt")
+    result = await gateway.generate_structured(
+        EXTRACTOR_ROLE,
+        int(prompt.rsplit("@", 1)[1]),
+        ExtractorOutputV3,
+        variables,
+        learner_id,
+        session_id,
+        None,
+        extraction_key(episode_seq, prompt, trigger_seq),
+        check=lambda output: label_errors(output, labels),
+    )
+    return result.value
