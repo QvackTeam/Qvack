@@ -347,10 +347,12 @@ def fold_skill(
             prior = before[e.level].status in ("proven", "implied")
             passes = _opens(x, e.level) and _paired(x, [*done, *group])
             if e.outcome == "incorrect" and passes and x.delayed and prior:
-                shown_since = any(
-                    last_memory_failure.get(e.level, -1) < s.at_ms < at_ms for s in shows
+                # After a reminder (an exposure since the last memory failure of the level) a
+                # failure is a failure again (`Т-§8.2` п.3).
+                reminded = e.level in last_memory_failure and any(
+                    last_memory_failure[e.level] < s.at_ms < at_ms for s in shows
                 )
-                if e.level not in last_memory_failure or shown_since:
+                if not reminded:
                     memory.add(e.id)
                     last_memory_failure[e.level] = at_ms
             reviewable = (passes or e.outcome == "partial") and x.delayed and prior and not x.hot
