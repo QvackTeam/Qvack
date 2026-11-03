@@ -8,7 +8,8 @@ builds the input of `artifact_writer@1` from the four layers of `Т-§17.3`:
    input names the type (`notes`);
 2. the learner's skill bound to the type — none until WP23.6 (`content.learner_skills`);
 3. the context — the topic with its skills, material chunks teaching them (`materials_prefetch`,
-   Т-§10.5), and the phrasings that worked: the last turn that showed a skill
+   Т-§10.5), the topics it builds on and that build on it (`topic_requires`), and the
+   phrasings that worked: the last turn that showed a skill
    (`turn.committed`, `markup.exposures`) before an independent success on it (Т1: a code
    verdict, correct, no help — `skill_history`), chosen by code from the log (`Т-§17.3` п.3);
 4. the personal minimum — misconceptions of the topic with quotes, skills where hints were
@@ -126,7 +127,7 @@ async def writer_input(
     variables = {
         "artifact_type": NOTES_TYPE,
         "learner_skill": NO_LEARNER_SKILL,
-        "topic_graph": _topic_graph(topic, labels),
+        "topic_graph": _topic_graph(topic, labels, await _neighbours(reader, topic)),
         "material_chunks": _chunks(hits, labels),
         "worked_phrasings": _phrasings(phrasings, labels),
         "personal": _personal(topic, labels, hinted),
@@ -148,12 +149,33 @@ def _label(labels: LabelMap, kind: LabelKind, object_id: UUID) -> str | None:
     return labels.label(kind, object_id)
 
 
-def _topic_graph(topic: TopicMemory, labels: LabelMap) -> str:
+async def _neighbours(reader: GraphReader, topic: TopicMemory) -> tuple[list[str], list[str]]:
+    """The topic graph (`REQUIRES` between topics, Т-§4.6): names of the topics this one builds
+    on and of those that build on it."""
+    if topic.domain_id is None:
+        return [], []
+    links = await reader.topic_requires(topic.domain_id)
+    needs = [link.to_topic_id for link in links if link.from_topic_id == topic.topic_id]
+    needed_by = [link.from_topic_id for link in links if link.to_topic_id == topic.topic_id]
+    if not needs and not needed_by:
+        return [], []
+    names = {t.topic_id: t.name for t in await reader.topic_memory([*needs, *needed_by])}
+    return [names[t] for t in needs if t in names], [names[t] for t in needed_by if t in names]
+
+
+def _topic_graph(
+    topic: TopicMemory, labels: LabelMap, neighbours: tuple[list[str], list[str]]
+) -> str:
     lines = [f"Topic: {topic.name}", "Skills:"]
     for skill in topic.skills:
         label = _label(labels, "skill", skill.skill_id)
         if label is not None:
             lines.append(f"- {label}: {skill.name or 'unnamed skill'}")
+    needs, needed_by = neighbours
+    if needs:
+        lines.append("Builds on: " + ", ".join(needs))
+    if needed_by:
+        lines.append("Needed for: " + ", ".join(needed_by))
     return "\n".join(lines)
 
 

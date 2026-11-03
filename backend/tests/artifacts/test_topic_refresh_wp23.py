@@ -15,7 +15,7 @@ from quack.config import Settings
 from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.events.log import NewEvent, append_events
-from quack.graph.read import TopicMemory
+from quack.graph.read import TopicMemory, TopicRequires
 from quack.graph.read.materials import ChunkHit
 from quack.graph.read.models import EvidenceFact, LevelFact, MisconceptionFact, SkillFact
 from quack.jobs.runner import JOB_HANDLERS
@@ -26,6 +26,7 @@ from tests.support.llm import ScriptedLLMProvider
 from tests.support.resources import build_app_resources
 
 LIMIT, CHAIN, MISCONCEPTION, CHUNK = uuid4(), uuid4(), uuid4(), uuid4()
+DOMAIN, SEQUENCES = uuid4(), uuid4()
 HIT = ChunkHit(
     chunk_id=CHUNK, material_id=uuid4(), page=3, text="A limit is…", teaches_focus=True, score=None
 )
@@ -39,13 +40,19 @@ class TopicReader(FixedGraphReader):
         super().__init__()
         self.topic_id, self.success_seq = topic_id, success_seq
 
+    async def topic_requires(self, domain_id: UUID) -> list[TopicRequires]:
+        return [TopicRequires(from_topic_id=self.topic_id, to_topic_id=SEQUENCES, weight=1)]
+
     async def topic_memory(self, topic_ids: Sequence[UUID]) -> list[TopicMemory]:
+        if SEQUENCES in topic_ids:
+            return [TopicMemory(topic_id=SEQUENCES, name="Sequences", domain_id=DOMAIN)]
         if self.topic_id not in topic_ids:
             return []
         return [
             TopicMemory(
                 topic_id=self.topic_id,
                 name="Limits",
+                domain_id=DOMAIN,
                 skills=[
                     SkillFact(skill_id=LIMIT, name="Limit of a sequence"),
                     SkillFact(
@@ -134,6 +141,7 @@ async def test_writer_input_has_the_four_layers(pg_db: Db, settings: Settings) -
     v = context.variables
     assert v["artifact_type"] == "notes" and v["learner_skill"] == "None."
     assert "S1: Limit of a sequence" in v["topic_graph"] and "S2: Chain rule" in v["topic_graph"]
+    assert "Builds on: Sequences" in v["topic_graph"]
     assert v["material_chunks"].startswith("P1 (page 3):")
     assert v["worked_phrasings"] == "S1: The terms approach a number."
     assert (
