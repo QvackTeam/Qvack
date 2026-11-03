@@ -28,7 +28,8 @@ def _steps_text(job: dict[str, Any]) -> str:
 
 def test_triggers_cover_pull_requests_and_branches() -> None:
     # PyYAML reads the key `on` as the boolean True.
-    triggers = _workflow().get("on", _workflow().get(True))
+    workflow = _workflow()
+    triggers = cast(dict[str, Any], workflow["on"] if "on" in workflow else workflow[True])
     assert "pull_request" in triggers
     assert {"main", "phase-4"} | STREAM_BRANCHES <= set(triggers["push"]["branches"])
     assert "pull_request_target" not in triggers and "workflow_run" not in triggers

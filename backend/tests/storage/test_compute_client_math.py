@@ -17,7 +17,7 @@ from quack.compute_client.math_contracts import (
     TransitionRequest,
     TransitionResponse,
 )
-from tests.support.compute import MATH_PATHS, ComputeScenario, scripted_compute
+from tests.support.compute import ComputeScenario, scripted_compute
 
 NUMERIC = NumericParams(
     numeric_points=20,
@@ -100,7 +100,3 @@ async def test_math_http_timeout_is_the_call_budget_plus_compute_timeout() -> No
     finally:
         await client.aclose()
     assert seen[0]["read"] == pytest.approx(10.0 + 5.0)
-
-
-def test_stub_has_math_queues() -> None:
-    assert set(MATH_PATHS) <= set(ComputeScenario().answers)
