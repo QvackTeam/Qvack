@@ -17,6 +17,7 @@ from quack.db.db import Db
 from quack.events.event_types import AnswerSubmitted
 from quack.events.keys import verdict_key
 from quack.events.values import LearnerAnswer as CoreAnswer
+from quack.graph.read.models import MisconceptionFact
 from quack.llm.gateway import LLMGateway, LLMResult
 from quack.practice.answer_spec import AnswerSpec, AnswerType
 from quack.practice.check import HelpUsed, SecondOpinion, Verdict
@@ -24,6 +25,7 @@ from quack.practice.model_check import (
     KnownMisconception,
     LevelState,
     check_with_model,
+    known_misconceptions,
     record_verdict,
     verdict_inputs,
     verdict_role,
@@ -247,3 +249,19 @@ async def test_record_verdict_once_by_key(pg_db: Db) -> None:
             "causation_seq": 12,
         }
     ]
+
+
+def test_known_misconceptions_from_the_slice() -> None:
+    """D-B-145 (A: `MisconceptionFact.statement`, #117): the misconceptions of the tested
+    skills, with their statements, in the order of the slice; others are not shown."""
+    tested, other = uuid4(), uuid4()
+    facts = [
+        MisconceptionFact(
+            misconception_id=M_ID, skill_id=tested, status="confirmed", statement="odd sum"
+        ),
+        MisconceptionFact(
+            misconception_id=uuid4(), skill_id=other, status="suspected", statement="elsewhere"
+        ),
+    ]
+
+    assert known_misconceptions(facts, skill_ids=[tested]) == [KnownMisconception(M_ID, "odd sum")]

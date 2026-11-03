@@ -137,15 +137,23 @@ class AgentRequest(_Strict):
     needed_in_session: bool
 
 
+type ControlType = Literal["tasks", "colloquium_proofs", "oral_theory"]
+
+
 class DeadlineFromTalk(_Strict):
     """A deadline heard in the conversation (WP13.3): an existing hub (`hub_label` `H…`) or a
     new one (`new_hub_name`); `deadline_at` — ISO 8601 date-time; `coverage` — topic labels
-    the deadline covers (D-B-110)."""
+    the deadline covers (D-B-110). `quote` — the learner's own words that name the control
+    and its date, copied exactly: code writes the deadline only if they are in a learner
+    message of the session (law 6, D-B-149); `control_type` — the kind of control when the
+    learner named it, for the required levels of a new hub (Т-§4.8, Т-§8.5)."""
 
     hub_label: str | None
     new_hub_name: str | None
     deadline_at: str
     coverage: list[str]
+    quote: str
+    control_type: ControlType | None
 
 
 class TurnMarkup(_Strict):

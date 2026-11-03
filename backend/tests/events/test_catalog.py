@@ -159,6 +159,13 @@ def test_shared_models_are_the_payloads() -> None:
     assert validate_payload("verdict.recorded", verdict) is verdict
 
 
+def test_check_failed_unsupported_goes_to_the_model() -> None:
+    """Т-§6.6, Т-§22.7 (D-B-146): a form without a structural check is `unsupported`."""
+    payload = {**sample_payload("check.failed"), "reason": "unsupported"}
+    checked = validate_payload("check.failed", payload)
+    assert isinstance(checked, CheckFailed) and checked.reason == "unsupported"
+
+
 def test_derived_keys_deterministic() -> None:
     session, node = uuid4(), uuid4()
     pairs = [
@@ -203,3 +210,29 @@ def test_text_types_have_text_and_match_index() -> None:
     index = re.search(r"idx_events_fts_en[\s\S]*?WHERE type IN \(([\s\S]*?)\);", baseline)
     assert index is not None
     assert set(re.findall(r"'([a-z_.]+)'", index.group(1))) == set(TEXT_TYPES)
+
+
+@pytest.mark.parametrize(
+    ("event_type", "changes"),
+    [
+        ("canvas.line_committed", {"kind": "formula"}),
+        ("artifact.updated", {"kind": "topic_notes"}),
+        ("artifact.updated", {"kind": "notes", "topic_id": None, "hub_id": str(uuid4())}),
+        ("artifact.updated", {"kind": "cards", "hub_id": str(uuid4())}),
+        ("artifact.updated", {"kind": "cheatsheet", "topic_id": None}),
+    ],
+)
+def test_frozen_kinds_reject_other_values(event_type: str, changes: dict[str, Any]) -> None:
+    """Q-A-3 (C, G1): `canvas.line_committed.kind` — LaTeX or text (Т-§15.3);
+    `artifact.updated.kind` — topic notes and cards with `topic_id`, a hub cheat sheet with
+    `hub_id` (WP23.1)."""
+    with pytest.raises(ValidationError):
+        validate_payload(event_type, {**sample_payload(event_type), **changes})
+
+
+def test_frozen_kinds_accept_their_values() -> None:
+    hub = str(uuid4())
+    sheet = {**sample_payload("artifact.updated"), "kind": "cheatsheet", "topic_id": None}
+    assert validate_payload("artifact.updated", {**sheet, "hub_id": hub})
+    typed = {**sample_payload("canvas.line_committed"), "kind": "text"}
+    assert validate_payload("canvas.line_committed", typed)
