@@ -326,6 +326,15 @@ STREAM = Stream(
             no_key="multipart; each photo is a new snapshot",
             files={"file": ("sheet.webp", b"RIFF\x00\x00\x00\x00WEBPVP8 ", "image/webp")},
         ),
+        # ТЗ Ф4 WP21.6: the key of the event is the session and the time of the segment (D-C-152),
+        # so a retry costs nothing; the segment is audio, a multipart request has no body key.
+        Route(
+            "POST",
+            "/v1/sessions/{session_id}/voice",
+            no_key="multipart; the key is the session and the time of the segment (D-C-152)",
+            files={"audio": ("segment.wav", b"RIFF", "audio/wav")},
+            form={"started_at_ms": "1000", "ended_at_ms": "2000"},
+        ),
         # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
         Route(
             "POST",
