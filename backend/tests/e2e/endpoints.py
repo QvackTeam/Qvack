@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from fastapi import FastAPI
 
@@ -25,6 +25,9 @@ NO_IDEMPOTENCY_KEY: dict[tuple[str, str], str] = {
     ("POST", "/v1/canvases/{canvas_id}/photos"): "multipart; each photo is a new snapshot",
     # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
     ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): "no event; the job coalesces",
+    # ТЗ Ф4 WP16.4: the body is `{text | material_id}` only; a direct model call, nothing is
+    # written (D-B-173).
+    ("POST", "/v1/domains/classify"): "no event; a direct classifier call that writes nothing",
 }
 
 # Routes without a body model: the key is not sent.
@@ -32,6 +35,9 @@ NO_BODY = {
     ("POST", "/v1/sessions/{session_id}/heartbeat"),
     ("POST", "/v1/canvases/{canvas_id}/pairing"),
 }
+
+# Phase 4 routes whose key is a UUID (ТЗ Ф4 WP13.1).
+UUID_KEY = {("POST", "/v1/sessions/{session_id}/actions")}
 
 MUTATING = {"post", "put", "patch", "delete"}
 
@@ -74,13 +80,15 @@ class Ids:
     card_id: UUID = NO_MATERIAL
     # WP21.3: a recognized line of the canvas the walk opens for the correction route.
     line_id: str = "none"
+    # WP13.1: a Phase 4 session for the action route while the session routes are Phase 3.
+    action_session_id: UUID = NO_MATERIAL
 
 
 def path_for(path: str, ids: Ids) -> str:
     return path.format(
         domain_id=ids.domain_id,
         topic_id=ids.topic_id,
-        session_id=ids.session_id,
+        session_id=ids.action_session_id if path.endswith("/actions") else ids.session_id,
         task_id=ids.task_id,
         artifact_id=ids.artifact_id,
         material_id=ids.material_id,
@@ -151,6 +159,12 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
         ("POST", "/v1/sessions/{session_id}/tasks/{task_id}/hint"): {
             "turn_id": str(ids.turn_id if v == 0 else ids.session_id)
         },
+        # ТЗ Ф4 WP13.1: an action without a teacher turn answers `201 {seq}` (D-B-156).
+        ("POST", "/v1/sessions/{session_id}/actions"): {
+            "kind": "confidence",
+            "target_seq": 1,
+            "value": [2, 3][v],
+        },
         ("POST", "/v1/sessions/{session_id}/tasks/{task_id}/submit"): {
             "turn_id": str(ids.turn_id),
             "answer": ["A", "B"][v],
@@ -180,6 +194,8 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
         ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): {"domain_id": str(ids.domain_id)},
     }
     body = dict(bodies[(method, path)])
-    if (method, path) not in NO_BODY:
+    if (method, path) in UUID_KEY:
+        body["idempotency_key"] = str(uuid5(NAMESPACE_URL, key))
+    elif (method, path) not in NO_BODY:
         body["idempotency_key"] = key
     return body

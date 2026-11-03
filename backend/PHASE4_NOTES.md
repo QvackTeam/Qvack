@@ -850,6 +850,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `test_tool_loop_step_limit`.
 - Требует подтверждения владельцем: нет
 
+### D-B-118. Объявление `POST /v1/sessions/{id}/actions` родным SSE FastAPI
+- Класс: B
+- WP / место: WP13.1 (Этап I, к G1 по запросу C), `quack/session/router.py`, `quack/session/actions.py`
+- Контекст: шов S11 требует кадры §4.7 и `Element` в OpenAPI к G1; FastAPI сам не выводит схему тела SSE.
+- Варианты: (а) `EventSourceResponse` FastAPI 0.162 и генератор с типом `AsyncIterator[ActionFrame]` — схема кадров в `itemSchema` под `text/event-stream`; (б) свой класс ответа и `responses` — FastAPI добавляет рядом с `$ref` `type: string`.
+- Решение: (а); `201 {seq}` — `ActionAccepted` под `application/json`. Тело — `NotImplementedError` до WP13.
+- Почему: §0.4.3 п.6–7 (проверяемо, средствами уже используемой библиотеки).
+- Обратимость: один маршрут.
+- Тесты: `test_actions_route_in_openapi`.
+- Требует подтверждения владельцем: нет
+
 ### D-B-121. Часть задачи без частей — `main`
 - Класс: B. WP11.4, `quack/practice/answers.py` (`DEFAULT_PART`): ключ вердикта `verdict:{answer_seq}:{part}` (`Т-§6.1`) требует часть, а у задачи без частей (`Т-§6.2`) её нет. Значение `main` — одна константа. Тесты: `test_instant_verdict_in_answer_transaction`. Подтверждение: нет.
 
@@ -1457,6 +1468,43 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 
 - Требует подтверждения владельцем: нет
 
+### D-B-156. Тело `POST /v1/sessions/{id}/actions`: порты графа в API
+- Класс: B
+- WP / место: WP13.1, WP13.2, §4.7, §4.5; `quack/session/action_turn.py` (`ApiTurnPorts`, `turn_frames`, `TurnContextSource`), `quack/session/router.py` (`post_action`), `quack/session/actions.py` (`ActionFrame` — `RootModel`)
+- Контекст: #75 объявил маршрут (D-B-119); граф хода — на портах (D-B-148), запись — `turn_commit` (D-B-149), сессии — `sessions.py` (D-B-155). Не названо: (а) откуда граф получает контекст до WP14; (б) кто держит блокировку хода между процессами; (в) коды кадра `error`; (г) ответ на действие в закрытой сессии; (д) как маршрут отвечает и SSE, и `201` при неизменном контракте S11; (е) вход маршрута до перевода API на сессии (D-C-119).
+- Решение: (а) порт `TurnContextSource.assemble(TurnRequest) → TurnSetup` (запрос модели и входы правил, провайдер роли через `LLMGateway.streaming`, таблица меток, строка манифеста, инструменты, данные для записи — цитаты ученика, пояс, на что отвечает ход); реализует WP14. Маршрут берёт его из `app.state.turn_context_source`; нет — `503 SERVICE_UNAVAILABLE`. До WP14 PR не вливается (D-B-119). (б) `admit`: Redis `SET NX EX 60` на `lock:turn:{session}` (TTL Фазы 3), занято другим процессом — кадр `error {TURN_LOCKED, retryable}`; освобождение — сравнение токена после хода; в процессе — `TurnSlots` (одна сессия — один ход, новый отменяет старый); без Redis — только `TurnSlots` (`Т-§20.7`). Роль: флаг давления модели учителя — ждать не дольше `teacher_admission_wait_ms`, иначе `teacher_fallback` (`Т-§11.3`, WP5.3 Фазы 3). Канал отмены `session:{id}:cancel` между процессами — \[ПРОВЕРИТЬ\] с развёртыванием нескольких `api` (сейчас один процесс). (в) Коды §4.5 Фазы 3: модель не ответила (ошибки шлюза и провайдера, предел шагов инструментов) — `LLM_DEGRADED`, повторяемо; блокировка — `TURN_LOCKED`; прочее — `SERVICE_UNAVAILABLE`; хода в журнале нет (`Т-§12.1`). Ответ шаблоном при `llm_unavailable` / `budget_exceeded` (`degraded_mode`, §4.4) — отдельным пунктом \[ПРОВЕРИТЬ\]. (г) Сессия ученика открыта — действие пишется; закрыта сборщиком — сначала возврат (`resume_if_swept`, WP13.10); закрыта учеником или чужая — `404 NOT_FOUND`, ничего не пишется. (д) Обычная функция: `201 {seq}` (`ActionAccepted`) или поток SSE (`sse_keepalive_response`, `sse_keepalive_s`); 200 описан тем же `itemSchema` с `data` → `ActionFrame`, что и в #75; `ActionFrame` — `RootModel` с тем же именем компонента (для `responses.model`). (е) Ученик — только из cookie сессии (`get_current_session`, `Т-§19.1`); ограничитель частоты роутера сессий Фазы 3 пока требует и токен — до D-C-119 (тесты шлют оба, как e2e, D-C-115). Вызов «исправь разметку» — без модели (порт отдаёт `None`, элемент убирается): инструкции для него в `teacher@2` нет — с промптом.
+- Почему: §0.4.3 п.2 (§4.7, WP13.1–13.2, `Т-§12.1`, `Т-§19.1`), п.3 (контракт S11 не меняется), п.5.
+- Обратимость: два модуля и маршрут.
+- Тесты: `tests/session/test_actions_route.py` (8, по HTTP): кадры §4.7, `201`, чужая сессия, без cookie, возврат после сборщика, закрытая учеником, кадр ошибки без хода, освобождение блокировки. Проверено на неверной реализации: 5 подмен — каждая роняет тест. e2e потока C (`T-E2`, `T-E3`) ждут маршрут в обходах — у C.
+### D-B-182. Сводка аналитика, результаты агентов и поправки в картине памяти (WP14.2)
+- Класс: B
+- WP / место: WP14.2, `Т-§10.2`, `Т-§13.5`, `Т-§13.7`, `Т-§5.6`, `Т-§6.3`, закон 10; `quack/session/turn_source.py` (`_revised`, `_requests`, `MemoryTurnContextSource._digest`, `_completed`)
+- Контекст: строки слота 7 «сводка аналитика, готовые результаты агентов, неисполненные поправки» уже рисует `render_memory_picture` (D-B-157), но источник их не давал (D-B-181 п.2). Не названы: какая сводка; какой результат «готов»; когда поправка «исполнена».
+- Решение: (а) Сводка — текст последнего `digest.written` домена ученика. Аналитик пишет её заново из структуры, поэтому чтение последней — не накопление выводов (закон 10). (б) Поручения сессии — `agent.requested` сессии и `agentRequests` её `turn.committed`. Все они получают метки `R…`, чтобы учитель мог их отменить. Готов тот, у которого есть `agent.completed` с `ok = true`: строка «<метка>: <вид> is ready». (в) Поправка — пара `(answer_seq, part)`, последний вердикт которой отличается от первого. Она держится, пока номер ответа не попадёт в `correctionsAcknowledged` какого-либо `turn.committed`. Строка: «part <часть> is now <исход>, was <исход>».
+- Почему: §0.4.3 п.2 (WP14.2), п.5.
+- Обратимость: один модуль.
+- Дополнение: (г) Целевой набор навыка — уровни, которые требуют хабы его темы (объединение, `Т-§8.5`), `target_levels`. (д) Инструменты получают строки канваса по номерам слота 5 (`L1…` в порядке сессии, стёртая строка сохраняет номер, `handwriting.corrected` заменяет текст) и сегменты голоса — для `voice_at_line` и `past_solution` (WP14.4).
+- Тесты: `tests/session/test_turn_source.py::test_journal_revisions_and_requests`, `::test_assemble_first_turn_freezes_slots`; мутация «признанная поправка остаётся» — тест падает.
+- Не решено \[ПРОВЕРИТЬ\]: нет.
+### D-B-181. Источник контекста хода учителя (WP14, WP13.2 «assemble»)
+- Класс: B
+- WP / место: WP14.1–14.5, WP13.2, `Т-§10`, `Т-§12.7`, `Т-§12.9`, `Т-§12.4`, `Т-§10.5`; `quack/session/turn_source.py` (`MemoryTurnContextSource`, `read_journal`, `turn_effort`, `answer_strings`), `quack/session/spoiler_guard.py` (`answer_in_text`, `remove_answer_sentences`)
+- Контекст: порт `TurnContextSource` из #125 нужно реализовать на журнале сессии и чтениях S4 (#170). A в #175: фабрика `workers` — с обязательным `learner_id`; ходу учителя нужен читатель с `session_factory`, его `quack.session` строит напрямую. Не названы: откуда цель сессии; что считать «активной задачей»; как проверять спойлер по `content.tasks` (защита Фазы 3 читает `core.task_bank`); как считать «два провала подряд на одном навыке» без `task.evaluated` Фазы 4.
+- Решение: (а) Читатель — параметр `reader(learner_id) -> GraphReader`; сборка процесса API передаёт `Neo4jGraphReader(neo4j, settings, learner_id=..., session_factory=...)` (ответ A в #175). (б) Цель — последний `message.sent` сессии с `intent` (`Т-§12.7`); без него — «learn» по домену. Темы цели — тема или темы хаба цели из `domain_goals`. (в) Активные задачи — `task.created` сессии без `task.closed`; фокус среза — навыки их разметки и навыки тем цели (`topic_memory`), `Т-§10.2`. (г) Чтения идут параллельно (WP14.5). Срез, который нельзя прочитать (Neo4j недоступен), — пустой срез, слот 7 «memory temporarily unavailable» и `memory_unavailable` (WP6.1). (д) Слоты 3–4 — снимок сессии (D-B-180); первый ход пишет его в `frozen_slots` своей строки манифеста. (е) Слот 8 — предвыборка по графу `materials_prefetch` (`Т-§10.5`), `materials_k` кусков. (ж) Действие хода: `hint.requested`, `solution.requested`, `check.skipped` дают `AnsweredAction`. Ответ `solved`, если последние вердикты всех частей ответов на эту задачу — `correct`. Вердикт самого ответа идёт в защиту. (з) Усилие (`Т-§12.9`): `high` на первом ходе сессии (нет `turn.committed`) и когда два последних проверенных ответа провалены на задачах с общим навыком; `teacher_fallback` — всегда `low`. (и) Спойлер — латех и sympy значения и элементов `answer_spec` активных задач; нормализация и пороги — общие с защитой Фазы 3. (к) Бюджет — `fit_budget` по шаблону промпта роли до вызова.
+- Почему: §0.4.3 п.2 (WP14, WP13.2), п.5.
+- Обратимость: один модуль; порт `TurnContextSource` не менялся.
+- Тесты: `tests/session/test_turn_source.py` (5); мутация «снимок пишется каждым ходом» — тест падает.
+- Не решено \[ПРОВЕРИТЬ\]: (1) Подключение сделано: `get_turn_context_source` (`quack/session/router.py`) один раз собирает источник из `app.state.resources` процесса API (`source_of`), правок C нет. Читатель — `Neo4jGraphReader(..., learner_id, session_factory, redis)` (#175, D-A-144). Пока A не влила `profile` и `misconception_detail` (#176, #179), сборка хода падает на `NotImplementedError` этих чтений, и клиент получает кадр `error`. (2) Быстрый вердикт кодом пишет `record_answer` при записи действия, до хода, поэтому сборка берёт его из журнала, отдельного ожидания нет (WP13.2). `context_text` хранится для доли `turn_context_sample_rate` ходов; решает `manifest_id`, так что повтор хода решает так же. `digest_id` манифеста пуст: у `digest.written` нет своего UUID — \[ПРОВЕРИТЬ\].
+### D-B-180. Слоты 3–4 из памяти и их снимок на сессию (WP14.1)
+- Класс: B
+- WP / место: WP14.1, `Т-§10.1`, `Т-§9.5`, `Т-§8.5`, `Т-§4.5`, закон 8; `quack/session/turn_inputs.py` (`learner_state`, `learned_lines`, `load_snapshot`), `quack/session/teacher_context.py` (`snapshot_slots`, `frozen_slots`), `quack/session/turn_commit.py` (`TurnManifestRow.frozen_slots`)
+- Контекст: A выложила `GraphReader.profile` и `domain_goals` и колонку `ops.turn_manifests.frozen_slots` (#170, D-A-137). Не названы: как подать выученную часть профиля словами; что делать с метками в замороженном тексте — таблица меток живёт один вызов (`Т-§4.5`), а текст слотов 3–4 держится всю сессию (`Т-§10.1`).
+- Решение: (а) Слоты 3 и 4 рисуются без меток, только с именами: иначе метки снимка разошлись бы с таблицей следующего хода. Слот 9 называет каждую метку вызова. (б) Снимок — текст `{profile, domain_and_goals}`. Его пишет ход, который его заморозил; читается самая ранняя строка манифеста сессии с непустым `frozen_slots`. Изменения за сессию — строки хвоста: строки текущей отрисовки, которых нет в снимке. (в) Выученное — четыре строки по `Т-§9.5`: «what helps», «confidence» (перекос словами, без оценки Брайера), «corrective branches» и «reasoning shown» (доли в процентах). При нехватке данных — «no data yet», не ноль (закон 8). (г) Свои модели слотов (`Profile`, `HubGoal`) остаются: `learner_state` переводит в них `ProfileFacts` и `HubGoal` A.
+- Почему: §0.4.3 п.2 (WP14.1, `Т-§10.1`), п.5.
+- Обратимость: два модуля.
+- Тесты: `tests/session/test_turn_inputs.py` (4), `tests/session/test_teacher_context.py::test_slot_order_and_freeze`; мутация «самая поздняя строка снимка» — тест падает.
+- Не решено \[ПРОВЕРИТЬ\]: «явное предпочтение перекрывает выученное» (`Т-§9.5`) — ключи `pref*` и `learned*` не пересекаются по именам, поэтому в слоте показываются обе группы.
+
 ### D-B-185. Гигиена графа `graph.hygiene` (WP16.3)
 - Класс: B
 - WP / место: WP16.3, `Т-§4.10`, `Т-§22.10`, `T-AG4`; `quack/agents/hygiene.py`, `config.py` (блок B)
@@ -1488,6 +1536,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/agents/test_misconception_describe.py` (5); мутация «сортировка только по `at_ms`» — тест падает.
 - Регистрация (процедура (б) A в #173, сигнатура фабрики D-A-144): `misconception.describe` и `extract.episode` — в `JOB_KINDS`, `KIND_LLM_ROLES` (роли из `rules_p4.JOB_KIND_SPECS`) и `HANDLER_MODULES`. Обработчики строят читателя `create_graph_reader(ctx.neo4j, ctx.settings, learner_id=job.learner_id)`. Ревью строк реестра — за A.
 - Не решено \[ПРОВЕРИТЬ\]: до слияния #179 (`misconception_detail`, `extraction_candidates` на Neo4j) задачи этих видов падают на `NotImplementedError` и уходят в повторы.
+
 ### D-B-177. Строитель визуализаций: задача `agent.viz` (WP16.5)
 - Класс: B
 - WP / место: WP16.5, `Т-§13.6`, `Т-§22.10`, `Т-§13.7`, `Т-§13.9`, `T-AG6`, закон 5; `quack/agents/viz.py` (`build_viz`, `handle_viz`, `param_sets`, `libraries_block`), `quack/config.py` блок B (`viz_libraries`)
@@ -1525,6 +1574,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Обратимость: один модуль.
 - Тесты: `tests/session/test_turn_inputs.py::test_plan_and_learner_skill`; мутация «первая версия скилла вместо последней» — тест падает.
 - Не решено \[ПРОВЕРИТЬ\]: место хранения снимка слотов 3 и 4 — ответ A в #125.
+- Требует подтверждения владельцем: нет
+
+### D-B-173. Определение домена: тело `POST /v1/domains/classify` (WP16.4)
+- Класс: B
+- WP / место: WP16.4, `Т-§4.9`, `Т-§22.9`, `Т-§4.5`, §4.1, §7.3 п.3; `quack/practice/domain_classify.py` (`classify_domain`, `ClassifyDomainRequest`, `DomainSuggestion`), `DomainClassifierOutput` перенесён в `quack/practice/role_outputs.py` (реэкспорт в `quack/agents/schemas.py`); объявление маршрута — `quack/domains/router.py` (A)
+- Контекст: §7.3 п.3 — тело в пакете B, маршрут в роутере A; §4.1 — продуктовый пакет импортирует из продуктовых только `practice`, так что `quack.domains` не может импортировать `quack.agents`. Не названы: форма ответа; что такое «начало файла»; что при неуверенном ответе, при материале без текста и при сбое модели; ключ вызова.
+- Решение: (а) тело и схема выхода — в `practice` (как `markup_record`, D-B-168). (б) Запрос — ровно одно из `text`, `material_id`. Ответ: `{decision, domain_id?, name?, confidence?}`; `existing` — id домена по метке, `new` — имя без краевых пробелов. Ниже `domain_autolink_confidence` — `unclear`, без предложения (`Т-§4.9`: «Неясно — домен не предлагается»). (в) Домены ученика — события `domain.created` по порядку (закон 1), метки `D…` (D-B-131). (г) «Начало файла» — первая страница материала с текстом (`content.material_pages`). Чужой материал — 404; страниц с текстом ещё нет — `unclear` без вызова. (д) Метка не из списка, `existing` без метки, `new` без имени — один повтор через `check` (`Т-§4.5`). Сбой шлюза (`LLMUnavailableError`, `LLMBudgetExceededError`, `LLMSchemaError`) — `unclear`: классификатор только подсказывает, домен ученик выбирает сам (`Т-§22.9`). (е) Ключ вызова — `domain_classify:{learner}:{sha256 текста}:{хэш набора доменов}`: новый домен меняет вход, а значит и ключ. (ж) Ничего не пишется: новый домен создаёт `POST /v1/domains` (A).
+- Почему: §0.4.3 п.2 (WP16.4, `Т-§4.9`), п.5.
+- Обратимость: один модуль.
+- Тесты: `T-AG5` — `tests/practice/test_domain_classify.py` (4); мутации (порог, проверка метки, обрезка имени) — тесты падают.
+- Списки маршрутов в тестах C: `POST /v1/domains/classify` добавлен в `EXPECTED_ROUTES` (`tests/test_app_assembly.py`) и в `NO_IDEMPOTENCY_KEY` (`tests/e2e/endpoints.py`): тело ТЗ Ф4 WP16.4 — `{text | material_id}` без `idempotency_key`, событие не пишется (п. ж), повтор безвреден; путь без `{id}` — T-E3 не затрагивает.
 - Требует подтверждения владельцем: нет
 
 ### Поток C
@@ -2110,6 +2170,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP13.1–13.2, тело `/actions` (D-B-156): `uv run pytest tests/session/test_actions_route.py` — ошибка сбора (нет `quack.session.action_turn`), коммит `a5066ee`; на неверной реализации — 5 подмен, каждая роняет тест. Зелёный: 8 passed.
 - WP21.3, роль `recognizer@1` (C, `phase-4-c-recognizer`, коммит `bf2b46a`): `pytest tests/llm/test_labels.py -k "recognizer or contracts_file"` — 2 failed (файла промпта нет, `PROMPT_CONTRACTS.md` устарел), 1 xfailed. Зелёный: `tests/llm/test_labels.py` — 59 passed, 1 xfailed (BLOCKED-C-202).
 - WP22.1, привязка (C, `phase-4-c-wp22-pairing`): красный прогон отдельно не снят (облегчённый TDD). Зелёный: `tests/auth`, `tests/canvas`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` — зелёные.
 - WP12.7, подбор задач (D-B-169): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 5 подмен (без `learnerId` задачи, без уровня, без «семейство не встречалось», порядок, лимит), каждая роняет тест. Зелёный: `tests/practice/test_select_tasks.py` против Neo4j — 1 passed.
@@ -2201,6 +2262,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 - A, 2026-11-03 (#182): тесты WP7 названы ID ТЗ §8: `test_every_rule_row_names_known_kinds` → `test_rule_table` (T-D1), `test_session_ended_and_turn_limit_and_intent_change` → `test_episode_boundaries` (T-D2), `test_episode_without_content_is_covered_by_the_dispatcher` → `test_episode_without_content` (T-D3), `test_coalesce_raises_required_seq_and_keeps_one_job` → `test_coalesce_greatest` (T-D4), `test_cancel_queued_and_running` → `test_cancel_requested` (T-D6), `test_retry_with_growing_pause_then_failed_with_agent_completed` → `test_failed_writes_agent_completed` (T-D8), `test_status_change_of_a_visible_job_publishes_jobs_changed` → `test_visible_and_plaque` (T-D10). `test_max_jobs_per_learner` (T-D5), `test_skipped_budget` (T-D7) уже так названы. T-D9 (`test_periodic_keys`) в #182 нет — периодические задачи Фазы 4 ещё не сделаны.
 
+- `tests/session/test_actions_route.py` (B, D-B-156, до зелёного): клиент шлёт и токен Фазы 3 (ограничитель частоты роутера сессий), и cookie сессии; маршрут берёт ученика только из cookie. Тест «без cookie» шлёт один токен и ждёт `401 UNAUTHENTICATED`. Добавлен тест освобождения блокировки хода. Утверждения не ослаблены.
 - `tests/e2e/test_isolation_and_idempotency.py`, `tests/e2e/endpoints.py` (C, WP23.1): три маршрута блоков — в обходе `T-E2`; тема для них записывается в журнал Фазы 4 (`topic.created`), которого структура Фазы 3 в обходе не пишет (D-C-112); `accept` и `DELETE` — в `NO_OTHER_BODY` (тело — только ключ).
 - `tests/test_app_assembly.py` (C, WP23.1): в `EXPECTED_ROUTES` и `_declared_routes` добавлены четыре маршрута конспекта §6.4 (§8.15 п.2 — новый маршрут контракта).
 - `tests/e2e/endpoints.py`, `tests/test_app_assembly.py` (C, WP22.2): маршрут снимка — в `T-A1`, в `NO_IDEMPOTENCY_KEY` и `MULTIPART` (`T-E2`, `T-E3`).
@@ -2219,6 +2281,13 @@ PR #77 (dbmate v2.36.0, sha256).
 - `tests/session/test_holdback.py` (B, до зелёного): `test_spoiler_found_only_at_the_end` ошибочно ждал спойлер только в `finish`, хотя по WP13.4 весь накопленный текст проверяется на каждом куске. Заменён на `test_spoiler_completed_inside_the_holdback` (спойлер ловится на куске, который его дописал) и `test_finish_checks_the_whole_text`. Проверка не ослаблена: показанный текст по-прежнему пуст.
 - `tests/llm/test_phase4_ai_layer.py` (`T111`): `max_output_tokens` десяти ролей — по замеру (D-B-134); `Т-§11.1` разрешает менять конфиг по замеру. Сила проверки не меняется.
 - `tests/test_contracts.py` (`T-A6`): в `PRODUCT` добавлен `agents` (ТЗ Ф4 §4.1). Сила проверки не меняется.
+- `tests/test_app_assembly.py` (C, PR #75, §8.15 п.2): `T-A1` — в набор маршрутов добавлен
+  `POST /v1/sessions/{session_id}/actions` (§6.4). `test_openapi_documents_every_response` — у
+  `/actions` ровно два ответа 2xx, `200` (SSE) и `201` (`{seq}`) по §4.7, у остальных — по-прежнему
+  ровно один; модель SSE-ответа принимается из `itemSchema` (так FastAPI описывает одно событие в
+  OpenAPI 3.2), модель обязательна, как раньше. `test_sse_endpoints_document_event_stream` расширен
+  на `/actions`. Тест падает на маршруте с одним 2xx или без модели события (§8.15 п.4).
+  `backend/openapi.json` пересобран `ops openapi`.
 - `compute/tests/math/test_equivalence.py`: `PARAMS` берётся из `test_params.py` (у `Params` новые поля, D-B-124). Утверждения не менялись.
 
 - D-C-119 (C, по D-A-113 и D-C-112 п.2): удалены вместе с кодом (§8.15 п.1) — `tests/domains/test_auth_and_learner.py::test_register_normalizes_email_and_rejects_duplicate` (вход по ссылке и ученик по адресу — `T-AU1` `test_magic_link_flow`), `::test_login_and_me_jwt_validation` (сессия, отзыв, 401 без неё — `T-AU4` `test_session_revocation`, `tests/auth/test_auth_routes.py::test_bad_link_and_no_session_are_401`), `::test_auth_rate_limiting_per_ip` (лимиты входа на адрес и IP — `T-AU2` `test_link_rate_limits_*`); `tests/session/test_fixtures.py::test_token_uses_dev_secret_when_jwt_secret_is_empty` (JWT нет); `tests/test_ops_phase3.py::test_seed_learners_refuses_without_jwt_secret` (JWT_SECRET нет, сессия не требует секрета); `tests/test_settings_meta_api.py::test_prod_jwt_secret_is_at_least_32_bytes` (JWT нет).
