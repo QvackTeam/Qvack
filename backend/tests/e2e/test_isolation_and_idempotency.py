@@ -19,6 +19,7 @@ from quack.events.log import NewEvent, append_events
 from quack.events.values import AnswerSpec, MathValue
 from quack.practice.role_outputs import TaskCondition
 from quack.practice.task_store import create_task
+from quack.session.sessions import StartSession, start_session
 from tests.e2e.endpoints import (
     MULTIPART,
     NO_IDEMPOTENCY_KEY,
@@ -50,6 +51,7 @@ IDEMPOTENT_WALK: tuple[tuple[str, str], ...] = (
     ("POST", "/v1/sessions/{session_id}/tasks/next"),
     ("POST", "/v1/sessions/{session_id}/tasks/{task_id}/hint"),
     ("POST", "/v1/sessions/{session_id}/tasks/{task_id}/submit"),
+    ("POST", "/v1/sessions/{session_id}/actions"),
     ("POST", "/v1/artifacts/notes"),
     ("PATCH", "/v1/artifacts/notes/{artifact_id}"),
     ("DELETE", "/v1/artifacts/notes/{artifact_id}"),
@@ -193,9 +195,29 @@ async def _advance(
     if (method, path) == ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"):
         ids = replace(ids, card_id=await _card_of_topic(system, learner, ids))
         return await _canvas_with_a_line(system, learner, ids)
+    if path.endswith("/submit"):
+        return await _action_session(system, learner, ids)
     if (method, path) == ("PATCH", "/v1/cards/{card_id}"):
         return replace(ids, card_id=UUID(payload["cards"][0]["card_id"]))
     return ids
+
+
+async def _action_session(system: System, learner: Learner, ids: Ids) -> Ids:
+    """WP13.1: a Phase 4 session (its domain in the Phase 4 log) for the action route."""
+    db, domain_id = system.resources.db, uuid4()
+    created = NewEvent(
+        type="domain.created",
+        payload={"domain_id": str(domain_id), "name": "Actions"},
+        actor="learner",
+        idempotency_key=f"te2:domain:{domain_id}",
+    )
+    await append_events(db, learner.learner_id, [created])
+    started = await start_session(
+        db,
+        learner_id=learner.learner_id,
+        body=StartSession(domain_id=domain_id, intent="learn", idempotency_key=uuid4()),
+    )
+    return replace(ids, action_session_id=started.session_id)
 
 
 async def _canvas_with_a_line(system: System, learner: Learner, ids: Ids) -> Ids:

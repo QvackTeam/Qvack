@@ -82,14 +82,16 @@ NEO4J_UNAVAILABLE: tuple[type[BaseException], ...] = (
     ConnectionAcquisitionTimeoutError,
 )
 
-_TIMEZONE = "SELECT settings->>'timezone' AS timezone FROM core.learners WHERE learner_id = %(l)s"
+_TIMEZONE = (
+    "SELECT settings->>'timezone' AS timezone FROM core.learners WHERE learner_id = %(learner_id)s"
+)
 _LATEST_DIGEST = (
-    "SELECT payload FROM core.events WHERE learner_id = %(l)s AND type = 'digest.written' "
+    "SELECT payload FROM core.events WHERE learner_id = %(learner_id)s AND type = 'digest.written' "
     "AND domain_id = %(d)s ORDER BY seq DESC LIMIT 1"
 )
 _COMPLETED = (
-    "SELECT payload FROM core.events WHERE learner_id = %(l)s AND type = 'agent.completed' "
-    "AND payload->>'request_id' = ANY(%(ids)s) ORDER BY seq"
+    "SELECT payload FROM core.events WHERE learner_id = %(learner_id)s "
+    "AND type = 'agent.completed' AND payload->>'request_id' = ANY(%(ids)s) ORDER BY seq"
 )
 _LINE_EVENTS = ("canvas.line_committed", "canvas.line_erased", "handwriting.corrected")
 _TASK_ACTIONS = {
@@ -97,6 +99,11 @@ _TASK_ACTIONS = {
     "solution.requested": "solution_request",
     "check.skipped": "check_skip",
 }
+
+
+async def learner_timezone(db: Db, *, learner_id: UUID) -> str | None:
+    row = await db.fetch_one(_TIMEZONE, {"learner_id": learner_id})
+    return row["timezone"] if row is not None else None
 
 
 @dataclass(frozen=True)
@@ -358,7 +365,7 @@ class MemoryTurnContextSource:
     async def _digest(self, learner_id: UUID, domain_id: UUID) -> str | None:
         """The latest analyst summary of the domain (Т-§13.5): rebuilt by the analyst each
         time from structure, so reading the latest one is no accumulation (law 10)."""
-        row = await self._db.fetch_one(_LATEST_DIGEST, {"l": learner_id, "d": domain_id})
+        row = await self._db.fetch_one(_LATEST_DIGEST, {"learner_id": learner_id, "d": domain_id})
         return None if row is None else str(row["payload"]["text"])
 
     async def _completed(self, learner_id: UUID, requests: dict[UUID, str]) -> set[UUID]:
@@ -366,7 +373,7 @@ class MemoryTurnContextSource:
         if not requests:
             return set()
         rows = await self._db.fetch_all(
-            _COMPLETED, {"l": learner_id, "ids": [str(r) for r in requests]}
+            _COMPLETED, {"learner_id": learner_id, "ids": [str(r) for r in requests]}
         )
         return {UUID(str(r["payload"]["request_id"])) for r in rows if r["payload"]["ok"]}
 
@@ -386,16 +393,15 @@ class MemoryTurnContextSource:
             db, learner_id=learner_id, session_id=session_id, to_seq=request.action_seq
         )
         journal = read_journal(events, request.action_seq)
-        now, plan, zone_row, snapshot, skill = await asyncio.gather(
+        now, plan, timezone, snapshot, skill = await asyncio.gather(
             learner_state(reader, learner_id=learner_id, domain_id=request.domain_id),
             load_plan(db, learner_id=learner_id, session_id=session_id),
-            db.fetch_one(_TIMEZONE, {"l": learner_id}),
+            learner_timezone(db, learner_id=learner_id),
             load_snapshot(db, learner_id=learner_id, session_id=session_id),
             load_learner_skill(db, learner_id=learner_id, name=journal.skill_invocation)
             if journal.skill_invocation
             else _none(),
         )
-        timezone = zone_row["timezone"] if zone_row is not None else None
         hubs = await reader.domain_goals(request.domain_id)
         topics = _goal_topics(journal.goal, hubs)
         memory: list[TopicMemory] = await reader.topic_memory(topics) if topics else []
