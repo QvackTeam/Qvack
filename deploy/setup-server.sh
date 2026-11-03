@@ -31,7 +31,14 @@ apt-get update -y
 apt-get install -y ca-certificates curl gnupg ufw fail2ban unattended-upgrades
 
 step "users: admin (sudo) and deploy (no sudo)"
-id admin >/dev/null 2>&1 || useradd --create-home --shell /bin/bash --groups sudo admin
+if ! id admin >/dev/null 2>&1; then
+  # Ubuntu ships a legacy group `admin`; useradd refuses to create a same-named user group.
+  if getent group admin >/dev/null; then
+    useradd --create-home --shell /bin/bash --gid admin --groups sudo admin
+  else
+    useradd --create-home --shell /bin/bash --groups sudo admin
+  fi
+fi
 id deploy >/dev/null 2>&1 || useradd --create-home --shell /bin/bash deploy
 install_key() { # user key
   local home; home="$(getent passwd "$1" | cut -d: -f6)"
@@ -65,6 +72,12 @@ systemctl reload ssh
 systemctl enable --now fail2ban
 
 step "docker engine >= $DOCKER_MIN_VERSION"
+if command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; then
+  # A snap refreshes itself and restarts the daemon with every container (Д-§10), and its
+  # confinement hides /srv/quack. Remove it by hand, the script then installs docker-ce.
+  echo "Docker is installed as a snap. Run 'snap remove docker --purge', then start this script again." >&2
+  exit 1
+fi
 if ! command -v docker >/dev/null 2>&1; then
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
@@ -80,6 +93,7 @@ if [[ "$(printf '%s\n%s\n' "$DOCKER_MIN_VERSION" "$installed" | sort -V | head -
   exit 1
 fi
 # `deploy` in the docker group is equivalent to root: a known trade-off of Д-§10.
+getent group docker >/dev/null || groupadd docker
 usermod -aG docker deploy
 
 step "swap ${SWAP_SIZE_GB} GB, vm.swappiness=10"
