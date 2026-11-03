@@ -529,7 +529,7 @@ def test_conversation_collapse() -> None:
     assert "Learner: question 13" in lines and "Teacher: answer 13" in lines
     assert "question 12" not in text  # folded turns are not verbatim
     # Canvas lines keep their session numbers: line 1 is in a folded turn.
-    assert "Canvas line 2: ratio = 1/e" in lines
+    assert "Canvas line L2: ratio = 1/e" in lines
     assert lines[-2:] == ["Current action", "Learner: and now?"]
 
     # The folded part stays the same until the next batch of 12 (prefix cache, Т-§10.1).
@@ -555,7 +555,7 @@ def test_conversation_verbatim_turn() -> None:
         "Hint 2 shown on task K1",
         "Task K1 closed: solved",
         "Turn 3",
-        "Canvas line 1: a_n = n!/n^n",
+        "Canvas line L1: a_n = n!/n^n",
         "Teacher: answer 3",
     ]
     split = split_turns(_session(3, task).events)

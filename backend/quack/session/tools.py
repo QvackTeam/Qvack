@@ -187,6 +187,7 @@ class ToolContext:
     """What a tool call reads with (WP14.4): the learner, the label table of the call, the
     memory read (`quack.graph.read`, seam S4), the names of skills, the canvas lines of the
     session by their numbers `L1…` (the numbers of slot 5, D-B-163) and its voice segments, the
+    domain of the session (a mistake elsewhere is "another subject"), the
     material search (seam S12; `None` while Modal is down). Evidence and chunks the tools show
     get labels `E…`, `P…` for this turn: a later tool call may name them."""
 
@@ -195,6 +196,7 @@ class ToolContext:
     reader: GraphReader
     settings: Settings
     now_ms: int
+    domain_id: UUID | None = None
     skill_names: Mapping[UUID, str] = field(default_factory=dict)
     canvas_lines: Mapping[str, CanvasLine] = field(default_factory=dict)
     voice: Sequence[VoiceSegment] = ()
@@ -305,7 +307,7 @@ async def _similar_mistakes(ctx: ToolContext, args: SimilarMistakesArgs) -> str:
     lines = []
     for item in found[: _limit(ctx, "similar_mistakes")]:
         where = _skill_name(ctx, item.skill_id)
-        if item.domain_id is not None and ctx.labels.label("domain", item.domain_id) is None:
+        if item.domain_id is not None and item.domain_id != ctx.domain_id:
             where += " (another subject)"
         line = f"{ctx.evidence_label(item.evidence_id)}: {where}"
         lines.append(line + (f': "{item.quote}"' if item.quote else ""))

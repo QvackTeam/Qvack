@@ -179,14 +179,14 @@ def _verbatim(
         case "canvas.line_committed":
             line = CanvasLineCommitted.model_validate(data)
             number = lines.number(line.canvas_id, line.line_id)
-            return [f"Canvas line {number}: {line.text}"]
+            return [f"Canvas line L{number}: {line.text}"]
         case "canvas.line_erased":
             erased = CanvasLineErased.model_validate(data)
-            return [f"Canvas line {lines.number(erased.canvas_id, erased.line_id)} erased"]
+            return [f"Canvas line L{lines.number(erased.canvas_id, erased.line_id)} erased"]
         case "handwriting.corrected":
             fixed = HandwritingCorrected.model_validate(data)
             number = lines.number(fixed.canvas_id, fixed.line_id)
-            return [f"Canvas line {number} corrected by the learner: {fixed.text}"]
+            return [f"Canvas line L{number} corrected by the learner: {fixed.text}"]
         case "voice.transcribed":
             return [f"Learner said: {VoiceTranscribed.model_validate(data).text}"]
         case "turn.committed":
