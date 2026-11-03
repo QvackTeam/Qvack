@@ -15,7 +15,16 @@ from quack.api.errors import ApiError
 from quack.api.ratelimit import enforce_action_rate_limit
 from quack.api.resources import get_llm, get_resources
 from quack.config import Settings
-from quack.domains import diagnostic, disputes, graph_view, learner, service, structure, topics
+from quack.domains import (
+    diagnostic,
+    disputes,
+    graph_view,
+    learner,
+    service,
+    structure,
+    topic_edits,
+    topics,
+)
 from quack.domains.schemas import (
     AnswerDiagnosticRequest,
     AnswerDiagnosticResponse,
@@ -359,3 +368,58 @@ async def declare_typo_endpoint(
     if seq is None:
         raise _not_yours()
     return disputes.EventAccepted(seq=seq)
+
+
+# --- ТЗ Ф4 WP8.2: edits of topics and «я это уже знаю» (Т-§4.11) ---
+
+
+def _edited(seq: int | None) -> topic_edits.Edited:
+    if seq is None:
+        raise _not_yours()
+    return topic_edits.Edited(seq=seq)
+
+
+@_protected.patch("/topics/{topic_id}", response_model=topic_edits.Edited, status_code=202)
+async def rename_topic_endpoint(
+    topic_id: UUID, req: topic_edits.RenameTopic, request: Request, learner_id: CurrentLearnerId
+) -> topic_edits.Edited:
+    r = get_resources(request)
+    return _edited(await topic_edits.rename(r.db, r.neo4j, r.redis, learner_id, topic_id, req.name))
+
+
+@_protected.post("/topics/{topic_id}/merge", response_model=topic_edits.Edited, status_code=202)
+async def merge_topic_endpoint(
+    topic_id: UUID, req: topic_edits.MergeTopic, request: Request, learner_id: CurrentLearnerId
+) -> topic_edits.Edited:
+    r = get_resources(request)
+    return _edited(await topic_edits.merge(r.db, r.neo4j, r.redis, learner_id, topic_id, req.into))
+
+
+@_protected.post("/topics/{topic_id}/hide", response_model=topic_edits.Edited, status_code=202)
+async def hide_topic_endpoint(
+    topic_id: UUID, request: Request, learner_id: CurrentLearnerId
+) -> topic_edits.Edited:
+    r = get_resources(request)
+    return _edited(await topic_edits.hide(r.db, r.neo4j, r.redis, learner_id, topic_id))
+
+
+@_protected.post("/topics/{topic_id}/known", response_model=topic_edits.Edited, status_code=202)
+async def claim_known_endpoint(
+    topic_id: UUID, request: Request, learner_id: CurrentLearnerId
+) -> topic_edits.Edited:
+    r = get_resources(request)
+    return _edited(await topic_edits.claim_known(r.db, r.neo4j, r.redis, learner_id, topic_id))
+
+
+@_protected.post(
+    "/episodes/{episode_seq}/reassign", response_model=topic_edits.Edited, status_code=202
+)
+async def reassign_episode_endpoint(
+    episode_seq: int,
+    req: topic_edits.ReassignEpisode,
+    request: Request,
+    learner_id: CurrentLearnerId,
+) -> topic_edits.Edited:
+    r = get_resources(request)
+    seq = await topic_edits.reassign(r.db, r.neo4j, r.redis, learner_id, episode_seq, req.topic_id)
+    return _edited(seq)

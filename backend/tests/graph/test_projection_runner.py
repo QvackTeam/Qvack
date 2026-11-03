@@ -339,3 +339,33 @@ async def test_disputes_check_the_target_and_append_one_event(
     assert await declare_typo(pg_db, None, mine, 1, "main") == 4
     assert await declare_typo(pg_db, None, mine, 1, "main") == 4  # the same verdict, one event
     assert await declare_typo(pg_db, None, other, 1, "main") is None
+
+
+async def test_topic_edits_check_the_topic_and_append_one_event(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings
+) -> None:
+    """WP8.2 (`Т-§4.11`, D-A-193): each edit of the learner's topic is one event; a topic of
+    another learner or of another domain is «not found»; a retry gives the same event."""
+    from quack.domains import topic_edits as edits
+
+    mine, other = await create_learner(pg_db), await create_learner(pg_db)
+    t1, t2, far = uuid4(), uuid4(), uuid4()
+    async with neo4j.session() as session:
+        await session.run(
+            "UNWIND $rows AS r CREATE (:Topic {id: r.id, learnerId: $l, name: r.name, "
+            "domainId: r.d, knownClaimedAtMs: 0})",
+            l=str(mine),
+            rows=[
+                {"id": str(t1), "name": "a", "d": "d"},
+                {"id": str(t2), "name": "b", "d": "d"},
+                {"id": str(far), "name": "c", "d": "e"},
+            ],
+        )
+    assert await edits.rename(pg_db, neo4j, None, mine, t1, "A") == 1
+    assert await edits.rename(pg_db, neo4j, None, mine, t1, "A") == 1  # a retry
+    assert await edits.rename(pg_db, neo4j, None, other, t1, "A") is None
+    assert await edits.merge(pg_db, neo4j, None, mine, t1, far) is None  # another domain
+    assert await edits.merge(pg_db, neo4j, None, mine, t1, t2) == 2
+    assert await edits.hide(pg_db, neo4j, None, mine, t2) == 3
+    assert await edits.claim_known(pg_db, neo4j, None, mine, t2) == 4
+    assert await edits.reassign(pg_db, neo4j, None, mine, 99, t2) is None  # no such episode

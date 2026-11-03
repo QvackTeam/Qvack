@@ -970,6 +970,17 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
 - Тесты: `tests/graph/test_projection_runner.py::test_disputes_check_the_target_and_append_one_event`; `tests/test_app_assembly.py` (маршруты, авторизация до валидации, снимок OpenAPI).
 - Требует подтверждения владельцем: нет.
 
+### D-A-193. WP8.2: правки тем и «я это уже знаю» — пять маршрутов
+- Класс: B. WP8.2; `Т-§4.11`, ТЗ §6.4; `quack/domains/topic_edits.py`, `quack/domains/router.py`
+- Решение:
+  1. **Маршруты:** `PATCH /v1/topics/{id} {name}` → `topic.renamed`; `POST /v1/topics/{id}/merge {into}` → `topic.merged`; `POST /v1/topics/{id}/hide` → `topic.hidden`; `POST /v1/topics/{id}/known` → `known.claimed`; `POST /v1/episodes/{episode_seq}/reassign {topic_id}` → `episode.reassigned`. Ответ — `202 {seq}`, как у D-A-192.
+  2. **Проверка цели** (закон 1). Тема — узел `Topic` ученика. Объединение — обе темы ученика, разные и одного домена. Эпизод — событие `episode.closed` ученика с этим `seq`. Иначе — `404 NOT_FOUND`.
+  3. **Ключ идемпотентности.** В запросах §6.4 его нет, поэтому ключ — сама правка с исходным состоянием (закон 5): переименование — `{тема}:{старое имя}->{новое}`, «знаю» — `{тема}:{knownClaimedAtMs}`, остальные — по своим id. Повтор запроса даёт то же событие, следующая правка того же вида — новое.
+  4. **Не здесь.** `PATCH /v1/hubs/{id}` (охват и дата дедлайна) — с WP6.5. Разделение темы — фразой в сессии (B). `topic.moved` — ПОЗЖЕ.
+- Почему: §0.4.3 п.1–2.
+- Тесты: `tests/graph/test_projection_runner.py::test_topic_edits_check_the_topic_and_append_one_event`; `tests/test_app_assembly.py` (T-A1, снимок OpenAPI пересобран).
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
