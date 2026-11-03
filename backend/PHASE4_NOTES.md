@@ -99,7 +99,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | WP0 (зона A) | A | выполнен: аудит B1–B7, B21; п.3б, п.3в | — (скрипты п.3б, п.3в) |
 | WP2 (A) | A | **S3 заморожен (G1)** в `phase-4-a-s3-freeze` (D-A-119): 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; Q-A-2, Q-A-3 закрыты | `tests/events`: 82 passed (без инфраструктуры) |
 | WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` (D-A-111); `MisconceptionFact.statement` (D-B-145) — `phase-4-a-g1`; факты картины памяти (D-A-126); помощь у свидетельства (D-A-127); реализация — G2 | `tests/graph/test_read_stub.py`: 12 passed |
-| WP7.1 (A), S6 | A | виды задач и таблица правил по событию (D-A-110); строка `known_check` и отмена поручений (D-A-115) — `phase-4-a-g1`; строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 27 passed |
+| WP7.1 (A), S6 | A | виды задач и таблица правил по событию (D-A-110); строка `known_check` и отмена поручений (D-A-115) — `phase-4-a-g1`; строки с данными сверх события, диспетчер на `Db`, эпизоды, очередь и исполнитель WP7.1–7.4 — `phase-4-a-wp7-gaps` (D-A-160…D-A-163, аудит выше); сборка `workers`/`projector` — WP1.3 | `tests/jobs`: 114 passed (без `test_coverage.py`, нужен dbmate) |
 | S5 (A), WP3.2 таблица | A | строки обработчиков проектора на 38 типов в `phase-4-a-s5` (D-A-125); обработчики — G2 | `tests/graph/test_projector_rows.py`: 3 passed |
 | WP15 швы A (п.4–5 сообщения B), WP7.3 | A | `check_extracted` и `mark_covered` в `phase-4-a-wp15-seams` (D-A-124) | `tests/graph/test_extracted_check.py`, `tests/jobs/test_coverage.py`: 16 passed |
 | S1 (A), `JobContext` | A | поля §4.2 `db`, `storage`, `embeddings`, `deletions` в `phase-4-a-g1` (D-A-114) | `tests/jobs/test_job_context.py`: 2 passed |
@@ -155,6 +155,48 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | B20 | подтверждено | `quack/practice/generation.py` (`build_generated_task`), роль `task_gen@1`; `task_checker`/`task_arbiter` нет |
 | B25 | подтверждено | `quack/llm/labels.py`: метки `S`/`T`/`K`/`M`, таблица в `ops.turn_manifests` |
 | B27 | подтверждено | `backend/scripts/meta_smoke.py` — роли Фазы 3, без стриминга и инструментов |
+
+### Аудит WP7.1–WP7.4 (раздел A; ветка `phase-4-a-wp7-gaps`)
+
+Сверка `ТЗ Ф4` WP7.1–WP7.4 (`Т-§7.5`, `Т-§7.10`, `Т-§13.1`–`Т-§13.2`, `Т-§13.8`) с кодом `quack/jobs/`. «Есть» — реализовано и покрыто тестом; «частично» и «нет» — с причиной. Все тесты ниже идут на Postgres (частная база, без dbmate, D-A-163), кроме чистых; Neo4j и Redis им не нужны.
+
+| Пункт ТЗ | Есть? | Где / тест |
+| :-- | :-: | :-- |
+| WP7.1 строки по событию: `episode.closed`, `task.closed`, `session.ended`, `answer.submitted` (быстрый/медленный), `check.failed`, `turn.committed`, `observation.diagnosed`, `photo.uploaded`, `material.uploaded`, `task.created`, `agent.requested`, `today.shown`, проявление заблуждения, `known.claimed`, `episode.reassigned`, `digest.written`, `handwriting.corrected`, `hub.deadline_set` | есть | `rules_p4.py` (G1, D-A-110, D-A-139); `test_rules_p4.py` |
+| WP7.1 `skill.split` → `extract.episode` по эпизодам с свидетельствами старого навыка | есть (этот PR) | `rules_p4._skill_split_reextract`, `facts_p4.skill_split_episodes`; `test_rules_p4`, `test_dispatcher_p4::test_skill_split_reextracts_…` |
+| WP7.1 `artifact.topic_refresh` (`session.ended`; `task.closed` с подсказками): правило | есть (#154) | `rules_p4`; тест правила в #154 |
+| то же: сбор домашних тем из журнала | есть (этот PR) | `facts_p4.session_topic_ids`, `hinted_task_topic_ids`; `test_session_end_refreshes_…`, `test_closed_task_with_hints_…`, `…_with_no_exposure_…` |
+| WP7.1 `artifact.cheatsheet` | есть (#154, D-A-139) | строка по событию; вне этого PR |
+| WP7.1 `embedding.compute`: кусок, заблуждение | есть (этот PR) | `rules_p4._chunk_indexed`, `_misconception_described`; `test_embedding_rows_…`, `test_embedding_jobs_carry_…` |
+| то же: тема, навык, свидетельство | **нет** | свойство для эмбеддинга темы/навыка — \[ПРОВЕРИТЬ\] (D-A-117); у свидетельства id даёт проектор, в событии его нет. Строка `*` осталась в `ROWS_NEED_FACTS` (D-A-162) |
+| WP7.1 `graph.hygiene`: `session.ended` с временными сущностями; каждые `graph_hygiene_every_topics` тем (`counters`) | есть (этот PR) | `rules_p4._session_hygiene`, `_topics_hygiene`, `dispatcher_p4._facts`; `test_graph_hygiene_…`, `test_hygiene_every_n_new_topics_…` |
+| WP7.1 `required_seq` = событие-триггер, `NULL` у читающих журнал | есть | `rules_p4._plan`; `test_job_waits_for_the_projector` (захват) |
+| WP7.1 ключ задачи детерминирован, `{coalesce_key}:{seq}`; `ON CONFLICT DO NOTHING` по `job_key`; склейка `GREATEST` | есть | `queue_p4.enqueue`; `test_enqueue_is_idempotent_by_job_key`, `test_coalesce_raises_required_seq_…`, `test_concurrent_coalescing_inserts_…` |
+| WP7.1 счётчики «каждые N» в `ops.dispatcher_offsets.counters` | есть | `dispatcher_p4._Counters`; `test_hygiene_every_n_new_topics_…`, `test_open_episode_of_a_session_is_kept_…` |
+| WP7.1 / T-D1: видов без правила нет | есть | `test_every_non_periodic_kind_has_a_row`, `test_dispatcher_column_of_the_catalog_is_covered_by_rows_or_episodes` (четыре метки каталога без строки — вопрос владельцу, D-A-162) |
+| WP7.2 `episode.closed` диспетчером, ключ `episode:{session}:{to_seq}`, `append_events` в транзакции отметки | есть | `dispatcher_p4._write_episode_closed`; `test_task_closed_closes_the_episode_…`, `test_a_replay_of_the_log_adds_…` |
+| WP7.2 границы: `task.closed`, `head.intent`/шаг плана, `episode_max_turns`, `session.ended` | есть | `episodes.EpisodeTracker`; `test_episodes.py`, `test_session_ended_and_turn_limit_…`, `test_max_turns_closes_…` (T-D2) |
+| WP7.2 `episode_idle_min`: периодическая проверка | есть | `dispatcher_p4.close_idle_episodes` (`dispatcher.episode_idle`) + разрыв по времени событий; `test_idle_episode_is_closed_…`, `test_idle_check_waits_for_unread_events` |
+| WP7.2 открытый эпизод сессии — в `counters` | есть | `test_open_episode_of_a_session_is_kept_…` |
+| WP7.2 `has_content = false` → покрытие `nothing_to_extract`, задачи нет | есть | `episodes.episode_has_content`, `dispatcher_p4._apply_rules`; `test_episode_without_content_is_covered_…` (T-D3) |
+| WP7.2 окно извлечения (`episode_context_turns`) | не зона A | собирает задача WP15 (B) по номерам из события |
+| WP7.3 `ops.coverage`, запись вместе с наблюдением | есть (D-A-124) | `coverage.mark_covered`; `test_coverage.py` (нужен dbmate — здесь не прогонялся) |
+| WP7.3 «нет покрытия — диспетчер ставит задачу» | частично | задача ставится на `episode.closed`; обхода «эпизоды без покрытия» (потерянная задача) нет — потребителя ТЗ не называет |
+| WP7.3 `nothing_to_extract` новой версией не переобрабатывается | частично | запись есть и ключ включает версию; задачи «переобработка по смене версии» в ТЗ нет — защита нужна ей, не диспетчеру по событию |
+| WP7.4 поля `ops.jobs` ровно `Т-§13.1`, частичные уникальные индексы | есть (G0) | `db/migrations/…baseline.sql`; `queue_p4` пишет и читает именно их |
+| WP7.4 захват: `queued`, `run_at`, `ORDER BY priority_class, created_at`, `SKIP LOCKED` | есть | `queue_p4.claim_next`; `test_claim_orders_by_class_then_age`, `test_future_run_at_…`, гонки: `test_concurrent_claims_…` (3) |
+| WP7.4 допуск классов (давление моделей роли вида) | есть | `executor_p4.JobWorker.claimable_kinds` → `kinds`; `test_worker_runs_only_kinds_…` |
+| WP7.4 `required_seq` против `projector_offsets.seq` | есть | `test_job_waits_for_the_projector`, `test_projector_of_another_learner_…` |
+| WP7.4 одна задача на `lock_key` | есть | `test_one_running_job_per_lock_key`, `test_lock_is_held_while_cancel_is_requested`, `test_concurrent_claims_respect_one_lock_key` |
+| WP7.4 `max_jobs_per_learner` | есть | `test_max_jobs_per_learner` (T-D5), `test_cancel_requested_job_still_counts_…`, `test_concurrent_claims_never_exceed_the_cap_…` |
+| WP7.4 пульс 15 с, чистильщик 60 с, плавная остановка | есть | `executor_p4.run_claimed`, `JobWorker`, `queue_p4.reap_stale`; `test_executor_p4.py`, `test_stale_worker_cannot_finish_…` |
+| WP7.4 повторы до `job_max_attempts`, пауза растёт с разбросом; `failed` + `agent.completed {ok: false}`; `ops.dlq` нет | есть | `queue_p4.fail_or_retry`; `test_retry_with_growing_pause_…` (T-D8), `test_failure_writes_the_event_once`, `test_failure_commits_nothing_…` |
+| WP7.4 отмена: ждущая → `cancelled`, работающая → `cancel_requested` → пульс → `cancelled` | есть | `queue_p4.request_cancel`, `executor_p4`, правило `turn.committed` (D-A-115); `test_cancel_queued_and_running`, `test_cancel_requested_is_seen_at_the_pulse_…`, `test_plan_update_cancels_the_requests_…` (T-D6) |
+| WP7.4 `skipped_budget` для P2/P3 сессии; извлечение и аналитик вне бюджета | есть | `queue_p4.claim_next`; `test_skipped_budget` (T-D7) |
+| WP7.4 дневной потолок `learner_daily_budget_usd` | не в очереди | проверяет шлюз при вызове (WP10.4, отложено владельцем до G3) |
+| WP7.4 `visible` по виду; плашка `GET /v1/sessions/{id}/jobs` | частично | поле и запрос `queue_p4.visible_jobs` — есть (`test_visible_jobs_of_the_session_only`, T-D10 в части запроса); объявление маршрута — `quack/session/router.py` (B, §7.3 п.3); сообщение `jobs_changed` при смене статуса — нет: канал и издатель в §4.8 не названы (вопрос C) |
+| WP7.5 `dispatcher.episode_idle` | есть | см. выше; остальные периодические задачи — G3 |
+| Сборка `workers`/`projector` на `DispatcherP4`/`JobWorker`, `HANDLER_MODULES` | нет | переход со старого стека — WP1.3 (D-A-103); модули лежат рядом со старыми |
 
 ## Промпты
 
@@ -518,6 +560,20 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/graph/test_read_stub.py::test_extraction_candidates_of_wp15`; `tests/jobs/test_rules_p4.py::test_handwriting_known_claim_and_reextraction_rows`.
 - Требует подтверждения владельцем: нет.
 
+### D-A-137. S4: чтения для контекста хода и описания заблуждения; `GraphReader` в `workers`; снимок слотов 3–4
+- Класс: B. WP6.4, WP14.1–14.2, WP16.2; `Т-§9.3`, `Т-§9.5`, `Т-§10.1`, `Т-§10.2`; вопросы B в #125 и #155; `quack/graph/read/`, `tests/support/graph_read.py`
+- Решение:
+  1. **`SkillFact.name`, `SkillFact.topic_name`** (оба `None`, пока не прочитаны) — срез и все чтения отдают названия сразу.
+  2. **`GraphReader.domain_goals(domain_id) -> list[HubGoal{hub_id, name, kind, control_type, deadline_at_ms, topics: [HubTopicGoal{topic_id, name, required_levels}]}]`** — по графу: слияния, разбиения и переименования тем уже учтены.
+  3. **`GraphReader.profile(learner_id) -> ProfileFacts{prefs, manner, learned_helpful_approach, learned_confidence_brier, learned_confidence_bias, learned_branch_rate, learned_reasoning_share}`** (`Т-§9.5`): `None` — «нет данных» (меньше `profile_min_samples`, для уверенности — `calibration_min_reports`), не ноль. Выученное считает свёртка профиля (WP5.3).
+  4. **`GraphReader.topic_memory(topic_ids) -> list[TopicMemory{topic_id, name, domain_id, skills, misconceptions}]`** — навыки тем цели сессии; их `skill_id` идут в `SliceFocus.skill_ids`. Неизвестная тема пропускается.
+  5. **`GraphReader.misconception_detail(misconception_id) -> MisconceptionDetail | None`** — id через `Alias` (после `misconception.merged` читается цель); поля `status` (включая `unknown` у гипотезы до первого проявления), `statement`, `triggers`, `skill_id`, `skill_name`, `manifestations: [ManifestationFact{evidence_id, quote, task_id, source_seq, at_ms, tier}]` — все по `MANIFESTS`, включая перенесённые слиянием.
+  6. **Как `workers` получает читателя:** поле в `JobContext` не добавляется — набор полей это контракт §4.2 без читателя. Обработчик строит `quack.graph.read.create_graph_reader(ctx.neo4j, ctx.settings)` там, где ему нужна память; тест подставляет `FixedGraphReader`. До G2 фабрика поднимает `NotImplementedError`.
+  7. **Снимок слотов 3–4 на сессию:** `Т-§10.1` требует заморозки на начало сессии, `state_at` для этого не нужен. Место хранения — зона B (контекст хода). Колонка `frozen_slots JSONB NULL` в `ops.turn_manifests` — миграция A, предложение B принято: `db/migrations/20261103000003_turn_manifests_frozen_slots.sql` (`ADD COLUMN frozen_slots JSONB NULL`, откат — `DROP COLUMN`). B пишет `{profile, domain_and_goals}` в манифест первого хода и читает снимок из самого раннего манифеста сессии с непустым `frozen_slots`; строки хвоста — из событий после `session.started`.
+- Почему: §0.4.3 п.2 (`Т-§9.5`, `Т-§10.1`), п.5; состав полей назван A в #125 и #155.
+- Тесты: `tests/graph/test_read_stub.py` (names, goals, profile, topic_memory, misconception_detail, factory); `tests/db/test_baseline_migration.py::test_turn_manifests_frozen_slots_column`.
+- Требует подтверждения владельцем: нет.
+
 ### D-A-136. S6 G2: строки `artifact.topic_refresh` по `Т-§17.7`; cheat sheet — после согласия
 - Класс: B. WP7.1, WP23.2, WP23.5; `Т-§13.3`, `Т-§17.7`; приоритет C в #135; `quack/jobs/rules_p4.py`
 - Решение:
@@ -553,18 +609,60 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: C отвечает за состояние предложения (`Т-§17.7`, WP23.5); фактов на этапе планирования строке не нужно.
 - Тесты: `tests/jobs/test_rules_p4.py::test_hub_deadline_set_puts_one_cheatsheet_job_without_facts`.
 - Требует подтверждения владельцем: нет.
-### D-A-137. S4: чтения для контекста хода и описания заблуждения; `GraphReader` в `workers`; снимок слотов 3–4
-- Класс: B. WP6.4, WP14.1–14.2, WP16.2; `Т-§9.3`, `Т-§9.5`, `Т-§10.1`, `Т-§10.2`; вопросы B в #125 и #155; `quack/graph/read/`, `tests/support/graph_read.py`
+
+### D-A-160. WP7.2: границы эпизодов и `has_content` — выборы там, где ТЗ молчит
+- Класс: B. WP7.2, `Т-§7.5`, `Т-§2.1`; `quack/jobs/episodes.py`, `quack/jobs/dispatcher_p4.py`
+- Контекст: ТЗ называет границы и принцип `has_content`, но не говорит, какие события входят в эпизод, по какую сторону границы лежит событие смены намерения, как считать «пустоту».
 - Решение:
-  1. **`SkillFact.name`, `SkillFact.topic_name`** (оба `None`, пока не прочитаны) — срез и все чтения отдают названия сразу.
-  2. **`GraphReader.domain_goals(domain_id) -> list[HubGoal{hub_id, name, kind, control_type, deadline_at_ms, topics: [HubTopicGoal{topic_id, name, required_levels}]}]`** — по графу: слияния, разбиения и переименования тем уже учтены.
-  3. **`GraphReader.profile(learner_id) -> ProfileFacts{prefs, manner, learned_helpful_approach, learned_confidence_brier, learned_confidence_bias, learned_branch_rate, learned_reasoning_share}`** (`Т-§9.5`): `None` — «нет данных» (меньше `profile_min_samples`, для уверенности — `calibration_min_reports`), не ноль. Выученное считает свёртка профиля (WP5.3).
-  4. **`GraphReader.topic_memory(topic_ids) -> list[TopicMemory{topic_id, name, domain_id, skills, misconceptions}]`** — навыки тем цели сессии; их `skill_id` идут в `SliceFocus.skill_ids`. Неизвестная тема пропускается.
-  5. **`GraphReader.misconception_detail(misconception_id) -> MisconceptionDetail | None`** — id через `Alias` (после `misconception.merged` читается цель); поля `status` (включая `unknown` у гипотезы до первого проявления), `statement`, `triggers`, `skill_id`, `skill_name`, `manifestations: [ManifestationFact{evidence_id, quote, task_id, source_seq, at_ms, tier}]` — все по `MANIFESTS`, включая перенесённые слиянием.
-  6. **Как `workers` получает читателя:** поле в `JobContext` не добавляется — набор полей это контракт §4.2 без читателя. Обработчик строит `quack.graph.read.create_graph_reader(ctx.neo4j, ctx.settings)` там, где ему нужна память; тест подставляет `FixedGraphReader`. До G2 фабрика поднимает `NotImplementedError`.
-  7. **Снимок слотов 3–4 на сессию:** `Т-§10.1` требует заморозки на начало сессии, `state_at` для этого не нужен. Место хранения — зона B (контекст хода). Колонка `frozen_slots JSONB NULL` в `ops.turn_manifests` — миграция A, предложение B принято: `db/migrations/20261103000003_turn_manifests_frozen_slots.sql` (`ADD COLUMN frozen_slots JSONB NULL`, откат — `DROP COLUMN`). B пишет `{profile, domain_and_goals}` в манифест первого хода и читает снимок из самого раннего манифеста сессии с непустым `frozen_slots`; строки хвоста — из событий после `session.started`.
-- Почему: §0.4.3 п.2 (`Т-§9.5`, `Т-§10.1`), п.5; состав полей назван A в #125 и #155.
-- Тесты: `tests/graph/test_read_stub.py` (names, goals, profile, topic_memory, misconception_detail, factory); `tests/db/test_baseline_migration.py::test_turn_manifests_frozen_slots_column`.
+  1. **События эпизода** — столбец «Диспетчер = эпизод» таблицы §6.3 (`EPISODE_OPENERS`: `session.started`, `message.sent`, `answer.submitted`, `element.responded`, `canvas.line_*`, `voice.transcribed`, `hint.requested`, `solution.requested`, `check.skipped`, `item.flagged_unclear`, `hint.shown`, `turn.committed`) плюс `task.closed` и `session.ended` как закрывающие. `verdict.recorded` только присоединяется к открытому эпизоду и не открывает его: вердикт страховки приходит после закрытия эпизода, и без этого запоздалый вердикт делал бы эпизод из одного себя. Выходы системы (наблюдения, сводки, результаты агентов) эпизод не открывают и таймер простоя не двигают.
+  2. **Стороны границ.** `task.closed`, `session.ended` и предел ходов закрывают эпизод вместе с собой (`to_seq` — их `seq`). Смена `head.intent` или `markup.plan_update.current_step` в `turn.committed` закрывает эпизод до этого хода (`to_seq` — последнее событие перед ним), а сам ход открывает следующий: ход с новым намерением относится к новой теме разговора. Первый ход эпизода границы не даёт.
+  3. **Простой** `episode_idle_min`: (а) по времени событий — если между последним событием эпизода и следующим событием сессии прошло не меньше, эпизод закрывается на последнем событии (повтор журнала закрывает те же эпизоды); (б) по часам — `close_idle_episodes` (периодическая проверка диспетчера, шаг `consumer_poll_ms`) для сессии, которая замолчала. Ученика с ещё не прочитанными событиями проверка пропускает.
+  4. **`has_content`** — `False`, только если в эпизоде нет слов ученика (`message.sent`, `voice.transcribed`, `item.flagged_unclear`, `element.responded` с текстом), строк канваса (`canvas.line_committed`/`erased`), ответов не закрытых типов и ответов с размышлением (`text`), и каждый закрытый ответ (`choice`, `number`, `expression`, `set`, `vector`, `quantity`, `short_text`) имеет в эпизоде вердикт `verification = code` по тому же `(answer_seq, part)`. Закрытый ответ без вердикта в эпизоде (страховка `check.symbolic` придёт позже) считается содержанием: извлекатель лучше прочтёт лишнее, чем пропустит слово. Эпизод вообще без ввода ученика — `False` (толковать нечего; показы пишет код, `Т-§7.8` п.6).
+  5. **Запись.** `episode.closed`: актор `system`, ключ `episode:{session_id}:{to_seq}` (`keys.episode_key`), `causation_seq = to_seq`, `occurred_at` — время события, решившего закрытие (по часам — время проверки), `domain_id` — из событий эпизода; `append_events` в транзакции отметки. Открытый эпизод каждой сессии — `counters.episodes[<session_id>]`.
+  6. **Покрытие `nothing_to_extract`:** диспетчер пишет его при разборе самого `episode.closed` с `has_content = false` (`episode_seq` — `seq` этого события, как в `observation.extracted`, D-B-172; `extractor` — `prompt` роли `extractor` из `Settings.llm_roles`, сейчас `extractor@3`), без задачи.
+- Почему: `Т-§7.5`, `Т-§2.8`; §0.4.3 п.2 (буква документа там, где она есть), п.5.
+- Обратимость: один модуль, чистая машина состояний.
+- Тесты: `tests/jobs/test_episodes.py` (17), `tests/jobs/test_dispatcher_p4.py` (T-D2, T-D3, повтор журнала). Проверено 10 подменами (граница `>=`/`>`, сторона границы, простой, открытие запоздалым вердиктом, ключ `episode.closed`, нет покрытия, не считаются ответы) — каждая роняет тест.
+- Требует подтверждения владельцем: нет. Вопрос к B: п.2 (сторона границы смены намерения) — в `Т-§7.5` не уточнено.
+
+### D-A-161. WP7.4: очередь Фазы 4 на `Db` — выборы там, где `Т-§13.1` молчит
+- Класс: B. WP7.4, `Т-§13.1`, `Т-§13.2`, `Т-§13.7`–`Т-§13.9`; `quack/jobs/queue_p4.py`, `quack/jobs/executor_p4.py`
+- Решение:
+  1. **Попытка считается при захвате** (`attempts += 1` в `claim_next`), а не при сбое: исполнитель, упавший посреди задачи, тоже тратит попытку, и задача, убивающая исполнителя, не крутится вечно; `defer` и `release` попытку возвращают. `attempts` же — защита от «потерянной» задачи: `heartbeat`, `complete`, `fail_or_retry`, `defer`, `release` действуют только при совпадении `attempts` у захвата, поэтому исполнитель, у которого чистильщик отнял задачу и её взял другой, ничего не завершит. Колонки `locked_by` в `Т-§13.1` нет, и она не нужна.
+  2. **Захват.** Кандидат: `queued`, `run_at <= now()`, `projector_offsets.seq >= required_seq`, вид из допущенных, нет задачи с тем же `lock_key` в `running` или `cancel_requested`, у ученика в работе меньше `max_jobs_per_learner` (предварительно в запросе, точно — под `pg_advisory_xact_lock` ученика, чтобы два исполнителя не обогнали друг друга); `ORDER BY priority_class, created_at, job_key FOR UPDATE SKIP LOCKED`. Задача в `cancel_requested` ещё занимает ключ и место ученика: исполнитель её не остановил.
+  3. **Склейка** оставляет нагрузку ждущей задачи как есть и поднимает только `required_seq` (`Т-§13.1`: нагрузка склеиваемой задачи не несёт данных о событии). Вставка: сначала `job_key` (повтор отбрасывается при любом статусе), затем `UPDATE … GREATEST` по `coalesce_key`, затем `INSERT … ON CONFLICT (job_key) DO NOTHING` в точке сохранения; гонку за `coalesce_key` ловит `UniqueViolation` и один повтор. `ON CONFLICT (coalesce_key)` в одном выражении с `job_key` PostgreSQL не допускает (одна арбитражная цель), поэтому порядок такой.
+  4. **Бюджет.** Перед стартом задача P2/P3 сессии, чей вид не в `BUDGET_EXEMPT_KINDS` (`extract.episode`, `analyst.run`, `analyst.deep`), получает `skipped_budget`, если `ops.llm_usage` этой сессии по ролям классов P2/P3, кроме извлечения, аналитика и `session_budget_exempt_roles`, превысила `session_agent_budget_usd` (ровно предел — ещё можно). Ходы учителя и P1 не считаются. Дневной потолок — вызов шлюза (WP10.4), очередь его не трогает.
+  5. **Сбой.** Временная ошибка — `queued` с `run_at = now() + min(cap, base · 2^attempts) · (0,75…1,25)`; исчерпание `job_max_attempts` или `JobFailedPermanently` — `failed` и `agent.completed {ok: false, error}` в одной транзакции (закон 7): актор `system`, ключ `agent_completed:{job_key}`, для поручения `request_id` из нагрузки, иначе `job_key`; `kind` — вид агента из нагрузки либо вид задачи; текст ошибки до 500 знаков, без стека (колонки нет). Задача периодическая (без ученика) события не пишет. Чистильщик возвращает задачу без паузы; зависшая `cancel_requested` — `cancelled`. Возврат в очередь задачи с `coalesce_key`, когда уже ждёт новая с тем же ключом, — `cancelled` со склейкой `required_seq` в ждущую (индекс не пустит двух).
+  6. **Исполнитель.** `run_claimed`: задача handler'а — `asyncio`-задача, пульс раз в `job_heartbeat_interval_sec`; ответ пульса `cancel_requested` — отмена задачи и `cancelled`; `None` — задачу забрали, ничего не пишем; отмена самого исполнителя (остановка) — `release`. `JobDeferred`/`JobFailedPermanently` — классы Фазы 3 (`quack.jobs.queue`), чтобы обработчики B писали одно и то же. `JobWorker` — цикл `claim → run`, допуск по флагам давления Фазы 3 (`quack.llm.pressure`, только чтение) для ролей вида, чистильщик каждые `job_stale_after_sec / 2`, плавная остановка.
+- Почему: `Т-§13.1`, `Т-§13.2`; закон 5 (повтор не дублирует), закон 7.
+- Обратимость: модули рядом со старой очередью (D-A-103), старые не тронуты.
+- Тесты: `tests/jobs/test_queue_p4.py` (33), `tests/jobs/test_executor_p4.py` (8): T-D4, T-D5, T-D6, T-D7, T-D8, T-D10 (запрос) и гонки (захват 20 исполнителей, склейка 10 вставок, один `lock_key`, предел ученика). Мутации: без блокировки ученика, без `required_seq`, без `GREATEST`, без `cancel_requested` в пульсе, без проверки `attempts`, без `release`, без `complete`, без ветки отмены — каждая роняет тест (мутант «без `FOR UPDATE SKIP LOCKED`» эквивалентен: `UPDATE … WHERE status = 'queued'` не отдаст задачу дважды и без него).
+- Требует подтверждения владельцем: нет.
+
+### D-A-162. WP7.1: строки с данными сверх события — диспетчер читает журнал, не граф
+- Класс: B. WP7.1, `Т-§13.3`, `Т-§17.7`, `Т-§2.8`, `Т-§4.10`; уточняет D-A-136 п.1, D-A-135, D-A-117; `quack/jobs/facts_p4.py`, `quack/jobs/rules_p4.py`, `quack/jobs/dispatcher_p4.py`
+- Решение:
+  1. **Домашнюю тему навыка диспетчер берёт из журнала, не из `COVERS`.** D-A-136 п.1 говорил «структура графа»; но `Т-§13.3`: «диспетчер читает журнал, а не проекцию», и диспетчер, и проектор идут по журналу независимо — граф к моменту `session.ended` может быть ещё не применён. `HomeTopics` сворачивает события структуры по `seq` (`skill.created`, `skill.split`, `skill.merged`, `topic.split`, `topic.merged`; псевдонимы идут по цепочке). Временный навык, чей id даёт только проектор, домашней темы в журнале не имеет и тем не даёт.
+  2. **`session.ended` → `artifact.topic_refresh`:** навыки показов (`turn.committed.markup.exposures`), свидетельств извлекателя (`observation.extracted`, элементы `evidence`) и свидетельств вердиктов (навыки `tests` задач, на которые в сессии отвечали) → темы. **`task.closed`** → темы навыков задачи (последняя исправленная разметка, иначе своя), если по задаче был `hint.shown`. Строки и ключи — D-A-136; `RuleFacts` расширен полями строк ниже.
+  3. **`skill.split`:** эпизоды — строки `ops.coverage` со статусом `extracted`, чьё наблюдение имеет элемент `evidence` старого навыка; по задаче на эпизод, ключ `extract.episode:{learner}:{seq}:{episode_seq}`, нагрузка `{episode_seq, restrict_skill_ids}` (D-A-135). При двух версиях извлекателя эпизод может прийти от старой версии лишний раз, но не потеряться.
+  4. **`graph.hygiene`:** `session.ended`, если в сессии есть временные сущности — `skill.created` со статусом `provisional`, описание нового навыка (`new_skill`) в разметке задач, в `task.created` или в элементе наблюдения; домен — из `session.started`. И `topic.created`: счётчик новых тем домена в `counters.new_topics`, по достижении `graph_hygiene_every_topics` — задача и сброс. P3, `domain:{id}` / `hygiene:{domain}`, `required_seq` = событие, нагрузка `{domain_id, reason}`.
+  5. **`embedding.compute`:** строки `chunk.indexed` (текст куска) и `misconception.described` (формулировка) — по событию, без графа, `required_seq` пуст (D-A-117). Остаются открытыми: тема и навык (какое свойство эмбеддится — \[ПРОВЕРИТЬ\] в `Т-§3.4.2`), свидетельство (id даёт проектор). Строка `*` в `ROWS_NEED_FACTS` остаётся.
+  6. **Вопрос владельцу.** В каталоге §6.3 столбец «Диспетчер» отмечен у `skill.merged` и `material.parsed`, а строки в `Т-§13.3` и WP7.1 у них нет; `test_dispatcher_column_of_the_catalog_…` держит этот список из четырёх типов явно (вместе с `skill.created`, `topic.proposed` — эмбеддинг).
+- Почему: `Т-§13.3`; §0.4.3 п.2; закон 1 (журнал — источник), закон 9 (диспетчер не ждёт проектор).
+- Обратимость: данные собираются в одном модуле, строки — в таблице.
+- Тесты: `tests/jobs/test_dispatcher_p4.py` (`test_skill_split_…`, `test_session_end_…`, `test_closed_task_with_hints_…`, `test_hygiene_…`, `test_embedding_jobs_…`), `tests/jobs/test_rules_p4.py`. Подмены: нет `learner_id` в выборке покрытия, любой элемент вместо `evidence`, нет свёртки структуры, не сбрасывается счётчик — роняют тест.
+- Требует подтверждения владельцем: нет.
+
+### D-A-163. Тесты WP7 без dbmate: частная база и селекторный цикл на Windows
+- Класс: A (`tests/jobs/`). `tests/jobs/conftest.py`
+- Решение: фикстура `jobs_db` создаёт базу `<тестовая>_p4_wp7`, применяет `migrate:up` каждого файла `db/migrations/*.sql` через psycopg и очищает таблицы перед каждым тестом. dbmate не нужен, общая база `<тестовая>_p4` (её `TRUNCATE` ломает параллельные прогоны других потоков) не используется. На Windows psycopg не работает на `ProactorEventLoop`, поэтому `conftest` ставит `WindowsSelectorEventLoopPolicy` (только `win32`).
+- Тесты: все тесты WP7 выше. Требует подтверждения владельцем: нет.
+
+### D-A-164. T-DB4 и очередь: межученические запросы очереди и диспетчера — в списке исключений
+- Класс: B. WP7.1, WP7.4; `Т-§13.1`–`Т-§13.3`, ТЗ WP1.2 (`T-DB2`, `T-DB4`); `tests/db/test_sql_static.py`, `quack/jobs/queue_p4.py`, `quack/jobs/dispatcher_p4.py`
+- Решение: очередь и диспетчер обслуживают всех учеников. Задача находится по глобальному `job_key` или `coalesce_key`. У периодической задачи нет ученика. Выбор берёт лучшую задачу любого ученика. Диспетчер обходит учеников, отставших от своей отметки. Их запросы внесены в `CROSS_LEARNER_ALLOWED` по имени, с причиной (как D-C-111, D-A-128). Встроенный SQL вынесен в именованные константы (`_CANCEL_SUPERSEDED`, `_STALE`, `_PENDING_LEARNERS`, `_LAG`, `_IDLE_LEARNERS`): по имени его можно внести в список, а f-строка в вызове запрещена `T-DB2`. Чтения и отмена по ученику (`request_cancel`, `visible_jobs`) остаются с `learner_id` в `WHERE`.
+- Почему: §0.4.3 п.1; CI #182 — 2 failed (`test_no_fstring_sql`, `test_repository_functions_take_learner_id`).
+- Тесты: `tests/db/test_sql_static.py` — 4 passed; `tests/jobs` — 118 passed.
 - Требует подтверждения владельцем: нет.
 
 ### D-A-140. WP6.4: ядро `quack.graph.read` на Neo4j — привязка к ученику, отметка, ожидание
@@ -599,6 +697,34 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: методы, получающие только id узла (`topic_memory`, `topic_requires`, `topic_readiness`, `recall_probability`, `domain_goals`), брали владельца из узла и отдали бы данные другого ученика. Протокол не меняется, B и C правят только вызов фабрики.
 - Тесты: `tests/graph/test_read_neo4j_core.py::test_factory_reader_is_bound_to_its_learner`.
 - Требует подтверждения владельцем: нет.
+
+### D-A-165. WP7.4: сигнал плашки `jobs_changed` (T-D10) — по ответу C в #183 (D-C-141)
+- Класс: B. WP7.4; `Т-§13.8`, `Т-§1.6`; `quack/jobs/queue_p4.py`
+- Решение: каждая смена статуса задачи с `visible` и непустым `session_id` после коммита публикует в `learner:{id}` объект `{"kind": "jobs_changed", "session_id"}` (orjson). Переходы: вставка (`queued`), выбор (`running`), `skipped_budget`, завершение (`succeeded`/`failed`/`cancelled`), возврат в очередь, вытеснение, отмена. При отмене — один сигнал на сессию. Публикация идёт через `Db.on_commit`, сбой пишется в лог (закон 9). Без Redis сигнала нет. Функции очереди принимают `redis=` (по умолчанию `None`); исполнитель и диспетчер передают свой.
+- Почему: §0.4.3 п.1; формат канала решён C (D-C-141), потребитель — `learner_stream.py` (C).
+- Тесты: `tests/jobs/test_queue_p4.py::test_visible_and_plaque` (не до коммита, невидимая и без сессии молчат, по одной публикации на смену).
+- Требует подтверждения владельцем: нет.
+
+### D-A-166. WP7.5: периодические задачи Фазы 4 — ключ периода
+- Класс: B. WP7.5; `Т-§13.1`; `quack/jobs/periodic_p4.py`, `rules_p4.JobPlan`
+- Решение:
+  1. **Ключи.** `periodic_plans(now)` даёт по строке таблицы WP7.5 с `job_key`, названным периодом в UTC: `deletions-reconcile:{дата}`, `manifests-cleanup:{дата}`, `exports-cleanup:{дата}`, `calibration:{ISO-год}-{неделя}`. Класс P3, `lock_key` = вид, ученика нет, в нагрузке — `period`.
+  2. **Один запуск на период.** `schedule_periodic` кладёт их через `queue_p4.enqueue`, а он отбрасывает повтор `job_key`. Сколько бы тиков ни было у процессов `workers`, на период ставится одна задача.
+  3. **Тип.** `JobPlan.learner_id` стал `UUID | None`: у периодической задачи нет ученика (`ops.jobs.learner_id` допускает NULL).
+  4. **Не сделано.** `session.sweep_inactive` остаётся у планировщика Фазы 3 до WP1.3. `dispatcher.episode_idle` живёт внутри диспетчера. Обработчиков четырёх видов ещё нет, они ждут в очереди: удаление (WP25), манифесты, калибровка — A; экспорт — по владельцу WP. Тик `workers` вызывает `schedule_periodic` со сборкой процесса (WP1.3).
+- Почему: §0.4.3 п.1–2.
+- Тесты: `tests/jobs/test_queue_p4.py::test_periodic_keys` (T-D9).
+- Требует подтверждения владельцем: нет.
+
+### D-A-167. WP7.2/7.4: сбой одного ученика в проверке простоя и сбой пульса не останавливают остальное (ревью #182)
+- Класс: B. WP7.2, WP7.4; `Т-§13.9` (закон 7); `quack/jobs/dispatcher_p4.py`, `quack/jobs/executor_p4.py`
+- Контекст: `close_idle_episodes` обходил учеников подряд, и ошибка на одном обрывала проверку для всех, кто идёт после него; ошибка БД на пульсе выходила из `run_claimed`, оставляя обработчик работать без присмотра (отмена не доходит, задачу позже заберёт чистильщик и она пойдёт второй раз).
+- Решение: ошибка проверки простоя одного ученика пишется в лог (`dispatcher_idle_learner_failed`), обход идёт дальше. Ошибка пульса пишется в лог (`job_heartbeat_failed`), исполнитель ждёт следующего пульса; если БД не вернулась, задачу вернёт чистильщик, а обработчик остановит ответ `None` пульса.
+- Почему: закон 7 — сбой фонового не трогает остальное; `Т-§13.1` — пульс и чистильщик решают судьбу задачи.
+- Обратимость: убрать два `try/except`.
+- Тесты: `tests/jobs/test_dispatcher_p4.py::test_idle_check_survives_a_failing_learner`, `tests/jobs/test_executor_p4.py::test_a_failed_pulse_does_not_orphan_the_handler`.
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
@@ -2133,6 +2259,8 @@ PR #77 (dbmate v2.36.0, sha256).
 - S6 G2 `artifact.topic_refresh` (A, D-A-136, коммит `5eb9b55`): `uv run pytest tests/jobs/test_rules_p4.py` — 1 failed (`NotImplementedError`). Подмены: ключ по склейке и `seq`, блокировка по ученику, нет причины, нет `required_seq`, факты не читаются, подсказки с ключом сессии — 6/6. Зелёный: `tests/jobs` — 35 passed.
 
 ## Правки тестов
+
+- A, 2026-11-03 (#182): тесты WP7 названы ID ТЗ §8: `test_every_rule_row_names_known_kinds` → `test_rule_table` (T-D1), `test_session_ended_and_turn_limit_and_intent_change` → `test_episode_boundaries` (T-D2), `test_episode_without_content_is_covered_by_the_dispatcher` → `test_episode_without_content` (T-D3), `test_coalesce_raises_required_seq_and_keeps_one_job` → `test_coalesce_greatest` (T-D4), `test_cancel_queued_and_running` → `test_cancel_requested` (T-D6), `test_retry_with_growing_pause_then_failed_with_agent_completed` → `test_failed_writes_agent_completed` (T-D8), `test_status_change_of_a_visible_job_publishes_jobs_changed` → `test_visible_and_plaque` (T-D10). `test_max_jobs_per_learner` (T-D5), `test_skipped_budget` (T-D7) уже так названы. T-D9 (`test_periodic_keys`) в #182 нет — периодические задачи Фазы 4 ещё не сделаны.
 
 - `tests/session/test_actions_route.py` (B, D-B-156, до зелёного): клиент шлёт и токен Фазы 3 (ограничитель частоты роутера сессий), и cookie сессии; маршрут берёт ученика только из cookie. Тест «без cookie» шлёт один токен и ждёт `401 UNAUTHENTICATED`. Добавлен тест освобождения блокировки хода. Утверждения не ослаблены.
 - `tests/e2e/test_isolation_and_idempotency.py`, `tests/e2e/endpoints.py` (C, WP23.1): три маршрута блоков — в обходе `T-E2`; тема для них записывается в журнал Фазы 4 (`topic.created`), которого структура Фазы 3 в обходе не пишет (D-C-112); `accept` и `DELETE` — в `NO_OTHER_BODY` (тело — только ключ).
