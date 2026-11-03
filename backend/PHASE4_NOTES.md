@@ -821,6 +821,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/graph/test_projection_batches.py` — `test_no_missing_properties` (T-P2: все свойства `Т-§3.4.2`/`Т-§3.4.4` у каждого узла сценария, без `null`), `test_batches_equal_rebuild_hypothesis` (T-P1: Hypothesis, 40 делений сценария из 20 событий на пачки; фазы А–В в памяти), `test_applying_a_batch_again_changes_nothing`, `test_script_reaches_every_phase`. Подмена «темы не пересчитываются от изменённых навыков» — тест падает. Сценарий фиксированный, а не случайный по каталогу: случайный — дальше. Чтения Neo4j проверяет `test_projection_runner.py::test_batches_of_any_size_give_one_graph`.
 - Требует подтверждения владельцем: нет.
 
+### D-A-187. WP1.4, S16: `.squawk.toml` и T-DB7
+- Класс: B. WP1.4; `Д-§5.2` п.2, `Д-§6.2`; `backend/.squawk.toml`, `tests/db/test_squawk_config.py`
+- Решение:
+  1. **Конфиг** — только два ключа документа: `pg_version = "16.0"`, `assume_in_transaction = true`. squawk 2.71.0 читает `pg_version` строкой: целое `16` — ошибка конфигурации. Смысл «16» Д-§5.2 сохранён.
+  2. **T-DB7** — статическая проверка: SQL с `CONCURRENTLY` (без комментариев) в части `up` требует `-- migrate:up transaction:false` и `-- squawk-disable-assume-in-transaction`. Проверка сама падает на файле без маркера и на файле с одним маркером из двух.
+  3. **Для C (WP9.3, шаг squawk в CI).** На двух миграциях `core.pairing_tokens` squawk 2.71.0 с этим конфигом выдаёт предупреждения `require-lock-timeout` и `require-statement-timeout`. Д-§5.2 требует ловить блокирующие `ALTER` и индексы без `CONCURRENTLY`, про тайм-ауты молчит. Исключать ли эти правила в конфиге, решает шаг CI — вопрос к C, конфиг их не исключает.
+- Почему: §0.4.3 п.1–2; S16 к G2.
+- Тесты: `tests/db/test_squawk_config.py::test_squawk_config_and_concurrent_marker` (T-DB7).
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
