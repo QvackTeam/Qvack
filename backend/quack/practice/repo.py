@@ -3,6 +3,7 @@ answer to D-B-122): parameters only `%(name)s`, every query filtered by `learner
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID
 
 from quack.db.db import Db
@@ -17,6 +18,14 @@ _BY_KEY = (
     "WHERE learner_id = %(learner_id)s AND idempotency_key = %(key)s"
 )
 _BY_SEQ = f"SELECT {_COLUMNS} FROM core.events WHERE learner_id = %(learner_id)s AND seq = %(seq)s"
+_SESSION_UP_TO = (
+    f"SELECT {_COLUMNS} FROM core.events WHERE learner_id = %(learner_id)s "
+    "AND session_id = %(session_id)s AND seq <= %(to_seq)s ORDER BY seq"
+)
+_OF_TASKS = (
+    f"SELECT {_COLUMNS} FROM core.events WHERE learner_id = %(learner_id)s "
+    "AND type = ANY(%(types)s) AND payload->>'task_id' = ANY(%(task_ids)s) ORDER BY seq"
+)
 
 
 async def event_by_key(db: Db, *, learner_id: UUID, key: str) -> StoredEvent | None:
@@ -25,3 +34,23 @@ async def event_by_key(db: Db, *, learner_id: UUID, key: str) -> StoredEvent | N
 
 async def event_by_seq(db: Db, *, learner_id: UUID, seq: int) -> StoredEvent | None:
     return await db.fetch_one(_BY_SEQ, {"learner_id": learner_id, "seq": seq}, row=StoredEvent)
+
+
+async def session_events_up_to(
+    db: Db, *, learner_id: UUID, session_id: UUID, to_seq: int
+) -> list[StoredEvent]:
+    """The session's events up to `to_seq`, in order."""
+    params = {"learner_id": learner_id, "session_id": session_id, "to_seq": to_seq}
+    return await db.fetch_all(_SESSION_UP_TO, params, row=StoredEvent)
+
+
+async def task_events(
+    db: Db, *, learner_id: UUID, task_ids: Sequence[UUID], types: Sequence[str]
+) -> list[StoredEvent]:
+    """Events of `types` about `task_ids`, in order."""
+    params = {
+        "learner_id": learner_id,
+        "types": list(types),
+        "task_ids": [str(t) for t in task_ids],
+    }
+    return await db.fetch_all(_OF_TASKS, params, row=StoredEvent)

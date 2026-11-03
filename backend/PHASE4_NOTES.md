@@ -1209,6 +1209,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `T-X1` — `tests/agents/test_extract_episode.py::test_extracted_elements_checked_on_the_episode`, `test_record_extraction`, `test_record_extraction_commits_nothing_on_failure`.
 - Не решено \[ПРОВЕРИТЬ\]: потолок уровня — по задаче целиком, не по части (`part`) ответа; задача `extract.episode` (сборка окна из журнала, кандидаты из S4, `task_tests` из `content.tasks`) — следующим шагом WP15.
 - Требует подтверждения владельцем: нет
+
+### D-B-172. Задача `extract.episode`: сборка из журнала и S4 (WP15 п.1–6)
+- Класс: B
+- WP / место: WP15 п.1–2, п.4–6, WP7.1, `Т-§2.1`, `Т-§7.5`, `Т-§7.6`, `Т-§2.8`, `Т-§4.11`; `quack/agents/extract_episode.py` (`ExtractionTrigger`, `extract_episode`, `run_extract_episode`, `task_tests`, `episode_vector`), `quack/practice/repo.py`; швы A: `GraphReader.extraction_candidates` (#147, D-A-135), правила диспетчера `rules_p4.py`
+- Контекст: правила A кладут в задачу `trigger_seq` и, при переизвлечении, `episode_seq` с `topic_id` или `restrict_skill_ids`; у `episode.closed` — `from_seq`, `to_seq`. Не названы: где брать границы эпизода при переизвлечении; из какого текста считать вектор эпизода; откуда разметка задач для потолка уровня; кто строит читателя памяти в процессе `workers`.
+- Решение: (а) эпизод — номер его `episode.closed` (`Т-§2.1`: «Идентичность эпизода — номер этого события»); без `episode_seq` в задаче эпизод — сам `trigger_seq`; границы и `session_id`/`domain_id` берутся из этого события. Номер, который не `episode.closed` сессии, — ошибка задачи. (б) Окно — события сессии до `to_seq` через `extraction_window` (D-B-162). (в) Вектор эпизода — `embed_query` от сырых слов событий эпизода (`source_text`, D-B-165) построчно; нет слов или `EmbeddingsUnavailable` — `None`, и A отдаёт только навыки сессии. (г) Кандидаты и известные заблуждения — `extraction_candidates(..., settings.candidate_skills_k, topic_id=..., skill_ids=...)` A; свои `CandidateSkill`, `KnownMisconception`, `candidate_skill_ids` удалены — отбор и ограничение делает A. (д) Разметка задач окна — из журнала (закон 1): `task.created` с частями, замещается более поздним `corrected_markup` у `task.verified`/`task.key_disputed`/`task.markup_disputed`; пары нового навыка без id не дают. Это уточняет п. (в) D-B-165 («из `content.tasks`»). (е) `run_extract_episode(job, ctx, reader)` принимает читателя аргументом: в `JobContext` (S1) читателя нет, а реализация `GraphReader` в G2 — у A. Обработчик в `JOB_HANDLERS` не регистрируется, пока A не назовёт, как процесс `workers` получает читателя.
+- Почему: §0.4.3 п.2 (WP15, `Т-§2.1`, `Т-§7.6`), п.5.
+- Обратимость: один модуль.
+- Тесты: `tests/agents/test_extract_episode.py::test_extract_episode_job` (три триггера, Modal недоступен, повтор — то же наблюдение), `test_extract_episode_needs_an_episode`, `test_task_tests_from_the_stored_markup`; мутации (без разметки, без `topic_id`, без вектора, без `corrected_markup`) — тесты падают.
+- Не решено \[ПРОВЕРИТЬ\]: регистрация `extract.episode` в `JOB_HANDLERS` — после ответа A, где читатель памяти в `workers`.
+- Требует подтверждения владельцем: нет
 ### D-B-170. Изображение во входе вызова роли (шов S12)
 - Класс: B
 - WP / место: WP21.3 (`recognizer`), WP11.6 (`verdict_free`), `Т-§11.1` «Spark с изображением»; `quack/llm/provider.py` (`ImageInput`, `ProviderRequest.images`), `quack/llm/responses_client.py` (`image_data_url`), `quack/llm/gateway.py` (`generate_structured(images=)`); вопрос-блокер C в #134
