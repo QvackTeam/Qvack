@@ -251,6 +251,9 @@ export const en = {
     openHubAria: (title: string, n: number) => `Open chapter ${title}, ${n} ${plural2(n, "subtopic", "subtopics")}`,
     allTopicsPill: "All topics",
     allTopicsPillAria: "Open the page with all topics of the subject",
+    columnLabel: "Topics outside the chains",
+    columnFree: "Standalone",
+    columnOther: "Other subjects",
     due: "due",
   },
   session: {

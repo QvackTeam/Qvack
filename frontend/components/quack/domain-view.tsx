@@ -2,8 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
-import { API_MODE } from "@/lib/api/client";
-import { getGraphModel } from "@/lib/graph/mock";
+import { useGraphModel } from "@/lib/graph/use-graph-model";
 import { useFmt, useLocale, useMocks, useT } from "@/lib/i18n/provider";
 import { scrollToId } from "@/lib/scroll";
 import { cn } from "@/lib/utils";
@@ -121,7 +120,7 @@ export function DomainView() {
 
   const deadlineHub = domain.hubs.find((h) => h.deadline);
   // The layered graph runs on the slice model. With the API on, the old graph stays until the adapter exists
-  const model = API_MODE ? undefined : getGraphModel(locale, domain.id);
+  const model = useGraphModel(locale, domain.id);
   const hasGraph = model ? model.topics.length > 0 : domain.topics.length > 0;
   const canvasCount = canvasesOf(domain.id).length;
 

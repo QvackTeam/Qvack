@@ -22,6 +22,10 @@ const K_MAX = 2.4;
 const FIT_K_MAX = 1.2;
 const FIT_MARGIN = 56;
 const TWEEN_MS = 450;
+/** A topic leaving the column for its place on the graph travels slower: the learner should see where it went */
+const MOVE_MS = 900;
+/** Width of the left column. It is fixed on screen, so the labels stay readable at any zoom */
+const COL_W = 208;
 const CARD_W = 320;
 /** The learner id is unknown on mocks; the key only has to be stable on this device */
 const LEARNER = "local";
@@ -79,6 +83,10 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const from = useRef(new Map<string, Pt>());
   const target = useRef(new Map<string, Pt>());
   const posTween = useRef<number | null>(null);
+  const posMs = useRef(TWEEN_MS);
+  const colY = useRef(new Map<string, number>());
+  const colEls = useRef(new Map<string, HTMLElement>());
+  const colScroll = useRef<HTMLElement | null>(null);
   const viewTween = useRef<{ start: number; from: View; to: View } | null>(null);
   const raf = useRef(0);
   const loop = useRef<FrameRequestCallback>(() => {});
@@ -93,7 +101,17 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const hubMap = useMemo(() => new Map(model.hubs.map((h) => [h.id, h])), [model]);
   // Saved positions keep known topics in place. The node list does not depend on them, so server and client markup match
   const layout = useMemo(() => layoutGraph(model, loadPositions(LEARNER, model.domainId)), [model]);
-  const scene = useRef({ layout, model, topicMap, hubMap });
+  // Left column: unlinked topics of this domain, then topics from other subjects
+  const column = useMemo(() => {
+    const free = layout.unlinked.map((id) => topicMap.get(id)).filter((t): t is GraphTopic => !!t);
+    const outside = [
+      ...model.otherDomain.map((o) => ({ topic: o.topic, domainName: o.domainName as string | undefined })),
+      ...model.topics.filter((t) => t.status === "off_domain" && t.visibility !== "hidden").map((t) => ({ topic: t, domainName: undefined })),
+    ];
+    return { free, outside, width: free.length || outside.length ? COL_W : 0 };
+  }, [layout, topicMap, model]);
+  const lookup = useMemo(() => new Map([...topicMap, ...model.otherDomain.map((o): [string, GraphTopic] => [o.topic.id, o.topic])]), [topicMap, model]);
+  const scene = useRef({ layout, model, topicMap, hubMap, colW: column.width });
 
   const draw = useCallback(() => {
     const c = canvas.current;
@@ -102,7 +120,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     if (!c || !col || !w || !h) return;
     const ctx = c.getContext("2d");
     if (!ctx) return;
-    const { layout: L, model: m, topicMap: topics, hubMap: hubs } = scene.current;
+    const { layout: L, model: m, topicMap: topics, hubMap: hubs, colW } = scene.current;
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
@@ -119,10 +137,14 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     ctx.globalAlpha = 0.1;
     ctx.beginPath();
     for (const l of m.includes) {
-      const a = pos(l.topicId);
       const b = pos(`h:${l.hubId}`);
-      if (!a || !b) continue;
-      const ax = sx(a.x), ay = sy(a.y), bx = sx(b.x), by = sy(b.y);
+      if (!b) continue;
+      const a = pos(l.topicId);
+      const cy = colY.current.get(l.topicId);
+      // A topic in the column links to its hub the same way, starting at the column edge
+      const ax = a ? sx(a.x) : colW, ay = a ? sy(a.y) : cy;
+      if (ay === undefined || (!a && !colW)) continue;
+      const bx = sx(b.x), by = sy(b.y);
       if (!near(ax, ay, 400) && !near(bx, by, 400)) continue;
       ctx.moveTo(ax, ay);
       ctx.quadraticCurveTo(ax, by + (ay - by) * 0.35, bx, by);
@@ -242,7 +264,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       raf.current = 0;
       let again = false;
       if (posTween.current !== null) {
-        const t = clamp((now - posTween.current) / TWEEN_MS, 0, 1);
+        const t = clamp((now - posTween.current) / posMs.current, 0, 1);
         const e = easeOut(t);
         for (const [key, to] of target.current) {
           const f = from.current.get(key) ?? to;
@@ -287,8 +309,10 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
 
   const fitView = useCallback((w: number, h: number): View => {
     const { x0, x1, y0, y1 } = scene.current.layout.bounds;
-    const k = clamp(Math.min((w - FIT_MARGIN * 2) / Math.max(1, x1 - x0), (h - FIT_MARGIN * 2) / Math.max(1, y1 - y0)), K_MIN, FIT_K_MAX);
-    return { k, tx: w / 2 - ((x0 + x1) / 2) * k, ty: h / 2 - ((y0 + y1) / 2) * k };
+    // The graph lives to the right of the column
+    const cw = scene.current.colW;
+    const k = clamp(Math.min((w - cw - FIT_MARGIN * 2) / Math.max(1, x1 - x0), (h - FIT_MARGIN * 2) / Math.max(1, y1 - y0)), K_MIN, FIT_K_MAX);
+    return { k, tx: cw + (w - cw) / 2 - ((x0 + x1) / 2) * k, ty: h / 2 - ((y0 + y1) / 2) * k };
   }, []);
 
   const zoomAt = useCallback(
@@ -328,25 +352,52 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
         fitted.current = true;
         view.current = fitView(size.w, size.h);
       }
+      // Resizing clears the canvas: paint at once so there is no blank frame
+      draw();
     }
     schedule();
-  }, [size, fitView, schedule]);
+  }, [size, fitView, schedule, draw]);
 
   // A new layout: known nodes stay, whatever moved glides to its place
   useEffect(() => {
-    scene.current = { layout, model, topicMap, hubMap };
+    const was = scene.current.layout.unlinked;
+    scene.current = { layout, model, topicMap, hubMap, colW: column.width };
     savePositions(LEARNER, model.domainId, layout);
     const first = shown.current.size === 0;
     from.current = new Map(shown.current);
     target.current = new Map([...layout.nodes.values()].map((n) => [n.key, { x: n.x, y: n.y }]));
-    // A new node appears where it belongs, it does not fly in from the corner
-    for (const [key, to] of target.current) if (!from.current.has(key)) from.current.set(key, to);
+    // A new node appears where it belongs, it does not fly in from the corner.
+    // A topic that just got a link starts from its spot in the column, so the learner sees where it went
+    let fromColumn = false;
+    const { k, tx: vx, ty: vy } = view.current;
+    for (const [key, to] of target.current) {
+      if (from.current.has(key)) continue;
+      const cy = was.includes(key) ? colY.current.get(key) : undefined;
+      if (!first && cy !== undefined) {
+        from.current.set(key, { x: (COL_W + 6 - vx) / k, y: (cy - vy) / k });
+        fromColumn = true;
+      } else from.current.set(key, to);
+    }
+    posMs.current = fromColumn ? MOVE_MS : TWEEN_MS;
     if (first || reducedMotion()) {
       shown.current = new Map(target.current);
       posTween.current = null;
     } else posTween.current = performance.now();
     schedule();
-  }, [layout, model, topicMap, hubMap, schedule]);
+  }, [layout, model, topicMap, hubMap, column.width, schedule]);
+
+  // Where each column item stands (for the lines to hubs). Measured after the column is laid out and whenever it scrolls
+  const measureColumn = useCallback(() => {
+    const box = colScroll.current;
+    const next = new Map<string, number>();
+    if (box) for (const [id, el] of colEls.current) next.set(id, el.offsetTop - box.scrollTop + el.offsetHeight / 2);
+    colY.current = next;
+    schedule();
+  }, [schedule]);
+  useEffect(() => {
+    const id = requestAnimationFrame(measureColumn);
+    return () => cancelAnimationFrame(id);
+  }, [column, size.h, measureColumn]);
 
   // Strict Mode runs this cleanup once in development: forget the cancelled frame so the loop can restart
   useEffect(
@@ -448,19 +499,62 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       if (!p) return;
       const { w, h } = sizeRef.current;
       const k = clamp(Math.max(view.current.k, 0.9), K_MIN, K_MAX);
-      moveView({ k, tx: w / 2 - p.x * k, ty: h / 2 - p.y * k }, true);
+      const cw = scene.current.colW;
+      const mid = cw + (w - cw) / 2;
+      moveView({ k, tx: mid - p.x * k, ty: h / 2 - p.y * k }, true);
       hoverKey.current = id;
-      setHover({ id, x: w / 2, y: h / 2 });
+      setHover({ id, x: mid, y: h / 2 });
     },
     [moveView],
   );
   useImperativeHandle(ref, () => ({ focusTopic }), [focusTopic]);
 
-  const hoverTopic = hover ? topicMap.get(hover.id) : undefined;
+  const enterItem = (id: string) => {
+    clearTimeout(hideTimer.current);
+    hoverKey.current = id;
+    setHover({ id, x: COL_W, y: colY.current.get(id) ?? 0 });
+  };
+
+  /** One group of the column. Names wrap instead of being cut, so a label is always whole */
+  const group = (title: string, items: { topic: GraphTopic; domainName?: string }[], first: boolean) =>
+    items.length === 0 ? null : (
+      <section className={first ? "" : "mt-4 border-t border-seam-soft pt-3"}>
+        <h3 className="caps px-4 pb-1 text-paper-dim">{title}</h3>
+        <ul>
+          {items.map(({ topic, domainName }) => (
+            <li
+              key={topic.id}
+              ref={(el) => {
+                if (el) colEls.current.set(topic.id, el);
+                else colEls.current.delete(topic.id);
+              }}
+              onPointerEnter={() => enterItem(topic.id)}
+              onPointerLeave={() => setHoverKey(null)}
+            >
+              <Link
+                href={`/topic/${topic.id}`}
+                className="flex items-start gap-2.5 px-4 py-2 text-small text-paper outline-none transition-colors duration-(--dur-s) ease-(--ease-out) hover:bg-cloth-hover focus-visible:bg-cloth-hover"
+                style={{ opacity: topic.status === "proposed" ? 0.65 : 1 }}
+              >
+                <StateDot state={stateOf(topic, model.nowMs)} className="mt-1.5" />
+                <span className="min-w-0">
+                  {topic.name}
+                  {domainName && <span className="caps mt-0.5 block text-paper-dim">{domainName}</span>}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+
+  const hoverTopic = hover ? lookup.get(hover.id) : undefined;
   const hoverMock = hover ? domain.topics.find((t) => t.id === hover.id) : undefined;
   const hubCount = model.hubs.filter((h) => h.kind !== "domain_all").length;
   const topicCount = model.topics.filter(onGraph).length;
   const allHub = model.hubs.find((h) => h.kind === "domain_all");
+  // Centre of the part of the box the graph can use
+  const cx = column.width + (size.w - column.width) / 2;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -487,10 +581,10 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
             </Link>
           )}
           <div className="flex" role="group" aria-label={tx.graph.zoomGroup}>
-            <IconButton label={tx.graph.zoomIn} onClick={() => zoomAt(size.w / 2, size.h / 2, 1.25)}>
+            <IconButton label={tx.graph.zoomIn} onClick={() => zoomAt(cx, size.h / 2, 1.25)}>
               <Plus />
             </IconButton>
-            <IconButton label={tx.graph.zoomOut} onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8)}>
+            <IconButton label={tx.graph.zoomOut} onClick={() => zoomAt(cx, size.h / 2, 0.8)}>
               <Minus />
             </IconButton>
             <IconButton label={tx.graph.fitAll} onClick={fitAll}>
@@ -514,9 +608,9 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
             ArrowRight: () => pan(-60, 0),
             ArrowUp: () => pan(0, 60),
             ArrowDown: () => pan(0, -60),
-            "+": () => zoomAt(size.w / 2, size.h / 2, 1.25),
-            "=": () => zoomAt(size.w / 2, size.h / 2, 1.25),
-            "-": () => zoomAt(size.w / 2, size.h / 2, 0.8),
+            "+": () => zoomAt(cx, size.h / 2, 1.25),
+            "=": () => zoomAt(cx, size.h / 2, 1.25),
+            "-": () => zoomAt(cx, size.h / 2, 0.8),
             "0": fitAll,
           };
           const fn = map[e.key];
@@ -536,6 +630,19 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
           onPointerCancel={onPointerUp}
           onPointerLeave={() => !drag.current && setHoverKey(null)}
         />
+
+        {column.width > 0 && (
+          <nav
+            ref={colScroll}
+            aria-label={tx.graph.columnLabel}
+            onScroll={measureColumn}
+            className="absolute inset-y-0 left-0 z-[5] overflow-y-auto border-r border-seam-soft bg-cloth py-3"
+            style={{ width: column.width }}
+          >
+            {group(tx.graph.columnFree, column.free.map((t) => ({ topic: t })), true)}
+            {group(tx.graph.columnOther, column.outside, column.free.length === 0)}
+          </nav>
+        )}
 
         {/* Real links for keyboard and screen readers. Small graphs only: 500 tab stops would be worse than none */}
         {layout.nodes.size <= 150 && (

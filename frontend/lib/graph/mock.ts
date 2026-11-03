@@ -37,6 +37,8 @@ function matanGraph(locale: Locale): GraphModel | undefined {
     deadlineAtMs: h.deadline ? Date.parse(h.deadline.date) : undefined,
   }));
   hubs.push({ id: "all", name: domain.title, kind: "domain_all" });
+  // Asked about in calculus, but there is no subject for it: it stays here with status off_domain
+  topics.push({ id: "wave", name: locale === "en" ? "Wave–particle duality" : "Корпускулярно-волновой дуализм", status: "off_domain", visibility: "shown" });
   return {
     domainId: domain.id,
     domainName: domain.title,
@@ -44,6 +46,7 @@ function matanGraph(locale: Locale): GraphModel | undefined {
     hubs,
     includes: domain.topics.filter((t) => t.hubId).map((t) => ({ hubId: t.hubId!, topicId: t.id })),
     requires: domain.topics.flatMap((t) => t.requires.map((r) => ({ topicId: t.id, requiresId: r }))),
+    otherDomain: domain.outside.map((o) => ({ topic: topicOf(o.id, o.title, "solid"), domainId: "linal", domainName: o.fromDomain })),
     nowMs: MOCK_NOW_MS,
   };
 }
@@ -73,7 +76,8 @@ const ROWS: Row[] = [
   { id: "eigvec", en: "Eigenvectors", ru: "Собственные векторы", requires: ["eigval"], hubs: ["colloq"], kind: "proposed" },
   { id: "diag", en: "Diagonalization", ru: "Диагонализация", requires: ["eigvec", "inverse"], hubs: ["colloq"], kind: "proposed" },
   { id: "jordan", en: "Jordan form", ru: "Жорданова форма", requires: ["diag"], hubs: ["colloq"], kind: "hidden" },
-  { id: "cross", en: "Cross product", ru: "Векторное произведение", requires: [], hubs: [], kind: "solid" },
+  { id: "cross", en: "Cross product", ru: "Векторное произведение", requires: [], hubs: ["vectors"], kind: "solid" },
+  { id: "trace", en: "Trace", ru: "След матрицы", requires: [], hubs: [], kind: "proposed" },
 ];
 
 const LINAL = {
@@ -95,22 +99,56 @@ function linalGraph(locale: Locale): GraphModel {
   return {
     domainId: "linal",
     domainName: l.name,
-    topics: ROWS.map((r) => topicOf(r.id, r[locale], r.kind)),
+    topics: [
+      ...ROWS.map((r) => topicOf(r.id, r[locale], r.kind)),
+      { id: "quantum", name: locale === "en" ? "Quantum states" : "Квантовые состояния", status: "off_domain" as const, visibility: "shown" as const },
+    ],
     hubs,
     includes,
     requires: ROWS.flatMap((r) => r.requires.map((q) => ({ topicId: r.id, requiresId: q }))),
+    otherDomain: [{ topic: topicOf("ev", locale === "en" ? "Expected value" : "Матожидание", "review"), domainId: "prob", domainName: locale === "en" ? "Probability" : "Теория вероятностей" }],
     nowMs: MOCK_NOW_MS,
   };
 }
 
 const cache = new Map<string, GraphModel | null>();
+const listeners = new Set<() => void>();
 
 /**
  * Graph of a domain in the slice's shape. Only on mocks: with the API on, an adapter produces the same type.
- * A domain with no topics gives `undefined`.
+ * A domain with no topics gives `undefined`. The object stays the same until the graph changes.
  */
 export function getGraphModel(locale: Locale, domainId: string): GraphModel | undefined {
   const key = `${locale}:${domainId}`;
   if (!cache.has(key)) cache.set(key, domainId === "matan" ? (matanGraph(locale) ?? null) : domainId === "linal" ? linalGraph(locale) : null);
   return cache.get(key) ?? undefined;
+}
+
+export function subscribeGraph(cb: () => void) {
+  listeners.add(cb);
+  return () => void listeners.delete(cb);
+}
+
+/** Stands in for a change arriving from the backend: replaces the model with an edited copy and tells the views */
+function editGraph(domainId: string, edit: (m: GraphModel) => GraphModel) {
+  for (const key of [...cache.keys()]) {
+    const m = cache.get(key);
+    if (m && m.domainId === domainId) cache.set(key, edit(m));
+  }
+  listeners.forEach((cb) => cb());
+}
+
+declare global {
+  interface Window {
+    /** Development only: pokes the mock graph to watch how the view reacts to changes */
+    __quackGraph?: { link: (domainId: string, topicId: string, requiresId: string) => void };
+  }
+}
+
+/** Development only: exposes `window.__quackGraph` so a change can be fed to the view by hand */
+export function installGraphDevHandle() {
+  if (typeof window === "undefined" || process.env.NODE_ENV === "production") return;
+  window.__quackGraph = {
+    link: (domainId, topicId, requiresId) => editGraph(domainId, (m) => ({ ...m, requires: [...m.requires, { topicId, requiresId }] })),
+  };
 }

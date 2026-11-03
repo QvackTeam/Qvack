@@ -252,6 +252,9 @@ export const ru: Dict = {
     openHubAria: (title: string, n: number) => `Открыть главу ${title}, ${n} ${plural(n, "подтема", "подтемы", "подтем")}`,
     allTopicsPill: "Все темы",
     allTopicsPillAria: "Открыть страницу со всеми темами предмета",
+    columnLabel: "Темы вне цепочек",
+    columnFree: "Отдельные",
+    columnOther: "Другие предметы",
     due: "колл.",
   },
   session: {

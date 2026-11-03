@@ -28,7 +28,7 @@ export function HubPage({ id }: { id: string }) {
   const soon = useSoon();
   const { start, busy } = useStartSession();
   // "all" is the hub over the whole subject: not a node on the graph, reached from the pill next to it
-  const hub = id === "all" ? { id, num: "·", title: domain.title, about: "" } : domain.hubs.find((h) => h.id === id);
+  const hub = useMemo(() => (id === "all" ? { id, num: "·", title: domain.title, about: "" } : domain.hubs.find((h) => h.id === id)), [id, domain]);
 
   const data = useMemo(() => {
     if (!hub) return null;
