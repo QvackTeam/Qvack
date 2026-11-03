@@ -184,6 +184,10 @@ EXPECTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/v1/domains/{domain_id}/materials"),
         ("GET", "/v1/materials/{material_id}"),
         ("GET", "/v1/search"),
+        # ТЗ Ф4 WP21.1 (stream C)
+        ("POST", "/v1/sessions/{session_id}/canvases"),
+        ("GET", "/v1/canvases/{canvas_id}"),
+        ("GET", "/v1/domains/{domain_id}/canvases"),
         # stream 1
         ("PATCH", "/v1/learner/preferences"),
         ("DELETE", "/v1/learner"),

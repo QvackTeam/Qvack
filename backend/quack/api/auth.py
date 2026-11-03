@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal, Protocol
 from uuid import UUID
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, WebSocket
 from sqlalchemy import text
 
 from quack.api.errors import ApiError
@@ -82,6 +82,16 @@ async def get_current_session(request: Request) -> CurrentSession:
     if session is None:
         raise _unauthenticated("session expired or signed out")
     return session
+
+
+async def websocket_session(websocket: WebSocket) -> CurrentSession | None:
+    """The live session of the cookie of a WebSocket handshake (ТЗ Ф4 WP21.2); `None` without
+    one — the handler refuses the socket."""
+    token = websocket.cookies.get(SESSION_COOKIE)
+    if not token:
+        return None
+    resolver: SessionResolver = websocket.app.state.session_resolver
+    return await resolver(get_resources(websocket).db, token=token, now=datetime.now(UTC))
 
 
 async def require_terms(

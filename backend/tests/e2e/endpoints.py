@@ -16,6 +16,8 @@ NO_IDEMPOTENCY_KEY: dict[tuple[str, str], str] = {
     # ТЗ Ф4 WP20.1: a multipart upload with an optional `session_id`; every upload is a new
     # material with its own `material.uploaded` key (D-C-116).
     ("POST", "/v1/domains/{domain_id}/materials"): "multipart; each upload is a new material",
+    # ТЗ Ф4 WP21.1: `{task_id?}` only; every call opens a new canvas of the session (D-C-118).
+    ("POST", "/v1/sessions/{session_id}/canvases"): "each call opens a new canvas",
     ("POST", "/v1/sessions/{session_id}/heartbeat"): "no event; refreshes presence only",
     # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
     ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): "no event; the job coalesces",
@@ -35,7 +37,8 @@ def mutating_routes(app: FastAPI) -> set[tuple[str, str]]:
     }
 
 
-# The walks upload no material: routes with `{material_id}` get an id nobody has.
+# The walks upload no material and open no canvas: routes with `{material_id}` or
+# `{canvas_id}` get an id nobody has.
 NO_MATERIAL = UUID(int=0)
 
 
@@ -53,6 +56,7 @@ class Ids:
     diagnostic_task_id: UUID
     structure_version: int
     material_id: UUID = NO_MATERIAL
+    canvas_id: UUID = NO_MATERIAL
 
 
 def path_for(path: str, ids: Ids) -> str:
@@ -63,6 +67,7 @@ def path_for(path: str, ids: Ids) -> str:
         task_id=ids.task_id,
         artifact_id=ids.artifact_id,
         material_id=ids.material_id,
+        canvas_id=ids.canvas_id,
     )
 
 
@@ -113,6 +118,7 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
         },
         ("POST", "/v1/sessions/{session_id}/finish"): {},
         ("POST", "/v1/sessions/{session_id}/heartbeat"): {},
+        ("POST", "/v1/sessions/{session_id}/canvases"): {},
         ("POST", "/v1/sessions/{session_id}/turns"): {"text": ["Hello", "Bye"][v]},
         ("POST", "/v1/sessions/{session_id}/tasks/next"): {
             "topic_id": str(ids.topic_id),
