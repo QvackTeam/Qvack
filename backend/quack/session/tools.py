@@ -139,10 +139,12 @@ def tool_definition(tool: ToolSpec) -> dict[str, Any]:
 @dataclass(frozen=True)
 class MaterialChunk:
     """A material chunk (Т-§10.5): text with the reference to its page or slide; slot 8 and
-    `search_materials` show it the same way."""
+    `search_materials` show it the same way. `material_name` — None: the documents give a
+    material no name (`Т-§3.4`, `content.materials`), the source is the label and the page
+    (D-B-171)."""
 
     chunk_id: UUID
-    material_name: str
+    material_name: str | None
     page: int | None
     text: str
 
@@ -154,9 +156,12 @@ def render_chunks(chunks: Sequence[MaterialChunk], label: Callable[[UUID], str |
     for chunk in chunks:
         name = label(chunk.chunk_id)
         page = f", page {chunk.page}" if chunk.page is not None else ""
-        out.append(
-            (f"{name}. " if name else "") + f'From the material "{chunk.material_name}"{page}:'
+        source = (
+            f'From the material "{chunk.material_name}"'
+            if chunk.material_name
+            else "From a material"
         )
+        out.append((f"{name}. " if name else "") + f"{source}{page}:")
         out.extend(f"> {line}" for line in chunk.text.splitlines())
     return "\n".join(out)
 
