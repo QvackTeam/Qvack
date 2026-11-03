@@ -58,7 +58,7 @@ export function DomainSidebar({
             />
           </div>
         ) : null}
-        <p className="display-caps text-[1.375rem] text-paper">Quack!</p>
+        <p className="display-caps text-[1.375rem] text-paper">Qvack!</p>
       </div>
 
       <p className="caps flex items-center justify-between px-3 pt-5 pb-2 text-paper-dim">

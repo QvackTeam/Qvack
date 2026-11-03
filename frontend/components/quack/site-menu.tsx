@@ -19,7 +19,6 @@ const ITEMS = [
   { key: "canvases", href: "/?view=canvases" },
   { key: "library", href: "/library" },
   { key: "newSubject", href: "/domains/new" },
-  { key: "profile", href: "/profile" },
   { key: "settings", href: "/settings" },
 ] as const;
 
@@ -55,8 +54,6 @@ function isCurrent(key: ItemKey, pathname: string, search: string) {
       return pathname.startsWith("/library");
     case "newSubject":
       return pathname.startsWith("/domains/new");
-    case "profile":
-      return pathname.startsWith("/profile");
     case "settings":
       return pathname.startsWith("/settings");
   }

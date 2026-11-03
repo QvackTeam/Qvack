@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Duck as FlatDuck } from "@/components/quack/duck";
 import { useT } from "@/lib/i18n/provider";
-import { EASE_OUT, markPreloaderShown, shouldShowPreloader, usePrefersReducedMotion } from "@/lib/motion";
+import { EASE_OUT, markPreloaderShown, PRELOADER_EXIT_EVENT, shouldShowPreloader, usePrefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import type { Duck } from "./scanline/duck-3d";
 import type { Scanline } from "./scanline/scanline";
@@ -154,6 +154,7 @@ export function Preloader() {
   useEffect(() => {
     if (phase !== "exit") return;
     markPreloaderShown();
+    window.dispatchEvent(new Event(PRELOADER_EXIT_EVENT));
     // затухание через WAAPI: глобальное правило reduced-motion обнуляет CSS-переходы
     if (reduced) rootRef.current?.animate?.([{ opacity: 1 }, { opacity: 0 }], { duration: FADE_MS, fill: "forwards" });
     const id = window.setTimeout(() => setPhase("gone"), (reduced ? FADE_MS : WIPE_MS) + 80);
@@ -252,7 +253,7 @@ export function Preloader() {
           aria-hidden
           className="relative h-[0.74em] w-full shrink-0 overflow-hidden text-center text-[22vw] leading-none"
         >
-          <span className="text-striped display-caps inline-block whitespace-nowrap text-ribbon">QUACK!</span>
+          <span className="text-striped display-caps inline-block whitespace-nowrap text-ribbon">QVACK!</span>
         </div>
       </div>
     </div>

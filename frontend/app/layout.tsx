@@ -16,7 +16,7 @@ const manrope = Manrope({
 const jetbrains = JetBrains_Mono({
   variable: "--font-jetbrains",
   subsets: ["latin", "cyrillic"],
-  weight: ["400", "500"],
+  weight: ["400", "500", "700", "800"],
 });
 
 const caveat = Caveat({
@@ -27,7 +27,7 @@ const caveat = Caveat({
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = getDict(await getLocale());
-  return { title: "Quack!", description: t.meta.description };
+  return { title: "Qvack!", description: t.meta.description };
 }
 
 export const viewport: Viewport = {

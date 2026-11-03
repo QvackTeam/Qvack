@@ -43,6 +43,9 @@ export function shouldShowPreloader(): boolean {
   }
 }
 
+/** Прелоадер пошёл на выход: под его шторкой уже можно показывать интерфейс */
+export const PRELOADER_EXIT_EVENT = "quack:preloader-exit";
+
 /** Отметить, что прелоадер уже показан в этой вкладке */
 export function markPreloaderShown(): void {
   try {

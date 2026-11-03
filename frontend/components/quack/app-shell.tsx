@@ -9,6 +9,7 @@ import { API_MODE } from "@/lib/api/client";
 import { useData } from "@/lib/api/data";
 import { useT } from "@/lib/i18n/provider";
 import { MOCK_TODAY } from "@/lib/mock";
+import { PRELOADER_EXIT_EVENT, shouldShowPreloader } from "@/lib/motion";
 import type { Domain, Session } from "@/lib/mock/types";
 import { cn } from "@/lib/utils";
 import { DomainSidebar } from "./domain-sidebar";
@@ -141,13 +142,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const openMenu = (el: HTMLElement | null) => {
+  const openMenu = useCallback((el: HTMLElement | null) => {
     menuOpener.current = el;
     const r = el?.getBoundingClientRect();
     setMenuAnchor(r ? { left: r.left, top: r.top } : null);
     setMenuOpen(true);
-  };
+  }, []);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
+
+  // Первый заход в вкладке на «/»: залогиненного встречает раскрытое меню — под шторкой прелоадера.
+  // Дальше (перезагрузка, переходы) меню открывается только кнопкой
+  const entryPath = useRef(pathname);
+  const greet = useRef<boolean | null>(null);
+  const loggedIn = !API_MODE || !!data.me;
+  useEffect(() => {
+    greet.current ??= entryPath.current === "/" && shouldShowPreloader();
+    if (!greet.current || !loggedIn) return;
+    const show = () => {
+      greet.current = false;
+      const btn = [...document.querySelectorAll<HTMLElement>("[data-menu-anchor] button")].find((b) => b.getClientRects().length > 0);
+      openMenu(btn ?? null);
+    };
+    // профиль мог загрузиться уже после ухода прелоадера
+    if (!shouldShowPreloader()) {
+      show();
+      return;
+    }
+    window.addEventListener(PRELOADER_EXIT_EVENT, show, { once: true });
+    return () => window.removeEventListener(PRELOADER_EXIT_EVENT, show);
+  }, [loggedIn, openMenu]);
 
   // любой переход (в том числе «назад») закрывает меню
   const [menuPath, setMenuPath] = useState(pathname);
@@ -224,7 +247,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <IconButton label={t.shell.subjects} onClick={(e) => openDrawer("domains", e.currentTarget)}>
                 <PanelLeft />
               </IconButton>
-              <p className="display-caps text-[1.125rem] text-paper">Quack!</p>
+              <p className="display-caps text-[1.125rem] text-paper">Qvack!</p>
               {/* на телефоне кнопка меню в верхней полосе */}
               <div ref={barToggle} data-menu-anchor className="ml-auto">
                 <MenuToggle

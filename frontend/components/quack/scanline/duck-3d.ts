@@ -11,6 +11,8 @@ import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 export type Duck = {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  /** Корень модели: снаружи им можно довернуть утку (поворот к курсору) */
+  root: THREE.Group;
   update(timeSec: number, aspect: number): void;
   dispose(): void;
 };
@@ -400,6 +402,7 @@ export function createDuck(): Duck {
   return {
     scene,
     camera,
+    root,
     update,
     dispose() {
       for (const g of geometries) g.dispose();
