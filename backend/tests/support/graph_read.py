@@ -13,6 +13,7 @@ on every call, so assertions can name ids:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 from uuid import UUID
 
 from quack.events.values import Level
@@ -49,6 +50,9 @@ SKILL_PROVEN = UUID(int=0x51)
 SKILL_FAILED = UUID(int=0x52)
 SKILL_QUIET = UUID(int=0x53)
 MISCONCEPTION = UUID(int=0x61)
+MISCONCEPTION_STATEMENT = "adds the denominators when adding fractions"
+MISCONCEPTION_TRIGGERS = ("fractions with different denominators",)
+LAPSE_AT_MS = 1_699_000_000_000
 EVIDENCE_PROVEN = UUID(int=0xE1)
 EVIDENCE_FAILED = UUID(int=0xE2)
 PROJECTED_SEQ = 120
@@ -85,6 +89,14 @@ _REQUIRES: dict[UUID, list[RequiresLink]] = {
     ]
 }
 _TOPIC_OF = {SKILL_PROVEN: TOPIC_READY, SKILL_FAILED: TOPIC_OPEN, SKILL_QUIET: TOPIC_OPEN}
+# Signals of the failed skill: a gap type with its confidence and a memory lapse (Т-§8.2, Т-§8.4).
+_SIGNALS: dict[UUID, dict[str, Any]] = {
+    SKILL_FAILED: {
+        "gap_type": "execution",
+        "gap_type_confidence": 0.8,
+        "last_lapse_at_ms": LAPSE_AT_MS,
+    },
+}
 
 
 def _evidence(evidence_id: UUID, skill_id: UUID, outcome: str, seq: int) -> EvidenceFact:
@@ -109,6 +121,7 @@ def _skill(skill_id: UUID) -> SkillFact:
         domain_id=DOMAIN,
         levels=_LEVELS[skill_id],
         requires=_REQUIRES.get(skill_id, []),
+        **_SIGNALS.get(skill_id, {}),
     )
 
 
@@ -136,6 +149,8 @@ class FixedGraphReader:
                     misconception_id=MISCONCEPTION,
                     skill_id=SKILL_FAILED,
                     status="suspected",
+                    statement=MISCONCEPTION_STATEMENT,
+                    triggers=list(MISCONCEPTION_TRIGGERS),
                     manifestation_count=1,
                     quotes=["a = b"],
                 )

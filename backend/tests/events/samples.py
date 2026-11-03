@@ -93,7 +93,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
         "canvas_id": uid("canvas"),
         "line_id": "l1",
         "text": "x = 2",
-        "kind": "formula",
+        "kind": "latex",
         "bbox": [0.0, 0.0, 10.0, 2.0],
         "stroke_ids": ["s1"],
         "started_at_ms": 1_000,
@@ -287,7 +287,7 @@ SAMPLES: dict[str, dict[str, Any]] = {
     "artifact.updated": {
         "artifact_id": uid("artifact"),
         "version": 1,
-        "kind": "topic_notes",
+        "kind": "notes",
         "topic_id": uid("topic"),
         "text": "Notes",
     },

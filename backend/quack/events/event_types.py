@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from quack.events.records import (
     AgentKind,
@@ -95,7 +95,7 @@ class CanvasLineCommitted(EventPayload):
     line_id: str
     text: str
     sympy: str | None = None
-    kind: str
+    kind: Literal["latex", "text"]  # Т-§15.3: the recognizer gives LaTeX or text (Q-A-3)
     bbox: tuple[float, float, float, float]
     stroke_ids: list[str]
     started_at_ms: int
@@ -505,7 +505,10 @@ class _SessionRef(EventPayload):
 
 @register("session.started", projector=False, dispatcher=True)
 class SessionStarted(_SessionRef):
-    pass
+    """`resumed` — an action in a session closed by the inactivity sweeper reopens it
+    (ТЗ Ф4 WP13.10, D-A-121)."""
+
+    resumed: bool = False
 
 
 @register("session.ended", projector=True, dispatcher=True)
@@ -601,12 +604,22 @@ class MisconceptionMerged(EventPayload):
 
 @register("artifact.updated", projector=False, dispatcher=False)
 class ArtifactUpdated(EventPayload):
+    """WP23.1: topic notes and topic cards carry `topic_id`, a hub cheat sheet `hub_id`; the
+    names follow the routes of §6.4 (Q-A-3)."""
+
     artifact_id: UUID
     version: int = Field(ge=1)
-    kind: str
+    kind: Literal["notes", "cards", "cheatsheet"]
     topic_id: UUID | None = None
     hub_id: UUID | None = None
     text: str
+
+    @model_validator(mode="after")
+    def _owner_by_kind(self) -> ArtifactUpdated:
+        of_hub = self.kind == "cheatsheet"
+        if (self.hub_id is not None) != of_hub or (self.topic_id is not None) == of_hub:
+            raise ValueError("notes and cards belong to a topic, a cheat sheet to a hub")
+        return self
 
 
 @register("embedding.ready", projector=True, dispatcher=False)

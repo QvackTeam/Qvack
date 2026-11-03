@@ -104,7 +104,10 @@ type Method = Literal["exact", "numeric", "symbolic", "units", "model"]
 type Verification = Literal["code", "model"]
 # Т-§6.2 ориентир: cheap deterministic checks of a wrong answer.
 type ErrorHint = Literal["sign", "coefficient", "dimension"]
-type CheckFailedReason = Literal["unparsed", "too_few_points", "timeout", "compute_unavailable"]
+# `unsupported` — the form has no structural check in code (Т-§6.6: «нет её — проверка моделью»).
+type CheckFailedReason = Literal[
+    "unparsed", "too_few_points", "unsupported", "timeout", "compute_unavailable"
+]
 
 
 class SecondOpinion(_Value):
