@@ -1,26 +1,34 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { createGlyphField } from "@/components/quack/landing/glyph-field";
 import { cn } from "@/lib/utils";
 import { Duck } from "../duck";
+import { createAuthField } from "./auth-field";
 
 const ASSEMBLE_MS = 2600;
 
 /**
- * Утка из глифов, как на лендинге: та же сцена, но в рамке родителя, а не на весь экран.
- * Без WebGL остаётся плоская штрихованная утка.
+ * Фон экрана входа: утка из глифов, графы по бокам и плавающие ноды. На весь экран, как на лендинге.
+ * `blind` — ученик вводит пароль: утка закрывает глаза повязкой. Без WebGL остаётся плоская утка.
  */
-export function AuthScene({ className }: { className?: string }) {
+export function AuthScene({ blind, className }: { blind: boolean; className?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const blindRef = useRef(blind);
+  // Redraws the frame once when the loop is not running (reduced motion, hidden tab)
+  const poke = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    blindRef.current = blind;
+    poke.current();
+  }, [blind]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    let field: ReturnType<typeof createGlyphField>;
+    let field: ReturnType<typeof createAuthField>;
     try {
-      field = createGlyphField(canvas);
+      field = createAuthField(canvas);
     } catch {
       canvas.dataset.flat = ""; // shows the flat duck below, no state needed
       return;
@@ -36,7 +44,14 @@ export function AuthScene({ className }: { className?: string }) {
     const draw = () => {
       const sec = reduced ? 1 : (performance.now() - t0) / 1000;
       const p = reduced ? 1 : Math.min(1, Math.max(0, (performance.now() - t0 - 200) / ASSEMBLE_MS));
-      field.render(sec, { pointerX: pointer.x, pointerY: pointer.y, pointerActive: pointer.active, disperse: Math.pow(1 - p, 3) });
+      field.render(sec, {
+        pointerX: pointer.x,
+        pointerY: pointer.y,
+        pointerActive: pointer.active,
+        disperse: Math.pow(1 - p, 3),
+        blind: blindRef.current,
+        instant: reduced,
+      });
     };
     const tick = () => {
       raf = requestAnimationFrame(tick);
@@ -49,6 +64,9 @@ export function AuthScene({ className }: { className?: string }) {
         cancelAnimationFrame(raf);
         raf = 0;
       }
+    };
+    poke.current = () => {
+      if (!raf) draw();
     };
 
     const ro = new ResizeObserver(() => {
@@ -64,12 +82,10 @@ export function AuthScene({ className }: { className?: string }) {
     });
     io.observe(canvas);
 
-    // The pointer is read against the scene itself, not the window, so the duck follows it inside its own frame
     const onMove = (e: PointerEvent) => {
-      const r = canvas.getBoundingClientRect();
-      pointer.x = ((e.clientX - r.left) / r.width) * 2 - 1;
-      pointer.y = 1 - ((e.clientY - r.top) / r.height) * 2;
-      pointer.active = pointer.x >= -1 && pointer.x <= 1 && pointer.y >= -1 && pointer.y <= 1;
+      pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+      pointer.y = 1 - (e.clientY / window.innerHeight) * 2;
+      pointer.active = true;
     };
     const onVis = () => sync();
     const onMotion = () => {
@@ -87,6 +103,7 @@ export function AuthScene({ className }: { className?: string }) {
     sync();
 
     return () => {
+      poke.current = () => {};
       if (raf) cancelAnimationFrame(raf);
       ro.disconnect();
       io.disconnect();
@@ -98,9 +115,8 @@ export function AuthScene({ className }: { className?: string }) {
   }, []);
 
   return (
-    <div aria-hidden className={cn("relative overflow-hidden", className)}>
-      {/* The scene is framed for a landscape screen, so the canvas keeps that shape and the frame crops it */}
-      <canvas ref={canvasRef} className="peer absolute left-1/2 top-0 block aspect-[8/5] h-full w-auto -translate-x-1/2" />
+    <div aria-hidden className={cn("pointer-events-none", className)}>
+      <canvas ref={canvasRef} className="peer absolute inset-0 block size-full" />
       <div className="absolute inset-0 hidden place-items-center peer-data-flat:grid">
         <Duck className="w-40 text-[#ff8a2a]" />
       </div>

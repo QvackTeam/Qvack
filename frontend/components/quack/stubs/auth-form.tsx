@@ -10,7 +10,7 @@ import { StubNote } from "./stub-parts";
 
 /** Поле входа: тонкая рамка на тёмной подложке, фокус — оранжевая рамка и кольцо */
 const INPUT =
-  "h-12 w-full rounded-control border border-white/12 bg-white/[0.04] px-4 text-body text-[#f6eadc] transition-colors duration-(--dur-s) ease-out placeholder:text-[#bba995]/60 hover:border-white/25 focus-visible:border-[#ff8a2a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff8a2a]/30";
+  "h-12 w-full rounded-control border border-white/12 bg-[#100906] px-4 text-body text-[#f6eadc] transition-colors duration-(--dur-s) ease-out placeholder:text-[#bba995]/60 hover:border-white/25 focus-visible:border-[#ff8a2a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff8a2a]/30";
 
 /** Log in / sign up. With the backend it gets a JWT; on mocks submitting just opens the app. */
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
@@ -21,6 +21,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const tx = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The duck covers its eyes while the password is being typed
+  const [blind, setBlind] = useState(false);
 
   const submit = async (form: FormData) => {
     if (!API_MODE) {
@@ -58,14 +60,15 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
 
   return (
     <main className="relative isolate h-full overflow-y-auto bg-[#080504] text-[#f6eadc]">
-      {/* тёплый тёмный фон с пятном света там, где стоит утка: как на лендинге */}
+      {/* фон на весь экран: утка из глифов, графы по бокам, плавающие ноды; сцена не прокручивается вместе с формой */}
+      <AuthScene blind={blind} className="fixed inset-0 -z-20" />
+      {/* тёмная подложка справа: глифы под формой не мешают читать поля */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(60%_60%_at_28%_58%,#2a1407_0%,#120a05_55%,#080504_100%)]"
+        className="pointer-events-none fixed inset-0 -z-10 bg-[linear-gradient(to_bottom,transparent_0%,#080504d9_46%)] lg:bg-[linear-gradient(to_left,#080504a6_0%,#080504a6_30%,transparent_62%)]"
       />
       <div className="mx-auto grid min-h-full max-w-[1400px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
-        <section className="relative h-[34svh] min-h-56 lg:h-auto">
-          <AuthScene className="absolute inset-0" />
+        <section className="relative h-[40svh] min-h-60 lg:h-auto">
           <p className="display-caps absolute left-6 top-6 text-[1.375rem] text-[#f6eadc] lg:left-10 lg:top-8">
             Quack<span className="text-[#ff8a2a]">!</span>
           </p>
@@ -101,6 +104,8 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
                   required
                   minLength={signup ? 8 : 1}
                   autoComplete={signup ? "new-password" : "current-password"}
+                  onFocus={() => setBlind(true)}
+                  onBlur={() => setBlind(false)}
                   className={INPUT}
                 />
               </AuthField>
