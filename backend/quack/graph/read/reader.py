@@ -12,22 +12,29 @@ from collections.abc import Sequence
 from typing import Protocol
 from uuid import UUID
 
+from neo4j import AsyncDriver
+
+from quack.config import Settings
 from quack.events.values import Level
 from quack.graph.overlay import SessionOverlay
 from quack.graph.read.models import (
     EvidenceFact,
     ExtractionCandidates,
     Frontier,
+    HubGoal,
     HubReadiness,
     MemorySlice,
+    MisconceptionDetail,
     PastSolution,
     PrepContext,
     PrerequisiteFact,
+    ProfileFacts,
     ReviewCandidate,
     ReviewScope,
     SimilarMistake,
     SliceFocus,
     StateAt,
+    TopicMemory,
     TopicRequires,
     WhyFacts,
 )
@@ -93,3 +100,30 @@ class GraphReader(Protocol):
         vector (Modal is down) — the session's skills only. `topic_id` / `skill_ids` restrict
         re-extraction to a topic (`episode.reassigned`) or to skills (`skill.split`)."""
         ...
+
+    async def domain_goals(self, domain_id: UUID) -> list[HubGoal]:
+        """Slot 4 of the teacher context (Т-§10.1): the goal hubs of the domain with the
+        required levels of their topics, by the graph — merges and renames applied."""
+        ...
+
+    async def profile(self, learner_id: UUID) -> ProfileFacts:
+        """Slot 3 (Т-§9.5): preferences, manner and the learned part of the profile."""
+        ...
+
+    async def topic_memory(self, topic_ids: Sequence[UUID]) -> list[TopicMemory]:
+        """Skills and misconceptions of the topics of the session goal (Т-§10.2); an unknown
+        topic id is skipped."""
+        ...
+
+    async def misconception_detail(self, misconception_id: UUID) -> MisconceptionDetail | None:
+        """One misconception with all manifestations (WP16.2, Т-§9.3). The id goes through the
+        alias: after `misconception.merged` the target is read; `None` — no such one."""
+        ...
+
+
+def create_graph_reader(neo4j: AsyncDriver, settings: Settings) -> GraphReader:
+    """The reader of a process: built from the resources of `JobContext` (`ctx.neo4j`,
+    `ctx.settings`), not a field of it (the field set is a contract, ТЗ Ф4 §4.2). Handlers of
+    `workers` call it where they need memory. The implementation is WP6.4 (G2); until then
+    it raises, and tests pass `FixedGraphReader` to the code that takes a reader."""
+    raise NotImplementedError("GraphReader implementation is WP6.4 (G2)")

@@ -518,6 +518,20 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/graph/test_read_stub.py::test_extraction_candidates_of_wp15`; `tests/jobs/test_rules_p4.py::test_handwriting_known_claim_and_reextraction_rows`.
 - Требует подтверждения владельцем: нет.
 
+### D-A-137. S4: чтения для контекста хода и описания заблуждения; `GraphReader` в `workers`; снимок слотов 3–4
+- Класс: B. WP6.4, WP14.1–14.2, WP16.2; `Т-§9.3`, `Т-§9.5`, `Т-§10.1`, `Т-§10.2`; вопросы B в #125 и #155; `quack/graph/read/`, `tests/support/graph_read.py`
+- Решение:
+  1. **`SkillFact.name`, `SkillFact.topic_name`** (оба `None`, пока не прочитаны) — срез и все чтения отдают названия сразу.
+  2. **`GraphReader.domain_goals(domain_id) -> list[HubGoal{hub_id, name, kind, control_type, deadline_at_ms, topics: [HubTopicGoal{topic_id, name, required_levels}]}]`** — по графу: слияния, разбиения и переименования тем уже учтены.
+  3. **`GraphReader.profile(learner_id) -> ProfileFacts{prefs, manner, learned_helpful_approach, learned_confidence_brier, learned_confidence_bias, learned_branch_rate, learned_reasoning_share}`** (`Т-§9.5`): `None` — «нет данных» (меньше `profile_min_samples`, для уверенности — `calibration_min_reports`), не ноль. Выученное считает свёртка профиля (WP5.3).
+  4. **`GraphReader.topic_memory(topic_ids) -> list[TopicMemory{topic_id, name, domain_id, skills, misconceptions}]`** — навыки тем цели сессии; их `skill_id` идут в `SliceFocus.skill_ids`. Неизвестная тема пропускается.
+  5. **`GraphReader.misconception_detail(misconception_id) -> MisconceptionDetail | None`** — id через `Alias` (после `misconception.merged` читается цель); поля `status` (включая `unknown` у гипотезы до первого проявления), `statement`, `triggers`, `skill_id`, `skill_name`, `manifestations: [ManifestationFact{evidence_id, quote, task_id, source_seq, at_ms, tier}]` — все по `MANIFESTS`, включая перенесённые слиянием.
+  6. **Как `workers` получает читателя:** поле в `JobContext` не добавляется — набор полей это контракт §4.2 без читателя. Обработчик строит `quack.graph.read.create_graph_reader(ctx.neo4j, ctx.settings)` там, где ему нужна память; тест подставляет `FixedGraphReader`. До G2 фабрика поднимает `NotImplementedError`.
+  7. **Снимок слотов 3–4 на сессию:** `Т-§10.1` требует заморозки на начало сессии, `state_at` для этого не нужен. Место хранения — зона B (контекст хода). Колонка `frozen_slots JSONB NULL` в `ops.turn_manifests` — миграция A, предложение B принято: `db/migrations/20261103000003_turn_manifests_frozen_slots.sql` (`ADD COLUMN frozen_slots JSONB NULL`, откат — `DROP COLUMN`). B пишет `{profile, domain_and_goals}` в манифест первого хода и читает снимок из самого раннего манифеста сессии с непустым `frozen_slots`; строки хвоста — из событий после `session.started`.
+- Почему: §0.4.3 п.2 (`Т-§9.5`, `Т-§10.1`), п.5; состав полей назван A в #125 и #155.
+- Тесты: `tests/graph/test_read_stub.py` (names, goals, profile, topic_memory, misconception_detail, factory); `tests/db/test_baseline_migration.py::test_turn_manifests_frozen_slots_column`.
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
