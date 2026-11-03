@@ -2890,7 +2890,7 @@
       },
       "LearnerDrawing": {
         "additionalProperties": false,
-        "description": "A drawing cut from a sheet photo (WP22.3 step 5; Т-§16.3 п.4, D-C-151): the image without\nits paper in the store and the box of the area as shares of the sheet.",
+        "description": "A drawing cut from a sheet photo (WP22.3 step 5; Т-§16.3 п.4, D-C-153): the image without\nits paper in the store and the box of the area as shares of the sheet.",
         "properties": {
           "bbox": {
             "maxItems": 4,
