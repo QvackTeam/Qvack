@@ -492,6 +492,20 @@ def cancelled_requests(event: StoredEvent) -> list[UUID]:
     return list(payload.markup.plan_update.cancel_request_ids)
 
 
+@dataclass(frozen=True)
+class RuleFacts:
+    """Data beyond the event for the G2 rows (WP7.1; D-A-136), gathered by the dispatcher:
+    `session.ended` — the home topics of the skills of the session's exposures and evidence;
+    `task.closed` — the home topics of the task's skills when a hint was shown on it."""
+
+    topic_ids: tuple[UUID, ...] = ()
+
+
+def plan_with_facts(event: StoredEvent, settings: Settings, facts: RuleFacts) -> list[JobPlan]:
+    """Jobs of the event-only rows plus the G2 rows that read `facts`."""
+    raise NotImplementedError
+
+
 def plan_jobs(event: StoredEvent, settings: Settings) -> list[JobPlan]:
     """Jobs the event-only rows of the table put for the event."""
     rows = [r for r in RULES if r.event_type == event.type and r.plan is not None]

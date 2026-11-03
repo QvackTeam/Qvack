@@ -266,3 +266,44 @@ def test_visible_kinds_follow_t_13_8() -> None:
 
 def test_no_rule_for_events_outside_the_table() -> None:
     assert r.plan_jobs(_event("message.sent"), SETTINGS) == []
+
+
+def test_artifact_topic_refresh_after_the_session_and_after_hints() -> None:
+    """Т-§17.7, WP7.1, WP23.2 (D-A-136). `session.ended` with exposures or evidence on a topic —
+    one `artifact.topic_refresh` per topic per session; `task.closed` where hints were needed —
+    the traps block for the task's topics. Lock and coalesce `artifact:{topic}`, P2, reads the
+    graph. The topics are data beyond the event: the dispatcher gathers them (`RuleFacts`)."""
+    first, second = UUID(int=0x71), UUID(int=0x72)
+    ended = _event("session.ended", seq=40)
+    plans = r.plan_with_facts(ended, SETTINGS, r.RuleFacts(topic_ids=(first, second)))
+    refresh = [p for p in plans if p.kind == "artifact.topic_refresh"]
+    assert [p.payload["topic_id"] for p in refresh] == [str(first), str(second)]
+    plan = refresh[0]
+    assert plan.lock_key == plan.coalesce_key == f"artifact:{first}"
+    assert plan.job_key == f"artifact.topic_refresh:{first}:session:{ended.session_id}"
+    assert (plan.priority_class, plan.required_seq) == ("P2", 40)
+    assert plan.payload == {"trigger_seq": 40, "topic_id": str(first), "reason": "session"}
+    assert {"analyst.run", "analyst.deep"} <= {p.kind for p in plans}  # event-only rows stay
+    nothing = r.plan_with_facts(ended, SETTINGS, r.RuleFacts())
+    assert not [p for p in nothing if p.kind.startswith("artifact.")]
+
+    closed = _event("task.closed", seq=41)
+    task = closed.payload["task_id"]
+    (trap,) = [
+        p
+        for p in r.plan_with_facts(closed, SETTINGS, r.RuleFacts(topic_ids=(first,)))
+        if p.kind == "artifact.topic_refresh"
+    ]
+    assert trap.job_key == f"artifact.topic_refresh:{first}:task:{task}"
+    assert trap.lock_key == f"artifact:{first}"
+    assert trap.payload == {
+        "trigger_seq": 41,
+        "topic_id": str(first),
+        "reason": "hints",
+        "task_id": task,
+    }
+    assert "artifact.topic_refresh" not in {
+        row.job_kinds[0]
+        for row in r.ROWS_NEED_FACTS
+        if row.event_type in ("session.ended", "task.closed")
+    }
