@@ -3,77 +3,25 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
 from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
 from sqlalchemy import text
 
-from quack.artifacts.cards import write_system_cards
-from quack.artifacts.documents import Card, SystemBlock, write_system_blocks
-from quack.canvas.boards import open_canvas
-from quack.canvas.recognition import commit_typed
-from quack.events import records
-from quack.events.log import NewEvent, append_events
-from quack.events.values import AnswerSpec, MathValue
-from quack.practice.role_outputs import TaskCondition
-from quack.practice.task_store import create_task
-from quack.session.sessions import StartSession, start_session
-from tests.e2e.endpoints import (
-    MULTIPART,
-    NO_IDEMPOTENCY_KEY,
+from tests.e2e.endpoints import mutating_routes
+from tests.e2e.journey import first, ok, onboard, run_journey, turn
+from tests.e2e.routes import (
     Ids,
     body_for,
-    mutating_routes,
+    files_for,
+    isolation_prepares,
+    no_key_routes,
     path_for,
+    walk,
 )
-from tests.e2e.journey import first, ok, onboard, run_journey, turn
 from tests.e2e.system import Learner, System
 from tests.session.helpers import parse_sse
-
-# Order of the T-E2 walk: each step may use ids created by the previous ones.
-IDEMPOTENT_WALK: tuple[tuple[str, str], ...] = (
-    ("PATCH", "/v1/learner/preferences"),
-    ("POST", "/v1/consents"),
-    ("DELETE", "/v1/consents/research"),
-    ("POST", "/v1/domains"),
-    ("POST", "/v1/domains/{domain_id}/structure/propose"),
-    ("POST", "/v1/domains/{domain_id}/structure/confirm"),
-    ("PATCH", "/v1/domains/{domain_id}/structure"),
-    ("PATCH", "/v1/domains/{domain_id}/topics/{topic_id}/status"),
-    ("PATCH", "/v1/topics/{topic_id}/status"),
-    ("POST", "/v1/domains/{domain_id}/diagnostic/start"),
-    ("POST", "/v1/domains/{domain_id}/diagnostic/answer"),
-    ("POST", "/v1/domains/{domain_id}/diagnostic/finish"),
-    ("POST", "/v1/sessions"),
-    ("POST", "/v1/sessions/{session_id}/turns"),
-    ("POST", "/v1/sessions/{session_id}/tasks/next"),
-    ("POST", "/v1/sessions/{session_id}/tasks/{task_id}/hint"),
-    ("POST", "/v1/sessions/{session_id}/tasks/{task_id}/submit"),
-    ("POST", "/v1/sessions/{session_id}/actions"),
-    ("POST", "/v1/artifacts/notes"),
-    ("PATCH", "/v1/artifacts/notes/{artifact_id}"),
-    ("DELETE", "/v1/artifacts/notes/{artifact_id}"),
-    ("PUT", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
-    ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"),
-    ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
-    ("PATCH", "/v1/cards/{card_id}"),
-    ("DELETE", "/v1/cards/{card_id}"),
-    ("POST", "/v1/canvases/{canvas_id}/lines/{line_id}/correct"),
-    ("POST", "/v1/disputes"),
-    ("POST", "/v1/sessions/{session_id}/finish"),
-    ("POST", "/v1/domains/{domain_id}/archive"),
-)
-# A body of these has no field besides the key, so "same key, other body" does not exist.
-NO_OTHER_BODY = {
-    ("POST", "/v1/domains/{domain_id}/diagnostic/start"),
-    ("DELETE", "/v1/artifacts/notes/{artifact_id}"),
-    ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"),
-    ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
-    ("DELETE", "/v1/cards/{card_id}"),
-    ("POST", "/v1/sessions/{session_id}/finish"),
-}
 
 
 async def _events(system: System, learner_id: UUID) -> int:
@@ -105,30 +53,31 @@ def _payload(response: httpx.Response) -> Any:
     return response.json()
 
 
-def _placeholder_ids(domain_id: UUID, topic_id: UUID) -> Ids:
-    zero = UUID(int=0)
-    return Ids(domain_id, topic_id, zero, zero, zero, zero, zero, zero, 1)
-
-
 async def test_mutating_endpoints_are_idempotent(system_for_walk: System) -> None:
     """T-E2: repeat with the same key and body → same answer, no new events; same key with
     another body → 409. Endpoints without a key are listed with a reason."""
     system = system_for_walk
-    keyed = mutating_routes(system.app) - set(NO_IDEMPOTENCY_KEY)
-    assert keyed == set(IDEMPOTENT_WALK), {
-        "not walked": sorted(keyed - set(IDEMPOTENT_WALK)),
-        "not mounted": sorted(set(IDEMPOTENT_WALK) - keyed),
+    steps = walk()
+    keyed = mutating_routes(system.app) - set(no_key_routes())
+    assert keyed == {r.key for r in steps}, {
+        "not walked": sorted(keyed - {r.key for r in steps}),
+        "not mounted": sorted({r.key for r in steps} - keyed),
     }
 
     learner = await system.register()
     main_domain, main_topic = await onboard(system, learner, "te2:main")
-    ids = _placeholder_ids(main_domain, main_topic)
+    onboarded = Ids(domain_id=main_domain, topic_id=main_topic)
+    ids = onboarded
 
-    for method, path in IDEMPOTENT_WALK:
-        if path.startswith("/v1/sessions"):
-            ids = replace(ids, domain_id=main_domain, topic_id=main_topic)
+    for route in steps:
+        method, path = route.key
+        ids = ids.replace(**{name: getattr(onboarded, name) for name in route.restore})
+        if route.prepare is not None:
+            ids = await route.prepare(system, learner, ids)
+        not_yet = [name for name in route.requires if ids.is_default(name)]
+        assert not not_yet, f"{method} {path}: the walk has not created {not_yet} yet"
         key = f"te2:{method}:{path}"
-        url = path_for(path, ids)
+        url = path_for(method, path, ids)
         body = body_for(method, path, ids, key)
         first_response = await _send(system, learner, method, url, body)
         assert first_response.status_code < 300, f"{method} {path}: {first_response.text}"
@@ -139,218 +88,14 @@ async def test_mutating_endpoints_are_idempotent(system_for_walk: System) -> Non
         assert again.status_code == first_response.status_code, f"{method} {path}: {again.text}"
         assert _payload(again) == _payload(first_response), f"{method} {path}"
         assert await _events(system, learner.learner_id) == before, f"{method} {path}"
-        if (method, path) not in NO_OTHER_BODY:
+        if route.no_other_body is None:
             other = await _send(
                 system, learner, method, url, body_for(method, path, ids, key, variant=1)
             )
             assert other.status_code == 409, f"{method} {path}: {other.status_code} {other.text}"
             assert other.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
-        ids = await _advance(system, learner, ids, method, path, _payload(first_response))
-
-
-async def _advance(
-    system: System, learner: Learner, ids: Ids, method: str, path: str, payload: Any
-) -> Ids:
-    """Take the ids the walk needs next from a response."""
-    if (method, path) == ("POST", "/v1/domains"):
-        return replace(ids, domain_id=UUID(payload["domain_id"]))
-    if path.endswith("/structure/propose"):
-        return replace(
-            ids,
-            topic_id=UUID(payload["topics"][0]["topic_id"]),
-            structure_version=payload["structure_version"],
-        )
-    if path.endswith("/structure/confirm"):
-        await system.settle()
-    if path.endswith("/diagnostic/start"):
-        return replace(
-            ids,
-            diagnostic_session_id=UUID(payload["session_id"]),
-            diagnostic_task_id=UUID(payload["next_question"]["task_id"]),
-        )
-    if (method, path) == ("POST", "/v1/sessions"):
-        return replace(ids, session_id=UUID(payload["session_id"]))
-    if path.endswith("/turns"):
-        started = first(payload, "turn_started")
-        assert started is not None
-        return replace(ids, turn_id=UUID(started["turn_id"]))
-    if path.endswith("/tasks/next"):
-        return replace(ids, task_id=UUID(payload["task_id"]))
-    if (method, path) == ("POST", "/v1/artifacts/notes"):
-        return replace(ids, artifact_id=UUID(payload["artifact_id"]))
-    if (method, path) == ("DELETE", "/v1/artifacts/notes/{artifact_id}"):
-        return await _notes_of_phase4_topic(system, learner, ids)
-    if (method, path) == ("PUT", "/v1/artifacts/{artifact_id}/blocks/{block_id}"):
-        # WP23.1: the system adds a supplement to the learner's block; the walk accepts it.
-        notes = await write_system_blocks(
-            system.resources.db,
-            learner_id=learner.learner_id,
-            kind="notes",
-            owner_id=ids.topic_id,
-            blocks=[SystemBlock(block_id=ids.block_id, kind="summary", content="More")],
-            created_by="artifact_writer@1",
-        )
-        return replace(ids, block_id=notes.blocks[1].block_id)
-    if path.endswith("/accept"):
-        return replace(ids, block_id=ids.learner_block_id)
-    if (method, path) == ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"):
-        ids = replace(ids, card_id=await _card_of_topic(system, learner, ids))
-        return await _canvas_with_a_line(system, learner, ids)
-    if path.endswith("/submit"):
-        return await _action_session(system, learner, ids)
-    if (method, path) == ("PATCH", "/v1/cards/{card_id}"):
-        return replace(ids, card_id=UUID(payload["cards"][0]["card_id"]))
-    if path.endswith("/lines/{line_id}/correct"):
-        # WP8.1: the verdict the dispute names.
-        return replace(ids, answer_seq=await _answer_of_phase4_log(system, learner))
-    return ids
-
-
-async def _answer_of_phase4_log(system: System, learner: Learner) -> int:
-    """The `seq` of an `answer.submitted` of the learner in the Phase 4 log (WP8.1)."""
-    answer = NewEvent(
-        type="answer.submitted",
-        payload={
-            "task_id": str(uuid4()),
-            "source": "chat",
-            "answer": {"kind": "number", "value": "2"},
-        },
-        actor="learner",
-        idempotency_key=f"te2:answer:{uuid4()}",
-    )
-    [stored] = await append_events(system.resources.db, learner.learner_id, [answer])
-    return stored.seq
-
-
-async def _wp8_targets_of(system: System, learner: Learner, ids: Ids) -> Ids:
-    """T-E3 for WP6.3/WP8: a hub and a topic of the learner in the graph, a verdict and a closed
-    episode in the Phase 4 log — what the routes of WP8 and `PATCH /v1/hubs/{id}` look up."""
-    hub_id = uuid4()
-    async with system.resources.neo4j.session() as session:
-        await session.run(
-            "MERGE (t:Topic {id: $topic}) ON CREATE SET t.learnerId = $learner, "
-            "t.domainId = $domain, t.name = 'Limits' "
-            "CREATE (:Hub {id: $hub, learnerId: $learner, domainId: $domain})",
-            topic=str(ids.topic_id),
-            learner=str(learner.learner_id),
-            domain=str(ids.domain_id),
-            hub=str(hub_id),
-        )
-    episode = NewEvent(
-        type="episode.closed",
-        payload={"from_seq": 1, "to_seq": 1, "has_content": False},
-        actor="code",
-        idempotency_key=f"te3:episode:{uuid4()}",
-    )
-    [closed] = await append_events(system.resources.db, learner.learner_id, [episode])
-    return replace(
-        ids,
-        hub_id=hub_id,
-        answer_seq=await _answer_of_phase4_log(system, learner),
-        episode_seq=closed.seq,
-    )
-
-
-async def _action_session(system: System, learner: Learner, ids: Ids) -> Ids:
-    """WP13.1: a Phase 4 session (its domain in the Phase 4 log) for the action route."""
-    db, domain_id = system.resources.db, uuid4()
-    created = NewEvent(
-        type="domain.created",
-        payload={"domain_id": str(domain_id), "name": "Actions"},
-        actor="learner",
-        idempotency_key=f"te2:domain:{domain_id}",
-    )
-    await append_events(db, learner.learner_id, [created])
-    started = await start_session(
-        db,
-        learner_id=learner.learner_id,
-        body=StartSession(domain_id=domain_id, intent="learn", idempotency_key=uuid4()),
-    )
-    return replace(ids, action_session_id=started.session_id)
-
-
-async def _canvas_with_a_line(system: System, learner: Learner, ids: Ids) -> Ids:
-    """WP21.3: a canvas of a Phase 4 session with one typed line for the correction route."""
-    db = system.resources.db
-    session_id = uuid4()
-    started = NewEvent(
-        type="session.started",
-        payload={"session_id": str(session_id), "domain_id": str(uuid4()), "intent": "learn"},
-        actor="learner",
-        idempotency_key=f"te2:session:{session_id}",
-    )
-    await append_events(db, learner.learner_id, [started])
-    canvas = await open_canvas(db, learner_id=learner.learner_id, session_id=session_id)
-    await commit_typed(
-        db, learner_id=learner.learner_id, session_id=session_id, canvas_id=canvas.canvas_id,
-        block_id="t1", latex="x=1", at_ms=0,
-    )  # fmt: skip
-    return replace(ids, canvas_id=canvas.canvas_id, line_id="t1")
-
-
-async def _notes_of_phase4_topic(system: System, learner: Learner, ids: Ids) -> Ids:
-    """WP23.1 reads topics from the Phase 4 log (`topic.created`), which the Phase 3 structure
-    of the walk does not write (D-C-112): one topic is recorded there for the notes routes."""
-    topic_id, domain_id = uuid4(), uuid4()
-    await append_events(
-        system.resources.db,
-        learner.learner_id,
-        [
-            NewEvent(
-                type="topic.created",
-                payload={
-                    "topic_id": topic_id,
-                    "domain_id": domain_id,
-                    "name": "Limits",
-                    "origin": "session",
-                },
-                actor="code",
-                idempotency_key=f"te2:topic:{topic_id}",
-                domain_id=domain_id,
-            )
-        ],
-    )
-    notes = ok(await system.client.get(f"/v1/topics/{topic_id}/notes", headers=learner.headers))
-    block_id = uuid4()
-    return replace(
-        ids,
-        topic_id=topic_id,
-        artifact_id=UUID(notes["artifact_id"]),
-        learner_block_id=block_id,
-        block_id=block_id,
-    )
-
-
-async def _card_of_topic(system: System, learner: Learner, ids: Ids) -> UUID:
-    """WP23.4: a card of the walk's Phase 4 topic, as the writer leaves it — its task already in
-    the bank (D-C-140)."""
-    card_id = uuid4()
-    await create_task(
-        system.resources.db,
-        learner_id=learner.learner_id,
-        task_id=card_id,
-        family_id=card_id,
-        source="generated",
-        condition=TaskCondition(text="Ratio test when?", latex=None),
-        markup=records.TaskMarkupRecord(
-            tests=[records.TestedLevelRecord(skill_id=uuid4(), level=3)],
-            method_named=False,
-            answer=AnswerSpec(type="number", value=MathValue(latex="1", sympy="1")),
-        ),
-        verification="unchecked",
-        actor="artifact_writer@1",
-        idempotency_key=f"te2:card:{card_id}",
-    )
-    card = Card(card_id=card_id, kind="sign_to_method", prompt="Ratio test when?", owner="system")
-    await write_system_cards(
-        system.resources.db,
-        system.resources.settings,
-        learner_id=learner.learner_id,
-        topic_id=ids.topic_id,
-        cards=[card],
-        created_by="artifact_writer@1",
-    )
-    return card_id
+        if route.advance is not None:
+            ids = await route.advance(system, learner, ids, _payload(first_response))
 
 
 NOTE_WORD = "quokkasecret"
@@ -397,7 +142,8 @@ async def test_cross_learner_isolation(system: System) -> None:
         diagnostic_task_id=j.assigned_task_id,
         structure_version=1,
     )
-    ids = await _wp8_targets_of(system, a, ids)
+    for prepare in isolation_prepares():
+        ids = await prepare(system, a, ids)
     await system.settle()
     a_events = await _events(system, a.learner_id)
 
@@ -410,13 +156,12 @@ async def test_cross_learner_isolation(system: System) -> None:
     )
     assert with_ids
     for method, path in with_ids:
-        url = path_for(path, ids)
+        url = path_for(method, path, ids)
+        files = files_for(method, path)
         if method == "GET":
             response = await system.client.get(url, headers=b.headers)
-        elif (method, path) in MULTIPART:
-            response = await system.client.request(
-                method, url, files=MULTIPART[(method, path)], headers=b.headers
-            )
+        elif files is not None:
+            response = await system.client.request(method, url, files=files, headers=b.headers)
         else:
             body = body_for(method, path, ids, f"te3:b:{method}:{path}")
             response = await system.client.request(method, url, json=body, headers=b.headers)

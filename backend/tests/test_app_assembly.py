@@ -4,6 +4,7 @@ limiter (ТЗ Фазы 3 §8.2, WP1.1, WP1.2, WP1.5; ТЗ Ф4 WP18.3 — sign-in
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect
 import json
 import re
@@ -29,6 +30,7 @@ from quack.config import Settings
 from quack.db import Db
 from quack.db.postgres import SessionFactory, create_engine
 from quack.db.redis import ratelimit_key
+from tests.e2e.routes import declared_routers, expected_routes
 from tests.support.auth import session_cookie, session_token
 from tests.support.broken import BrokenNeo4jDriver, BrokenRedis
 from tests.support.resources import build_app_resources
@@ -162,123 +164,21 @@ async def test_single_session_contract_across_packages(
 
 # --- T-A1: the endpoint set equals the contract -------------------------------------------
 
-# ТЗ-П1 §3 (auth, learner, domains, structure, diagnostic, graph, topics; the short topic
-# routes are D-7.1 of the remediation notes), ТЗ-П2 §3 (sessions), ТЗ-П3 §3 (practice,
-# artifacts, search, cheatsheets, export), `/health/*`. The Phase 2 documents are not in the
-# repository, so the set is kept in step with the router docstrings and the Phase 2 notes.
-EXPECTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("GET", "/health/live"),
-        ("GET", "/health/ready"),
-        # ТЗ Ф4 WP18 (stream C)
-        ("POST", "/auth/link"),
-        ("GET", "/auth/link/verify"),
-        ("GET", "/auth/google/start"),
-        ("GET", "/auth/google/callback"),
-        ("POST", "/auth/logout"),
-        ("GET", "/v1/me"),
-        ("PATCH", "/v1/learner/settings"),
-        ("POST", "/v1/consents"),
-        ("DELETE", "/v1/consents/research"),
-        # ТЗ Ф4 WP20.1, WP20.5 (stream C)
-        ("POST", "/v1/domains/{domain_id}/materials"),
-        ("GET", "/v1/domains/{domain_id}/materials"),
-        ("GET", "/v1/materials/{material_id}"),
-        ("GET", "/v1/search"),
-        # ТЗ Ф4 WP21.1 (stream C)
-        ("POST", "/v1/sessions/{session_id}/canvases"),
-        ("GET", "/v1/canvases/{canvas_id}"),
-        ("POST", "/v1/canvases/{canvas_id}/lines/{line_id}/correct"),
-        ("GET", "/v1/canvases/{canvas_id}/replay"),
-        ("GET", "/v1/domains/{domain_id}/canvases"),
-        # ТЗ Ф4 WP22.1
-        ("POST", "/v1/canvases/{canvas_id}/pairing"),
-        # ТЗ Ф4 WP22.2
-        ("POST", "/v1/canvases/{canvas_id}/photos"),
-        ("POST", "/companion/pair"),
-        # stream 1
-        ("PATCH", "/v1/learner/preferences"),
-        ("DELETE", "/v1/learner"),
-        ("GET", "/v1/domains"),
-        ("POST", "/v1/domains"),
-        # ТЗ Ф4 WP16.4 (stream B, route in the domains router)
-        ("POST", "/v1/domains/classify"),
-        ("GET", "/v1/domains/{domain_id}"),
-        ("POST", "/v1/domains/{domain_id}/archive"),
-        ("POST", "/v1/domains/{domain_id}/structure/propose"),
-        ("PATCH", "/v1/domains/{domain_id}/structure"),
-        ("POST", "/v1/domains/{domain_id}/structure/confirm"),
-        ("POST", "/v1/domains/{domain_id}/diagnostic/start"),
-        ("POST", "/v1/domains/{domain_id}/diagnostic/answer"),
-        ("POST", "/v1/domains/{domain_id}/diagnostic/finish"),
-        ("GET", "/v1/domains/{domain_id}/graph"),
-        # ТЗ Ф4 WP8.1 (stream A)
-        ("POST", "/v1/disputes"),
-        ("POST", "/v1/verdicts/{answer_seq}/typo"),
-        # ТЗ Ф4 WP8.2 (stream A)
-        ("PATCH", "/v1/topics/{topic_id}"),
-        ("POST", "/v1/topics/{topic_id}/merge"),
-        ("POST", "/v1/topics/{topic_id}/hide"),
-        ("POST", "/v1/topics/{topic_id}/known"),
-        ("POST", "/v1/episodes/{episode_seq}/reassign"),
-        # ТЗ Ф4 WP6.3 (stream A)
-        ("PATCH", "/v1/hubs/{hub_id}"),
-        ("GET", "/v1/domains/{domain_id}/topics/{topic_id}"),
-        ("PATCH", "/v1/domains/{domain_id}/topics/{topic_id}/status"),
-        ("GET", "/v1/topics/{topic_id}"),
-        ("PATCH", "/v1/topics/{topic_id}/status"),
-        # stream 2
-        ("POST", "/v1/sessions"),
-        ("GET", "/v1/sessions"),
-        ("GET", "/v1/sessions/active"),
-        ("GET", "/v1/sessions/{session_id}"),
-        ("POST", "/v1/sessions/{session_id}/heartbeat"),
-        ("POST", "/v1/sessions/{session_id}/finish"),
-        ("POST", "/v1/sessions/{session_id}/turns"),
-        # ТЗ Ф4 §4.7, §6.4: the student action (WP13.1, stream B).
-        ("POST", "/v1/sessions/{session_id}/actions"),
-        ("GET", "/v1/sessions/{session_id}/events"),
-        # stream 3
-        ("POST", "/v1/sessions/{session_id}/tasks/next"),
-        ("POST", "/v1/sessions/{session_id}/tasks/{task_id}/hint"),
-        ("POST", "/v1/sessions/{session_id}/tasks/{task_id}/submit"),
-        ("GET", "/v1/artifacts"),
-        ("POST", "/v1/artifacts/notes"),
-        ("PATCH", "/v1/artifacts/notes/{artifact_id}"),
-        ("DELETE", "/v1/artifacts/notes/{artifact_id}"),
-        ("GET", "/v1/artifacts/search"),
-        ("GET", "/v1/topics/{topic_id}/cheatsheet"),
-        ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"),
-        ("GET", "/v1/domains/{domain_id}/export"),
-        # ТЗ Ф4 §6.4 «Артефакты», WP23.1: notes in blocks
-        ("GET", "/v1/topics/{topic_id}/notes"),
-        ("PUT", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
-        ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"),
-        ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
-        # ТЗ Ф4 §6.4 «Артефакты», WP23.4: topic cards
-        ("GET", "/v1/topics/{topic_id}/cards"),
-        ("PATCH", "/v1/cards/{card_id}"),
-        ("DELETE", "/v1/cards/{card_id}"),
-        # §6.4: new endpoints of Phase 3
-        ("GET", "/v1/learner/stream"),
-        ("GET", "/healthz"),
-    }
-)
+# The contract is the union of what the streams register in `tests/e2e/routes/` (D-C-147): ТЗ-П1
+# §3, ТЗ-П2 §3, ТЗ-П3 §3, ТЗ Ф4 §6.4 and `/health/*`; a stream adds its route in its own module.
+EXPECTED_ROUTES: frozenset[tuple[str, str]] = expected_routes()
 # Endpoints of §6.4 whose packages are not done yet (PHASE3_NOTES, O9). The entry is removed
 # by the package that mounts the route; `test_pending_routes_are_still_pending` fails otherwise.
 PENDING_ROUTES: dict[tuple[str, str], str] = {}
 
 
 def _declared_routes() -> list[tuple[str, str]]:
-    """`(method, path)` of every route as the routers declare it, with duplicates kept."""
-    from quack.artifacts.cards_routes import router as cards_router
-    from quack.artifacts.notes_routes import router as notes_router
-    from quack.artifacts.router import router as artifacts_router
-    from quack.domains.router import _protected
-    from quack.session.router import router as session_router
-
+    """`(method, path)` of every route as the routers declare it, with duplicates kept. The
+    routers are the ones the streams name in `Stream.routers`."""
     declared: list[tuple[str, str]] = []
-    for router in (_protected, session_router, artifacts_router, notes_router, cards_router):
+    for spec in declared_routers():
+        module_name, attribute = spec.split(":")
+        router = getattr(importlib.import_module(module_name), attribute)
         for route in router.routes:
             assert isinstance(route, APIRoute), route
             declared.extend((method, route.path) for method in sorted(route.methods or ()))
