@@ -31,6 +31,18 @@ JOB_KINDS: tuple[str, ...] = (
     "graph.curate",
     "session.sweep_inactive",
     "account.purge_deleted",
+    "artifact.topic_refresh",
+    "agent.viz",
+    "photo.pipeline",
+    "extract.episode",
+    "misconception.describe",
+    "analyst.run",
+    "analyst.deep",
+    "check.symbolic",
+    "task.check",
+    "check.model",
+    "today.prepare",
+    "graph.hygiene",
 )
 
 # WP5.3/T-Q10: the roles whose models a kind calls; a kind waits while any of them is pressured.
@@ -43,6 +55,18 @@ KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
     "graph.curate": ("curator",),
     "session.sweep_inactive": (),
     "account.purge_deleted": (),
+    "artifact.topic_refresh": ("artifact_writer",),
+    "agent.viz": ("viz_builder", "viz_checker"),
+    "photo.pipeline": ("recognizer", "segmenter"),
+    "extract.episode": ("extractor",),
+    "misconception.describe": ("misconception_describer",),
+    "analyst.run": ("analyst",),
+    "analyst.deep": ("analyst_deep",),
+    "check.symbolic": (),
+    "task.check": ("task_checker",),
+    "check.model": ("verdict_proof", "verdict_free"),
+    "today.prepare": ("today_planner",),
+    "graph.hygiene": ("builder",),
 }
 
 
