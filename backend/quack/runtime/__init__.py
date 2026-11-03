@@ -39,6 +39,8 @@ HANDLER_MODULES: tuple[str, ...] = (
     "quack.agents.misconception_describe",
     "quack.agents.analyst",
     "quack.practice.jobs",
+    "quack.agents.today",
+    "quack.agents.hygiene",
 )
 
 
