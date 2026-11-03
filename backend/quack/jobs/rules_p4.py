@@ -122,7 +122,7 @@ class JobPlan:
     kind: str
     job_key: str
     priority_class: PriorityClass
-    learner_id: UUID
+    learner_id: UUID | None  # None — a periodic job of no learner (WP7.5)
     lock_key: str | None = None
     coalesce_key: str | None = None
     required_seq: int | None = None
@@ -176,6 +176,13 @@ class RuleFacts:
     `task.closed` — the home topics of the task's skills when a hint was shown on it."""
 
     topic_ids: tuple[UUID, ...] = ()
+    # `skill.split`: episodes whose current observation holds evidence of the old skill.
+    episode_seqs: tuple[int, ...] = ()
+    # `session.ended`, `topic.created` (graph.hygiene): the domain, the temporary entities of the
+    # session, the counter of new topics of the domain having reached its period.
+    domain_id: UUID | None = None
+    temporary_entities: bool = False
+    hygiene_due: bool = False
 
 
 type FactsPlanner = Callable[[StoredEvent, Any, RuleFacts], list[JobPlan]]
@@ -454,6 +461,62 @@ def _hinted_topics_refresh(event: StoredEvent, p: Any, facts: RuleFacts) -> list
     return [_topic_refresh(event, t, f"task:{p.task_id}", payload) for t in facts.topic_ids]
 
 
+def _skill_split_reextract(event: StoredEvent, p: Any, facts: RuleFacts) -> list[JobPlan]:
+    """`Т-§2.8`: the episodes where the old skill has evidence are interpreted again, the
+    candidates restricted to the parts (D-A-135). One job per episode."""
+    parts = [str(part.skill_id) for part in p.into]
+    return [
+        _plan(
+            event,
+            "extract.episode",
+            key_tail=f"{event.seq}:{episode_seq}",
+            graph=True,
+            payload={"episode_seq": episode_seq, "restrict_skill_ids": parts},
+        )
+        for episode_seq in facts.episode_seqs
+    ]
+
+
+def _hygiene(event: StoredEvent, domain_id: UUID, reason: str) -> JobPlan:
+    """`Т-§4.10`: one waiting hygiene job per domain; `domain:{id}` is the lock of the writes to
+    the structure of the domain (WP7.1)."""
+    return _plan(
+        event,
+        "graph.hygiene",
+        lock_key=f"domain:{domain_id}",
+        coalesce_key=f"hygiene:{domain_id}",
+        graph=True,
+        payload={"domain_id": str(domain_id), "reason": reason},
+    )
+
+
+def _session_hygiene(event: StoredEvent, _p: Any, facts: RuleFacts) -> list[JobPlan]:
+    if not facts.temporary_entities or facts.domain_id is None:
+        return []
+    return [_hygiene(event, facts.domain_id, "temporary_entities")]
+
+
+def _topics_hygiene(event: StoredEvent, p: Any, facts: RuleFacts) -> list[JobPlan]:
+    if not facts.hygiene_due:
+        return []
+    return [_hygiene(event, p.domain_id, "new_topics")]
+
+
+def _embedding(event: StoredEvent, node_kind: str, node_id: UUID, text: str) -> list[JobPlan]:
+    """D-A-117: the text rides in the job — the dispatcher takes it from the event that brought
+    it, the handler reads nothing; `required_seq` is empty (the job reads only the log)."""
+    nodes = [{"node_kind": node_kind, "node_id": str(node_id), "text": text}]
+    return [_plan(event, "embedding.compute", payload={"nodes": nodes})]
+
+
+def _chunk_indexed(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
+    return _embedding(event, "chunk", p.chunk_id, p.text)
+
+
+def _misconception_described(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
+    return _embedding(event, "misconception", p.misconception_id, p.statement)
+
+
 RULES: tuple[RuleRow, ...] = (
     RuleRow("episode.closed", ("extract.episode",), "has_content", _episode_closed),
     RuleRow("task.closed", ("analyst.run",), "always", _task_closed),
@@ -507,6 +570,7 @@ RULES: tuple[RuleRow, ...] = (
         "one job per episode where the old skill has evidence, candidates restricted to the "
         "parts: payload {episode_seq, restrict_skill_ids} (Т-§2.8; D-A-135)",
         needs="episodes of the current observations with evidence of the old skill",
+        plan_facts=_skill_split_reextract,
     ),
     RuleRow(
         "session.ended",
@@ -529,16 +593,35 @@ RULES: tuple[RuleRow, ...] = (
         _deadline_cheatsheet,
     ),
     RuleRow(
+        "chunk.indexed", ("embedding.compute",), "always: the text of the chunk", _chunk_indexed
+    ),
+    RuleRow(
+        "misconception.described",
+        ("embedding.compute",),
+        "always: the statement of the misconception",
+        _misconception_described,
+    ),
+    RuleRow(
         "*",
         ("embedding.compute",),
-        "new chunk, topic, skill, misconception or evidence with text",
-        needs="node ids",
+        "new topic, skill or evidence with text",
+        needs="topic and skill: which property is embedded (`name`, for a skill `summary` too) "
+        "is [ПРОВЕРИТЬ] in Т-§3.4.2 (D-A-117); evidence: its id is given by the projector, not "
+        "the event",
     ),
     RuleRow(
         "session.ended",
         ("graph.hygiene",),
-        "temporary entities, or every graph_hygiene_every_topics new topics (counters)",
-        needs="temporary entities of the session; counters of the dispatcher mark",
+        "the session has temporary entities (a described new skill, a provisional skill)",
+        needs="new skill descriptions and provisional skills of the session; its domain",
+        plan_facts=_session_hygiene,
+    ),
+    RuleRow(
+        "topic.created",
+        ("graph.hygiene",),
+        "every graph_hygiene_every_topics new topics of the domain (counter of the mark)",
+        needs="counters of the dispatcher mark",
+        plan_facts=_topics_hygiene,
     ),
 )
 

@@ -35,6 +35,29 @@ CROSS_LEARNER_ALLOWED: dict[str, str] = {
     # D-A-128 (#142): the phone has no session; the learner is found by the pairing token.
     "quack/auth/pairing.py:_REDEEM_TOKEN": "learner of a pairing token, unknown before pairing",
 }
+# D-A-164 (#182): the job queue and the dispatcher serve every learner (Т-§13.1–13.3): a job is
+# found by its global `job_key` or `coalesce_key`, a periodic job has no learner, a claim picks
+# the best job of any learner, the dispatcher walks the learners behind their mark.
+CROSS_LEARNER_ALLOWED |= {
+    f"quack/jobs/queue_p4.py:{name}": "the job queue serves every learner (Т-§13.1, Т-§13.2)"
+    for name in (
+        "_JOB_EXISTS",
+        "_COALESCE",
+        "_INSERT",
+        "_LEARNER_LOCK",
+        "_LEARNER_LOAD",
+        "_SKIP_BUDGET",
+        "_SESSION_SPEND",
+        "_HEARTBEAT",
+        "_FINISH",
+        "_REQUEUE",
+        "_SUPERSEDE",
+        "_CANCEL_SUPERSEDED",
+    )
+} | {
+    f"quack/jobs/dispatcher_p4.py:{name}": "the dispatcher walks every learner (Т-§13.3)"
+    for name in ("_PENDING_LEARNERS", "_LAG", "_IDLE_LEARNERS")
+}
 
 
 def _modules() -> Iterator[tuple[Path, ast.Module]]:

@@ -6,15 +6,18 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
-from quack.api.auth import require_terms
+from quack.api.auth import CurrentSession, get_current_session, require_terms
 from quack.api.errors import ApiError
 from quack.api.resources import AppResources, get_resources
 from quack.compute_client.client import ComputeClient
 from quack.config import Settings
+from quack.events.errors import IdempotencyConflictError
 from quack.llm.gateway import LLMGateway
-from quack.session import lifecycle, stream, turns
+from quack.session import lifecycle, sessions, stream, turns
+from quack.session.action_turn import TurnContextSource, turn_frames
+from quack.session.actions import Action, ActionAccepted, ActionFrame
 from quack.session.deps import (
     current_learner_id,
     enforce_turn_rate_limit,
@@ -23,6 +26,7 @@ from quack.session.deps import (
     get_settings_dep,
 )
 from quack.session.keepalive import sse_keepalive_response
+from quack.session.record import record_action
 from quack.session.schemas import (
     ActiveSession,
     FinishResponse,
@@ -34,12 +38,59 @@ from quack.session.schemas import (
     StartSessionRequest,
     TurnRequest,
 )
+from quack.session.turn_graph import TurnSlots
+from quack.session.turn_source import source_of
 
 router = APIRouter(prefix="/v1")
 
 LearnerId = Annotated[UUID, Depends(current_learner_id)]
 Resources = Annotated[AppResources, Depends(get_resources)]
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
+CurrentSessionDep = Annotated[CurrentSession, Depends(get_current_session)]
+
+
+_SSE_ITEM = {
+    "type": "object",
+    "properties": {
+        "data": {
+            "type": "string",
+            "contentMediaType": "application/json",
+            "contentSchema": {"$ref": "#/components/schemas/ActionFrame"},
+        },
+        "event": {"type": "string"},
+        "id": {"type": "string"},
+        "retry": {"type": "integer", "minimum": 0},
+    },
+    "required": ["data"],
+}
+
+
+class _EventStream(StreamingResponse):
+    """Documents the SSE media type of `/actions`; the route returns its responses itself."""
+
+    media_type = "text/event-stream"
+
+
+# ТЗ Ф4 WP13.2: one active turn per session in this process (D-B-148 п.е).
+PROCESS_TURN_SLOTS = TurnSlots()
+
+
+def get_turn_context_source(request: Request) -> TurnContextSource:
+    """The context of the teacher turn (WP14, D-B-181): `app.state.turn_context_source` if the
+    assembly set one, else built once from the resources of the process; without resources the
+    turn cannot run — `503`."""
+    state = request.app.state
+    source = getattr(state, "turn_context_source", None)
+    if source is None:
+        resources = getattr(state, "resources", None)
+        if resources is None:
+            raise ApiError(
+                "SERVICE_UNAVAILABLE",
+                "the context of the teacher turn is not set up",
+                status_code=503,
+            )
+        source = state.turn_context_source = source_of(resources)
+    return source
 
 
 # ТЗ Ф4 WP13.1, WP18.4 (D-C-112 п.3): no session without `consent.given {kind: terms}` of the
@@ -118,6 +169,75 @@ async def post_turn(
         str(getattr(request.state, "request_id", "")),
     )
     return sse_keepalive_response(events, settings.sse_keepalive_s)
+
+
+@router.post(
+    "/sessions/{session_id}/actions",
+    response_class=_EventStream,
+    response_model=None,
+    responses={
+        200: {
+            "description": "Actions with a teacher turn: SSE frames in the order of ТЗ Ф4 §4.7.",
+            # `model` keeps `ActionFrame` among the components; the event is documented as one
+            # SSE item, as FastAPI does for a streamed route (seam S11, unchanged from #75).
+            "model": ActionFrame,
+            "content": {"text/event-stream": {"itemSchema": _SSE_ITEM}},
+        },
+        201: {
+            "description": "Actions without a teacher turn (`confidence`): the action event seq.",
+            "content": {"application/json": {"schema": ActionAccepted.model_json_schema()}},
+        },
+    },
+)
+async def post_action(
+    session_id: UUID,
+    body: Action,
+    current: CurrentSessionDep,
+    resources: Resources,
+    settings: SettingsDep,
+    source: Annotated[TurnContextSource, Depends(get_turn_context_source)],
+) -> Response:
+    """ТЗ Ф4 WP13.1 (`Т-§1.4`): one learner action of an open session of the learner. A kind
+    without a teacher turn answers `201 {seq}`; a kind with one — SSE frames of §4.7 (D-B-156);
+    a session the inactivity sweep ended comes back first (WP13.10). The learner is the one of
+    the session cookie (Т-§19.1)."""
+    learner_id = current.learner_id
+    try:
+        open_session = await sessions.get_session(
+            resources.db, learner_id=learner_id, session_id=session_id
+        )
+        if open_session.status != "active" and not await sessions.resume_if_swept(
+            resources.db, learner_id=learner_id, session_id=session_id
+        ):
+            raise LookupError(f"session {session_id} is ended")
+        recorded = await record_action(
+            resources.db,
+            body,
+            learner_id=learner_id,
+            session_id=session_id,
+            domain_id=open_session.domain_id,
+            settings=settings,
+            redis=resources.redis,
+        )
+    except LookupError as exc:
+        raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
+    except IdempotencyConflictError as exc:
+        raise ApiError("IDEMPOTENCY_CONFLICT", str(exc), status_code=409) from exc
+    if not recorded.starts_turn:
+        return JSONResponse(ActionAccepted(seq=recorded.seq).model_dump(), status_code=201)
+    frames = turn_frames(
+        db=resources.db,
+        redis=resources.redis,
+        settings=settings,
+        source=source,
+        slots=PROCESS_TURN_SLOTS,
+        learner_id=learner_id,
+        session_id=session_id,
+        domain_id=open_session.domain_id,
+        recorded=recorded,
+        action=body,
+    )
+    return sse_keepalive_response(frames, settings.sse_keepalive_s)
 
 
 @router.get("/sessions/{session_id}/events")
