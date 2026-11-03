@@ -395,3 +395,31 @@ async def test_notes_routes(
         assert (await client.get(f"/v1/topics/{topic_id}/notes")).status_code == 404
         foreign = {"content": "x", "idempotency_key": "put-1"}
         assert (await client.put(f"{base}/{uuid4()}", json=foreign)).status_code == 404
+
+
+async def test_repeated_generator_run_writes_nothing(pg_db: Db) -> None:
+    """Law 5 (review B #138): the generator job repeated with the same blocks — a new block and
+    a supplement to a learner block — gives the same ids and no new version."""
+    learner_id = await create_learner(pg_db)
+    topic_id = await _topic(pg_db, learner_id)
+    notes = await get_artifact(pg_db, learner_id=learner_id, kind="notes", owner_id=topic_id)
+    mine = uuid4()
+    await edit_block(
+        pg_db,
+        learner_id=learner_id,
+        artifact_id=notes.artifact_id,
+        block_id=mine,
+        content="mine",
+        idempotency_key="own",
+    )
+    run = [_sys("more", block_id=mine), _sys("new", kind="why")]
+    first = await write_system_blocks(
+        pg_db, learner_id=learner_id, kind="notes", owner_id=topic_id, blocks=run,
+        created_by=WRITER,
+    )  # fmt: skip
+    again = await write_system_blocks(
+        pg_db, learner_id=learner_id, kind="notes", owner_id=topic_id, blocks=run,
+        created_by=WRITER,
+    )  # fmt: skip
+    assert (first.version, again.version) == (2, 2)
+    assert again.blocks == first.blocks

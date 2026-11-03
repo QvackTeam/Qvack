@@ -17,10 +17,11 @@ is in the event log (law 1; the hot path does not wait for Neo4j, Т-§20.7).
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal
-from uuid import UUID, uuid4, uuid5
+from uuid import UUID, uuid5
 
 from psycopg.types.json import Jsonb
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, TypeAdapter
@@ -210,21 +211,29 @@ async def write_system_blocks(
     """
     domain_id = await _domain_of_owner(db, learner_id, kind, owner_id)
 
+    artifact_id = artifact_id_for(learner_id, kind, owner_id)
+
+    def new_id(index: int, new: SystemBlock, supplement_to: UUID | None) -> UUID:
+        """A new block or supplement has an id from its source: a repeated run of the
+        generator with the same blocks writes nothing new (law 5, D-C-125 п.4)."""
+        digest = hashlib.sha256(new.content.encode()).hexdigest()
+        return uuid5(artifact_id, f"{created_by}:{index}:{supplement_to or ''}:{digest}")
+
     def change(current: list[Block]) -> list[Block]:
         by_id = {block.block_id: block for block in current}
         replaced: dict[UUID, Block] = {}
         supplements: dict[UUID, list[Block]] = {}
         appended: list[Block] = []
-        for new in blocks:
+        for index, new in enumerate(blocks):
             target = by_id.get(new.block_id) if new.block_id is not None else None
             if target is not None and target.owner == "system" and target.supplement_to is None:
                 replaced[target.block_id] = _system(new, target.block_id, None)
             elif target is not None and target.owner == "learner":
                 supplements.setdefault(target.block_id, []).append(
-                    _system(new, uuid4(), target.block_id)
+                    _system(new, new_id(index, new, target.block_id), target.block_id)
                 )
             else:
-                appended.append(_system(new, uuid4(), None))
+                appended.append(_system(new, new_id(index, new, None), None))
         result: list[Block] = []
         for block in current:
             if block.owner == "learner":
@@ -238,7 +247,7 @@ async def write_system_blocks(
                     result.append(block)
         return result + appended
 
-    artifact_id = await _ensure_artifact(db, learner_id, kind, owner_id, domain_id)
+    await _ensure_artifact(db, learner_id, kind, owner_id, domain_id)
     return await _save(
         db,
         learner_id=learner_id,
