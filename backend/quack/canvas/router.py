@@ -1,7 +1,7 @@
 """Routes of canvases (ТЗ Ф4 §6.4 «Канвас», WP21.1, WP21.2): `POST /v1/sessions/{id}/canvases`,
 `GET /v1/canvases/{id}`, `GET /v1/domains/{id}/canvases`, `POST /v1/canvases/{id}/photos`,
 `POST /v1/canvases/{id}/lines/{line_id}/correct`, `WS /v1/canvases/{id}/ws`,
-`GET /v1/canvases/{id}/replay` (WP21.6). The
+`GET /v1/canvases/{id}/replay` and `POST /v1/sessions/{id}/voice` (WP21.6). The
 learner comes only from the session cookie (WP18.3); a session, task, canvas or domain of another
 learner is 404."""
 
@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, UploadFile, WebSocket
+from fastapi import APIRouter, Depends, File, Form, UploadFile, WebSocket
 from pydantic import BaseModel, Field
 
 from quack.api.auth import (
@@ -22,7 +22,7 @@ from quack.api.auth import (
 )
 from quack.api.errors import ApiError
 from quack.api.resources import AppResources, get_resources
-from quack.canvas import boards, photos, recognition, replay, socket
+from quack.canvas import boards, photos, recognition, replay, socket, voice
 from quack.canvas.board import BoardDoc
 
 router = APIRouter(prefix="/v1", tags=["canvas"])
@@ -62,6 +62,15 @@ class CorrectedLine(BaseModel):
 class PhotoView(BaseModel):
     photo_id: UUID
     canvas_id: UUID
+
+
+class VoiceView(BaseModel):
+    """WP21.6: what was heard; `seq` is the `voice.transcribed` event, `null` for silence."""
+
+    text: str
+    started_at_ms: int
+    ended_at_ms: int
+    seq: int | None
 
 
 class CanvasList(BaseModel):
@@ -182,6 +191,41 @@ async def upload_photo(
     except boards.CanvasNotFound as exc:
         raise _not_found(exc) from exc
     return PhotoView(photo_id=photo.photo_id, canvas_id=photo.canvas_id)
+
+
+@router.post("/sessions/{session_id}/voice", status_code=201, response_model=VoiceView)
+async def upload_voice(
+    session_id: UUID,
+    session: Session,
+    resources: Resources,
+    audio: Annotated[UploadFile, File()],
+    started_at_ms: Annotated[int, Form(ge=0)],
+    ended_at_ms: Annotated[int, Form(ge=0)],
+) -> VoiceView:
+    """WP21.6: one segment of speech (WAV) with its start and end by the device clock; the
+    audio is not stored (П-14.1). The companion has no voice (T-CP1: 403). A session of another
+    learner is 404; compressed audio is 415; the same segment again gives the same answer."""
+    try:
+        heard = await voice.transcribe_segment(
+            resources.db,
+            resources.llm,
+            learner_id=session.learner_id,
+            session_id=session_id,
+            audio=await audio.read(),
+            started_at_ms=started_at_ms,
+            ended_at_ms=ended_at_ms,
+            redis=resources.redis,
+        )
+    except voice.SessionNotFound as exc:
+        raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
+    except voice.InvalidSegment as exc:
+        raise ApiError("VALIDATION_ERROR", str(exc), status_code=422) from exc
+    return VoiceView(
+        text=heard.text,
+        started_at_ms=heard.started_at_ms,
+        ended_at_ms=heard.ended_at_ms,
+        seq=heard.seq,
+    )
 
 
 @router.post("/canvases/{canvas_id}/lines/{line_id}/correct", response_model=CorrectedLine)

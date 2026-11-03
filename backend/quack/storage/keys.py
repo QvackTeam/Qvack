@@ -54,6 +54,11 @@ def photo_original_key(learner_id: UUID, photo_id: UUID) -> str:
     return f"{learner_prefix(learner_id)}photos/{photo_id}/original-{new_ulid()}.webp"
 
 
+def photo_drawing_key(learner_id: UUID, photo_id: UUID, n: int) -> str:
+    """A drawing cut from the photo, without its paper (WP22.3 step 5)."""
+    return f"{learner_prefix(learner_id)}photos/{photo_id}/drawing_{n}-{new_ulid()}.webp"
+
+
 def photo_crop_key(learner_id: UUID, photo_id: UUID, crop: int) -> str:
     return f"{learner_prefix(learner_id)}photos/{photo_id}/crop_{crop}-{new_ulid()}.webp"
 

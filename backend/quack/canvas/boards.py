@@ -18,7 +18,7 @@ from uuid import UUID, uuid4, uuid5
 from psycopg.types.json import Jsonb
 from redis.asyncio import Redis
 
-from quack.canvas.board import BoardDoc
+from quack.canvas.board import BoardDoc, LearnerDrawing
 from quack.db import Db
 from quack.events.event_types import AgentRequested
 from quack.events.log import NewEvent, append_events
@@ -40,6 +40,16 @@ _DOMAIN_OF_LEARNER = (
 _TASK = (
     "SELECT source, solution_space IS NOT NULL AS has_space FROM content.tasks "
     "WHERE learner_id = %(learner_id)s AND task_id = %(task_id)s"
+)
+# A drawing is added once: its id is the key (a repeated photo job adds nothing).
+_ADD_DRAWING = (
+    "UPDATE content.canvas_boards SET "
+    "doc = jsonb_set(doc, '{learner,drawings}', "
+    "COALESCE(doc #> '{learner,drawings}', '[]'::jsonb) || %(drawing)s, true), "
+    "version = version + 1, updated_at = now() "
+    "WHERE learner_id = %(learner_id)s AND canvas_id = %(canvas_id)s AND NOT EXISTS ("
+    "SELECT 1 FROM jsonb_array_elements(COALESCE(doc #> '{learner,drawings}', '[]'::jsonb)) d "
+    "WHERE d ->> 'drawing_id' = %(drawing_id)s) RETURNING version"
 )
 _COLUMNS = "canvas_id, session_id, task_id, doc, version, updated_at"
 _INSERT = (
@@ -133,6 +143,22 @@ async def get_canvas(db: Db, *, learner_id: UUID, canvas_id: UUID) -> Canvas:
     if row is None:
         raise CanvasNotFound(f"canvas {canvas_id} not found")
     return _canvas(row)
+
+
+async def add_drawing(
+    db: Db, *, learner_id: UUID, canvas_id: UUID, drawing: LearnerDrawing
+) -> bool:
+    """Lay a drawing into the learner layer (WP22.3 step 5); `False` — it is there already."""
+    row = await db.fetch_one(
+        _ADD_DRAWING,
+        {
+            "learner_id": learner_id,
+            "canvas_id": canvas_id,
+            "drawing_id": drawing.drawing_id,
+            "drawing": Jsonb([drawing.model_dump(mode="json")]),
+        },
+    )
+    return row is not None
 
 
 async def domain_canvases(db: Db, *, learner_id: UUID, domain_id: UUID) -> list[Canvas]:

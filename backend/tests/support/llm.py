@@ -55,23 +55,6 @@ class FakeLLMProvider:
     def enqueue(self, *items: QueuedLLMItem) -> None:
         self.responses.extend(items)
 
-    async def segment(self, request: SegmentRequest) -> ProviderResponse:
-        self.segment_calls.append(request)
-        if self.media_error is not None:
-            raise self.media_error
-        text = self.segment_text(request) if callable(self.segment_text) else self.segment_text
-        return ProviderResponse(text, 100, 10, 0, request.model)
-
-    async def transcribe(self, request: TranscribeRequest) -> TranscribeResponse:
-        self.transcribe_calls.append(request)
-        if self.media_error is not None:
-            raise self.media_error
-        text = self.transcript(request) if callable(self.transcript) else self.transcript
-        return TranscribeResponse(text, 0, 0, 0, request.model, audio_duration_ms=1000)
-
-    async def illustrate(self, request: IllustrationRequest) -> ImageResponse:
-        raise AssertionError("ScriptedLLMProvider: `illustrator` is not scripted")
-
     async def complete_structured(self, request: ProviderRequest) -> ProviderResponse:
         self.calls.append(request)
         if not self.responses:
@@ -430,6 +413,23 @@ class ScriptedLLMProvider:
             failure.times -= 1
             return failure
         return None
+
+    async def segment(self, request: SegmentRequest) -> ProviderResponse:
+        self.segment_calls.append(request)
+        if self.media_error is not None:
+            raise self.media_error
+        text = self.segment_text(request) if callable(self.segment_text) else self.segment_text
+        return ProviderResponse(text, 100, 10, 0, request.model)
+
+    async def transcribe(self, request: TranscribeRequest) -> TranscribeResponse:
+        self.transcribe_calls.append(request)
+        if self.media_error is not None:
+            raise self.media_error
+        text = self.transcript(request) if callable(self.transcript) else self.transcript
+        return TranscribeResponse(text, 0, 0, 0, request.model, audio_duration_ms=1000)
+
+    async def illustrate(self, request: IllustrationRequest) -> ImageResponse:
+        raise AssertionError("ScriptedLLMProvider: `illustrator` is not scripted")
 
     async def complete_structured(self, request: ProviderRequest) -> ProviderResponse:
         self.calls.append(request)
