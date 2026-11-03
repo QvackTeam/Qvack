@@ -449,6 +449,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Решение: в ответные модели среза добавлены поля, названные техдоком: `SkillFact.gap_type_confidence` (`gapTypeConfidence`, `Т-§3.4.4`, `Т-§8.4`: доля голосов за победивший тип), `SkillFact.last_lapse_at_ms` (`retLastLapseAtMs`; «забыл», `Т-§8.2` п.3), `MisconceptionFact.triggers` (`Т-§3.4.2`, `Т-§9.3`). Нет значения — `None` / пустой список (закон 8: «не было» — явное значение). Поля необязательные: читающий код B и C не меняется. Каталог событий не затронут (S3 заморожен, D-A-119). Заглушка `FixedGraphReader` даёт их у «проваленного» навыка и у заблуждения.
 - Почему: §0.4.3 п.2 (поля названы `Т-§3.4`); S4 — интерфейс A, реализация — G2.
 - Тесты: `tests/graph/test_read_stub.py::test_memory_picture_facts_of_wp14_2`.
+
 ### D-A-124. Швы WP15 для B: проверка элементов `extractor@3` и запись покрытия
 - Класс: B. WP15 п.4, п.8 (`Т-§7.6`, `Т-§4.4`, `Т-§2.1`), WP7.3 (`Т-§2.8`); `quack/graph/evidence_validation.py` (`check_extracted`), `quack/jobs/coverage.py` (`mark_covered`)
 - Контекст: B просит (п.5 сообщения B): проверку элементов на записях Фазы 4 и функцию записи `ops.coverage` в транзакции `observation.extracted`. Ядро не может импортировать модель B (`quack.agents.schemas.ExtractedElement`, §4.1).
