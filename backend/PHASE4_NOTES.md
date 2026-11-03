@@ -872,6 +872,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (`Т-§6.8`: «рубрика — ключевые шаги … или ключевые идеи»; `Т-§7.7`: «при сомнении» — сомнении вердикта), п.5.
 - Обратимость: одна функция входа и порядок двух строк.
 - Тесты: `tests/practice/test_check_model.py`.
+- Ответ A (#117, 2026-11-03): `MisconceptionFact.statement` обязателен (`Т-§9.3`). B строит `KnownMisconception` из среза: `known_misconceptions(facts, skill_ids=…)` — заблуждения проверяемых навыков в порядке среза (`quack/practice/model_check.py`).
 - Требует подтверждения владельцем: нет
 - Открыто: рисунок (`drawing`) идёт в `verdict_free` текстом `value`. Изображения в запросе шлюз пока не передаёт (`Т-§6.8` «Spark с изображением»); нужен вход-изображение в `generate_structured` (B, WP10.2) — до него ответ-рисунок проверяется по описанию. У `MisconceptionFact` (S4) нет формулировки заблуждения — для `KnownMisconception.statement` нужна она (вопрос A).
 
@@ -883,6 +884,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.1 (без изменения каталога в чужом файле), п.3.
 - Обратимость: одна ветка в `insure_symbolic`.
 - Тесты: `tests/practice/test_check_symbolic_job.py`.
+- Ответ A (#117, 2026-11-03): `unsupported` есть в `CheckFailedReason`. Страховка пишет `check.failed {reason: unsupported}` вместо «ничего не писать»; строка S6 `check.failed → check.model` отдаёт ответ модели (`Т-§6.6`).
 - Требует подтверждения владельцем: нет
 ### D-B-144. Грамматика API пускает отношения — режим `interval` проходит проверку разметки
 - Класс: B
@@ -1218,6 +1220,7 @@ PR #77 (dbmate v2.36.0, sha256).
 ## Красные прогоны
 
 - WP13.1, согласие на старте сессии (D-B-151): `uv run pytest tests/session/test_session_terms.py` — 2 failed (старт без согласия `201`, без cookie `201`), коммит `f5029a2`. Зелёный: 2 passed; `tests/session` и `tests/llm/test_labels.py` зелёные; `tests/e2e` — 13 failed (`403` на старте, правка у C).
+- WP11.3, WP11.6 на полях A #117 (D-B-145, D-B-146): `uv run pytest tests/practice/test_check_symbolic_job.py tests/practice/test_check_model.py` — 1 failed (`unsupported` ничего не писал) и ошибка сбора (нет `known_misconceptions`), коммит `72e96fb`. Зелёный: `tests/practice`, `tests/events`, `tests/graph/test_read_stub.py`, `tests/jobs/test_rules_p4.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` — 234 passed.
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
 - WP18, этап I (C, `phase-4-c-wp18`): в Linux против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` и dbmate v2.36.0 `pytest tests/auth` — 7 failed (`NotImplementedError`: `request_link`, `redeem_link`, `LinkLimiter`, `cookie_params`, `learner_for_google`, сессии, согласия). Зелёный (библиотека): 7 passed. `T-AU5` — с маршрутами (весь API на сессиях).
 - WP20.1, WP20.5 (C, `phase-4-c-wp20`, коммит `d161aed`): в Linux против `quack-test-*` с dbmate — `tests/materials` 4 failed (`NotImplementedError`). Зелёный: `tests/materials`, `test_contracts.py`, `tests/db/test_sql_static.py` — 15 passed.
@@ -1275,6 +1278,8 @@ PR #77 (dbmate v2.36.0, sha256).
 ## Правки тестов
 
 - `tests/session/test_head_guards.py::test_boundary_names_the_missing_prerequisites_once` (D-B-153, до зелёного): проверка «id не в тексте» смотрела на id предпосылки с меткой и не ловила утечку id предпосылки без метки (подмена прошла); теперь проверяются оба id и точный текст. Тест усилен, не ослаблен.
+- `tests/practice/test_check_symbolic_job.py::test_unsupported_form_writes_nothing_yet` → `test_unsupported_form_writes_check_failed_for_the_model` (B, D-B-146): прежний тест закреплял временное поведение до ответа A («`unsupported` нет в каталоге»); A добавил значение в #117, тест проверяет новое поведение: `check.failed {reason: unsupported}` под ключом `check_failed_key`. Тест не ослаблен.
+
 - `tests/session/test_holdback.py` (B, до зелёного): `test_spoiler_found_only_at_the_end` ошибочно ждал спойлер только в `finish`, хотя по WP13.4 весь накопленный текст проверяется на каждом куске. Заменён на `test_spoiler_completed_inside_the_holdback` (спойлер ловится на куске, который его дописал) и `test_finish_checks_the_whole_text`. Проверка не ослаблена: показанный текст по-прежнему пуст.
 - `tests/llm/test_phase4_ai_layer.py` (`T111`): `max_output_tokens` десяти ролей — по замеру (D-B-134); `Т-§11.1` разрешает менять конфиг по замеру. Сила проверки не меняется.
 - `tests/test_contracts.py` (`T-A6`): в `PRODUCT` добавлен `agents` (ТЗ Ф4 §4.1). Сила проверки не меняется.

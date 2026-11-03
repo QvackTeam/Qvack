@@ -76,12 +76,13 @@ async def insure_symbolic(
         )
         return result
     if isinstance(result, NeedsModel):
-        return result
-    failed = (
-        CheckFailed(answer_seq=answer_seq, part=part, reason=result.reason)
-        if isinstance(result, NotYet)
-        else result
-    )
+        # D-B-146: no structural check for the form — `unsupported`; S6 `check.failed →
+        # check.model` gives it to the model (Т-§6.6).
+        failed = CheckFailed(answer_seq=answer_seq, part=part, reason="unsupported")
+    elif isinstance(result, NotYet):
+        failed = CheckFailed(answer_seq=answer_seq, part=part, reason=result.reason)
+    else:
+        failed = result
     await append_events(
         db,
         learner_id,
