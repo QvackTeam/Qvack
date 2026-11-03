@@ -249,8 +249,11 @@ def test_handwriting_known_claim_and_reextraction_rows() -> None:
     assert _one(_event("handwriting.corrected")).kind == "canvas.rediagnose"
     assert _one(_event("known.claimed")).kind == "check.known_claim"
     assert _one(_event("episode.reassigned")).kind == "extract.episode"
-    split = _one(_event("skill.split"))
-    assert split.kind == "extract.episode" and split.payload["restrict_skill_ids"]
+    # Т-§2.8: the episodes where the old skill has evidence are re-extracted, restricted to the
+    # parts — one job per episode, a row with data beyond the event (G2, D-A-135).
+    assert r.plan_jobs(_event("skill.split"), Settings()) == []
+    (split,) = [row for row in r.ROWS_NEED_FACTS if row.event_type == "skill.split"]
+    assert split.job_kinds == ("extract.episode",)
 
 
 def test_visible_kinds_follow_t_13_8() -> None:

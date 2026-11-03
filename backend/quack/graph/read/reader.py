@@ -16,6 +16,7 @@ from quack.events.values import Level
 from quack.graph.overlay import SessionOverlay
 from quack.graph.read.models import (
     EvidenceFact,
+    ExtractionCandidates,
     Frontier,
     HubReadiness,
     MemorySlice,
@@ -76,3 +77,19 @@ class GraphReader(Protocol):
     async def state_at(
         self, learner_id: UUID, seq_n: int, skill_ids: Sequence[UUID]
     ) -> StateAt: ...
+
+    async def extraction_candidates(
+        self,
+        learner_id: UUID,
+        session_id: UUID,
+        episode_vector: Sequence[float] | None,
+        k: int,
+        *,
+        topic_id: UUID | None = None,
+        skill_ids: Sequence[UUID] | None = None,
+    ) -> ExtractionCandidates:
+        """Candidates of the extractor (WP15 п.2, п.6; D-A-135): the skills of the topics active
+        in the session plus the nearest to `episode_vector` by `skill_emb`, at most `k`; no
+        vector (Modal is down) — the session's skills only. `topic_id` / `skill_ids` restrict
+        re-extraction to a topic (`episode.reassigned`) or to skills (`skill.split`)."""
+        ...
