@@ -16,7 +16,7 @@
 
 5. every area the recognizer marked as a drawing — and only those (T-CP3) — goes to `segmenter`
    (`sam-3.1`) by its box in pixels; compute `/v1/image/clean-drawing` removes the paper under
-   the mask, the image is stored and laid into the learner layer of the board (D-C-151).
+   the mask, the image is stored and laid into the learner layer of the board (D-C-153).
 
 The line source is the whole photo with the approximate box of the line (`Т-§22.6`), so no crop
 is stored.
@@ -287,7 +287,7 @@ async def _place_drawings(
     """Step 5: one `segmenter` call per drawing area, `clean-drawing` under the mask, the image
     to the store, a record in the learner layer. A drawing already on the board is not touched
     (a repeated job calls nothing). The photo whose size the WebP header does not give has no
-    box in pixels: its drawings are skipped and logged (D-C-151). Errors propagate: the job is
+    box in pixels: its drawings are skipped and logged (D-C-153). Errors propagate: the job is
     retried (§4.2)."""
     if not areas:
         return []

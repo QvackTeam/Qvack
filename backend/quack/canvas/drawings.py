@@ -1,4 +1,4 @@
-"""Drawings of a sheet photo (ТЗ Ф4 WP22.3 step 5; Т-§22.6, Т-§16.3 п.4; D-C-151).
+"""Drawings of a sheet photo (ТЗ Ф4 WP22.3 step 5; Т-§22.6, Т-§16.3 п.4; D-C-153).
 
 The recognizer marks an area of the sheet as a drawing and gives its approximate box as shares
 of the image. This module turns that into what the next calls need:

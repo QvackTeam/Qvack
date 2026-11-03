@@ -46,7 +46,7 @@ class TypedFormula(_Strict):
 
 
 class LearnerDrawing(_Strict):
-    """A drawing cut from a sheet photo (WP22.3 step 5; Т-§16.3 п.4, D-C-151): the image without
+    """A drawing cut from a sheet photo (WP22.3 step 5; Т-§16.3 п.4, D-C-153): the image without
     its paper in the store and the box of the area as shares of the sheet."""
 
     drawing_id: str  # `{photo_id}:{n}`, n — the number of the drawing among those of the photo

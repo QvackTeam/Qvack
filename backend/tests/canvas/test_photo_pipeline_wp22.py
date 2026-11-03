@@ -139,7 +139,7 @@ async def test_photos_of_one_sheet_write_only_new_lines(
     )
     assert result.drawings == 1 and not result.new_sheet
     # The aligned photo of this test is not a WebP of a known size, so the drawing has no box in
-    # pixels: it is counted and skipped without a call of the model (D-C-151).
+    # pixels: it is counted and skipped without a call of the model (D-C-153).
     assert result.drawings_placed == [] and provider.segment_calls == []
     assert result.committed == [f"{first}:{second}:1", f"{first}:{second}:3"]
     assert result.erased == [f"{first}:{first}:1"]

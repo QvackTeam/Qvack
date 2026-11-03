@@ -1,5 +1,5 @@
 """WP22.3 step 5: the helpers of drawings — the size of the aligned photo and the mask for
-compute `/v1/image/clean-drawing` (ТЗ Ф4 WP22.3; Т-§22.6, Т-§16.3 п.4; D-C-151)."""
+compute `/v1/image/clean-drawing` (ТЗ Ф4 WP22.3; Т-§22.6, Т-§16.3 п.4; D-C-153)."""
 
 from __future__ import annotations
 
