@@ -26,7 +26,8 @@ from redis.asyncio import Redis
 
 from quack.config import Settings
 from quack.db.redis import session_events_channel
-from tests.session.helpers import make_token, parse_sse
+from tests.session.helpers import parse_sse
+from tests.support.auth import learner_headers
 
 if TYPE_CHECKING:
     from tests.session.fixtures import SeededDomain
@@ -258,7 +259,7 @@ async def test_session_events_foreign_or_unknown_session_returns_404(
 
     # 2. Another learner requesting `/v1/sessions/{session_id}/events` gets 404 NOT_FOUND
     foreign_learner = uuid4()
-    foreign_headers = {"Authorization": f"Bearer {make_token(settings, foreign_learner)}"}
+    foreign_headers = learner_headers(foreign_learner)
     foreign_resp = await client.get(
         f"/v1/sessions/{session_id}/events",
         headers=foreign_headers,

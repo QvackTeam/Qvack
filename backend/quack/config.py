@@ -95,13 +95,10 @@ class DiagnosticParams(BaseModel):
     default_tested_depth: float = 0.5
 
 
-# Q6 (PHASE3_NOTES): tokens are HS256; RFC 7518 §3.2 requires a key at least as long as the
-# hash output (256 bits). A property of the algorithm, not a tunable threshold.
-HS256_MIN_SECRET_BYTES = 32
-
 # Д-§7: the secrets each process role needs in prod (compose passes only these, ТЗ WP9.2).
+# JWT_SECRET is gone with JWT (ТЗ Ф4 §2.3 row 3, WP18.3).
 _PROD_SECRETS_BY_ROLE: dict[str, tuple[str, ...]] = {
-    "api": ("JWT_SECRET", "META_API_KEY", "NEO4J_PASSWORD"),
+    "api": ("META_API_KEY", "NEO4J_PASSWORD"),
     "workers": ("META_API_KEY", "NEO4J_PASSWORD"),
     "projector": ("NEO4J_PASSWORD",),
     "ops": (),
@@ -206,7 +203,6 @@ class Settings(BaseSettings):
     neo4j_password: SecretStr = SecretStr("neo4j")
     redis_url: str = "redis://localhost:6379/0"
     compute_url: str = "http://localhost:8001"
-    jwt_secret: SecretStr = SecretStr("")
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
@@ -521,11 +517,9 @@ class Settings(BaseSettings):
     # WP8.3: probe timeout of /health/ready and /healthz (was HEALTH_CHECK_TIMEOUT_SEC).
     health_check_timeout_s: float = 2.0
     # WP1.5 (Т-§19.1, ТЗ-П1, ТЗ-П2): fixed 60 s windows, keys ratelimit:{scope}:{key}.
-    auth_requests_per_ip_per_min: int = 10
     learner_actions_per_min: int = 60
     turns_per_min: int = 20
-    # WP1.6: moved from quack/domains (JWT_TTL_DAYS, CURATION_DEFER_MINUTES).
-    jwt_ttl_days: int = 7
+    # WP1.6: moved from quack/domains (CURATION_DEFER_MINUTES).
     curation_defer_min: int = 10
     # WP1.6, audit A7: other thresholds of Phase 2 (domains, artifacts) — Phase 3 decision D-C-014.
     curation_min_evidence_for_promotion: int = 2
@@ -607,6 +601,23 @@ class Settings(BaseSettings):
     team_daily_alert_usd: float = 60.0
     backup_interval_hours: int = 6
     backup_retention_days: int = 14
+    # `ops backup` (Д-§8.1, Д-§7): R2 key limited to the bucket; `file:///dir` in the endpoint
+    # writes into a directory instead (tests, local stack).
+    backup_bucket: str = "quack-backups"
+    backup_s3_endpoint: SecretStr = SecretStr("")
+    backup_s3_access_key: SecretStr = SecretStr("")
+    backup_s3_secret_key: SecretStr = SecretStr("")
+    backup_age_public_key: str = ""
+    backup_local_dir: str = "/backups"
+    heartbeat_backup_url: SecretStr = SecretStr("")
+    alert_webhook_url: SecretStr = SecretStr("")
+    # `ops db-roles` (Д-§7): passwords of the three Postgres roles.
+    app_db_password: SecretStr = SecretStr("")
+    reader_db_password: SecretStr = SecretStr("")
+    migrator_db_password: SecretStr = SecretStr("")
+    # Д-§14.3: the chat is not chosen yet, the body shape follows the setting (ops/notify.py).
+    alert_webhook_format: Literal["slack", "discord", "telegram"] = "slack"
+    alert_webhook_chat_id: str = ""
     cors_origins: list[str] = Field(
         default_factory=lambda: ["https://app.qvack.online", "https://preview.qvack.online"]
     )
@@ -635,7 +646,6 @@ class Settings(BaseSettings):
         the role (`projector` has no META_API_KEY, `migrate` and other `ops` commands none)."""
         if self.env == "prod":
             secrets = {
-                "JWT_SECRET": self.jwt_secret,
                 "META_API_KEY": self.meta_api_key,
                 "NEO4J_PASSWORD": self.neo4j_password,
             }
@@ -646,13 +656,6 @@ class Settings(BaseSettings):
             ]
             if missing:
                 raise ValueError(f"missing required secrets for ENV=prod: {', '.join(missing)}")
-            jwt_bytes = len(self.jwt_secret.get_secret_value().encode())
-            if "JWT_SECRET" in _PROD_SECRETS_BY_ROLE[self.process_role] and (
-                jwt_bytes < HS256_MIN_SECRET_BYTES
-            ):
-                raise ValueError(
-                    f"JWT_SECRET for ENV=prod must be at least {HS256_MIN_SECRET_BYTES} bytes"
-                )
         return self
 
     @property
@@ -681,7 +684,6 @@ class Settings(BaseSettings):
         """Values the logger must mask (Д-§7)."""
         values = [
             self.meta_api_key.get_secret_value(),
-            self.jwt_secret.get_secret_value(),
             self.neo4j_password.get_secret_value(),
             *(
                 secret.get_secret_value()
@@ -694,6 +696,14 @@ class Settings(BaseSettings):
                     self.s3_secret_key,
                     self.deletions_s3_access_key,
                     self.deletions_s3_secret_key,
+                    self.backup_s3_endpoint,
+                    self.backup_s3_access_key,
+                    self.backup_s3_secret_key,
+                    self.heartbeat_backup_url,
+                    self.alert_webhook_url,
+                    self.app_db_password,
+                    self.reader_db_password,
+                    self.migrator_db_password,
                     self.modal_token_id,
                     self.modal_token_secret,
                 )

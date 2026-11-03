@@ -13,12 +13,15 @@ on every call, so assertions can name ids:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 from uuid import UUID
 
 from quack.events.values import Level
 from quack.graph.overlay import SessionOverlay
 from quack.graph.read import (
+    CandidateSkill,
     EvidenceFact,
+    ExtractionCandidates,
     Frontier,
     HubReadiness,
     LevelFact,
@@ -49,6 +52,10 @@ SKILL_PROVEN = UUID(int=0x51)
 SKILL_FAILED = UUID(int=0x52)
 SKILL_QUIET = UUID(int=0x53)
 MISCONCEPTION = UUID(int=0x61)
+MISCONCEPTION_STATEMENT = "adds the denominators when adding fractions"
+MISCONCEPTION_TRIGGERS = ("fractions with different denominators",)
+LAPSE_AT_MS = 1_699_000_000_000
+HINT_STEP = 2
 EVIDENCE_PROVEN = UUID(int=0xE1)
 EVIDENCE_FAILED = UUID(int=0xE2)
 PROJECTED_SEQ = 120
@@ -85,6 +92,16 @@ _REQUIRES: dict[UUID, list[RequiresLink]] = {
     ]
 }
 _TOPIC_OF = {SKILL_PROVEN: TOPIC_READY, SKILL_FAILED: TOPIC_OPEN, SKILL_QUIET: TOPIC_OPEN}
+_NAMES = {SKILL_PROVEN: "add fractions", SKILL_FAILED: "common denominator",
+          SKILL_QUIET: "reduce a fraction"}  # fmt: skip
+# Signals of the failed skill: a gap type with its confidence and a memory lapse (Т-§8.2, Т-§8.4).
+_SIGNALS: dict[UUID, dict[str, Any]] = {
+    SKILL_FAILED: {
+        "gap_type": "execution",
+        "gap_type_confidence": 0.8,
+        "last_lapse_at_ms": LAPSE_AT_MS,
+    },
+}
 
 
 def _evidence(evidence_id: UUID, skill_id: UUID, outcome: str, seq: int) -> EvidenceFact:
@@ -109,6 +126,7 @@ def _skill(skill_id: UUID) -> SkillFact:
         domain_id=DOMAIN,
         levels=_LEVELS[skill_id],
         requires=_REQUIRES.get(skill_id, []),
+        **_SIGNALS.get(skill_id, {}),
     )
 
 
@@ -136,6 +154,8 @@ class FixedGraphReader:
                     misconception_id=MISCONCEPTION,
                     skill_id=SKILL_FAILED,
                     status="suspected",
+                    statement=MISCONCEPTION_STATEMENT,
+                    triggers=list(MISCONCEPTION_TRIGGERS),
                     manifestation_count=1,
                     quotes=["a = b"],
                 )
@@ -198,6 +218,10 @@ class FixedGraphReader:
     async def skill_history(
         self, skill_id: UUID, level: Level | None = None, limit: int = 10
     ) -> list[EvidenceFact]:
+        if skill_id == SKILL_FAILED:
+            hinted = _evidence(EVIDENCE_FAILED, skill_id, "incorrect", 110).model_dump()
+            hinted |= {"assistance": "hint", "hint_step": HINT_STEP}
+            return [EvidenceFact.model_validate(hinted)][:limit]
         return [_evidence(EVIDENCE_PROVEN, skill_id, "correct", 100)][:limit]
 
     async def prerequisites(self, skill_id: UUID, limit: int = 10) -> list[PrerequisiteFact]:
@@ -219,3 +243,30 @@ class FixedGraphReader:
             seq=seq_n,
             skills=[_skill(s) for s in skill_ids if s in _LEVELS],
         )
+
+    async def extraction_candidates(
+        self,
+        learner_id: UUID,
+        session_id: UUID,
+        episode_vector: Sequence[float] | None,
+        k: int,
+        *,
+        topic_id: UUID | None = None,
+        skill_ids: Sequence[UUID] | None = None,
+    ) -> ExtractionCandidates:
+        wanted = list(_LEVELS)
+        if topic_id is not None:
+            wanted = [s for s in wanted if _TOPIC_OF[s] == topic_id]
+        if skill_ids is not None:
+            wanted = [s for s in wanted if s in skill_ids]
+        wanted = wanted[:k]
+        skills = [CandidateSkill(skill_id=s, name=_NAMES[s], topic_id=_TOPIC_OF[s]) for s in wanted]
+        misconception = MisconceptionFact(
+            misconception_id=MISCONCEPTION,
+            skill_id=SKILL_FAILED,
+            status="suspected",
+            statement=MISCONCEPTION_STATEMENT,
+            triggers=list(MISCONCEPTION_TRIGGERS),
+        )
+        known = [misconception] if SKILL_FAILED in wanted else []
+        return ExtractionCandidates(skills=skills, misconceptions=known)

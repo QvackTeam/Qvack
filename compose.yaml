@@ -1,20 +1,27 @@
 # Quack stack (ТЗ Фазы 3 WP9.2, Д-§3, Д-§4.1, Д-§6.1, Д-§7). Values are starting points.
 #
 # Secrets and per-host values come from `.env` next to this file (names: backend/.env.example
-# plus POSTGRES_PASSWORD). No service publishes a port here; `compose.override.yaml` publishes
-# the databases and the API on 127.0.0.1 for local work. Caddy, backup and alerts belong to the
-# DevOps track and are added on top of this file.
+# plus POSTGRES_PASSWORD). Only `caddy` publishes ports (80, 443, Д-§10); its config is
+# deploy/Caddyfile. `compose.override.yaml` publishes the databases and the API on 127.0.0.1 for
+# local work. Backup and alerts are added on top of this file.
 #
 # Small machine (Docker with ~4 GB): NEO4J_HEAP=512m NEO4J_PAGECACHE=256m NEO4J_TX_MAX=256m
 # NEO4J_MEM_LIMIT=1536m NEO4J_MEMSWAP_LIMIT=1920m.
 #
 # Test learners: `docker compose exec api python -m quack.cli ops seed-learners --count N --out
-# /tmp/learners.json` — in `api`, the only service with JWT_SECRET (tokens are signed with it).
+# /tmp/learners.json` — each learner gets a session token (ТЗ Ф4 WP18.3).
 #
 # Load stand: `docker compose --profile loadtest up` adds `meta-mock`; point api and workers to it
 # with META_API_BASE_URL=http://meta-mock:8080 (no /v1 suffix).
 
 name: quack
+
+# Д-§4.2: json-file, 10 MB x 5 files per container.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
 
 x-backend-image: &backend-image
   image: ${QUACK_BACKEND_IMAGE:-quack-backend:local}
@@ -73,6 +80,7 @@ services:
       timeout: 3s
       retries: 20
     mem_limit: 1792m
+    logging: *default-logging
     memswap_limit: 2240m
     cpus: 2.0
 
@@ -97,6 +105,7 @@ services:
       retries: 30
       start_period: 30s
     mem_limit: ${NEO4J_MEM_LIMIT:-4g}
+    logging: *default-logging
     memswap_limit: ${NEO4J_MEMSWAP_LIMIT:-5g}
     cpus: 2.0
 
@@ -112,6 +121,7 @@ services:
       timeout: 3s
       retries: 20
     mem_limit: 192m
+    logging: *default-logging
     memswap_limit: 240m
     cpus: 0.25
 
@@ -124,11 +134,16 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       QUACK_VERSION: ${QUACK_VERSION:-dev}
       POSTGRES_DSN: postgresql://quack:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/quack
+      # `ops db-roles` runs in this service too (superuser DSN); `ops migrate` ignores them.
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-}
+      READER_DB_PASSWORD: ${READER_DB_PASSWORD:-}
+      MIGRATOR_DB_PASSWORD: ${MIGRATOR_DB_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
     networks: [backend]
     mem_limit: 256m
+    logging: *default-logging
     memswap_limit: 320m
     cpus: 0.5
 
@@ -155,7 +170,6 @@ services:
       API_WORKERS: "2"
       API_GRACEFUL_SHUTDOWN_S: "30"
       COMPUTE_URL: http://compute:8001
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       META_API_KEY: ${META_API_KEY:-}
       META_API_BASE_URL: ${META_API_BASE_URL:-}
     networks: [backend, egress]
@@ -171,6 +185,7 @@ services:
       start_period: 20s
     stop_grace_period: 35s
     mem_limit: 1g
+    logging: *default-logging
     memswap_limit: 1280m
     cpus: 1.5
 
@@ -185,6 +200,7 @@ services:
     networks: [backend]
     stop_grace_period: 15s
     mem_limit: 512m
+    logging: *default-logging
     memswap_limit: 640m
     cpus: 1.0
 
@@ -215,6 +231,7 @@ services:
     networks: [backend, egress]
     stop_grace_period: 25s
     mem_limit: 1g
+    logging: *default-logging
     memswap_limit: 1280m
     cpus: 1.0
 
@@ -230,8 +247,63 @@ services:
     shm_size: 256mb
     stop_grace_period: 10s
     mem_limit: 2g
+    logging: *default-logging
     memswap_limit: 2560m
     cpus: 3.0
+
+  backup:
+    # Д-§8.1: run by the host timer (`docker compose run --rm backup`) and by deploy.sh before a
+    # migration (`... backup ops backup now`); never started by `up`.
+    <<: *backend-image
+    profiles: [backup]
+    restart: "no"
+    command: ["ops", "backup"]
+    # Д-§7: the dump reads as `quack_reader`, created by `ops db-roles` (deploy.sh runs it).
+    environment:
+      ENV: ${ENV:-prod}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      QUACK_VERSION: ${QUACK_VERSION:-dev}
+      POSTGRES_DSN: postgresql://quack_reader:${READER_DB_PASSWORD:-}@postgres:5432/quack
+      BACKUP_LOCAL_DIR: /backups
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY:-}
+      BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY:-}
+      BACKUP_AGE_PUBLIC_KEY: ${BACKUP_AGE_PUBLIC_KEY:-}
+      HEARTBEAT_BACKUP_URL: ${HEARTBEAT_BACKUP_URL:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_FORMAT: ${ALERT_WEBHOOK_FORMAT:-slack}
+      ALERT_WEBHOOK_CHAT_ID: ${ALERT_WEBHOOK_CHAT_ID:-}
+    volumes:
+      # Directory 700, owned by the container user (uid 10001), see setup-server.sh.
+      - ${QUACK_BACKUPS_DIR:-/srv/quack/backups}:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend, egress]
+    mem_limit: 256m
+    memswap_limit: 320m
+    cpus: 0.5
+    logging: *default-logging
+
+  caddy:
+    # Д-§3, Д-§3.1: the only service that publishes ports (Д-§10). Config comes from deploy/.
+    image: caddy:${CADDY_VERSION:-2.10}
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-api.qvack.online}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [backend, egress]
+    stop_grace_period: 10s
+    mem_limit: 128m
+    memswap_limit: 160m
+    cpus: 0.25
+    logging: *default-logging
 
   meta-mock:
     <<: *backend-image
@@ -242,6 +314,7 @@ services:
       META_MOCK_LATENCY: ${META_MOCK_LATENCY:-measured}
     networks: [backend]
     mem_limit: 256m
+    logging: *default-logging
     memswap_limit: 320m
     cpus: 0.5
 
@@ -253,3 +326,4 @@ networks:
 volumes:
   postgres-data: {}
   neo4j-data: {}
+  caddy-data: {}

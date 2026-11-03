@@ -18,7 +18,8 @@ from uuid import UUID
 
 from quack.config import Settings
 from quack.events import registry
-from quack.events.models import StoredEvent
+from quack.events.event_types import TurnCommitted
+from quack.events.log import StoredEvent
 
 type PriorityClass = Literal["P1", "P2", "P3"]
 
@@ -101,13 +102,15 @@ MAIN_PART = "main"
 # Task sources of the bank, whose solution space is built ahead in the background (WP12.4);
 # `teacher` tasks on the fly get it lazily through `agent.requested`.
 BANK_TASK_SOURCES: frozenset[str] = frozenset({"seminar", "generated", "material"})
-# AgentKind -> job kind; `known_check` is `check.known_claim` (known.claimed), not an agent job.
+# AgentKind -> job kind. `known_check` has no agent kind in §6.5: it is `check.known_claim`, the
+# kind of `known.claimed` (B's answer to D-A-110 p.7).
 AGENT_JOB_KINDS: dict[str, str] = {
     "viz": "agent.viz",
     "illustration": "agent.illustration",
     "task_generation": "agent.task_generation",
     "solution_space": "agent.solution_space",
     "artifact": "agent.artifact",
+    "known_check": "check.known_claim",
 }
 
 
@@ -333,11 +336,17 @@ def _task_created(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
 
 
 def _agent_requested(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
-    kind = AGENT_JOB_KINDS.get(p.kind)
-    if kind is None:
-        return []
+    kind = AGENT_JOB_KINDS[p.kind]
     cls: PriorityClass = "P1" if p.needed_in_session else "P2"
-    return [_plan(event, kind, cls=cls, payload={"request_id": str(p.request_id), "kind": p.kind})]
+    payload: dict[str, Any] = {"request_id": str(p.request_id), "kind": p.kind}
+    if kind == "check.known_claim":
+        # The same job as `known.claimed`: it checks the skills of a topic (WP8.2), so a
+        # request without a topic has nothing to check (review B of #117).
+        if p.params.topic_id is None:
+            return []
+        payload["topic_id"] = str(p.params.topic_id)
+        return [_plan(event, kind, cls=cls, graph=True, payload=payload)]
+    return [_plan(event, kind, cls=cls, payload=payload)]
 
 
 def _today_shown(event: StoredEvent, _s: Settings, _p: Any) -> list[JobPlan]:
@@ -385,11 +394,6 @@ def _episode_reassigned(event: StoredEvent, _s: Settings, p: Any) -> list[JobPla
     ]
 
 
-def _skill_split(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
-    skills = [str(p.skill_id), *(str(part.skill_id) for part in p.into)]
-    return [_plan(event, "extract.episode", graph=True, payload={"restrict_skill_ids": skills})]
-
-
 RULES: tuple[RuleRow, ...] = (
     RuleRow("episode.closed", ("extract.episode",), "has_content", _episode_closed),
     RuleRow("task.closed", ("analyst.run",), "always", _task_closed),
@@ -428,7 +432,7 @@ RULES: tuple[RuleRow, ...] = (
     RuleRow(
         "agent.requested",
         tuple(AGENT_JOB_KINDS.values()),
-        "P1 if needed_in_session; known_check has no agent job",
+        "P1 if needed_in_session; known_check -> check.known_claim",
         _agent_requested,
     ),
     RuleRow("today.shown", ("today.prepare",), "always", _today_shown),
@@ -436,8 +440,14 @@ RULES: tuple[RuleRow, ...] = (
     RuleRow("handwriting.corrected", ("canvas.rediagnose",), "always", _handwriting_corrected),
     RuleRow("known.claimed", ("check.known_claim",), "always", _known_claimed),
     RuleRow("episode.reassigned", ("extract.episode",), "always", _episode_reassigned),
-    RuleRow("skill.split", ("extract.episode",), "restricted to the split skills", _skill_split),
     # G2 rows that read data beyond the event.
+    RuleRow(
+        "skill.split",
+        ("extract.episode",),
+        "one job per episode where the old skill has evidence, candidates restricted to the "
+        "parts: payload {episode_seq, restrict_skill_ids} (Т-§2.8; D-A-135)",
+        needs="episodes of the current observations with evidence of the old skill",
+    ),
     RuleRow(
         "session.ended",
         ("artifact.topic_refresh",),
@@ -471,6 +481,15 @@ RULES: tuple[RuleRow, ...] = (
 )
 
 ROWS_NEED_FACTS: tuple[RuleRow, ...] = tuple(r for r in RULES if r.plan is None)
+
+
+def cancelled_requests(event: StoredEvent) -> list[UUID]:
+    """Agent requests the teacher's `planUpdate` cancels (WP7.4, Т-§13.7; D-A-115). The
+    dispatcher sets `cancel_requested` on their running jobs and `cancelled` on queued ones."""
+    if event.type != "turn.committed":
+        return []
+    payload = TurnCommitted.model_validate(event.payload)
+    return list(payload.markup.plan_update.cancel_request_ids)
 
 
 def plan_jobs(event: StoredEvent, settings: Settings) -> list[JobPlan]:

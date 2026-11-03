@@ -14,14 +14,14 @@ from dataclasses import dataclass
 
 from fastapi import Request
 from neo4j import AsyncDriver
-from psycopg_pool import AsyncConnectionPool
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
+from starlette.requests import HTTPConnection
 
 from quack.api.email import EmailSender, create_email_sender
 from quack.compute_client.client import ComputeClient, create_compute_client
 from quack.config import Settings
-from quack.db import Db
+from quack.db import Db, open_db
 from quack.db.neo4j import create_driver
 from quack.db.postgres import SessionFactory, create_engine, create_session_factory
 from quack.db.redis import create_redis
@@ -74,16 +74,9 @@ class AppResources:
 
 async def create_app_resources(settings: Settings) -> AppResources:
     """Production resources of the API process, in the creation order of §4.2. The `Db` pool
-    opens without waiting for Postgres: the API starts and `/health/ready` reports a missing
-    database as 503 (Phase 3 readiness contract), unlike `open_db` of the workers."""
-    pool = AsyncConnectionPool(
-        settings.postgres_dsn,
-        min_size=settings.pg_pool_min_size,
-        max_size=settings.pg_pool_max_size,
-        open=False,
-    )
-    await pool.open(wait=False)
-    db = Db(pool)
+    opens without waiting for Postgres (`wait=False`): the API starts and `/health/ready`
+    reports a missing database as 503 (Phase 3 readiness contract)."""
+    db = await open_db(settings, wait=False)
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
     neo4j = create_driver(settings)
@@ -105,8 +98,9 @@ async def create_app_resources(settings: Settings) -> AppResources:
     )
 
 
-def get_resources(request: Request) -> AppResources:
-    """`AppResources` of the running application; `RuntimeError` if not initialized."""
+def get_resources(request: HTTPConnection) -> AppResources:
+    """`AppResources` of the running application (a request or a WebSocket); `RuntimeError` if
+    not initialized."""
     resources: AppResources | None = getattr(request.app.state, "resources", None)
     if resources is None:
         raise RuntimeError("application resources are not initialized")
