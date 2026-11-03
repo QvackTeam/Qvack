@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
+import orjson
 import pytest
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
@@ -231,6 +232,41 @@ async def test_learner_stream_reports_artifacts_and_materials(
         assert await next_sse_event(lines) == ("material_parsed", {"material_id": str(material)})
         artifact = await _p4_change(pg_db, learner, redis, "artifact.updated")
         assert await next_sse_event(lines) == ("artifact_updated", {"artifact_id": str(artifact)})
+
+
+async def test_learner_stream_forwards_jobs_changed(
+    stream_settings: Settings,
+    pg_engine: AsyncEngine,
+    db: SessionFactory,
+    pg_db: Db,
+    neo4j: AsyncDriver,
+    redis: Redis,
+) -> None:
+    """ТЗ Ф4 §4.8, `Т-§13.8` (D-C-141): the queue publishes `{"kind": "jobs_changed",
+    "session_id"}` on `learner:{id}` after commit; the stream sends `jobs_changed {session_id}`,
+    and a plain signal after it still reads the log."""
+    learner = await create_learner(pg_db)
+    await ensure_user(db, learner)
+    headers = session_cookie(await session_token(pg_db, learner, stream_settings))
+    resources = build_app_resources(
+        stream_settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db
+    )
+    app = create_app(stream_settings, resources=resources)
+    session_id = uuid4()
+    async with (
+        _client(app) as client,
+        client.stream("GET", "/v1/learner/stream", headers=headers) as r,
+    ):
+        lines = r.aiter_lines()
+        assert (await next_sse_event(lines))[0] == "projection_advanced"
+        channel = learner_signal_channel(learner)
+        await _wait_subscribers(redis, channel, 1)
+        await redis.publish(
+            channel, orjson.dumps({"kind": "jobs_changed", "session_id": str(session_id)})
+        )
+        assert await next_sse_event(lines) == ("jobs_changed", {"session_id": str(session_id)})
+        material = await _p4_change(pg_db, learner, redis, "material.parsed")
+        assert await next_sse_event(lines) == ("material_parsed", {"material_id": str(material)})
 
 
 async def test_learner_stream_reports_changes_without_redis(

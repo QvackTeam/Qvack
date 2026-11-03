@@ -20,6 +20,8 @@ input of `extractor@3` and the call of the role. D-B-162.
   code verdict in the episode.
 - **Write** (п.5): `observation.extracted` with key `obs:{episode_seq}:{extractor@3}:{trigger_seq}`
   and the `ops.coverage` row in one transaction (WP7.3, law 7). D-B-165.
+- **Job** `extract.episode`: the episode is the seq of its `episode.closed` (Т-§2.1); candidates
+  from A's `GraphReader.extraction_candidates` (S4), the markup of tasks from the log. D-B-172.
 """
 
 from __future__ import annotations
@@ -31,12 +33,14 @@ from uuid import UUID
 from quack.agents.schemas import ExtractorOutputV3
 from quack.config import Settings
 from quack.db import Db
+from quack.embeddings.client import EmbeddingClient, EmbeddingsUnavailable
 from quack.events.event_types import (
     AnswerSubmitted,
     CanvasLineCommitted,
     CanvasLineErased,
     CheckSkipped,
     ElementResponded,
+    EpisodeClosed,
     HandwritingCorrected,
     HintRequested,
     HintShown,
@@ -44,21 +48,28 @@ from quack.events.event_types import (
     MessageSent,
     SolutionRequested,
     TaskClosed,
+    TaskCreated,
     TurnCommitted,
     TypoDeclared,
     VoiceTranscribed,
 )
 from quack.events.keys import observation_key
 from quack.events.log import NewEvent, StoredEvent, append_events
+from quack.events.records import TaskMarkupRecord
 from quack.events.values import CheckFailed, Verdict
 from quack.graph.evidence_validation import (
     CheckedElements,
     EpisodeCheckContext,
     EpisodeSource,
+    check_extracted,
 )
+from quack.graph.read import CandidateSkill, GraphReader, MisconceptionFact, create_graph_reader
 from quack.jobs.coverage import mark_covered
+from quack.jobs.queue import ClaimedJob
+from quack.jobs.runner import JobContext, register_job_handler
 from quack.llm.gateway import LLMGateway
 from quack.llm.labels import LabelMap
+from quack.practice.repo import event_by_seq, session_events_up_to, task_events
 
 EXTRACTOR_ROLE = "extractor"
 NONE_LINE = "(none)"
@@ -89,19 +100,6 @@ class EpisodeWindow:
     episode: list[StoredEvent]
 
 
-@dataclass(frozen=True)
-class CandidateSkill:
-    skill_id: UUID
-    name: str
-
-
-@dataclass(frozen=True)
-class KnownMisconception:
-    misconception_id: UUID
-    skill_id: UUID
-    statement: str
-
-
 def extraction_window(
     session_events: Sequence[StoredEvent], from_seq: int, to_seq: int, settings: Settings
 ) -> EpisodeWindow:
@@ -125,22 +123,6 @@ def extraction_window(
         if e.seq > boundary.seq and (e.causation_seq is None or e.causation_seq not in outside)
     ]
     return EpisodeWindow(before=before, episode=episode)
-
-
-def candidate_skill_ids(
-    session_skill_ids: Sequence[UUID],
-    nearest_skill_ids: Sequence[UUID],
-    settings: Settings,
-    *,
-    restrict: Sequence[UUID] | None = None,
-) -> list[UUID]:
-    """Skills of the session topics first, then the nearest by vector; `candidate_skills_k`.
-    A re-extraction (п.6, Т-§2.8, Т-§4.11) gives `restrict`: the skills of the topic named by
-    `episode.reassigned`, or the split skill and its parts of `skill.split` — only they."""
-    if restrict is not None:
-        return list(dict.fromkeys(restrict))[: settings.candidate_skills_k]
-    unique = list(dict.fromkeys([*session_skill_ids, *nearest_skill_ids]))
-    return unique[: settings.candidate_skills_k]
 
 
 def _task(labels: LabelMap, task_id: UUID) -> str:
@@ -250,14 +232,8 @@ def render_events(events: Sequence[StoredEvent], labels: LabelMap, answers: dict
     return "\n".join(lines) or NONE_LINE
 
 
-def window_labels(
-    window: EpisodeWindow,
-    candidates: Sequence[CandidateSkill],
-    misconceptions: Sequence[KnownMisconception],
-    settings: Settings,
-) -> LabelMap:
-    """Labels of the call: candidates in their order, the tasks of the window by appearance,
-    the known misconceptions of the candidates."""
+def window_tasks(window: EpisodeWindow) -> list[UUID]:
+    """The tasks of the window by appearance: the markup of turns and the events of a task."""
     tasks: list[UUID] = []
     for event in [*window.before, *window.episode]:
         if event.type == "turn.committed":
@@ -266,6 +242,18 @@ def window_labels(
             )
         elif "task_id" in event.payload:
             tasks.append(UUID(str(event.payload["task_id"])))
+    return list(dict.fromkeys(tasks))
+
+
+def window_labels(
+    window: EpisodeWindow,
+    candidates: Sequence[CandidateSkill],
+    misconceptions: Sequence[MisconceptionFact],
+    settings: Settings,
+) -> LabelMap:
+    """Labels of the call: candidates in their order, the tasks of the window by appearance,
+    the known misconceptions of the candidates."""
+    tasks = window_tasks(window)
     skills = [c.skill_id for c in candidates]
     known = [m.misconception_id for m in misconceptions if m.skill_id in set(skills)]
     return LabelMap.build(settings, skills=skills, tasks=tasks, misconceptions=known)
@@ -274,7 +262,7 @@ def window_labels(
 def extractor_variables(
     window: EpisodeWindow,
     candidates: Sequence[CandidateSkill],
-    misconceptions: Sequence[KnownMisconception],
+    misconceptions: Sequence[MisconceptionFact],
     labels: LabelMap,
 ) -> dict[str, str]:
     """The five input blocks of `extractor@3`."""
@@ -475,3 +463,147 @@ async def record_extraction(
             observation_seq=stored.seq,
         )
     return stored
+
+
+_MARKUP_EVENTS = ("task.created", "task.verified", "task.key_disputed", "task.markup_disputed")
+
+
+def markup_pairs(markup: TaskMarkupRecord) -> list[tuple[UUID, int]]:
+    """The pairs (skill id, level) of the markup and its parts; a new skill has no id yet."""
+    tested = [*markup.tests, *(t for part in markup.parts or () for t in part.tests or ())]
+    return list(dict.fromkeys((t.skill_id, t.level) for t in tested if t.skill_id is not None))
+
+
+def task_tests(events: Sequence[StoredEvent]) -> dict[UUID, list[tuple[UUID, int]]]:
+    """Task id → its `tests` pairs from `task.created`, replaced by a later `corrected_markup`
+    of the check (WP12.2). `events` are in seq order."""
+    tests: dict[UUID, list[tuple[UUID, int]]] = {}
+    for event in events:
+        if event.type == "task.created":
+            created = TaskCreated.model_validate(event.payload)
+            tests[created.task_id] = markup_pairs(created.markup)
+        elif (corrected := event.payload.get("corrected_markup")) is not None:
+            task_id = UUID(str(event.payload["task_id"]))
+            tests[task_id] = markup_pairs(TaskMarkupRecord.model_validate(corrected))
+    return tests
+
+
+def episode_text(window: EpisodeWindow) -> str:
+    """The raw words of the episode: what its vector is computed from (WP15 п.2). D-B-172."""
+    return "\n".join(text for event in window.episode if (text := source_text(event)))
+
+
+async def episode_vector(embeddings: EmbeddingClient, window: EpisodeWindow) -> list[float] | None:
+    """`None` when the episode has no words or Modal is down: candidates of the session only."""
+    text = episode_text(window)
+    if not text:
+        return None
+    try:
+        return await embeddings.embed_query(text)
+    except EmbeddingsUnavailable:
+        return None
+
+
+@dataclass(frozen=True)
+class ExtractionTrigger:
+    """The payload of `extract.episode` (WP7.1, D-A-135): `episode.closed` gives only its own
+    seq — the episode; `episode.reassigned` names the episode and the topic; `skill.split` —
+    the episode and the skills of the split."""
+
+    episode_seq: int
+    trigger_seq: int
+    topic_id: UUID | None = None
+    skill_ids: list[UUID] | None = None
+
+    @classmethod
+    def from_payload(cls, payload: Mapping[str, object]) -> ExtractionTrigger:
+        trigger_seq = int(str(payload["trigger_seq"]))
+        topic = payload.get("topic_id")
+        skills = payload.get("restrict_skill_ids")
+        return cls(
+            episode_seq=int(str(payload.get("episode_seq", trigger_seq))),
+            trigger_seq=trigger_seq,
+            topic_id=UUID(str(topic)) if topic is not None else None,
+            skill_ids=[UUID(str(s)) for s in skills] if isinstance(skills, list) else None,
+        )
+
+
+async def extract_episode(
+    db: Db,
+    gateway: LLMGateway,
+    settings: Settings,
+    reader: GraphReader,
+    embeddings: EmbeddingClient,
+    *,
+    learner_id: UUID,
+    trigger: ExtractionTrigger,
+) -> StoredEvent:
+    """WP15 п.1–6: the episode is the range of its `episode.closed` (its seq is the episode,
+    Т-§2.1); window, candidates, one call, the check by code, the observation with coverage."""
+    closed = await event_by_seq(db, learner_id=learner_id, seq=trigger.episode_seq)
+    if closed is None or closed.type != "episode.closed" or closed.session_id is None:
+        raise ValueError(f"seq {trigger.episode_seq} is no episode.closed of a session")
+    bounds = EpisodeClosed.model_validate(closed.payload)
+    session_id = closed.session_id
+    events = await session_events_up_to(
+        db, learner_id=learner_id, session_id=session_id, to_seq=bounds.to_seq
+    )
+    window = extraction_window(events, bounds.from_seq, bounds.to_seq, settings)
+    found = await reader.extraction_candidates(
+        learner_id,
+        session_id,
+        await episode_vector(embeddings, window),
+        settings.candidate_skills_k,
+        topic_id=trigger.topic_id,
+        skill_ids=trigger.skill_ids,
+    )
+    labels = window_labels(window, found.skills, found.misconceptions, settings)
+    output = await call_extractor(
+        gateway,
+        settings,
+        learner_id=learner_id,
+        session_id=session_id,
+        episode_seq=trigger.episode_seq,
+        trigger_seq=trigger.trigger_seq,
+        variables=extractor_variables(window, found.skills, found.misconceptions, labels),
+        labels=labels,
+    )
+    markups = await task_events(
+        db, learner_id=learner_id, task_ids=window_tasks(window), types=_MARKUP_EVENTS
+    )
+    context = episode_check_context(window, labels, task_tests(markups))
+    prompt = settings.llm_roles[EXTRACTOR_ROLE].prompt
+    assert prompt is not None  # call_extractor has checked it
+    return await record_extraction(
+        db,
+        learner_id,
+        prompt=prompt,
+        episode_seq=trigger.episode_seq,
+        trigger_seq=trigger.trigger_seq,
+        checked=check_extracted(output.elements, context),
+        session_id=session_id,
+        domain_id=closed.domain_id,
+    )
+
+
+async def run_extract_episode(job: ClaimedJob, ctx: JobContext, reader: GraphReader) -> StoredEvent:
+    """The `extract.episode` job; the reader of memory is A's (S4). D-B-172."""
+    if job.learner_id is None:
+        raise ValueError("extract.episode needs learner_id")
+    return await extract_episode(
+        ctx.db,
+        ctx.llm,
+        ctx.settings,
+        reader,
+        ctx.embeddings,
+        learner_id=job.learner_id,
+        trigger=ExtractionTrigger.from_payload(job.payload),
+    )
+
+
+@register_job_handler("extract.episode")
+async def handle_extract_episode(job: ClaimedJob, ctx: JobContext) -> None:
+    if job.learner_id is None:
+        raise ValueError("extract.episode needs learner_id")
+    reader = create_graph_reader(ctx.neo4j, ctx.settings, learner_id=job.learner_id)
+    await run_extract_episode(job, ctx, reader)
