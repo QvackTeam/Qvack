@@ -394,11 +394,6 @@ def _episode_reassigned(event: StoredEvent, _s: Settings, p: Any) -> list[JobPla
     ]
 
 
-def _skill_split(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
-    skills = [str(p.skill_id), *(str(part.skill_id) for part in p.into)]
-    return [_plan(event, "extract.episode", graph=True, payload={"restrict_skill_ids": skills})]
-
-
 RULES: tuple[RuleRow, ...] = (
     RuleRow("episode.closed", ("extract.episode",), "has_content", _episode_closed),
     RuleRow("task.closed", ("analyst.run",), "always", _task_closed),
@@ -445,8 +440,14 @@ RULES: tuple[RuleRow, ...] = (
     RuleRow("handwriting.corrected", ("canvas.rediagnose",), "always", _handwriting_corrected),
     RuleRow("known.claimed", ("check.known_claim",), "always", _known_claimed),
     RuleRow("episode.reassigned", ("extract.episode",), "always", _episode_reassigned),
-    RuleRow("skill.split", ("extract.episode",), "restricted to the split skills", _skill_split),
     # G2 rows that read data beyond the event.
+    RuleRow(
+        "skill.split",
+        ("extract.episode",),
+        "one job per episode where the old skill has evidence, candidates restricted to the "
+        "parts: payload {episode_seq, restrict_skill_ids} (Т-§2.8; D-A-135)",
+        needs="episodes of the current observations with evidence of the old skill",
+    ),
     RuleRow(
         "session.ended",
         ("artifact.topic_refresh",),

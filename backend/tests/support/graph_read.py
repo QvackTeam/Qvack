@@ -19,7 +19,9 @@ from uuid import UUID
 from quack.events.values import Level
 from quack.graph.overlay import SessionOverlay
 from quack.graph.read import (
+    CandidateSkill,
     EvidenceFact,
+    ExtractionCandidates,
     Frontier,
     HubReadiness,
     LevelFact,
@@ -90,6 +92,8 @@ _REQUIRES: dict[UUID, list[RequiresLink]] = {
     ]
 }
 _TOPIC_OF = {SKILL_PROVEN: TOPIC_READY, SKILL_FAILED: TOPIC_OPEN, SKILL_QUIET: TOPIC_OPEN}
+_NAMES = {SKILL_PROVEN: "add fractions", SKILL_FAILED: "common denominator",
+          SKILL_QUIET: "reduce a fraction"}  # fmt: skip
 # Signals of the failed skill: a gap type with its confidence and a memory lapse (Т-§8.2, Т-§8.4).
 _SIGNALS: dict[UUID, dict[str, Any]] = {
     SKILL_FAILED: {
@@ -239,3 +243,30 @@ class FixedGraphReader:
             seq=seq_n,
             skills=[_skill(s) for s in skill_ids if s in _LEVELS],
         )
+
+    async def extraction_candidates(
+        self,
+        learner_id: UUID,
+        session_id: UUID,
+        episode_vector: Sequence[float] | None,
+        k: int,
+        *,
+        topic_id: UUID | None = None,
+        skill_ids: Sequence[UUID] | None = None,
+    ) -> ExtractionCandidates:
+        wanted = list(_LEVELS)
+        if topic_id is not None:
+            wanted = [s for s in wanted if _TOPIC_OF[s] == topic_id]
+        if skill_ids is not None:
+            wanted = [s for s in wanted if s in skill_ids]
+        wanted = wanted[:k]
+        skills = [CandidateSkill(skill_id=s, name=_NAMES[s], topic_id=_TOPIC_OF[s]) for s in wanted]
+        misconception = MisconceptionFact(
+            misconception_id=MISCONCEPTION,
+            skill_id=SKILL_FAILED,
+            status="suspected",
+            statement=MISCONCEPTION_STATEMENT,
+            triggers=list(MISCONCEPTION_TRIGGERS),
+        )
+        known = [misconception] if SKILL_FAILED in wanted else []
+        return ExtractionCandidates(skills=skills, misconceptions=known)
