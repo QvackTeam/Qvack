@@ -26,7 +26,7 @@ input of `extractor@3` and the call of the role. D-B-162.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -289,10 +289,10 @@ def extractor_variables(
     }
 
 
-def label_errors(output: ExtractorOutputV3, labels: LabelMap) -> str | None:
-    """Т-§4.5: a label the call did not give goes back to the model once."""
-    skills = labels.labels("skill")
-    known = labels.labels("misconception")
+def unknown_label_errors(
+    output: ExtractorOutputV3, skills: Collection[str], known: Collection[str]
+) -> str | None:
+    """Т-§4.5: a label of skill or misconception that the call did not give."""
     unknown: list[str] = []
     for element in output.elements:
         if element.skill is not None and element.skill not in skills:
@@ -304,6 +304,11 @@ def label_errors(output: ExtractorOutputV3, labels: LabelMap) -> str | None:
     if not unknown:
         return None
     return "unknown labels: " + ", ".join(dict.fromkeys(unknown)) + "; use only the given labels"
+
+
+def label_errors(output: ExtractorOutputV3, labels: LabelMap) -> str | None:
+    """Т-§4.5: a label the call did not give goes back to the model once."""
+    return unknown_label_errors(output, labels.labels("skill"), labels.labels("misconception"))
 
 
 def extraction_key(episode_seq: int, prompt: str, trigger_seq: int) -> str:
