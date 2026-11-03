@@ -1358,7 +1358,8 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (WP16.1, `Т-§13.5`), п.5.
 - Обратимость: один модуль.
 - Тесты: `T-AG1` — `tests/agents/test_analyst.py` (2); мутации (`request_id` случайный, `needed_in_session`, без `prompt_role`, `as_of_seq`) — тесты падают.
-- Не решено \[ПРОВЕРИТЬ\]: обработчики `analyst.run`, `analyst.deep` и отрисовка блоков памяти — после PR A с чтениями S4 и ответа о `GraphReader` в `workers` (#155).
+- Задача (D-B-179 рег.): `analyst.run`/`analyst.deep` зарегистрированы. Триггер даёт домен и сессию; триггер вне сессии домена — ничего не пишет. Фокус — навыки из `observation.extracted` сессии. Блоки рисуются здесь же, коротко: `agents` не импортирует `session` (§4.1). Цели — из `domain_goals`, профиль — из `profile`, план — из `content.session_plans`.
+- Не решено \[ПРОВЕРИТЬ\]: строки триггеров без сессии (проявления заблуждения вне хода) аналитика не запускают.
 ### D-B-175. Описание заблуждения (WP16.2)
 - Класс: B
 - WP / место: WP16.2, `Т-§9.3`, `Т-§9.2`, `T-AG2`, законы 5 и 10; `quack/agents/misconception_describe.py` (`describe_misconception`, `render_manifestations`, `DescriberInput`); факты — `GraphReader.misconception_detail` A (ответ A в #155, сигнатура — в PR A)

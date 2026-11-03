@@ -35,6 +35,8 @@ JOB_KINDS: tuple[str, ...] = (
     "photo.pipeline",
     "extract.episode",
     "misconception.describe",
+    "analyst.run",
+    "analyst.deep",
 )
 
 # WP5.3/T-Q10: the roles whose models a kind calls; a kind waits while any of them is pressured.
@@ -51,6 +53,8 @@ KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
     "photo.pipeline": ("recognizer", "segmenter"),
     "extract.episode": ("extractor",),
     "misconception.describe": ("misconception_describer",),
+    "analyst.run": ("analyst",),
+    "analyst.deep": ("analyst_deep",),
 }
 
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID, uuid5
 
 from quack.agents.schemas import AnalystOutput
@@ -33,8 +34,19 @@ from quack.events.records import (
     SuggestedMoveRecord,
     UncertaintyRecord,
 )
+from quack.graph.read import (
+    GraphReader,
+    HubGoal,
+    MemorySlice,
+    ProfileFacts,
+    SliceFocus,
+    create_graph_reader,
+)
+from quack.jobs.queue import ClaimedJob
+from quack.jobs.runner import JobContext, register_job_handler
 from quack.llm.gateway import LLMGateway
 from quack.llm.labels import LabelMap
+from quack.practice.repo import event_by_seq, session_events_up_to
 
 ANALYST_ROLE = "analyst"
 DEEP_ROLE = "analyst_deep"
@@ -223,3 +235,144 @@ async def run_analyst(
     ]
     async with db.transaction():
         return await append_events(db, learner_id, [digest, *requests])
+
+
+# --- the job: blocks of `analyst@1` from memory (S4) ------------------------------------------
+# `agents` may not import `session` (§4.1), so the blocks are rendered here, plainly.
+
+_PLAN = (
+    "SELECT plan FROM content.session_plans "
+    "WHERE session_id = %(session_id)s AND learner_id = %(learner_id)s"
+)
+
+
+def _skills_block(found: MemorySlice, labels: LabelMap) -> str:
+    lines = []
+    for skill in found.skills:
+        label = labels.label("skill", skill.skill_id)
+        if label is None:
+            continue
+        levels = ", ".join(f"level {lv.level} {lv.status}" for lv in skill.levels) or "no data"
+        lines.append(f"{label} {skill.name or ''}: {levels}".replace("  ", " "))
+    return "\n".join(lines)
+
+
+def _misconceptions_block(found: MemorySlice, labels: LabelMap) -> str:
+    lines = []
+    for item in found.misconceptions:
+        label = labels.label("misconception", item.misconception_id)
+        skill = labels.label("skill", item.skill_id)
+        if label is not None and skill is not None:
+            lines.append(f"{label} on {skill} ({item.status}): {item.statement}")
+    return "\n".join(lines)
+
+
+def _goals_block(hubs: Sequence[HubGoal]) -> str:
+    lines = []
+    for hub in hubs:
+        when = (
+            datetime.fromtimestamp(hub.deadline_at_ms / 1000, UTC).strftime("%Y-%m-%d")
+            if hub.deadline_at_ms is not None
+            else "no deadline"
+        )
+        topics = "; ".join(
+            f"{t.name} levels {','.join(map(str, t.required_levels))}" for t in hub.topics
+        )
+        lines.append(f'Hub "{hub.name}" ({hub.control_type}, {when}): {topics}')
+    return "\n".join(lines)
+
+
+def _profile_block(facts: ProfileFacts) -> str:
+    lines = [f"Preference {k}: {v}" for k, v in sorted(facts.prefs.items())]
+    learned = {
+        "helpful approach": facts.learned_helpful_approach,
+        "confidence bias": facts.learned_confidence_bias,
+        "branch rate": facts.learned_branch_rate,
+        "reasoning share": facts.learned_reasoning_share,
+    }
+    lines.extend(f"Learned {k}: {'no data yet' if v is None else v}" for k, v in learned.items())
+    return "\n".join(lines)
+
+
+async def analyst_job(
+    job: ClaimedJob, ctx: JobContext, reader: GraphReader, *, deep: bool
+) -> list[StoredEvent]:
+    """`analyst.run` / `analyst.deep` (WP16.1): the trigger gives the domain and the session;
+    the focus is the skills the session's observations judged; a trigger outside a session of a
+    domain has nothing to analyse."""
+    if job.learner_id is None:
+        raise ValueError("analyst needs learner_id")
+    learner_id, trigger_seq = job.learner_id, int(str(job.payload["trigger_seq"]))
+    trigger = await event_by_seq(ctx.db, learner_id=learner_id, seq=trigger_seq)
+    if trigger is None or trigger.domain_id is None or trigger.session_id is None:
+        return []
+    session_id = trigger.session_id
+    plan = ""
+    events = await session_events_up_to(
+        ctx.db, learner_id=learner_id, session_id=session_id, to_seq=trigger_seq
+    )
+    observations = [e for e in events if e.type == "observation.extracted"]
+    row = await ctx.db.fetch_one(_PLAN, {"learner_id": learner_id, "session_id": session_id})
+    if row is not None:
+        doc = row["plan"]
+        plan = f"Current step: {doc.get('current_step', '')}; next: " + "; ".join(
+            doc.get("next_steps", [])
+        )
+    skill_ids = list(
+        dict.fromkeys(
+            el.skill_id
+            for e in observations
+            for el in ObservationExtracted.model_validate(e.payload).elements
+            if el.skill_id is not None
+        )
+    )
+    focus = SliceFocus(skill_ids=skill_ids, domain_id=trigger.domain_id)
+    found = await reader.slice_for_turn(learner_id, session_id, focus)
+    hubs = await reader.domain_goals(trigger.domain_id)
+    profile = await reader.profile(learner_id)
+    labels = LabelMap.build(
+        ctx.settings,
+        skills=list(dict.fromkeys([*skill_ids, *(s.skill_id for s in found.skills)])),
+        misconceptions=[m.misconception_id for m in found.misconceptions],
+        hubs=[hub.hub_id for hub in hubs],
+    )
+    facts = AnalystInput(
+        domain_id=trigger.domain_id,
+        session_id=session_id,
+        as_of_seq=trigger_seq,
+        skills_state=_skills_block(found, labels),
+        misconceptions=_misconceptions_block(found, labels),
+        session_plan=plan,
+        goals=_goals_block(hubs),
+        profile=_profile_block(profile),
+        labels=labels,
+    )
+    return await run_analyst(
+        ctx.db,
+        ctx.llm,
+        ctx.settings,
+        learner_id=learner_id,
+        trigger_seq=trigger_seq,
+        deep=deep,
+        facts=facts,
+        observations=observations,
+    )
+
+
+def _reader(ctx: JobContext, job: ClaimedJob) -> GraphReader:
+    assert job.learner_id is not None
+    return create_graph_reader(ctx.neo4j, ctx.settings, learner_id=job.learner_id)
+
+
+@register_job_handler("analyst.run")
+async def handle_analyst(job: ClaimedJob, ctx: JobContext) -> None:
+    if job.learner_id is None:
+        raise ValueError("analyst.run needs learner_id")
+    await analyst_job(job, ctx, _reader(ctx, job), deep=False)
+
+
+@register_job_handler("analyst.deep")
+async def handle_analyst_deep(job: ClaimedJob, ctx: JobContext) -> None:
+    if job.learner_id is None:
+        raise ValueError("analyst.deep needs learner_id")
+    await analyst_job(job, ctx, _reader(ctx, job), deep=True)
