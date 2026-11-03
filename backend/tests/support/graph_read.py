@@ -20,6 +20,7 @@ from quack.events.values import Level
 from quack.graph.overlay import SessionOverlay
 from quack.graph.read import (
     EvidenceFact,
+    ExtractionCandidates,
     Frontier,
     HubReadiness,
     LevelFact,
@@ -234,3 +235,15 @@ class FixedGraphReader:
             seq=seq_n,
             skills=[_skill(s) for s in skill_ids if s in _LEVELS],
         )
+
+    async def extraction_candidates(
+        self,
+        learner_id: UUID,
+        session_id: UUID,
+        episode_vector: Sequence[float] | None,
+        k: int,
+        *,
+        topic_id: UUID | None = None,
+        skill_ids: Sequence[UUID] | None = None,
+    ) -> ExtractionCandidates:
+        raise NotImplementedError
