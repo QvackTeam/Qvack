@@ -117,6 +117,17 @@ class RulesParams:
         return cls(root_cause_confidence=confidence)
 
 
+@dataclass(frozen=True)
+class SliceDiff:
+    """Changed props of existing nodes and every prop of new ones; deleted nodes; new or
+    changed relationships with their props; deleted relationships (identity props kept)."""
+
+    upsert_nodes: list[NodeRecord]
+    delete_nodes: list[NodeRef]
+    upsert_rels: list[RelRecord]
+    delete_rels: list[RelRecord]
+
+
 class BatchSlice:
     """The slice of one learner's batch: the store read plus the changes of the batch.
 
@@ -177,6 +188,10 @@ class BatchSlice:
                     for key, r in list(self._rels.items()):
                         if (label, node_id) in ((r.from_label, r.from_id), (r.to_label, r.to_id)):
                             del self._rels[key]
+
+    def diff(self) -> SliceDiff:
+        """What the batch changed against the slice read before it (WP3.3, D-A-138)."""
+        raise NotImplementedError
 
     def snapshot(self) -> SubGraph:
         """Every node and relationship of the slice now (for tests and rebuild)."""
