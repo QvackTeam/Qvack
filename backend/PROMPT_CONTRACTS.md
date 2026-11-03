@@ -607,9 +607,9 @@ Output fields:
 
 Input blocks: `situation`, `turn_a`, `turn_b`, `criteria`
 
-## `recognizer@1` → `RecognizerOutput`
+## `recognizer@1` → `RecognizerOutput`, `RecognizerSheetOutput`
 
-Output fields:
+Output fields of `RecognizerOutput`:
 
 - `kind`: "latex" | "text"
 - `text`: string
@@ -617,7 +617,21 @@ Output fields:
 - `confidence`: number
 - `crossed_out`: boolean
 
-Input blocks: none
+Output fields of `RecognizerSheetOutput`:
+
+- `lines`: list[object]
+- `lines.kind`: "latex" | "text" | "drawing"
+- `lines.text`: string
+- `lines.sympy`: string | null
+- `lines.bbox`: object
+- `lines.bbox.left`: number
+- `lines.bbox.top`: number
+- `lines.bbox.right`: number
+- `lines.bbox.bottom`: number
+- `lines.confidence`: number
+- `lines.crossed_out`: boolean
+
+Input blocks: `mode`
 
 ## `artifact_writer@1` → `ArtifactWriterOutput`
 
