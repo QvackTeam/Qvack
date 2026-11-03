@@ -85,7 +85,8 @@ async def test_cards_are_tasks_of_the_bank_with_markup(
     assert len(calls) == 2 and "### Artifact type\n\ncards" in calls[0].prompt
     cards = await topic_cards(pg_db, learner_id=learner, topic_id=topic_id)
     (card,) = cards.cards
-    assert (card.kind, card.prompt, card.owner) == ("sign_to_method", "When the ratio test?", "system")
+    assert (card.kind, card.owner) == ("sign_to_method", "system")
+    assert card.prompt == "When the ratio test?"
     task = await get_task(pg_db, learner_id=learner, task_id=card.card_id)
     assert task is not None and task.condition.text == "When the ratio test?"
     assert task.source == "generated" and task.domain_id == DOMAIN
@@ -93,7 +94,8 @@ async def test_cards_are_tasks_of_the_bank_with_markup(
     assert created["actor"] == WRITER and created["payload"]["verification"] == "unchecked"
     assert created["payload"]["task_id"] == str(card.card_id)
     assert created["payload"]["family_id"] == str(card.card_id)
-    assert created["payload"]["markup"]["tests"] == [{"skill_id": str(LIMIT), "level": 3}]
+    (tested,) = created["payload"]["markup"]["tests"]
+    assert (tested["skill_id"], tested["level"]) == (str(LIMIT), 3)
 
     again = await refresh_topic_cards(
         resources.db, resources.llm, reader, _prefetch, settings,

@@ -19,20 +19,33 @@ The memory is read only through `GraphReader` (S4, §4.1), built in the job by
 `create_graph_reader(ctx.neo4j, ctx.settings)` (D-A-137). Skills and chunks are short labels
 (`S1`, `P1`, Т-§4.5). Code checks the output (`Т-§17.3`): an unknown label or a block number that
 is not in the current version is a violation — one more generation, then the element is dropped.
-The blocks go to `write_system_blocks` (D-C-125): learner blocks are never rewritten. Cards are
-WP23.4.
+The blocks go to `write_system_blocks` (D-C-125): learner blocks are never rewritten.
+
+The same job writes the topic's cards (WP23.4, D-C-154): a second call of the role with the type
+`cards`; code checks the markup of every card (`validate_markup`, Т-§5.3), a violation is one
+more generation, then the card is dropped; each card is a task of the bank
+(`markup_record` → `create_task`, `card_id` = `task_id`, D-C-140); no more than
+`cards_per_topic_max` per topic.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from redis.asyncio import Redis
 
-from quack.artifacts.documents import Block, SystemBlock, get_artifact, write_system_blocks
-from quack.artifacts.writer import ArtifactWriterOutput, WrittenBlock
+from quack.artifacts.cards import topic_cards, write_system_cards
+from quack.artifacts.documents import (
+    Block,
+    Card,
+    SystemBlock,
+    _domain_of_owner,
+    get_artifact,
+    write_system_blocks,
+)
+from quack.artifacts.writer import ArtifactWriterOutput, WrittenBlock, WrittenCard
 from quack.config import Settings
 from quack.db import Db
 from quack.graph.read import GraphReader, TopicMemory, create_graph_reader
@@ -42,11 +55,15 @@ from quack.jobs.runner import JobContext, register_job_handler
 from quack.llm.gateway import LLMGateway
 from quack.llm.labels import LabelKind, LabelMap, UnknownLabelError
 from quack.logging import get_logger
+from quack.practice.markup import markup_record, validate_markup
+from quack.practice.role_outputs import TaskCondition
+from quack.practice.task_store import create_task
 
 log = get_logger(__name__)
 
 WRITER_ROLE = "artifact_writer"
 NOTES_TYPE = "notes"
+CARDS_TYPE = "cards"
 NO_LEARNER_SKILL = "None."
 
 type Prefetch = Callable[[Sequence[UUID]], Awaitable[list[ChunkHit]]]
@@ -106,8 +123,11 @@ async def writer_input(
     *,
     learner_id: UUID,
     topic_id: UUID,
+    artifact_type: str = NOTES_TYPE,
+    current_text: str | None = None,
 ) -> WriterInput | None:
-    """The four layers for the topic's notes; `None` — the graph does not know the topic."""
+    """The four layers for the topic's notes (or, with `artifact_type` and `current_text`, for its
+    cards: the text of the cards already there); `None` — the graph does not know the topic."""
     memories = await reader.topic_memory([topic_id])
     if not memories:
         return None
@@ -122,21 +142,24 @@ async def writer_input(
     )
     phrasings = await worked_phrasings(db, reader, learner_id=learner_id, skill_ids=skill_ids)
     hinted = [s for s in skill_ids if await needed_hints(reader, s)]
-    notes = await get_artifact(db, learner_id=learner_id, kind="notes", owner_id=topic_id)
+    current: tuple[Block, ...] = ()
+    if current_text is None:
+        notes = await get_artifact(db, learner_id=learner_id, kind="notes", owner_id=topic_id)
+        current = notes.blocks
     variables = {
-        "artifact_type": NOTES_TYPE,
+        "artifact_type": artifact_type,
         "learner_skill": NO_LEARNER_SKILL,
         "topic_graph": _topic_graph(topic, labels, await _neighbours(reader, topic)),
         "material_chunks": chunks_text(hits, labels),
         "worked_phrasings": phrasings_text(phrasings, labels),
         "personal": personal_text(topic, labels, hinted),
-        "current_blocks": numbered_blocks_text(notes.blocks),
+        "current_blocks": numbered_blocks_text(current) if current_text is None else current_text,
     }
     return WriterInput(
         variables=variables,
         labels=labels,
         chunks={h.chunk_id: h for h in hits},
-        current=notes.blocks,
+        current=current,
     )
 
 
@@ -225,6 +248,39 @@ def numbered_blocks_text(blocks: Sequence[Block]) -> str:
     return "\n\n".join(
         f"{n}. [{block.kind}, {block.owner}]\n{block.content}" for n, block in enumerate(blocks, 1)
     )
+
+
+def numbered_cards_text(cards: Sequence[Card]) -> str:
+    if not cards:
+        return "None yet."
+    return "\n".join(f"{n}. [{card.kind}] {card.prompt}" for n, card in enumerate(cards, 1))
+
+
+def card_id_for(topic_id: UUID, key: str, index: int) -> UUID:
+    """A card's task id from the call key and the place in the writer's answer, so a repeated job
+    writes the same tasks (law 5)."""
+    return uuid5(NAMESPACE_URL, f"card:{topic_id}:{key}:{index}")
+
+
+def valid_cards(
+    written: Sequence[WrittenCard], labels: LabelMap
+) -> tuple[list[tuple[int, WrittenCard]], int]:
+    """The cards whose markup passes the form rules of Т-§5.3 (with their place in the answer)
+    and the number of violating ones."""
+    cards: list[tuple[int, WrittenCard]] = []
+    bad = 0
+    for index, card in enumerate(written):
+        violations = validate_markup(
+            card.markup,
+            skill_labels=labels.labels("skill"),
+            misconception_labels=labels.labels("misconception"),
+            task_labels=labels.labels("task"),
+        )
+        if violations:
+            bad += 1
+        else:
+            cards.append((index, card))
+    return cards, bad
 
 
 def system_blocks(
@@ -317,6 +373,112 @@ async def refresh_topic_notes(
     return notes.version
 
 
+async def refresh_topic_cards(
+    db: Db,
+    gateway: LLMGateway,
+    reader: GraphReader,
+    prefetch: Prefetch,
+    settings: Settings,
+    *,
+    learner_id: UUID,
+    topic_id: UUID,
+    key: str,
+    redis: Redis | None = None,
+) -> int | None:
+    """New cards of the topic (WP23.4, Т-§17.5); returns the version of the cards artifact, or
+    `None` — nothing to write (the graph does not know the topic, the topic already holds
+    `cards_per_topic_max`, or no valid card came back); a repeated job returns the version it
+    wrote. Each card becomes a task of the bank in
+    the transaction that puts it into the artifact; a repeated job reads the same answer through
+    the outbox and writes nothing new."""
+    current = await topic_cards(db, learner_id=learner_id, topic_id=topic_id)
+    room = settings.cards_per_topic_max - len(current.cards)
+    if room <= 0:
+        return None
+    context = await writer_input(
+        db, reader, prefetch, settings, learner_id=learner_id, topic_id=topic_id,
+        artifact_type=f"{CARDS_TYPE} (at most {room} new cards)",
+        current_text=numbered_cards_text(current.cards),
+    )  # fmt: skip
+    if context is None:
+        log.info("topic_refresh_unknown_topic", topic_id=str(topic_id))
+        return None
+    prompt = settings.llm_roles[WRITER_ROLE].prompt
+    if prompt is None:
+        raise ValueError("role 'artifact_writer' has no prompt")
+    cards: list[tuple[int, WrittenCard]] = []
+    for attempt in range(2):  # Т-§5.3: a violation — one more generation, then dropped
+        result = await gateway.generate_structured(
+            WRITER_ROLE,
+            int(prompt.rsplit("@", 1)[1]),
+            ArtifactWriterOutput,
+            context.variables,
+            learner_id,
+            None,
+            None,
+            f"artifact_writer:cards:{topic_id}:{key}" + (":retry" if attempt else ""),
+        )
+        cards, bad = valid_cards(result.value.cards, context.labels)
+        if bad == 0:
+            break
+        log.info("artifact_writer_card_violations", topic_id=str(topic_id), bad=bad)
+    known = {card.card_id for card in current.cards}
+    fresh = [(i, c) for i, c in cards if card_id_for(topic_id, key, i) not in known][:room]
+    if not cards:
+        return None
+    if not fresh:
+        return current.version  # a repeated job: the same cards are already there
+    domain_id = await _domain_of_owner(db, learner_id, "cards", topic_id)
+    async with db.transaction():
+        stored: list[Card] = []
+        for index, card in fresh:
+            task_id = card_id_for(topic_id, key, index)
+            await create_task(
+                db,
+                learner_id=learner_id,
+                task_id=task_id,
+                family_id=task_id,
+                source="generated",
+                condition=TaskCondition(text=card.prompt, latex=None),
+                markup=markup_record(card.markup, context.labels),
+                verification="unchecked",  # code checks the form, not the truth (Т-§5.3)
+                actor=prompt,
+                idempotency_key=f"card:{task_id}",
+                domain_id=domain_id,
+            )
+            stored.append(Card(card_id=task_id, kind=card.kind, prompt=card.prompt, owner="system"))
+        written = await write_system_cards(
+            db, settings, learner_id=learner_id, topic_id=topic_id, cards=stored,
+            created_by=prompt, redis=redis,
+        )  # fmt: skip
+    return written.version
+
+
+async def refresh_topic(
+    db: Db,
+    gateway: LLMGateway,
+    reader: GraphReader,
+    prefetch: Prefetch,
+    settings: Settings,
+    *,
+    learner_id: UUID,
+    topic_id: UUID,
+    key: str,
+    redis: Redis | None = None,
+) -> tuple[int | None, int | None]:
+    """The job `artifact.topic_refresh` (Т-§17.7): new versions of the notes and of the cards of
+    the topic; each is `None` when there was nothing to write."""
+    notes = await refresh_topic_notes(
+        db, gateway, reader, prefetch, settings,
+        learner_id=learner_id, topic_id=topic_id, key=key, redis=redis,
+    )  # fmt: skip
+    cards = await refresh_topic_cards(
+        db, gateway, reader, prefetch, settings,
+        learner_id=learner_id, topic_id=topic_id, key=key, redis=redis,
+    )  # fmt: skip
+    return notes, cards
+
+
 @register_job_handler("artifact.topic_refresh")
 async def _topic_refresh_handler(job: ClaimedJob, ctx: JobContext) -> None:
     learner_id = job.learner_id
@@ -329,7 +491,7 @@ async def _topic_refresh_handler(job: ClaimedJob, ctx: JobContext) -> None:
         )
 
     reader = create_graph_reader(ctx.neo4j, ctx.settings, learner_id=learner_id)  # D-A-144
-    await refresh_topic_notes(
+    await refresh_topic(
         ctx.db, ctx.llm, reader, prefetch, ctx.settings,
         learner_id=learner_id, topic_id=UUID(job.payload["topic_id"]), key=str(job.id),
         redis=ctx.redis,

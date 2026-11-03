@@ -173,7 +173,7 @@
 | WP23.1 | Модель данных | влит | Артефакт как документ с версиями, защита блоков ученика (#138) | — | — | T-AR1 |
 | WP23.2 | Генерация | влит | `artifact_writer@1`, `artifact.topic_refresh` (#139, #172) | слой 1 — черновик (D-C-132) | — | T-AR2 |
 | WP23.3 | Точность | частично | Проверка меток и номеров блоков, одна перегенерация (#172) | ссылки на страницы, проверка формул в compute, блок «не проверено», отметка «без опоры» | — | T-AR2 |
-| WP23.4 | Карточки | частично | Хранение, `GET/PATCH/DELETE`, карточка как задача банка (#184) | генерация карточек через `markup_record`, `answer.submitted {source: card}`, `cards_per_topic_max` | — | T-AR3 |
+| WP23.4 | Карточки | готов в ветке | Хранение, `GET/PATCH/DELETE`, карточка как задача банка (#184); генерация в `artifact.topic_refresh` (второй вызов `artifact_writer@1`, `markup_record`, `create_task`, потолок `cards_per_topic_max`, D-C-154); `answer.submitted {source: card}` — действие `answer` B и строка проектора A (D-A-125 п.1), нового события нет | — | — | T-AR3 |
 | WP23.5 | Cheat sheet хаба | частично | Состояние предложения `cheatsheet_offer` при чтении (D-C-144); подгонка под A4 через `/v1/render/pdf` до `cheatsheet_fit_rounds`; «собери сам» (`POST …/cheatsheet/review`); `GET/POST /v1/hubs/{id}/cheatsheet`; задача `artifact.cheatsheet` (D-C-148, ветка phase-4-c) | запись согласия `agent.requested {artifact, hub_id}` ждёт D-A-196 (три теста `xfail(strict)`); A: поля в схеме, маршрутизация `agent.requested{artifact: cheatsheet}` → `artifact.cheatsheet` `{hub_id, request_id}`, снять строку `hub.deadline_set`; KaTeX для формул в PDF (WP9.2) | D-A-196 (класс C) | T-AR4 |
 | WP23.6 | Скиллы ученика (P2) | не начат | — | `content.learner_skills`, `/имя` в чате, `GET /v1/system-templates` | — | T-CX6 |
 | WP23.7 | Экспорт (P2) | не начат | Экспорт Фазы 3 `GET /v1/domains/{id}/export` | Obsidian, Anki (`genanki`), `POST /v1/learner/export` (`export.data`) | — | T-AR5 |
@@ -208,7 +208,7 @@
 ### Поток C
 
 1. **WP23.5** — хвост: после D-A-196 снять три `xfail(strict)` (запись согласия); остальное сделано (D-C-148).
-2. **WP23.4** — генерация карточек через `markup_record`, `answer.submitted {source: card}`, `cards_per_topic_max`; затем **WP23.3**.
+2. **WP23.3** — точность (ссылки на страницы, проверка формул в compute, блок «не проверено»).
 3. **WP20.2** — задача `material.parse` и слой 2 `material_parser@1` (рантайм — после WP1.3).
 4. **WP21.4 → WP21.5** — каскад проверки шагов, затем пометки и вмешательства (T-CV4, T-CV5).
 5. **WP26.1–26.2** — перевести `tests/e2e/` на новый путь (`T-E1` для G2), красные `T-E2`–`T-E14`; после WP1.3 потока A.
