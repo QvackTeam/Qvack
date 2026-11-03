@@ -532,6 +532,39 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/graph/test_read_stub.py` (names, goals, profile, topic_memory, misconception_detail, factory); `tests/db/test_baseline_migration.py::test_turn_manifests_frozen_slots_column`.
 - Требует подтверждения владельцем: нет.
 
+### D-A-150. WP6.4: чтения `ExtraReads` — схема, изоляция, контроль отметки
+- Класс: B. WP6.4, `Т-§2.6`, `Т-§3.4`, закон 1; `quack/graph/read/neo4j_extras.py`, `skill_state.py`
+- Решение: (1) схема графа — по `Т-§3.4` (узлы `Skill` со свойствами `lNStatus`, `lNBasis`, `lNDecisiveEvidenceId`, `ret*`, `needsConsolidation`, `gapType`; связи `COVERS`, `ON`, `ON_TASK`, `OF`, `MANIFESTS`, `ABOUT`, `REQUIRES`, `INCLUDES`, `ALIAS_OF`) и по обработчикам `rules@3` (ветка `phase-4-a-wp3-projector`); свёртка навыка WP4 пишет `lN*`/`ret*` — чтения готовы под неё. (2) Подпись `skill_history(skill_id)`, `prerequisites(skill_id)`, `prep_context(hub_id)`, `misconception_detail(id)` не несёт `learner_id`: владелец читается с узла-якоря, остальные узлы привязаны к его `learnerId`. (3) Чтения среза идут с проверкой `Learner.projectedSeq` до и после, `1 + snapshot_read_retries` попыток; кончились — возвращается последнее чтение (закон 9). (4) Уровень: `unknown` -> `not_tested`; база `indirect`/`implied`/`none` -> `None`; `proven_by_direct` = `proven` с базой `direct`; `last_t1_failed` — последнее активное Т1 уровня с исходом `incorrect`; ярус: Т1 `code`, Т2 `model`, Т3–Т4 `conversation`. Учитываются только свидетельства `status = active`, уровень >= 1.
+- Почему: §0.4.3 п.2 (буква `Т-§3.4`, `Т-§8.2`, `Т-§8.7`).
+- Тесты: `tests/graph/test_read_neo4j_extras.py`.
+- Требует подтверждения владельцем: нет.
+
+### D-A-151. WP17.1: приоритет кандидатов на повторение
+- Класс: B. WP17.1, `Т-§14.1`
+- Решение: причины — `retention` (R < `review_trigger_retention` или `retDueAtMs` <= сейчас), `consolidation`, `misconception_recheck` (`watching` и `watchSinceMs + watch_days` <= сейчас), `hub_requirement` (хаб с дедлайном в будущем, требуемый уровень навыка не `proven`/`implied`). Приоритет = `w_need`·нужность + `w_deadline`·`1/(1 + дней до ближайшего дедлайна)` + `w_forgetting`·`(1 − R)` + `w_consolidation`·(флаг или перепроверка); нужность = 1, если навык — предпосылка (`REQUIRES`, 1–2 шага, `confidence >= requires_min_confidence`) одного из `goal_skill_ids`. Вид убывания веса дедлайна в документах не назван — взят без параметров. «Разрешённое забывание»: нет нужности и нет дедлайна, а последняя практика домена (максимум `lastPracticeAtMs` его навыков — «открытие домена» в графе не проецируется) старше `forgetting_domain_idle_days`. Вместо запроса по индексу `(learnerId, retDueAtMs)` читаются все навыки ученика (сотни, `Т-§3.4.5`): R считается в Python. `domain_all` без `INCLUDES` — все не скрытые темы домена. Снятие веса дедлайна после `grade.reported` не реализовано: оценка в графе не хранится.
+- Тесты: `test_review_candidates_reasons_scope_and_isolation`.
+- Требует подтверждения владельцем: нет.
+
+### D-A-152. WP17.4: `prep_context`
+- Класс: B. WP17.4, `Т-§14.7`
+- Решение: `ready_count`/`total_count` — темы охвата (`Т-§14.5`: все навыки, все требуемые уровни `proven`/`implied` с базой `direct`; тема без навыков не готова); `days_to_deadline` — округление вверх, не меньше 0; `candidates` — `review_candidates` с `hub_id`. **`control_materials` пусто:** в графе нет вида материала (пробник, прошлый вариант, список вопросов, критерии) — ни в `Т-§3.4.2`, ни в `chunk.indexed`/`material.parsed`; вопрос в PR. Упорядочение «разрыв до требуемых уровней, надёжность источника охвата» не реализовано: источник охвата в `INCLUDES` не хранится.
+- Требует подтверждения владельцем: да (вид материала контроля).
+
+### D-A-153. `similar_mistakes`, `past_solution`
+- Класс: B. `Т-§10.4`, `Т-§3.4.6`
+- Решение: `similar_mistakes` — `SEARCH` по `evidence_emb` (фильтр `learnerId`, `searchable`; запас `vector_search_reserve`), ошибки `outcome <> correct` всех доменов, без самого свидетельства; по тексту нужен `_embedder`, иначе `EmbeddingsUnavailable`. `past_solution` — реплики (`quote`) активных свидетельств по задаче и навыку, последние первыми, не больше `memory_tool_limits.past_solution`: строки канваса лежат в Postgres, не в графе (`Т-§3.4.1`).
+- Требует подтверждения владельцем: нет.
+
+### D-A-154. WP8.3: `state_at`
+- Класс: B. WP8.3, `Т-§2.6`
+- Решение: события ученика `seq <= N` из `core.events` (`read_learner_events`) проигрываются `project_in_memory` — теми же обработчиками, что пересборка; поздние события (оспаривание после N) в проигрывание не входят. Удержание считается на момент последнего события <= N. Нужен `_session_factory`, иначе `RuntimeError`. Шов `_replay` переопределяется в тестах; на текущей базе проигрывание даёт узлы `rules@2` (без `lN*`), полноценно заработает с проектором `rules@3` и свёрткой WP4.
+- Требует подтверждения владельцем: нет.
+
+### D-A-155. WP15 п.2: `extraction_candidates`; WP16.2: `misconception_detail`
+- Класс: B. D-A-135, D-A-137, `Т-§9.2`, `Т-§9.3`
+- Решение: кандидаты — три яруса до `k`: (1) навыки с активным свидетельством этой сессии (`sourceSessionId`) или заблуждением, на которое нацелена сессия; (2) ближайшие по `skill_emb` (если есть вектор); (3) остальные навыки тем яруса 1. `Exposure` не хранит сессию, поэтому показы «темы сессии» не определяют. `topic_id` — только навыки темы (до `k`); `skill_ids` — перечисленные, без обрезки. Заблуждения кандидатов — статусы `suspected`, `confirmed`, `in_work`, `watching` (модель не умеет другие). `misconception_detail`: id через `Alias` (`ALIAS_OF*1..5`); статус `unknown` отдаётся; `dismissed`/`fixed`/`disputed` -> `None` (модель статуса их не содержит; описывать нечего); проявления — активные свидетельства `MANIFESTS` (перенесённые слиянием входят).
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
