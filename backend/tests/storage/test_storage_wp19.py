@@ -59,7 +59,7 @@ def test_keys_layout_and_random_part() -> None:
     )
     assert material_page_key(learner, material, 3) == f"{prefix}materials/{material}/pages/3.webp"
     random_part = {
-        canvas_chunk_key(learner, session, 7): f"{prefix}canvas/{session}/7-",
+        canvas_chunk_key(learner, session, canvas, 7): f"{prefix}canvas/{session}/{canvas}/7-",
         photo_original_key(learner, photo): f"{prefix}photos/{photo}/original-",
         photo_crop_key(learner, photo, 2): f"{prefix}photos/{photo}/crop_2-",
         export_key(learner, export): f"{prefix}exports/{export}-",
@@ -81,7 +81,9 @@ def test_keys_layout_and_random_part() -> None:
 
     # A repeated upload of the same photo or chunk is a new object (immutable keys, Т-§3.3).
     assert photo_original_key(learner, photo) != photo_original_key(learner, photo)
-    assert canvas_chunk_key(learner, session, 7) != canvas_chunk_key(learner, session, 7)
+    assert canvas_chunk_key(learner, session, canvas, 7) != canvas_chunk_key(
+        learner, session, canvas, 7
+    )
 
 
 # --- T-ST2: uploads by content --------------------------------------------------------------
