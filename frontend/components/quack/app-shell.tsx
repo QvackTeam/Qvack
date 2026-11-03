@@ -15,7 +15,6 @@ import { DomainSidebar } from "./domain-sidebar";
 import { IconButton } from "./icon-button";
 import { MenuToggle } from "./menu-toggle";
 import { SiteMenu } from "./site-menu";
-import { IndicatorPills } from "./graph/indicator-pills";
 import { SessionsPanel } from "./sessions-panel";
 import { SoonProvider } from "./soon";
 
@@ -264,7 +263,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               sessionsPref === null ? "w-14 xl:w-73" : sessionsPref ? "w-14" : "w-73",
             )}
           >
-            <IndicatorPills />
             {sessionsPref === null ? (
               <>
                 <div className="h-full xl:hidden">{panel(true, toggleSessions)}</div>

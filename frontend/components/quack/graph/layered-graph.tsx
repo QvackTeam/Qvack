@@ -13,6 +13,7 @@ import { loadCamera, restoreCenter, saveCamera, type SavedCamera } from "@/lib/g
 import { useT } from "@/lib/i18n/provider";
 import type { Domain, TopicState } from "@/lib/mock/types";
 import { IconButton } from "../icon-button";
+import { IndicatorPills } from "./indicator-pills";
 import { StateDot, TopicCardBody } from "../topic-card";
 
 export type GraphHandle = { focusTopic: (id: string) => void };
@@ -108,7 +109,10 @@ function stateOf(t: GraphTopic, nowMs: number): TopicState {
   return "solid";
 }
 
-export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain: Domain; highlight?: { topicIds: string[]; hubIds: string[] } }>(function LayeredGraph({ model, domain, highlight }, ref) {
+export const LayeredGraph = forwardRef<
+  GraphHandle,
+  { model: GraphModel; domain: Domain; highlight?: { topicIds: string[]; hubIds: string[] }; focusHubId?: string | null; onClearFocus?: () => void }
+>(function LayeredGraph({ model, domain, highlight, focusHubId = null, onClearFocus }, ref) {
   const tx = useT();
   const router = useRouter();
   const wrap = useRef<HTMLDivElement>(null);
@@ -142,6 +146,10 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const lastHalo = useRef(0);
   // Hub focus: which hub the graph is dimmed around and how far the fade has gone (0 none, 1 full)
   const focusHub = useRef<string | null>(null);
+  // The hub picked in the left panel: the graph stays focused on it until it is cleared
+  const pinHub = useRef<string | null>(null);
+  const pinApplied = useRef<string | null>(null);
+  const clearPinRef = useRef(onClearFocus);
   const focusMix = useRef(0);
   const lastFocus = useRef(0);
   const activeRef = useRef<ReadonlySet<IndicatorId>>(new Set());
@@ -226,8 +234,11 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     const fnow = performance.now();
     const fEase = 1 - Math.exp(-Math.min(100, fnow - lastFocus.current) / 110);
     lastFocus.current = fnow;
-    if (hoverHub) focusHub.current = hoverHub;
-    const fTarget = hoverHub ? 1 : 0;
+    // The hub under the pointer wins; with the pointer elsewhere the graph stays focused on the hub picked in the left panel
+    const pin = pinHub.current;
+    const hubSel = hoverHub ?? pin;
+    if (hubSel) focusHub.current = hubSel;
+    const fTarget = hubSel ? 1 : 0;
     const f0 = focusMix.current;
     const focus = Math.abs(fTarget - f0) < 0.01 ? fTarget : f0 + (fTarget - f0) * fEase;
     focusMix.current = focus;
@@ -256,7 +267,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       const hp = pos(`h:${hubId}`);
       if (!hp) continue;
       const hx = sx(hp.x), hy = sy(hp.y);
-      const lit = hoverHub === hubId;
+      const lit = hubSel === hubId;
       const mute = bright(`h:${hubId}`);
       // The foot of the stem sits below the hub on screen; the curves end there
       const sxp = hx, syp = hy + Math.max(ringR + 6, 0.5 * GAP_Y * k);
@@ -364,7 +375,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       if (!p) continue;
       const x = sx(p.x), y = sy(p.y);
       if (!near(x, y, 40)) continue;
-      const r = n.key === hovered || litHubs.has(n.id) ? rH + 2 : rH;
+      const r = n.key === hovered || n.id === hubSel || litHubs.has(n.id) ? rH + 2 : rH;
       ctx.globalAlpha = bright(n.key);
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
@@ -912,11 +923,39 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   // Esc switches every indicator off and the camera goes back
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && activeRef.current.size) clearIndicators();
+      if (e.key !== "Escape") return;
+      if (activeRef.current.size) clearIndicators();
+      else if (pinHub.current) clearPinRef.current?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // A hub picked in the left panel: the graph focuses on it, as if it had been picked on the graph, and the camera brings its cluster into view
+  useEffect(() => {
+    clearPinRef.current = onClearFocus;
+    pinHub.current = focusHubId;
+    schedule();
+  }, [focusHubId, onClearFocus, schedule]);
+
+  useEffect(() => {
+    if (!focusHubId) {
+      pinApplied.current = null;
+      return;
+    }
+    const { w, h } = size;
+    const hp = target.current.get(`h:${focusHubId}`);
+    if (pinApplied.current === focusHubId || !w || !h || !hp) return;
+    pinApplied.current = focusHubId;
+    const pts = [hp, ...(links.byHub.get(focusHubId) ?? []).map((id) => target.current.get(id)).filter((p): p is Pt => !!p)];
+    const cw = scene.current.colW;
+    const aw = w - cw;
+    const M = 70;
+    const x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x));
+    const y0 = Math.min(...pts.map((p) => p.y)), y1 = Math.max(...pts.map((p) => p.y));
+    const k = clamp(Math.min((aw - 2 * M) / Math.max(1, x1 - x0), (h - 2 * M) / Math.max(1, y1 - y0), 1), K_READ, K_MAX);
+    moveView({ k, tx: cw + aw / 2 - ((x0 + x1) / 2) * k, ty: h / 2 - ((y0 + y1) / 2) * k }, true);
+  }, [focusHubId, size, layout, links, moveView]);
 
   const goToArrow = (a: Arrow) => {
     const p = target.current.get(a.key);
@@ -1026,6 +1065,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     const p = local(e);
     const key = hitTest(p.x, p.y);
     if (key) router.push(key.startsWith("h:") ? `/hub/${key.slice(2)}` : `/topic/${key}`);
+    else if (pinHub.current) clearPinRef.current?.();
   };
 
   const focusTopic = useCallback(
@@ -1111,11 +1151,8 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="@container flex min-h-10 shrink-0 flex-wrap items-center gap-x-6 border-b border-seam-soft text-paper-dim">
-        <p aria-live="polite" className="caps shrink-0">
-          {tx.graph.status(hubCount, topicCount)}
-        </p>
-        <ul className="order-last flex basis-full flex-wrap items-center gap-x-4 pb-2 @[40rem]:order-none @[40rem]:min-w-0 @[40rem]:flex-1 @[40rem]:basis-auto @[40rem]:pb-0" aria-label={tx.graph.statesLabel}>
+      <div className="@container flex min-h-10 shrink-0 flex-wrap items-center gap-x-3 border-b border-seam-soft text-paper-dim">
+        <ul className="order-last flex basis-full flex-wrap items-center gap-x-3 pb-2 @[40rem]:order-none @[40rem]:min-w-0 @[40rem]:flex-1 @[40rem]:basis-auto @[40rem]:pb-0" aria-label={tx.graph.statesLabel}>
           {(["solid", "review", "confused", "new"] as const).map((s) => (
             <li key={s} className="caps flex items-center gap-2 whitespace-nowrap">
               <StateDot state={s} />
@@ -1124,15 +1161,6 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
           ))}
         </ul>
         <div className="ml-auto flex shrink-0 items-center">
-          {allHub && (
-            <Link
-              href={`/hub/${allHub.id}`}
-              aria-label={tx.graph.allTopicsPillAria}
-              className="caps mr-1 inline-flex h-10 shrink-0 items-center rounded-pill border border-seam px-4 whitespace-nowrap text-paper transition-colors duration-(--dur-s) ease-(--ease-out) hover:border-rule hover:bg-cloth-hover"
-            >
-              {tx.graph.allTopicsPill}
-            </Link>
-          )}
           <div className="flex" role="group" aria-label={tx.graph.zoomGroup}>
             <IconButton label={tx.graph.zoomIn} onClick={() => zoomAt(cx, size.h / 2, 1.25)}>
               <Plus />
@@ -1147,126 +1175,145 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
         </div>
       </div>
 
-      <div
-        ref={wrap}
-        tabIndex={0}
-        role="application"
-        aria-label={tx.graph.ariaGraph(domain.title)}
-        className="relative min-h-0 flex-1 overflow-hidden rounded-[2px] outline-none select-none focus-visible:ring-2 focus-visible:ring-ribbon/60"
-        onKeyDown={(e) => {
-          if (e.target !== e.currentTarget) return;
-          const pan = (dx: number, dy: number) => moveView({ ...view.current, tx: view.current.tx + dx, ty: view.current.ty + dy }, false);
-          const map: Record<string, () => void> = {
-            ArrowLeft: () => pan(60, 0),
-            ArrowRight: () => pan(-60, 0),
-            ArrowUp: () => pan(0, 60),
-            ArrowDown: () => pan(0, -60),
-            "+": () => zoomAt(cx, size.h / 2, 1.25),
-            "=": () => zoomAt(cx, size.h / 2, 1.25),
-            "-": () => zoomAt(cx, size.h / 2, 0.8),
-            "0": fitAll,
-          };
-          const fn = map[e.key];
-          if (fn) {
-            e.preventDefault();
-            fn();
-          }
-        }}
-      >
-        <canvas
-          ref={canvas}
-          className="absolute inset-0 cursor-grab touch-none"
-          style={{ width: size.w, height: size.h }}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onPointerLeave={() => !drag.current && setHoverKey(null)}
-        />
+      <div className="flex min-h-0 flex-1">
+        <div
+          ref={wrap}
+          tabIndex={0}
+          role="application"
+          aria-label={tx.graph.ariaGraph(domain.title)}
+          className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-[2px] outline-none select-none focus-visible:ring-2 focus-visible:ring-ribbon/60"
+          onKeyDown={(e) => {
+            if (e.target !== e.currentTarget) return;
+            const pan = (dx: number, dy: number) => moveView({ ...view.current, tx: view.current.tx + dx, ty: view.current.ty + dy }, false);
+            const map: Record<string, () => void> = {
+              ArrowLeft: () => pan(60, 0),
+              ArrowRight: () => pan(-60, 0),
+              ArrowUp: () => pan(0, 60),
+              ArrowDown: () => pan(0, -60),
+              "+": () => zoomAt(cx, size.h / 2, 1.25),
+              "=": () => zoomAt(cx, size.h / 2, 1.25),
+              "-": () => zoomAt(cx, size.h / 2, 0.8),
+              "0": fitAll,
+            };
+            const fn = map[e.key];
+            if (fn) {
+              e.preventDefault();
+              fn();
+            }
+          }}
+        >
+          <canvas
+            ref={canvas}
+            className="absolute inset-0 cursor-grab touch-none"
+            style={{ width: size.w, height: size.h }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onPointerLeave={() => !drag.current && setHoverKey(null)}
+          />
 
-        {arrows.length > 0 && (
-          <ul className="pointer-events-none absolute inset-0 z-[6]">
-            {arrows.map((a) => {
-              const Icon = a.dir === "up" ? ArrowUp : a.dir === "down" ? ArrowDown : a.dir === "left" ? ArrowLeft : ArrowRight;
-              return (
-                <li key={a.id} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: a.x, top: a.y }}>
-                  <button
-                    type="button"
-                    onClick={() => goToArrow(a)}
-                    aria-label={tx.graphInd.arrow(tx.graphInd[a.ind], tx.graphInd[a.dir], a.n)}
-                    style={{ borderColor: IND_VAR[a.ind], color: IND_VAR[a.ind] }}
-                    className="pointer-events-auto inline-flex h-10 min-w-10 items-center justify-center gap-1 rounded-pill border bg-cloth-deep px-2.5 transition-colors duration-(--dur-s) ease-(--ease-out) hover:bg-cloth-raised focus-visible:outline-2 focus-visible:outline-ribbon"
-                  >
-                    <Icon className="size-4" aria-hidden />
-                    <span className="num text-small">{a.n}</span>
-                  </button>
+          {arrows.length > 0 && (
+            <ul className="pointer-events-none absolute inset-0 z-[6]">
+              {arrows.map((a) => {
+                const Icon = a.dir === "up" ? ArrowUp : a.dir === "down" ? ArrowDown : a.dir === "left" ? ArrowLeft : ArrowRight;
+                return (
+                  <li key={a.id} className="absolute -translate-x-1/2 -translate-y-1/2" style={{ left: a.x, top: a.y }}>
+                    <button
+                      type="button"
+                      onClick={() => goToArrow(a)}
+                      aria-label={tx.graphInd.arrow(tx.graphInd[a.ind], tx.graphInd[a.dir], a.n)}
+                      style={{ borderColor: IND_VAR[a.ind], color: IND_VAR[a.ind] }}
+                      className="pointer-events-auto inline-flex h-10 min-w-10 items-center justify-center gap-1 rounded-pill border bg-cloth-deep px-2.5 transition-colors duration-(--dur-s) ease-(--ease-out) hover:bg-cloth-raised focus-visible:outline-2 focus-visible:outline-ribbon"
+                    >
+                      <Icon className="size-4" aria-hidden />
+                      <span className="num text-small">{a.n}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {column.width > 0 && (
+            <nav
+              ref={colScroll}
+              aria-label={tx.graph.columnLabel}
+              onScroll={measureColumn}
+              className="absolute inset-y-0 left-0 z-[5] overflow-y-auto border-r border-seam-soft bg-cloth py-3"
+              style={{ width: column.width }}
+            >
+              {group(tx.graph.columnFree, column.free.map((t) => ({ topic: t })), true)}
+              {group(tx.graph.columnOther, column.outside, column.free.length === 0)}
+            </nav>
+          )}
+
+          {/* Real links for keyboard and screen readers. Small graphs only: 500 tab stops would be worse than none */}
+          {layout.nodes.size <= 150 && (
+            <ul className="sr-only">
+              {layout.hubs.map((n) => (
+                <li key={n.key}>
+                  <Link href={`/hub/${n.id}`}>{hubMap.get(n.id)?.name}</Link>
                 </li>
-              );
-            })}
-          </ul>
-        )}
+              ))}
+              {layout.topics.map((n) => (
+                <li key={n.key}>
+                  <Link href={`/topic/${n.id}`}>{topicMap.get(n.id)?.name}</Link>
+                </li>
+              ))}
+            </ul>
+          )}
 
-        {column.width > 0 && (
-          <nav
-            ref={colScroll}
-            aria-label={tx.graph.columnLabel}
-            onScroll={measureColumn}
-            className="absolute inset-y-0 left-0 z-[5] overflow-y-auto border-r border-seam-soft bg-cloth py-3"
-            style={{ width: column.width }}
-          >
-            {group(tx.graph.columnFree, column.free.map((t) => ({ topic: t })), true)}
-            {group(tx.graph.columnOther, column.outside, column.free.length === 0)}
-          </nav>
-        )}
+          {hover && hoverTopic && (
+            <div
+              data-card
+              onPointerEnter={() => clearTimeout(hideTimer.current)}
+              onPointerLeave={() => {
+                hoverKey.current = null;
+                hideTimer.current = setTimeout(() => setHover(null), 220);
+              }}
+              className="absolute z-10 rounded-[2px] border border-seam bg-cloth-raised p-4 shadow-[0_12px_32px_-12px_rgb(0_0_0/0.7)]"
+              style={{
+                width: CARD_W,
+                left: hover.x + 18 + CARD_W < size.w ? hover.x + 18 : Math.max(8, hover.x - 18 - CARD_W),
+                top: clamp(hover.y - 36, 8, Math.max(8, size.h - 280)),
+              }}
+            >
+              {hoverMock ? (
+                <TopicCardBody topic={hoverMock} hubLabel={domain.hubs.find((h) => h.id === hoverMock.hubId)?.title} />
+              ) : (
+                <>
+                  <h3 className="display-caps text-[1.0625rem]">
+                    <Link href={`/topic/${hoverTopic.id}`} className="text-paper underline decoration-seam decoration-1 underline-offset-4 hover:decoration-rule">
+                      {hoverTopic.name}
+                    </Link>
+                  </h3>
+                  <p className="caps mt-3 flex items-center gap-2 text-paper">
+                    <StateDot state={stateOf(hoverTopic, model.nowMs)} />
+                    {tx.states[stateOf(hoverTopic, model.nowMs)]}
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+        </div>
 
-        {/* Real links for keyboard and screen readers. Small graphs only: 500 tab stops would be worse than none */}
-        {layout.nodes.size <= 150 && (
-          <ul className="sr-only">
-            {layout.hubs.map((n) => (
-              <li key={n.key}>
-                <Link href={`/hub/${n.id}`}>{hubMap.get(n.id)?.name}</Link>
-              </li>
-            ))}
-            {layout.topics.map((n) => (
-              <li key={n.key}>
-                <Link href={`/topic/${n.id}`}>{topicMap.get(n.id)?.name}</Link>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {hover && hoverTopic && (
-          <div
-            data-card
-            onPointerEnter={() => clearTimeout(hideTimer.current)}
-            onPointerLeave={() => {
-              hoverKey.current = null;
-              hideTimer.current = setTimeout(() => setHover(null), 220);
-            }}
-            className="absolute z-10 rounded-[2px] border border-seam bg-cloth-raised p-4 shadow-[0_12px_32px_-12px_rgb(0_0_0/0.7)]"
-            style={{
-              width: CARD_W,
-              left: hover.x + 18 + CARD_W < size.w ? hover.x + 18 : Math.max(8, hover.x - 18 - CARD_W),
-              top: clamp(hover.y - 36, 8, Math.max(8, size.h - 280)),
-            }}
-          >
-            {hoverMock ? (
-              <TopicCardBody topic={hoverMock} hubLabel={domain.hubs.find((h) => h.id === hoverMock.hubId)?.title} />
-            ) : (
-              <>
-                <h3 className="display-caps text-[1.0625rem]">
-                  <Link href={`/topic/${hoverTopic.id}`} className="text-paper underline decoration-seam decoration-1 underline-offset-4 hover:decoration-rule">
-                    {hoverTopic.name}
-                  </Link>
-                </h3>
-                <p className="caps mt-3 flex items-center gap-2 text-paper">
-                  <StateDot state={stateOf(hoverTopic, model.nowMs)} />
-                  {tx.states[stateOf(hoverTopic, model.nowMs)]}
-                </p>
-              </>
-            )}
-          </div>
-        )}
+        {/* The indicators and the count have a column of their own: nothing of the graph or of its controls lies under them */}
+        <div className="hidden w-32 shrink-0 flex-col gap-3 overflow-y-auto pt-2 pl-2 md:flex">
+          <IndicatorPills />
+          {allHub && (
+            <Link
+              href={`/hub/${allHub.id}`}
+              aria-label={tx.graph.allTopicsPillAria}
+              className="caps inline-flex h-10 w-full shrink-0 items-center justify-center rounded-pill border border-seam px-3 whitespace-nowrap text-paper transition-colors duration-(--dur-s) ease-(--ease-out) hover:border-rule hover:bg-cloth-hover"
+            >
+              {tx.graph.allTopicsPill}
+            </Link>
+          )}
+          <p aria-live="polite" className="caps px-1 text-paper-dim">
+            {tx.graph.status(hubCount, topicCount)}
+          </p>
+        </div>
       </div>
     </div>
   );
