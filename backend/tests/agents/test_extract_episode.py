@@ -299,6 +299,10 @@ def test_candidate_skills() -> None:
     assert len(chosen) == SETTINGS.candidate_skills_k
     assert chosen[3] == nearest[1]
     assert candidate_skill_ids(session, [], SETTINGS) == session
+    # п.6: a re-extraction keeps only the skills of the named topic or of the split
+    topic = [uuid4(), uuid4()]
+    assert candidate_skill_ids(session, nearest, SETTINGS, restrict=topic) == topic
+    assert candidate_skill_ids(session, nearest, SETTINGS, restrict=[]) == []
 
 
 def _element(**kw: Any) -> ExtractedElement:

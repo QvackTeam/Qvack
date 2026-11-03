@@ -11,6 +11,10 @@ input of `extractor@3` and the call of the role. D-B-162.
 - **Call** (п.3): `extractor@3` through the gateway, strict schema `ExtractorOutputV3`; an
   unknown label goes back to the model once (the gateway's repair path, Т-§4.5).
 
+- **Re-extraction** (п.6): `episode.reassigned` and `skill.split` restrict the candidates to
+  the skills of the named topic or of the split (Т-§2.8, Т-§4.11); the new observation has its
+  own `trigger_seq` in the key.
+
 The check of the elements (п.4) and the write of `observation.extracted` with coverage (п.5)
 stand on the seams of stream A.
 """
@@ -113,9 +117,17 @@ def extraction_window(
 
 
 def candidate_skill_ids(
-    session_skill_ids: Sequence[UUID], nearest_skill_ids: Sequence[UUID], settings: Settings
+    session_skill_ids: Sequence[UUID],
+    nearest_skill_ids: Sequence[UUID],
+    settings: Settings,
+    *,
+    restrict: Sequence[UUID] | None = None,
 ) -> list[UUID]:
-    """Skills of the session topics first, then the nearest by vector; `candidate_skills_k`."""
+    """Skills of the session topics first, then the nearest by vector; `candidate_skills_k`.
+    A re-extraction (п.6, Т-§2.8, Т-§4.11) gives `restrict`: the skills of the topic named by
+    `episode.reassigned`, or the split skill and its parts of `skill.split` — only they."""
+    if restrict is not None:
+        return list(dict.fromkeys(restrict))[: settings.candidate_skills_k]
     unique = list(dict.fromkeys([*session_skill_ids, *nearest_skill_ids]))
     return unique[: settings.candidate_skills_k]
 
