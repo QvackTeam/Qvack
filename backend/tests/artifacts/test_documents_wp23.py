@@ -358,6 +358,8 @@ async def test_notes_routes(
                 "skills": [],
                 "generatedBy": None,
                 "supplementTo": None,
+                "basis": None,
+                "unverified": False,
             }
         ]
         # §6.4, T-E2: the repeat answers the same and writes nothing; another body — 409.
