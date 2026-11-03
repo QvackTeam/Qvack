@@ -528,6 +528,15 @@ class Settings(BaseSettings):
     # WP10.6 (ТЗ Ф4 §2.3 строка 20): UUIDv5 namespace of the learner pseudonym in traces.
     # Phase 4 decision D-B-105: a fixed namespace, never changed after the first trace.
     langsmith_pseudonym_ns: str = "6f1c2a9e-4b7d-5e3a-9c21-0d8e7f6a5b43"
+    # WP10.6 (Д-§7: the key only in `api` and `workers`; Д-§11: off in tests and `loadtest`).
+    # An empty key means tracing off. D-B-201, D-B-202.
+    langsmith_api_key: SecretStr = SecretStr("")
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_project: str = "quack"
+    langsmith_timeout_s: float = 5.0
+    # Days after which LangSmith drops a trace (a setting of the LangSmith project, set by the
+    # owner; the number is the one the owner sets there, [ПРОВЕРИТЬ] the plan's value).
+    langsmith_retention_days: int = 14
     # WP15 (Т-§9.4): root-cause confidence category of extractor@3 → number. D-B-106.
     root_cause_confidence_map: dict[Literal["low", "medium", "high"], float] = Field(
         default_factory=lambda: {"low": 0.3, "medium": 0.6, "high": 0.9}
@@ -748,6 +757,7 @@ class Settings(BaseSettings):
                 secret.get_secret_value()
                 for secret in (
                     self.email_api_key,
+                    self.langsmith_api_key,
                     self.google_oidc_client_id,
                     self.google_oidc_client_secret,
                     self.s3_endpoint,
