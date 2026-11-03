@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-B-207. `GET /v1/sessions/{id}/jobs`: модель ответа и проверка владения (WP7.4, issue #212)
+- Класс: B
+- WP / место: WP7.4, §4.8, Т-§13.8; `quack/session/router.py::session_jobs`, `schemas.SessionJobsResponse`
+- Контекст: §4.8/Т-§13.8 задают состав плашки (visible, `queued`/`running`), но не форму ответа и не способ проверки сессии
+- Решение: ответ `{jobs: [{job_key, kind, status, created_at}]}` (как `VisibleJob`, обёртка как у `SessionListResponse`); владение — `sessions.get_session` (`content.sessions`, как у `/actions`), `LookupError` → `404 NOT_FOUND`; задачи — `queue_p4.visible_jobs`
+- Почему: Т-§13.8, issue #212, §7.3 п.3
+- Обратимость: да
+- Тесты: `tests/session/test_session_jobs_route.py`, реестр `tests/e2e/routes/b.py`
+- Требует подтверждения владельцем: нет
+
 ### D-B-202. Удаление трасс: нет подтверждённого API, срок хранения (WP10.6)
 - Класс: B
 - WP / место: WP10.6, WP25; `quack/llm/tracing.py::Tracer.delete_learner`, `Settings.langsmith_retention_days`
