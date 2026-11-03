@@ -295,14 +295,12 @@ def _profile_block(facts: ProfileFacts) -> str:
 
 
 async def analyst_job(
-    job: ClaimedJob, ctx: JobContext, reader: GraphReader, *, deep: bool
+    job: ClaimedJob, ctx: JobContext, reader: GraphReader, *, learner_id: UUID, deep: bool
 ) -> list[StoredEvent]:
     """`analyst.run` / `analyst.deep` (WP16.1): the trigger gives the domain and the session;
     the focus is the skills the session's observations judged; a trigger outside a session of a
     domain has nothing to analyse."""
-    if job.learner_id is None:
-        raise ValueError("analyst needs learner_id")
-    learner_id, trigger_seq = job.learner_id, int(str(job.payload["trigger_seq"]))
+    trigger_seq = int(str(job.payload["trigger_seq"]))
     trigger = await event_by_seq(ctx.db, learner_id=learner_id, seq=trigger_seq)
     if trigger is None or trigger.domain_id is None or trigger.session_id is None:
         return []
@@ -359,20 +357,17 @@ async def analyst_job(
     )
 
 
-def _reader(ctx: JobContext, job: ClaimedJob) -> GraphReader:
-    assert job.learner_id is not None
-    return create_graph_reader(ctx.neo4j, ctx.settings, learner_id=job.learner_id)
-
-
 @register_job_handler("analyst.run")
 async def handle_analyst(job: ClaimedJob, ctx: JobContext) -> None:
     if job.learner_id is None:
         raise ValueError("analyst.run needs learner_id")
-    await analyst_job(job, ctx, _reader(ctx, job), deep=False)
+    reader = create_graph_reader(ctx.neo4j, ctx.settings, learner_id=job.learner_id)
+    await analyst_job(job, ctx, reader, learner_id=job.learner_id, deep=False)
 
 
 @register_job_handler("analyst.deep")
 async def handle_analyst_deep(job: ClaimedJob, ctx: JobContext) -> None:
     if job.learner_id is None:
         raise ValueError("analyst.deep needs learner_id")
-    await analyst_job(job, ctx, _reader(ctx, job), deep=True)
+    reader = create_graph_reader(ctx.neo4j, ctx.settings, learner_id=job.learner_id)
+    await analyst_job(job, ctx, reader, learner_id=job.learner_id, deep=True)

@@ -284,8 +284,10 @@ async def test_analyst_job_reads_memory_for_the_session(pg_db: Db) -> None:
         )
 
     reader = fx.FixedGraphReader()
-    assert await analyst_job(job(without.seq), ctx, reader, deep=False) == []
-    written = await analyst_job(job(with_session.seq), ctx, reader, deep=True)
+    assert await analyst_job(job(without.seq), ctx, reader, learner_id=learner_id, deep=False) == []
+    written = await analyst_job(
+        job(with_session.seq), ctx, reader, learner_id=learner_id, deep=True
+    )
     assert written[0].type == "digest.written" and written[0].session_id == session_id
     variables = gateway.calls[0]["variables"]
     assert 'Hub "fractions exam"' in variables["goals"]
