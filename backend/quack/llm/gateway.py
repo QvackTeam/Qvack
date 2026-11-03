@@ -16,7 +16,7 @@ import random
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -28,6 +28,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.events.hashing import canonical_json
 from quack.llm.errors import (
@@ -46,6 +47,7 @@ from quack.llm.media import (
     BoxPrompt,
     Illustration,
     IllustrationRequest,
+    ImageResponse,
     MaskEncoding,
     MediaProvider,
     Segmentation,
@@ -76,6 +78,7 @@ from quack.llm.streaming import (
     StreamRequest,
 )
 from quack.llm.strict_schema import to_strict_json_schema
+from quack.llm.usage import UsageRow, call_cost_usd, check_usd_budgets, insert_usage
 from quack.logging import get_logger
 from quack.prompts.registry import PromptRegistry, PromptTemplate
 
@@ -132,6 +135,8 @@ class _CallContext:
     idempotency_key: str
     # WP5.7: the effort of the call, written to the ledger.
     reasoning_effort: str | None = None
+    # WP10.4: rows written so far for this call; a row after the first is a retry.
+    rows: list[int] = field(default_factory=lambda: [0])
 
 
 class LLMGateway:
@@ -143,7 +148,12 @@ class LLMGateway:
         prompts: PromptRegistry | None = None,
         *,
         redis: Redis | None = None,
+        db: Db | None = None,
     ) -> None:
+        # WP10.4 (D-B-197): with `db` the call is accounted in `ops.llm_usage` with its cost
+        # and the budgets are in dollars; without it (the SQLAlchemy stack of Phases 1–3,
+        # until WP1.3) the row goes to `ops.llm_ledger` and the budgets are in tokens.
+        self.db = db
         self.session_factory = session_factory
         self.provider = provider
         self.settings = settings
@@ -209,7 +219,7 @@ class LLMGateway:
                 usage=None,
             )
         exempt = role in self.settings.session_budget_exempt_roles
-        await self._check_budgets(learner_id, None if exempt else session_id)
+        await self._admit_budget(role, learner_id, None if exempt else session_id)
         effort = reasoning_effort or self.settings.llm_role_reasoning.get(role)
         ctx = _CallContext(
             role, prompt, model, learner_id, session_id, turn_id, idempotency_key, effort
@@ -440,7 +450,7 @@ class LLMGateway:
         model = self.settings.model_for_role(role)
         timeout = self.settings.llm_role_timeout_s.get(role, self.settings.llm_timeout_sec)
         exempt = role in self.settings.session_budget_exempt_roles
-        await self._check_budgets(learner_id, None if exempt else session_id)
+        await self._admit_budget(role, learner_id, None if exempt else session_id)
         template = PromptTemplate(role, 0, "", _media_hash(role))
         ctx = _CallContext(role, template, model, learner_id, session_id, turn_id, "")
         request = ProviderRequest(
@@ -654,6 +664,12 @@ class LLMGateway:
             return None
         return dict(row.response_json), str(row.model)
 
+    async def _admit_budget(self, role: str, learner_id: UUID, session_id: UUID | None) -> None:
+        if self.db is None:
+            await self._check_budgets(learner_id, session_id)
+        else:
+            await check_usd_budgets(self.db, self.settings, role, learner_id, session_id)
+
     async def _check_budgets(self, learner_id: UUID, session_id: UUID | None) -> None:
         async with self.session_factory() as session:
             daily = int(
@@ -718,6 +734,11 @@ class LLMGateway:
         status: str,
         error_code: str | None,
     ) -> None:
+        retried = ctx.rows[0] > 0
+        ctx.rows[0] += 1
+        if self.db is not None:
+            await self._usage(ctx, response, latency_ms, status, retried)
+            return
         async with self.session_factory() as session, session.begin():
             await session.execute(
                 text(
@@ -748,6 +769,48 @@ class LLMGateway:
                     "err": error_code,
                 },
             )
+
+    async def _usage(
+        self,
+        ctx: _CallContext,
+        response: ProviderResponse,
+        latency_ms: int,
+        status: str,
+        retried: bool,
+    ) -> None:
+        """A row of `ops.llm_usage` with the cost (Т-§11.4, D-B-197). Voice has no tokens: the
+        price is by the audio length; the illustrator: by the picture (D-B-198)."""
+        assert self.db is not None
+        model = response.model or ctx.model
+        audio_ms = int(getattr(response, "audio_duration_ms", 0))
+        images = 1 if isinstance(response, ImageResponse) and status == "ok" else 0
+        cost = call_cost_usd(
+            self.settings,
+            model,
+            input_tokens=response.input_tokens,
+            cached_tokens=response.cached_tokens,
+            output_tokens=response.output_tokens,
+            audio_ms=audio_ms,
+            images=images,
+        )
+        row = UsageRow(
+            learner_id=ctx.learner_id,
+            session_id=ctx.session_id,
+            role=ctx.role,
+            model=model,
+            prompt_version=ctx.prompt.ref,
+            effort=ctx.reasoning_effort,
+            input_tokens=response.input_tokens,
+            cached_input_tokens=response.cached_tokens,
+            output_tokens=response.output_tokens,
+            reasoning_tokens=response.reasoning_tokens,
+            cost_usd=cost,
+            incomplete=status == "incomplete",
+            retried=retried,
+            latency_ms=latency_ms,
+            status=status,
+        )
+        await insert_usage(self.db, row)
 
     async def _finish_outbox(
         self,
@@ -797,7 +860,10 @@ class _GatewayStream:
         gw, settings = self._gw, self._gw.settings
         provider: StreamingLLMProvider = self._gw.provider  # type: ignore[assignment]
         ctx = replace(
-            self._ctx, model=request.base.model, reasoning_effort=request.base.reasoning_effort
+            self._ctx,
+            model=request.base.model,
+            reasoning_effort=request.base.reasoning_effort,
+            rows=[0],
         )
         failures = 0
         while True:

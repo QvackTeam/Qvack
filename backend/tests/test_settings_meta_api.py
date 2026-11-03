@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from quack.config import Settings
 
+PRICES = {"muse-wonder-1.0": {"input": 1.0, "cached_input": 0.1, "output": 4.0}}
 ENV_NAMES = ("META_API_KEY", "META_API_BASE_URL", "LLM_API_KEY", "LLM_API_BASE_URL")
 
 
@@ -18,6 +19,17 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _settings(**values: object) -> Settings:
     return Settings(_env_file=None, **values)  # type: ignore[call-arg]
+
+
+def test_prod_requires_the_price_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ТЗ Ф4 §2.3 row 9 (WP10.4, D-B-198): `api` and `workers` do not start in prod without
+    prices; `projector`, `ops` and `dev`/`test` do."""
+    monkeypatch.setenv("META_API_KEY", "meta-key-1")
+    for role in ("api", "workers"):
+        with pytest.raises(ValidationError, match="LLM_PRICES"):
+            _settings(env="prod", process_role=role, neo4j_password="pw")
+    _settings(env="prod", process_role="projector", neo4j_password="pw")
+    _settings(env="dev")
 
 
 def test_default_models_are_the_live_ids() -> None:
@@ -58,9 +70,9 @@ def test_old_llm_api_names_are_fallbacks(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_prod_requires_meta_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ValidationError, match="META_API_KEY"):
-        _settings(env="prod", neo4j_password="pw")
+        _settings(env="prod", neo4j_password="pw", llm_prices=PRICES)
     monkeypatch.setenv("META_API_KEY", "meta-key-1")
-    s = _settings(env="prod", neo4j_password="pw")
+    s = _settings(env="prod", neo4j_password="pw", llm_prices=PRICES)
     assert "meta-key-1" in s.secret_values()
 
 
@@ -81,7 +93,10 @@ def test_prod_secrets_follow_the_process_role(
     gone with JWT (ТЗ Ф4 §2.3 row 3, WP18.3)."""
     for missing in ("META_API_KEY", "NEO4J_PASSWORD"):
         monkeypatch.setenv("META_API_KEY", "" if missing == "META_API_KEY" else "meta-key-1")
-        values = {"neo4j_password": "" if missing == "NEO4J_PASSWORD" else "pw"}
+        values = {
+            "neo4j_password": "" if missing == "NEO4J_PASSWORD" else "pw",
+            "llm_prices": PRICES,
+        }
         if missing in required:
             with pytest.raises(ValidationError, match=missing):
                 _settings(env="prod", process_role=role, **values)
