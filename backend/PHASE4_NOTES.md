@@ -102,7 +102,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | WP7.1 (A), S6 | A | виды задач и таблица правил по событию (D-A-110); строка `known_check` и отмена поручений (D-A-115) — `phase-4-a-g1`; строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 27 passed |
 | S1 (A), `JobContext` | A | поля §4.2 `db`, `storage`, `embeddings`, `deletions` в `phase-4-a-g1` (D-A-114) | `tests/jobs/test_job_context.py`: 2 passed |
 | WP3.1 (A) | A | схема Neo4j Фазы 4 в `quack/db/neo4j.py`: уникальность `id` для Hub, Option, Material, Chunk, Digest, Profile; range по `learnerId` на метках, где его ещё нет; составной `(learnerId, retDueAtMs)` на Skill; пять векторных индексов с фильтрующими свойствами и `embedding_dim`; сосуществует с индексами Фазы 3 до WP1.3. Остальное WP3 (обработчики, фазы А–В) — дальше | `tests/graph/test_schema_wp31.py` + `test_infra.py`: 4 passed (Neo4j 2026.06.0) |
-| WP1.1–1.2 (A) | A | выполнен в `phase-4-a-wp1` (шов S2): базовая миграция dbmate, `Db`, `append_events`, параметры §6.7 потока A. WP1.4 (`.squawk.toml`, S16) — к G2; WP1.3 — к G3/G4 | `tests/db`: 19 passed |
+| WP1.1–1.2 (A) | A | выполнен в `phase-4-a-wp1` (шов S2): базовая миграция dbmate, `Db`, `append_events`, параметры §6.7 потока A; расширяющая миграция `core.pairing_tokens` (D-A-128). WP1.4 (`.squawk.toml`, S16) — к G2; WP1.3 — к G3/G4 | `tests/db`: 20 passed |
 | WP0 (зона B) | B | выполнен: аудит, п.3г, п.3д, п.5 | — (скрипт п.3г) |
 | Этап I G1 (B: S7, S8, S11, S13) | B | контракты в `phase-4-b`, тесты контрактов зелёные | см. «Красные прогоны» |
 | WP10.2–10.3 (B) | B | частично: разбор потока хода и вход шага цикла с инструментами — зелёные (`T-AI2`–`T-AI4`); адаптер `ResponsesClient.stream_structured` и цикл `run_tool_loop` (параллельные инструменты с таймаутом, повтор оборванного с удвоенным лимитом) — зелёные (`T-AI5`, `T-AI6` без строки `ops.llm_usage` — она в WP10.4); встраивание в шлюз (допуск, семафоры, учёт) — с WP13 | 19 passed |
@@ -449,6 +449,15 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (поля названы `Т-§3.4`); S4 — интерфейс A, реализация — G2.
 - Тесты: `tests/graph/test_read_stub.py::test_memory_picture_facts_of_wp14_2`.
 - Требует подтверждения владельцем: нет.
+
+### D-A-128. `core.pairing_tokens` — хранение токена привязки (WP22.1 ↔ §6.1)
+- Класс: C. WP22.1, §6.1, §0.4.4 п.4; вопрос C в #128; `backend/db/migrations/20261103000001_pairing_tokens.sql`, `…000002_pairing_tokens_learner_index.sql`, `tests/db/test_baseline_migration.py`
+- Противоречие: WP22.1 и `Т-§16.1` требуют токен привязки — одноразовый, живёт `pairing_ttl_s`, привязан к ученику, сессии, канвасу и задаче, «хранится хэш». В §6.1 места для него нет: `core.auth_links` — письма (`email NOT NULL`), `core.auth_sessions` — уже выданные сессии; токен в ней сам стал бы кукой и не был бы одноразовым.
+- Решение: расширяющая миграция после G0 — таблица `core.pairing_tokens (token_hash TEXT PK, learner_id, session_id, canvas_id NOT NULL, task_id NULL, created_at, expires_at NOT NULL, used_at NULL)`, по образцу `core.auth_links` (\[РЕШЕНИЕ Ф4\] §6.1 для писем). Индекс по `learner_id` для удаления ученика (WP25) — отдельным файлом `CONCURRENTLY` (Д-§6.2). Погашение — одним `UPDATE … SET used_at = now() WHERE token_hash = … AND used_at IS NULL AND expires_at > now()` — код C (`quack/auth`, `quack/canvas`). Запрос погашения по хэшу C вносит в `CROSS_LEARNER_ALLOWED` (`tests/db/test_sql_static.py`) своим PR — согласие A здесь.
+- Почему не Redis: `Т-§19.1` держит сессии в Postgres, потому что в Redis нет ничего, что жалко потерять (`Т-§1.2`); без Redis (§4.2 — он необязателен) привязка не работала бы. §0.4.3 п.1 (одноразовость — атомарный `UPDATE` в Postgres), п.7 (как `core.auth_links`).
+- Тест `T-DB1` (§8.15 п.3): описание «таблицы §6.1 и только их» уточнено — базовая миграция даёт ровно §6.1, каждая расширяющая — только свои таблицы, `down` откатывает по одной. Сила проверки та же; `test_pairing_tokens_table` — колонки, ключ, индекс.
+- Удаление ученика (WP25, A) удаляет и его строки `core.pairing_tokens`.
+- Требует подтверждения владельцем: да.
 
 ### Ответы потока A (2026-11-02)
 
@@ -1321,6 +1330,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.9, `known_check` без темы (D-B-149 п. ж): `-k known_check` — 1 failed (запрос без темы записан), коммит `730bf0c`. Зелёный: 26 passed.
 - WP13.9, запись хода (D-B-149): `cd backend && uv run pytest tests/session/test_turn_commit.py` — ошибка сбора (нет `quack.session.turn_commit`), коммит `d7972cc`; на неверной реализации (6 подмен) — каждая роняет 1–2 теста. Зелёный: 6 passed.
 - WP13.9, дедлайн из разговора, подсказки, закрытие задачи (D-B-149 п. г, д): тот же файл — ошибка сбора (нет `AnsweredAction`, `LearnerText`), коммит `6e39af5`; на неверной реализации — 8 подмен, каждая роняет 1–3 теста. Зелёный: 16 passed.
+- `core.pairing_tokens` (A, D-A-128, `phase-4-a-pairing-tokens`, коммит `6c49e1d`): `QUACK_TEST_REQUIRE_INFRA=1 uv run pytest tests/db/test_baseline_migration.py` — 2 failed (нет `core.pairing_tokens`). Подмены: нет файла индекса, `task_id NOT NULL`, `down` не удаляет таблицу, `used_at NOT NULL`, таблица в базовой миграции — 5/5 роняют тест. Зелёный: `tests/db` — 20 passed.
 
 ## Правки тестов
 
