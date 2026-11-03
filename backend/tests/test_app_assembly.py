@@ -39,6 +39,7 @@ PUBLIC_ROUTES = {
     ("GET", "/auth/link/verify"),
     ("GET", "/auth/google/start"),
     ("GET", "/auth/google/callback"),
+    ("POST", "/companion/pair"),
 }
 # Т-§19.1: the start of the Google flow is a redirect only, it has no 2xx body.
 REDIRECT_ONLY_ROUTES = {("GET", "/auth/google/start")}
@@ -189,6 +190,11 @@ EXPECTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/v1/canvases/{canvas_id}"),
         ("GET", "/v1/canvases/{canvas_id}/replay"),
         ("GET", "/v1/domains/{domain_id}/canvases"),
+        # ТЗ Ф4 WP22.1
+        ("POST", "/v1/canvases/{canvas_id}/pairing"),
+        # ТЗ Ф4 WP22.2
+        ("POST", "/v1/canvases/{canvas_id}/photos"),
+        ("POST", "/companion/pair"),
         # stream 1
         ("PATCH", "/v1/learner/preferences"),
         ("DELETE", "/v1/learner"),
