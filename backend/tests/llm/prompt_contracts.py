@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from quack.agents import schemas as agents
 from quack.artifacts.schemas import ArtifactGenOutput
+from quack.artifacts.writer import ArtifactWriterOutput
 from quack.canvas.recognition import RecognizerOutput
 from quack.domains.schemas import CuratorOutput, DiagnosticOutput, StructurerOutput
 from quack.llm.labels import LABEL_PREFIX
@@ -65,6 +66,7 @@ PHASE4_PROMPT_SCHEMAS: dict[str, tuple[type[BaseModel], ...]] = {
     "release_judge@1": (agents.ReleaseJudgeOutput,),
     # Stream C, layer 2 by §7.3 п.2 (D-C-123).
     "recognizer@1": (RecognizerOutput,),
+    "artifact_writer@1": (ArtifactWriterOutput,),
 }
 
 # Every prompt with its schemas: what `T-M5` and `PROMPT_CONTRACTS.md` cover.
@@ -77,7 +79,10 @@ ALL_PROMPT_SCHEMAS: dict[str, tuple[type[BaseModel], ...]] = {
 # reference → BLOCKED number of `PHASE4_NOTES.md` §«Заблокировано». Empty since the owner's
 # decision of 2026-11-02: the stand drafts of the eight stub roles closed BLOCKED-B-101…108.
 DOCTRINE_PENDING_MARKER = "Doctrine for this role is pending from the owner"
-DOCTRINE_PENDING: dict[str, str] = {"recognizer@1": "BLOCKED-C-202"}
+DOCTRINE_PENDING: dict[str, str] = {
+    "recognizer@1": "BLOCKED-C-202",
+    "artifact_writer@1": "BLOCKED-C-203",
+}
 
 # Fields whose values are labels of `LabelMap` (WP14.1, Т-§4.5).
 LABEL_FIELDS: dict[str, list[str]] = {
@@ -114,6 +119,13 @@ LABEL_FIELDS: dict[str, list[str]] = {
         "tasks.markup.tests.skill",
         "tasks.markup.variantOf",
         "tasks.markup.options.misconception",
+    ],
+    "artifact_writer@1": [
+        "blocks.sources",
+        "blocks.skills",
+        "cards.markup.tests.skill",
+        "cards.markup.variantOf",
+        "cards.markup.options.misconception",
     ],
     "solution_space@1": ["wrong_branches.misconception"],
     "analyst@1": [
