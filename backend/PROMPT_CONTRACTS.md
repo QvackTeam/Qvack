@@ -618,7 +618,6 @@ Output fields:
 - `crossed_out`: boolean
 
 Input blocks: none
-Layer 1: stub, owner's doctrine pending (BLOCKED-C-202)
 
 ## `artifact_writer@1` → `ArtifactWriterOutput`
 
@@ -706,7 +705,6 @@ Output fields:
 
 Input blocks: `artifact_type`, `learner_skill`, `topic_graph`, `material_chunks`, `worked_phrasings`, `personal`, `current_blocks`
 Label fields: `blocks.sources`, `blocks.skills`, `cards.markup.tests.skill`, `cards.markup.variantOf`, `cards.markup.options.misconception`
-Layer 1: stub, owner's doctrine pending (BLOCKED-C-203)
 
 ## Edit points after G1
 

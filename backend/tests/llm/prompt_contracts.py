@@ -79,10 +79,7 @@ ALL_PROMPT_SCHEMAS: dict[str, tuple[type[BaseModel], ...]] = {
 # reference → BLOCKED number of `PHASE4_NOTES.md` §«Заблокировано». Empty since the owner's
 # decision of 2026-11-02: the stand drafts of the eight stub roles closed BLOCKED-B-101…108.
 DOCTRINE_PENDING_MARKER = "Doctrine for this role is pending from the owner"
-DOCTRINE_PENDING: dict[str, str] = {
-    "recognizer@1": "BLOCKED-C-202",
-    "artifact_writer@1": "BLOCKED-C-203",
-}
+DOCTRINE_PENDING: dict[str, str] = {}
 
 # Fields whose values are labels of `LabelMap` (WP14.1, Т-§4.5).
 LABEL_FIELDS: dict[str, list[str]] = {
