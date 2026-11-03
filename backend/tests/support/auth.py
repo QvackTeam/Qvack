@@ -1,20 +1,28 @@
-"""Auth helpers of the tests (ТЗ Фазы 3 WP1.2, D-C-004).
+"""Auth helpers of the tests (ТЗ Фазы 3 WP1.2, D-C-004; ТЗ Ф4 WP18.3, D-C-112).
 
 The single auth dependency accepts a token only for an existing `auth.users` row. Phase 2
 session tests mint tokens for random learner ids; `ensure_users_hook` gives every such id a
 user row before the request is sent, as registration would. A row that already exists (for
 example one with `deleted_at` set) is left as it is.
+
+Routes on Phase 4 sessions sign in with `login`: a `core.auth_sessions` row and the cookie on
+the client (D-C-112 п.2).
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from uuid import UUID
 
 import httpx
 import jwt
 from sqlalchemy import text
 
+from quack.api.auth import SESSION_COOKIE
+from quack.auth.sessions import open_session
+from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 
 type RequestHook = Callable[[httpx.Request], Awaitable[None]]
@@ -53,3 +61,10 @@ def ensure_users_hook(db: SessionFactory) -> RequestHook:
             await ensure_user(db, learner_id)
 
     return hook
+
+
+async def login(client: httpx.AsyncClient, db: Db, learner_id: UUID, settings: Settings) -> str:
+    """A `full` session of `learner_id` and its cookie on `client`; the token."""
+    token = await open_session(db, settings, learner_id=learner_id, now=datetime.now(UTC))
+    client.cookies.set(SESSION_COOKIE, token)
+    return token
