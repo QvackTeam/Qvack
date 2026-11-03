@@ -33,7 +33,14 @@ from redis.exceptions import RedisError
 from quack.api.auth import CurrentSession
 from quack.api.resources import AppResources
 from quack.canvas.boards import Canvas
-from quack.canvas.strokes import Erasure, Point, Stroke, StrokeBatch, StrokeJournal
+from quack.canvas.strokes import (
+    Erasure,
+    Point,
+    Stroke,
+    StrokeBatch,
+    StrokeJournal,
+    chunk_max_batches,
+)
 from quack.logging import get_logger
 
 log = get_logger(__name__)
@@ -128,6 +135,7 @@ async def serve_canvas(
         learner_id=session.learner_id,
         session_id=canvas.session_id,
         chunk_seconds=resources.settings.stroke_chunk_seconds,
+        max_batches=chunk_max_batches(resources.settings),
     )
     sending = asyncio.Lock()
 

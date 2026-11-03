@@ -23,6 +23,7 @@ from uuid import UUID
 import msgpack
 import zstandard
 
+from quack.config import Settings
 from quack.storage.keys import canvas_chunk_key
 from quack.storage.objects import ObjectStore, StorageUnavailable
 
@@ -131,6 +132,10 @@ def _points(raw: list[list[float | int]]) -> tuple[Point, ...]:
     return tuple(points)
 
 
+def chunk_max_batches(settings: Settings) -> int:
+    raise NotImplementedError
+
+
 class StrokeJournal:
     """Pending batches of one canvas in one API process."""
 
@@ -141,6 +146,7 @@ class StrokeJournal:
         learner_id: UUID,
         session_id: UUID,
         chunk_seconds: int,
+        max_batches: int,
     ) -> None:
         self._storage = storage
         self._learner_id = learner_id
