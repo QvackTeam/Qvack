@@ -292,3 +292,21 @@ def test_alias_and_empty_apply() -> None:
     before = _run([], [_SKILL], [])
     after = _run([_event(15, "embedding.ready", ready | {"node_id": SKILL_B})], [_SKILL], [])
     assert after == before
+
+
+def test_proposed_topic_created_later_keeps_what_it_had() -> None:
+    """A proposed topic that the learner accepts keeps its own values (here «known»)."""
+    proposed = _node("Topic", TOPIC, domainId=DOMAIN, name="Fractions", origin="material",
+                     status="proposed", knownClaimedAtMs=5)  # fmt: skip
+    payload = {"topic_id": TOPIC, "domain_id": DOMAIN, "name": "Fractions", "origin": "learner"}
+    nodes, rels = _run([_event(2, "topic.created", payload)], [_DOMAIN, proposed])
+    assert nodes[("Topic", TOPIC)] == proposed.props | {"status": "active", "origin": "learner"}
+    assert ("Domain", DOMAIN, "HAS_TOPIC", "Topic", TOPIC) not in rels  # not created twice
+
+
+def test_edge_between_merged_skills_is_not_a_loop() -> None:
+    """After `skill.merged` both ends may resolve to one skill (Т-§2.8): no relation to itself."""
+    edge = {"kind": "requires", "from_id": SKILL_OLD, "to_id": SKILL, "origin": "model",
+            "confidence": 0.9}  # fmt: skip
+    _, rels = _run([_event(6, "edge.added", edge)], [_SKILL, _ALIAS], [_ALIAS_OF])
+    assert ("Skill", SKILL, "REQUIRES", "Skill", SKILL) not in rels

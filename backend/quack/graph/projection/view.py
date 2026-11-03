@@ -12,8 +12,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from quack.graph.projection.mutations import Mutation
-from quack.graph.projection.types import NodeRecord, NodeRef, Props, RelRecord, SubGraph
+from quack.graph.projection.mutations import (
+    DeleteNode,
+    DeleteRel,
+    MergeNode,
+    MergeRel,
+    Mutation,
+    SetProps,
+)
+from quack.graph.projection.types import NodeRecord, NodeRef, Props, RelKey, RelRecord, SubGraph
 
 
 @dataclass(frozen=True)
@@ -30,7 +37,11 @@ class Need:
     domain_labels: frozenset[tuple[str, str]] = frozenset()
 
     def __or__(self, other: Need) -> Need:
-        raise NotImplementedError
+        return Need(
+            nodes=self.nodes | other.nodes,
+            neighbourhoods=self.neighbourhoods | other.neighbourhoods,
+            domain_labels=self.domain_labels | other.domain_labels,
+        )
 
 
 NOTHING = Need()
@@ -61,19 +72,129 @@ class SliceView(Protocol):
 
 
 class BatchSlice:
-    """The slice of one learner's batch: the store read plus the changes of the batch."""
+    """The slice of one learner's batch: the store read plus the changes of the batch.
+
+    Applying is strict: `SetProps` on a missing node and `MergeRel` with a missing end are
+    handler errors (a handler resolves its references first and applies nothing if they are
+    gone, Т-§2.4).
+    """
 
     def __init__(self, learner_id: str, loaded: SubGraph) -> None:
-        raise NotImplementedError
+        self.learner_id = learner_id
+        self._nodes: dict[NodeRef, Props] = {(n.label, n.id): dict(n.props) for n in loaded.nodes}
+        self._rels: dict[RelKey, Props] = {r.key: dict(r.props) for r in loaded.rels}
 
     def view(self, need: Need) -> SliceView:
         """The view of one handler: reads outside `need` raise `OutsideSliceError`."""
-        raise NotImplementedError
+        return _View(self, need)
 
     def apply(self, mutations: Sequence[Mutation]) -> None:
         """Apply the changes of one event, so later events of the batch see them."""
-        raise NotImplementedError
+        for m in mutations:
+            match m:
+                case MergeNode(label, node_id, props):
+                    self._nodes[(label, node_id)] = {
+                        **self._nodes.get((label, node_id), {}),
+                        **props,
+                    }
+                case SetProps(label, node_id, props):
+                    if (label, node_id) not in self._nodes:
+                        raise ValueError(f"SetProps on a missing node {label} {node_id}")
+                    self._nodes[(label, node_id)].update(props)
+                case MergeRel(from_label, from_id, rel_type, to_label, to_id, props):
+                    for end in ((from_label, from_id), (to_label, to_id)):
+                        if end not in self._nodes:
+                            raise ValueError(f"MergeRel {rel_type} with a missing end {end}")
+                    key = (from_label, from_id, rel_type, to_label, to_id)
+                    self._rels[key] = {**self._rels.get(key, {}), **props}
+                case DeleteRel(from_label, from_id, rel_type, to_label, to_id):
+                    self._rels.pop((from_label, from_id, rel_type, to_label, to_id), None)
+                case DeleteNode(label, node_id):
+                    self._nodes.pop((label, node_id), None)
+                    for key in [k for k in self._rels if (label, node_id) in (k[:2], k[3:])]:
+                        del self._rels[key]
 
     def snapshot(self) -> SubGraph:
         """Every node and relationship of the slice now (for tests and rebuild)."""
-        raise NotImplementedError
+        return SubGraph(
+            nodes=[NodeRecord(label, i, dict(p)) for (label, i), p in sorted(self._nodes.items())],
+            rels=[RelRecord(*key, dict(p)) for key, p in sorted(self._rels.items())],
+        )
+
+    # --- reads without the guard (the view checks the need first) ---
+
+    def _resolve(self, label: str, node_id: str) -> str | None:
+        seen: set[str] = set()
+        while (label, node_id) not in self._nodes:
+            if node_id in seen or ("Alias", node_id) not in self._nodes:
+                return None
+            seen.add(node_id)
+            targets = [k[4] for k in self._rels if k[:3] == ("Alias", node_id, "ALIAS_OF")]
+            if len(targets) != 1:
+                return None
+            node_id = targets[0]
+        return node_id
+
+    def _rels_of(self, label: str, node_id: str, *, out: bool) -> list[RelRecord]:
+        end = slice(0, 2) if out else slice(3, 5)
+        return [
+            RelRecord(*key, dict(p))
+            for key, p in sorted(self._rels.items())
+            if key[end] == (label, node_id)
+        ]
+
+    def _neighbours(self, label: str, node_id: str) -> set[NodeRef]:
+        return {(r.to_label, r.to_id) for r in self._rels_of(label, node_id, out=True)} | {
+            (r.from_label, r.from_id) for r in self._rels_of(label, node_id, out=False)
+        }
+
+
+class _View:
+    def __init__(self, batch: BatchSlice, need: Need) -> None:
+        self._batch = batch
+        self._need = need
+
+    def _check_node(self, label: str, node_id: str) -> None:
+        ref = (label, node_id)
+        if ref in self._need.nodes or ref in self._need.neighbourhoods:
+            return
+        for near_label, near_id in self._need.neighbourhoods:
+            live = self._batch._resolve(near_label, near_id)
+            if live is not None and ref in self._batch._neighbours(near_label, live):
+                return
+        raise OutsideSliceError(f"{label} {node_id} is not in needs()")
+
+    def node(self, label: str, node_id: str) -> Props | None:
+        self._check_node(label, node_id)
+        live = self._batch._resolve(label, node_id)
+        return None if live is None else dict(self._batch._nodes[(label, live)])
+
+    def resolve(self, label: str, node_id: str) -> str | None:
+        self._check_node(label, node_id)
+        return self._batch._resolve(label, node_id)
+
+    def _rels(
+        self, label: str, node_id: str, rel_type: str | None, *, out: bool
+    ) -> list[RelRecord]:
+        if (label, node_id) not in self._need.neighbourhoods:
+            raise OutsideSliceError(f"relationships of {label} {node_id} are not in needs()")
+        live = self._batch._resolve(label, node_id)
+        if live is None:
+            return []
+        rels = self._batch._rels_of(label, live, out=out)
+        return [r for r in rels if rel_type is None or r.rel_type == rel_type]
+
+    def out_rels(self, label: str, node_id: str, rel_type: str | None = None) -> list[RelRecord]:
+        return self._rels(label, node_id, rel_type, out=True)
+
+    def in_rels(self, label: str, node_id: str, rel_type: str | None = None) -> list[RelRecord]:
+        return self._rels(label, node_id, rel_type, out=False)
+
+    def domain_nodes(self, domain_id: str, label: str) -> list[NodeRecord]:
+        if (domain_id, label) not in self._need.domain_labels:
+            raise OutsideSliceError(f"{label} nodes of domain {domain_id} are not in needs()")
+        return [
+            NodeRecord(node_label, node_id, dict(props))
+            for (node_label, node_id), props in sorted(self._batch._nodes.items())
+            if node_label == label and props.get("domainId") == domain_id
+        ]
