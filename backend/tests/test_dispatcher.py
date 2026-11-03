@@ -16,8 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from structlog.testing import capture_logs
 
 from quack.api.app import create_app
-from quack.api.auth import issue_access_token
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.events import append_events
 from quack.events.models import NewEvent, StoredEvent
@@ -28,7 +28,7 @@ from quack.jobs.dispatcher import Dispatcher, supervise
 from quack.jobs.dispatcher_rules import DISPATCHER_RULES
 from quack.jobs.queue import JobSpec
 from tests.factories import new_event
-from tests.support.auth import ensure_user
+from tests.support.auth import ensure_user, session_cookie, session_token
 from tests.support.resources import build_app_resources
 
 # Rows compared with what the transaction of the event used to enqueue (WP11.2).
@@ -483,6 +483,7 @@ async def test_dispatcher_lag(db: SessionFactory, settings: Settings) -> None:
 
 async def test_cheatsheet_refresh_endpoint_enqueues_directly(
     db: SessionFactory,
+    pg_db: Db,
     settings: Settings,
     pg_engine: AsyncEngine,
     neo4j: AsyncDriver,
@@ -515,9 +516,11 @@ async def test_cheatsheet_refresh_endpoint_enqueues_directly(
     )
     app = create_app(
         settings,
-        resources=build_app_resources(settings, pg_engine, neo4j, redis, session_factory=db),
+        resources=build_app_resources(
+            settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db
+        ),
     )
-    headers = {"Authorization": f"Bearer {issue_access_token(learner, settings)}"}
+    headers = session_cookie(await session_token(pg_db, learner, settings))
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         first = await client.post(

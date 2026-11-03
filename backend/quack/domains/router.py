@@ -1,5 +1,6 @@
-"""FastAPI router for Stream 1 (`/v1/auth/*`, `/v1/learner/*`, `/v1/domains/*`)
-wiring all 18 HTTP endpoints to domain service modules (ТЗ §3).
+"""FastAPI router for Stream 1 (`/v1/learner/*`, `/v1/domains/*`) wiring its HTTP endpoints to
+domain service modules (ТЗ §3). Register, login and `GET /v1/auth/me` are removed with the
+password and JWT (ТЗ Ф4 §2.3 row 3, WP18.3, D-A-113); sign-in is `quack.auth` (WP18).
 """
 
 from __future__ import annotations
@@ -10,16 +11,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request
 
 from quack.api.auth import get_current_learner_id
-from quack.api.ratelimit import enforce_action_rate_limit, enforce_auth_rate_limit
+from quack.api.ratelimit import enforce_action_rate_limit
 from quack.api.resources import get_llm, get_resources
 from quack.config import Settings
-from quack.domains import auth, diagnostic, graph_view, learner, service, structure, topics
+from quack.domains import diagnostic, graph_view, learner, service, structure, topics
 from quack.domains.schemas import (
     AnswerDiagnosticRequest,
     AnswerDiagnosticResponse,
     ArchiveDomainRequest,
     ArchiveDomainResponse,
-    AuthResponse,
     ConfirmStructureRequest,
     ConfirmStructureResponse,
     CreateDomainRequest,
@@ -32,11 +32,8 @@ from quack.domains.schemas import (
     EditStructureResponse,
     FinishDiagnosticRequest,
     FinishDiagnosticResponse,
-    LearnerMeResponse,
-    LoginRequest,
     ProposeStructureRequest,
     ProposeStructureResponse,
-    RegisterRequest,
     StartDiagnosticRequest,
     StartDiagnosticResponse,
     TopicDetailResponse,
@@ -47,10 +44,9 @@ from quack.domains.schemas import (
 )
 from quack.llm.gateway import LLMGateway
 
-# Register and login are public and limited per IP (`auth` scope, WP1.5); every other route
-# authenticates at router level, so a request without a token gets 401 before body
-# validation (ТЗ Фазы 3 WP1.2, T-A2), and its mutating requests count in the `actions` limit.
-_public = APIRouter(prefix="/v1", tags=["domains"], dependencies=[Depends(enforce_auth_rate_limit)])
+# Every route authenticates at router level, so a request without a session gets 401 before
+# body validation (ТЗ Фазы 3 WP1.2, T-A2), and its mutating requests count in the `actions`
+# limit.
 _protected = APIRouter(
     prefix="/v1",
     tags=["domains"],
@@ -66,36 +62,7 @@ type CurrentLearnerId = Annotated[UUID, Depends(get_current_learner_id)]
 type CurrentLLMGateway = Annotated[LLMGateway, Depends(get_llm)]
 
 
-# --- 1. Auth & Learner Profile (5 endpoints) ---
-
-
-@_public.post("/auth/register", response_model=AuthResponse, status_code=201)
-async def register_endpoint(
-    req: RegisterRequest,
-    request: Request,
-) -> AuthResponse:
-    resources = get_resources(request)
-    settings = _get_settings(request)
-    return await auth.register_learner(resources, settings, req)
-
-
-@_public.post("/auth/login", response_model=AuthResponse, status_code=200)
-async def login_endpoint(
-    req: LoginRequest,
-    request: Request,
-) -> AuthResponse:
-    resources = get_resources(request)
-    settings = _get_settings(request)
-    return await auth.login_learner(resources, settings, req)
-
-
-@_protected.get("/auth/me", response_model=LearnerMeResponse, status_code=200)
-async def me_endpoint(
-    request: Request,
-    learner_id: CurrentLearnerId,
-) -> LearnerMeResponse:
-    resources = get_resources(request)
-    return await auth.get_learner_me(resources, learner_id)
+# --- 1. Learner Profile ---
 
 
 @_protected.patch("/learner/preferences", response_model=UpdatePreferencesResponse, status_code=200)
@@ -359,5 +326,4 @@ async def update_topic_status_short_endpoint(
 
 
 router = APIRouter()
-router.include_router(_public)
 router.include_router(_protected)
