@@ -11,10 +11,13 @@ import struct
 from typing import Any
 from uuid import UUID, uuid4
 
+import orjson
 from neo4j import AsyncDriver
+from redis.asyncio import Redis
 
 from quack.config import Settings
 from quack.db import Db
+from quack.db.redis import projector_applied_channel
 from quack.events.log import NewEvent, append_events
 from quack.graph.projection.runner import RULES_VERSION, BatchOutcome, project_learner, resume
 from tests.db.fixtures import create_learner
@@ -259,3 +262,27 @@ async def test_rules3_stale_rebuild(pg_db: Db, neo4j: AsyncDriver, settings: Set
     assert str(learner) not in await stale_learners(neo4j, RULES_VERSION)
     rebuilt = await _graph(neo4j, learner)
     assert rebuilt == projected  # the junk is gone, the rest is the same graph
+
+
+async def test_changed_topics_are_published_after_commit(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings, redis: Redis
+) -> None:
+    """WP3.3 (`Т-§2.4`, ТЗ Ф4 §4.8): after the commit the batch publishes `applied_seq` and the
+    topics it changed on `projector:applied:{learner}` — `projection_advanced` of the stream."""
+    learner = await create_learner(pg_db)
+    domain, topic, skill, material, chunk = uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
+    await append_events(pg_db, learner, _materials(domain, topic, skill, material, chunk))
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(projector_applied_channel(learner))
+    try:
+        outcome = await project_learner(pg_db, neo4j, settings, learner, redis=redis)
+        assert outcome.status == "applied", outcome
+        message = None
+        for _ in range(3):  # the first read may return the confirmation of the subscription
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=5.0)
+            if message is not None:
+                break
+        assert message is not None
+        assert orjson.loads(message["data"]) == {"applied_seq": 6, "topics": [str(topic)]}
+    finally:
+        await pubsub.aclose()

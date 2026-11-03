@@ -916,6 +916,13 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/graph/test_projection_runner.py::test_rules3_stale_rebuild` (T-P8: `rules@2` находится, после пересборки `rules@3` и тот же граф, лишний узел исчез). `replace_learner` добавлен в `NEO4J_WRITERS` (T-A9a).
 - Требует подтверждения владельцем: нет.
 
+### D-A-190. WP3.3: публикация изменённых тем после фиксации
+- Класс: B. WP3.3; `Т-§2.4`, ТЗ §4.8; `quack/graph/projection/runner.py`
+- Решение: после записи пачки и копии отметки `project_learner(..., redis=)` публикует в `projector:applied:{learner_id}` (`projector_applied_channel` — канал, который уже читает `GET /v1/learner/stream`) объект `{"applied_seq": N, "topics": [id, …]}`. В `topics` — темы, свойства которых пачка изменила (разница среза). Сбой публикации только пишется в лог (закон 9). Без Redis ничего не публикуется: поток опрашивает отметку.
+- Почему: §0.4.3 п.1; §4.8 — `projection_advanced` «с `topics`»; канал Фазы 3 тот же, ключ `applied_seq` прежний.
+- Тесты: `tests/graph/test_projection_runner.py::test_changed_topics_are_published_after_commit`.
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.

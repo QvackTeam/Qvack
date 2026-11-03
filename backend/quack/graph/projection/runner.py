@@ -16,11 +16,14 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
+import orjson
 from neo4j import AsyncDriver
+from redis.asyncio import Redis
 
 from quack.config import Settings
 from quack.db import Db
 from quack.db.db import LockKeyspace
+from quack.db.redis import projector_applied_channel
 from quack.events.log import StoredEvent
 from quack.graph.profile_fold import PROFILE_EVENT_TYPES
 from quack.graph.projection.phase_a import EventFailed, apply_events, batch_need
@@ -35,6 +38,9 @@ from quack.graph.projection.store import (
 )
 from quack.graph.projection.types import NodeRef, SubGraph
 from quack.graph.projection.view import BatchSlice, Need, RulesParams
+from quack.logging import get_logger
+
+log = get_logger(__name__)
 
 # WP3.6: the version of handlers, folds and parameters written on `Learner.projectorVersion`.
 RULES_VERSION = "rules@3"
@@ -118,8 +124,23 @@ class _Neo4jFolds:
         return await load_topic_inputs(self._neo4j, self._learner, topics, skills, hubs)
 
 
+async def _publish(redis: Redis, learner_id: UUID, applied: int, topics: list[str]) -> None:
+    """After the commit (Т-§2.4, ТЗ Ф4 §4.8): which topics changed, on the channel the learner
+    stream reads (`projection_advanced`). A lost message is only logged (law 9)."""
+    try:
+        message = orjson.dumps({"applied_seq": applied, "topics": topics}).decode()
+        await redis.publish(projector_applied_channel(learner_id), message)
+    except Exception:
+        log.warning("projector_applied_publish_failed", learner_id=str(learner_id))
+
+
 async def project_learner(
-    db: Db, neo4j: AsyncDriver, settings: Settings, learner_id: UUID
+    db: Db,
+    neo4j: AsyncDriver,
+    settings: Settings,
+    learner_id: UUID,
+    *,
+    redis: Redis | None = None,
 ) -> BatchOutcome:
     """Apply the next batch of one learner (Т-§2.4). A temporary Neo4j error propagates: the
     caller repeats the batch with a growing pause."""
@@ -160,8 +181,12 @@ async def project_learner(
             )
             return BatchOutcome("failed", after, failed.seq)
         last = events[-1].seq
-        await write_batch(neo4j, str(learner_id), batch.diff(), last, RULES_VERSION)
+        diff = batch.diff()
+        await write_batch(neo4j, str(learner_id), diff, last, RULES_VERSION)
         await db.execute(_OFFSET, params | {"seq": last})
+        if redis is not None:
+            topics = sorted({n.id for n in diff.upsert_nodes if n.label == "Topic"})
+            await _publish(redis, learner_id, last, topics)
         return BatchOutcome("applied", last)
 
 
