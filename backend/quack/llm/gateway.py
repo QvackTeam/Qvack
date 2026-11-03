@@ -810,7 +810,7 @@ class LLMGateway:
             latency_ms=latency_ms,
             status=status,
         )
-        await insert_usage(self.db, row)
+        await insert_usage(self.db, row.learner_id, row)
 
     async def _finish_outbox(
         self,

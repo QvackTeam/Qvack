@@ -84,7 +84,8 @@ _INSERT = (
 
 _SESSION_SPEND = (
     "SELECT COALESCE(sum(cost_usd), 0)::float8 AS spent FROM ops.llm_usage "
-    "WHERE session_id = %(session_id)s AND role = ANY(%(roles)s::text[])"
+    "WHERE learner_id = %(learner_id)s AND session_id = %(session_id)s "
+    "AND role = ANY(%(roles)s::text[])"
 )
 
 _DAILY_SPEND = (
@@ -94,8 +95,8 @@ _DAILY_SPEND = (
 )
 
 
-async def insert_usage(db: Db, row: UsageRow) -> None:
-    await db.execute(_INSERT, row.__dict__)
+async def insert_usage(db: Db, learner_id: UUID | None, row: UsageRow) -> None:
+    await db.execute(_INSERT, row.__dict__ | {"learner_id": learner_id})
 
 
 def background_roles(settings: Settings) -> list[str]:
@@ -121,7 +122,12 @@ async def check_usd_budgets(
         return
     if session_id is not None:
         row = await db.fetch_one(
-            _SESSION_SPEND, {"session_id": session_id, "roles": limited_roles(settings)}
+            _SESSION_SPEND,
+            {
+                "learner_id": learner_id,
+                "session_id": session_id,
+                "roles": limited_roles(settings),
+            },
         )
         spent = float(row["spent"]) if row else 0.0
         if spent > settings.session_agent_budget_usd:
