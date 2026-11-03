@@ -53,6 +53,7 @@ MISCONCEPTION = UUID(int=0x61)
 MISCONCEPTION_STATEMENT = "adds the denominators when adding fractions"
 MISCONCEPTION_TRIGGERS = ("fractions with different denominators",)
 LAPSE_AT_MS = 1_699_000_000_000
+HINT_STEP = 2
 EVIDENCE_PROVEN = UUID(int=0xE1)
 EVIDENCE_FAILED = UUID(int=0xE2)
 PROJECTED_SEQ = 120
