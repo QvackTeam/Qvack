@@ -786,3 +786,190 @@ def test_events_of_the_batch_are_seen_by_later_events() -> None:
     apply_events([_event(ANSWER_SEQ, "message.sent", {"text": "is it 1/2?"})], batch)
     view = batch.view(Need(events=frozenset({ANSWER_SEQ})))
     assert view.event(ANSWER_SEQ) is not None
+
+
+# --- verdicts, cards, typos, disputes (T-P4, group 5; Т-§7.2, Т-§7.8, Т-§9.1, Т-§2.8) --------
+
+VERDICT_SEQ = 71
+OPTION_A, OPTION_B = str(UUID(int=0x0A)), str(UUID(int=0x0B))
+_TASK = _node("Task", TASK, domainId=DOMAIN, familyId=FAMILY, source="teacher",
+              verification="checked", methodNamed=False)  # fmt: skip
+_TRAP_MISCONCEPTION = _node("Misconception", MISCONCEPTION, domainId=DOMAIN, statement="s",
+                            status="suspected", triggers=[], targetedInSessionId="")  # fmt: skip
+
+
+def _tests_rel(skill: str, level: int, part: str = "main") -> RelRecord:
+    return _rel(("Task", TASK), "TESTS", ("Skill", skill), level=level, part=part)
+
+
+def _verdict_graph(task: NodeRecord = _TASK) -> tuple[list[NodeRecord], list[RelRecord]]:
+    option_a = NodeRecord("Option", OPTION_A, {"learnerId": L, "label": "A", "isCorrect": True})
+    option_b = NodeRecord("Option", OPTION_B, {"learnerId": L, "label": "B", "isCorrect": False})
+    nodes = [_DOMAIN, _SKILL, _SKILL_B, task, _TRAP_MISCONCEPTION, option_a, option_b]
+    rels = [
+        _tests_rel(SKILL, 3), _tests_rel(SKILL, 4), _tests_rel(SKILL_B, 2, "b"),
+        _rel(("Task", TASK), "HAS_OPTION", ("Option", OPTION_A)),
+        _rel(("Task", TASK), "HAS_OPTION", ("Option", OPTION_B)),
+        _rel(("Option", OPTION_B), "TRAPS", ("Misconception", MISCONCEPTION)),
+        _rel(("Misconception", MISCONCEPTION), "ABOUT", ("Skill", SKILL)),
+    ]  # fmt: skip
+    return nodes, rels
+
+
+def _verdict(**changes: Any) -> StoredEvent:
+    body = {"answer_seq": ANSWER_SEQ, "part": "main", "outcome": "incorrect", "method": "exact",
+            "verification": "code"} | changes  # fmt: skip
+    return _event(VERDICT_SEQ, "verdict.recorded", body, domain_id=UUID(DOMAIN),
+                  session_id=SESSION)  # fmt: skip
+
+
+def _evidence_props(**changes: Any) -> Props:
+    """Phase A writes every property of an Evidence explicitly (law 8); weight, novelty and
+    delayed are the fold's (phase B), here their «not counted yet» 0 / false."""
+    return {
+        "learnerId": L, "domainId": DOMAIN, "atMs": AT_MS, "level": 3, "outcome": "incorrect",
+        "assistance": "none", "hintStep": 0, "novelty": 0.0, "confidence": 0, "tier": 1,
+        "weight": 0.0, "verification": "code", "delayed": False, "solveTimeMs": 0,
+        "gapType": "unknown", "quote": "", "sourceSessionId": str(SESSION),
+        "sessionDomainId": DOMAIN, "sourceSeq": ANSWER_SEQ, "derivedKind": "direct",
+        "status": "active", "observationSeq": 0, "extractor": "", "searchable": False,
+    } | changes  # fmt: skip
+
+
+def _ev(n: int, seq: int = VERDICT_SEQ) -> str:
+    return deterministic_id(LEARNER, seq, f"evidence:{n}")
+
+
+def test_code_verdict_gives_t1_evidence_per_pair_of_its_part() -> None:
+    """Т-§7.8 п.1–2: a code verdict on a marked task — T1 per pair of the part's markup, with
+    the verdict's outcome; a wrong option with a trap — a T1 manifestation (`MANIFESTS`)."""
+    nodes, rels = _run(
+        [_answer(confidence=3), _verdict(help_step=1, misconception_id=MISCONCEPTION)],
+        *_verdict_graph(),
+    )
+    hint = {"assistance": "hint", "hintStep": 1, "confidence": 3}
+    assert nodes[("Evidence", _ev(0))] == _evidence_props(**hint)
+    assert nodes[("Evidence", _ev(1))] == _evidence_props(level=4, **hint)
+    assert {k for k in rels if k[0] == "Evidence"} == {
+        ("Evidence", _ev(0), "ON", "Skill", SKILL),
+        ("Evidence", _ev(0), "ON_TASK", "Task", TASK),
+        ("Evidence", _ev(1), "ON", "Skill", SKILL),
+        ("Evidence", _ev(1), "ON_TASK", "Task", TASK),
+        ("Evidence", _ev(0), "MANIFESTS", "Misconception", MISCONCEPTION),
+    }
+
+
+def test_verdict_of_a_part_uses_its_markup() -> None:
+    nodes, _ = _run([_answer(part="b"), _verdict(part="b", outcome="correct")], *_verdict_graph())
+    assert nodes[("Evidence", _ev(0))] == _evidence_props(level=2, outcome="correct",
+                                                          gapType="none")  # fmt: skip
+    assert ("Evidence", _ev(1)) not in nodes
+
+
+@pytest.mark.parametrize(
+    ("verdict", "task_verification", "tier", "verification"),
+    [
+        ({"verification": "model", "method": "model"}, "checked", 2, "model"),
+        (
+            {
+                "verification": "model",
+                "method": "model",
+                "second_opinion": {"requested": True, "agreed": True},
+            },
+            "checked",
+            2,
+            "model",
+        ),
+        (
+            {
+                "verification": "model",
+                "method": "model",
+                "second_opinion": {"requested": True, "agreed": False},
+            },
+            "checked",
+            3,
+            "model",
+        ),
+        ({"verification": "code"}, "disputed", 2, "model"),
+    ],
+)
+def test_tier_by_verification_and_second_opinion(
+    verdict: dict[str, Any], task_verification: str, tier: int, verification: str
+) -> None:
+    """Т-§7.2, Т-§7.8 п.3: model — T2, or T3 if the second opinion disagreed; a disputed task
+    lowers its verdicts to class model (Т-§5.6)."""
+    task = _node("Task", TASK, **(_TASK.props | {"verification": task_verification}))
+    nodes, _ = _run([_answer(), _verdict(**verdict)], *_verdict_graph(task))
+    evidence = nodes[("Evidence", _ev(0))]
+    assert (evidence["tier"], evidence["verification"]) == (tier, verification)
+
+
+def test_unclear_verdict_or_missing_answer_gives_nothing() -> None:
+    graph = _verdict_graph()
+    before = _run([_answer()], *graph)
+    assert _run([_answer(), _verdict(outcome="unclear")], *graph) == before
+    assert _run([_verdict()], *graph) == _run([], *graph)  # the answer event is gone (Т-§2.9)
+
+
+def test_success_on_a_trap_task_resists_its_misconceptions() -> None:
+    """Т-§9.1: a success passing the gate (T1/T2, no shown solution) on a task where an option
+    catches a misconception — `RESISTED` to it."""
+    _, rels = _run([_answer(), _verdict(outcome="correct")], *_verdict_graph())
+    assert ("Evidence", _ev(0), "RESISTED", "Misconception", MISCONCEPTION) in rels
+    _, rels = _run([_answer(), _verdict(outcome="correct", solution_shown=True)], *_verdict_graph())
+    assert not any(k[2] == "RESISTED" for k in rels)
+
+
+def test_card_self_assessment_is_t4_evidence_of_level_1() -> None:
+    """D-A-125 п.1: a card with a self-assessment — T4 on the skills of the card markup, level
+    1, outcome by the self-assessment; other answers change nothing."""
+    card = _answer(source="card", self_assessment=False)
+    nodes, rels = _run([card], *_verdict_graph())
+    props = _evidence_props(level=1, outcome="incorrect", tier=4, verification="model",
+                            sourceSeq=ANSWER_SEQ)  # fmt: skip
+    assert nodes[("Evidence", _ev(0, ANSWER_SEQ))] == props
+    assert ("Evidence", _ev(0, ANSWER_SEQ), "ON", "Skill", SKILL) in rels
+    assert ("Evidence", _ev(1, ANSWER_SEQ)) not in nodes  # one per skill, level 1
+    assert _run([_answer()], *_verdict_graph()) == _run([], *_verdict_graph())
+
+
+def test_typo_declared_disputes_the_verdict_evidence_as_slip() -> None:
+    """Т-§2.8: «описка» — the verdict's evidence is excluded with what is derived from it; its
+    gap type is `slip` (WP3.2)."""
+    typo = _event(72, "typo.declared", {"answer_seq": ANSWER_SEQ, "part": "main"})
+    nodes, _ = _run([_answer(), _verdict(), typo], *_verdict_graph())
+    for n in (0, 1):
+        assert nodes[("Evidence", _ev(n))] == _evidence_props(
+            level=3 + n, status="disputed", gapType="slip"
+        )
+
+
+def test_dispute_of_evidence_misconception_or_verdict() -> None:
+    """Т-§2.8: the target gets `disputed` together with the evidence derived from it."""
+    derived = _ev(9)
+    graph_nodes, graph_rels = _verdict_graph()
+    nodes, _ = _run(
+        [
+            _answer(),
+            _verdict(),
+            _event(73, "dispute.filed", {"target_kind": "verdict", "target_id": str(VERDICT_SEQ)}),
+        ],
+        graph_nodes,
+        graph_rels,
+    )
+    assert [nodes[("Evidence", _ev(n))]["status"] for n in (0, 1)] == ["disputed", "disputed"]
+    source = NodeRecord("Evidence", _ev(0), _evidence_props())
+    child = NodeRecord("Evidence", derived, _evidence_props(derivedKind="indirect"))
+    nodes, _ = _run(
+        [
+            _event(74, "dispute.filed", {"target_kind": "evidence", "target_id": _ev(0)}),
+            _event(
+                75, "dispute.filed", {"target_kind": "misconception", "target_id": MISCONCEPTION}
+            ),
+        ],
+        [*graph_nodes, source, child],
+        [*graph_rels, _rel(("Evidence", derived), "DERIVED_FROM", ("Evidence", _ev(0)))],
+    )
+    assert nodes[("Evidence", _ev(0))]["status"] == "disputed"
+    assert nodes[("Evidence", derived)]["status"] == "disputed"
+    assert nodes[("Misconception", MISCONCEPTION)]["status"] == "disputed"
