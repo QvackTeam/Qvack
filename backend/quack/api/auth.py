@@ -72,8 +72,20 @@ def _unauthenticated(message: str) -> ApiError:
 
 
 async def get_current_session(request: Request) -> CurrentSession:
-    """FastAPI dependency: the live session of the cookie; `401 UNAUTHENTICATED` without one.
-    `learner_id` comes only from here, never from a request body (Т-§19.1)."""
+    """FastAPI dependency: the live `full` session of the cookie; `401 UNAUTHENTICATED` without
+    one. A `companion` session may only upload into its canvas and see its status (WP22.1,
+    T-CP1): every route behind this dependency answers it `403` (D-C-128). `learner_id` comes
+    only from here, never from a request body (Т-§19.1)."""
+    session = await get_any_session(request)
+    if session.scope != "full":
+        raise ApiError("UNAUTHORIZED", "a companion session cannot do this", status_code=403)
+    return session
+
+
+async def get_any_session(request: Request) -> CurrentSession:
+    """FastAPI dependency: the live session of the cookie of any scope; `401` without one. Only
+    for the routes a `companion` may use — the upload of photos into its canvas (WP22.1–22.2);
+    the route checks the canvas itself (D-C-128)."""
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         raise _unauthenticated("not signed in")

@@ -26,6 +26,8 @@ PUBLIC_ROUTES = frozenset(
         ("get", "/auth/link/verify"),
         ("get", "/auth/google/start"),
         ("get", "/auth/google/callback"),
+        # WP22.1: the phone has no session yet; the pairing token is its credential.
+        ("post", "/companion/pair"),
     }
 )
 # The heartbeat does not count against the `actions` limit (WP1.5, `quack.api.ratelimit`).

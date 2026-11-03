@@ -607,6 +607,105 @@ Output fields:
 
 Input blocks: `situation`, `turn_a`, `turn_b`, `criteria`
 
+## `recognizer@1` → `RecognizerOutput`
+
+Output fields:
+
+- `kind`: "latex" | "text"
+- `text`: string
+- `sympy`: string | null
+- `confidence`: number
+- `crossed_out`: boolean
+
+Input blocks: none
+
+## `artifact_writer@1` → `ArtifactWriterOutput`
+
+Output fields:
+
+- `blocks`: list[object]
+- `blocks.updates`: integer | null
+- `blocks.kind`: "summary" | "definition" | "statement" | "why" | "when_to_apply" | "worked_example" | "my_traps" | "links" | "custom"
+- `blocks.content`: string
+- `blocks.sources`: list[string]
+- `blocks.skills`: list[string]
+- `cards`: list[object]
+- `cards.kind`: "definition" | "sign_to_method" | "distinction" | "against_misconception"
+- `cards.prompt`: string
+- `cards.markup`: object
+- `cards.markup.tests`: list[object]
+- `cards.markup.tests.skill`: string | null
+- `cards.markup.tests.new_skill`: object | null
+- `cards.markup.tests.new_skill.name`: string
+- `cards.markup.tests.new_skill.topic_hint`: string
+- `cards.markup.tests.level`: integer
+- `cards.markup.methodNamed`: boolean
+- `cards.markup.variantOf`: string | null
+- `cards.markup.answer`: object
+- `cards.markup.answer.type`: "choice" | "number" | "expression" | "set" | "vector" | "quantity" | "proof" | "free_text" | "drawing" | "short_text"
+- `cards.markup.answer.value`: object | null
+- `cards.markup.answer.value.latex`: string
+- `cards.markup.answer.value.sympy`: string
+- `cards.markup.answer.items`: list[object] | null
+- `cards.markup.answer.items.latex`: string
+- `cards.markup.answer.items.sympy`: string
+- `cards.markup.answer.options`: list[object] | null
+- `cards.markup.answer.options.option_id`: string
+- `cards.markup.answer.options.text`: string
+- `cards.markup.answer.options.correct`: boolean
+- `cards.markup.answer.accepted`: list[string] | null
+- `cards.markup.answer.tol_abs`: number | null
+- `cards.markup.answer.tol_rel`: number | null
+- `cards.markup.answer.sig_digits`: integer | null
+- `cards.markup.answer.unit`: string | null
+- `cards.markup.answer.mode`: "equal" | "up_to_constant" | "solution_set" | "interval" | "form" | null
+- `cards.markup.answer.form_target`: "factored" | "simplified" | null
+- `cards.markup.answer.variables`: list[object] | null
+- `cards.markup.answer.variables.name`: string
+- `cards.markup.answer.variables.assumptions`: list["real" | "positive" | "nonnegative" | "integer" | "nonzero"]
+- `cards.markup.answer.key_ideas`: list[string] | null
+- `cards.markup.options`: list[object] | null
+- `cards.markup.options.option_id`: string
+- `cards.markup.options.misconception`: string | null
+- `cards.markup.options.hypothesis`: string | null
+- `cards.markup.options.neighbor_idea`: boolean
+- `cards.markup.pairTaskId`: string | null
+- `cards.markup.form`: "multistep" | "explain_why" | "what_breaks" | null
+- `cards.markup.parts`: list[object] | null
+- `cards.markup.parts.part`: string
+- `cards.markup.parts.answer`: object
+- `cards.markup.parts.answer.type`: "choice" | "number" | "expression" | "set" | "vector" | "quantity" | "proof" | "free_text" | "drawing" | "short_text"
+- `cards.markup.parts.answer.value`: object | null
+- `cards.markup.parts.answer.value.latex`: string
+- `cards.markup.parts.answer.value.sympy`: string
+- `cards.markup.parts.answer.items`: list[object] | null
+- `cards.markup.parts.answer.items.latex`: string
+- `cards.markup.parts.answer.items.sympy`: string
+- `cards.markup.parts.answer.options`: list[object] | null
+- `cards.markup.parts.answer.options.option_id`: string
+- `cards.markup.parts.answer.options.text`: string
+- `cards.markup.parts.answer.options.correct`: boolean
+- `cards.markup.parts.answer.accepted`: list[string] | null
+- `cards.markup.parts.answer.tol_abs`: number | null
+- `cards.markup.parts.answer.tol_rel`: number | null
+- `cards.markup.parts.answer.sig_digits`: integer | null
+- `cards.markup.parts.answer.unit`: string | null
+- `cards.markup.parts.answer.mode`: "equal" | "up_to_constant" | "solution_set" | "interval" | "form" | null
+- `cards.markup.parts.answer.form_target`: "factored" | "simplified" | null
+- `cards.markup.parts.answer.variables`: list[object] | null
+- `cards.markup.parts.answer.variables.name`: string
+- `cards.markup.parts.answer.variables.assumptions`: list["real" | "positive" | "nonnegative" | "integer" | "nonzero"]
+- `cards.markup.parts.answer.key_ideas`: list[string] | null
+- `cards.markup.parts.tests`: list[object] | null
+- `cards.markup.parts.tests.skill`: string | null
+- `cards.markup.parts.tests.new_skill`: object | null
+- `cards.markup.parts.tests.new_skill.name`: string
+- `cards.markup.parts.tests.new_skill.topic_hint`: string
+- `cards.markup.parts.tests.level`: integer
+
+Input blocks: `artifact_type`, `learner_skill`, `topic_graph`, `material_chunks`, `worked_phrasings`, `personal`, `current_blocks`
+Label fields: `blocks.sources`, `blocks.skills`, `cards.markup.tests.skill`, `cards.markup.variantOf`, `cards.markup.options.misconception`
+
 ## Edit points after G1
 
 - teacher tool names, if tools appear (R9);
