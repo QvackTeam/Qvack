@@ -87,6 +87,7 @@ if [[ "$(printf '%s\n%s\n' "$DOCKER_MIN_VERSION" "$installed" | sort -V | head -
   exit 1
 fi
 # `deploy` in the docker group is equivalent to root: a known trade-off of Д-§10.
+getent group docker >/dev/null || groupadd docker
 usermod -aG docker deploy
 
 step "swap ${SWAP_SIZE_GB} GB, vm.swappiness=10"
