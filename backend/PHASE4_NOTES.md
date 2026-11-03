@@ -1264,6 +1264,15 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 
 - Требует подтверждения владельцем: нет
 
+### D-B-179. Описание заблуждения на фактах S4 (WP16.2)
+- Класс: B
+- WP / место: WP16.2, WP7.1, `Т-§9.3`, `T-AG2`; `quack/agents/misconception_describe.py` (`describe_misconception`, `render_manifestations`, `run_misconception_describe`)
+- Контекст: A выложила `MisconceptionDetail` и `ManifestationFact` (#170) и ответила, что `workers` получает читателя фабрикой `create_graph_reader(ctx.neo4j, ctx.settings)` (#155). Своя модель `DescriberInput` из D-B-175 (д) больше не нужна. Открытые места: у `ManifestationFact.quote` бывает `None`; порядок проявлений с одинаковым временем не задан.
+- Решение: (а) Модуль принимает `MisconceptionDetail | None` от A напрямую; `DescriberInput` и `Manifestation` удалены. Статус `unknown` (гипотеза до первого проявления) — выход без вызова, как и всё вне трёх подтверждённых. (б) Порядок — по `at_ms`, при равенстве по `source_seq`: вход детерминирован (закон 5). (в) Проявление без цитаты — строка «no quote», а не пустые кавычки. (г) `run_misconception_describe(job, ctx, reader)` берёт `misconception_id` и `trigger_seq` из нагрузки строки WP7.1, домен — из события-триггера. Читатель — параметр: тест подставляет `FixedGraphReader`, а регистрация с `create_graph_reader` — после выбора процедуры реестра видов в #173 (T-Q7: обработчик вида, которого нет в `JOB_KINDS`, роняет `test_all_job_kinds_have_handlers`).
+- Почему: §0.4.3 п.2 (WP16.2, `Т-§9.3`), п.5.
+- Обратимость: один модуль.
+- Тесты: `tests/agents/test_misconception_describe.py` (5); мутация «сортировка только по `at_ms`» — тест падает.
+- Не решено \[ПРОВЕРИТЬ\]: регистрация `misconception.describe` — после #173.
 ### D-B-176. Аналитик границы: вызов и запись (WP16.1)
 - Класс: B
 - WP / место: WP16.1, `Т-§13.5`, `Т-§13.2`, `Т-§9.5`, `T-AG1`, законы 5, 7, 10; `quack/agents/analyst.py` (`run_analyst`, `render_evidence`, `digest_structured`, `analyst_errors`)
