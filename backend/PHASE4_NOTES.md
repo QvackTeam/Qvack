@@ -1274,6 +1274,18 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: нет (п.3 — D-C-122 п.4).
 
+### D-C-130. §4.8: `artifact_updated` и `material_parsed` в канале ученика
+- Класс: B
+- WP / место: §4.8; `quack/api/learner_stream.py`
+- Контекст: §4.8 добавляет в `GET /v1/learner/stream` виды `projection_advanced {topics}`, `jobs_changed {session_id}`, `verdict_revised {answer_seq}`, `artifact_updated {artifact_id}`, `material_parsed {material_id}`. Откуда канал берёт их, не сказано.
+- Решение:
+  1. `artifact_updated` и `material_parsed` — из журнала Фазы 4: новые `artifact.updated` / `material.parsed` после открытия канала. Канал подписан на сигнал `learner:{id}`, который `append_events` публикует после коммита (`Т-§2.3`), и по нему дочитывает журнал от своего курсора; без Redis — тем же опросом раз в `learner_stream_poll_ms`. События до открытия канала не повторяются.
+  2. `jobs_changed` (очередь A, `Т-§13.8`), `verdict_revised` (пересмотр вердикта B, `Т-§5.6`) и `topics` у `projection_advanced` (проектор A, `Т-§2.4`) — не события журнала C. Их источник называют A и B; вопрос — в PR этого решения.
+- Почему: §4.8, `Т-§1.6`, `Т-§2.3`.
+- Обратимость: одна таблица видов и одно чтение.
+- Тесты: `tests/test_learner_stream.py` (Redis и опрос).
+- Требует подтверждения владельцем: нет.
+
 ### D-C-120. `observation.diagnosed` пишется только при найденной ошибке
 - Класс: B (тип C по §6.3; владелец поручил C решить по документам, 2026-11-03)
 - WP / место: WP21.4 п.3, WP5.1, §6.3; `Т-§7.1`, `Т-§15.4`, `Т-§7.6`, П-9.7; будущий код C `quack/canvas/` (быстрый слой)
