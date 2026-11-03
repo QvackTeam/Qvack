@@ -108,6 +108,18 @@ def test_unknown_labels_are_rejected() -> None:
     assert _reasons(_el(root_cause=RootCause(skill="S8", confidence="low"))) == ["unknown_label"]
 
 
+def test_help_and_gap_type_must_agree() -> None:
+    """WP15 п.3, `Т-§7.6`: a hint has its step 1–3 and only a hint has one; a positive element
+    has gap type `none` (review of B in #133)."""
+    assert _reasons(_el(help="hint", hint_step=None)) == ["incomplete_element"]
+    assert _reasons(_el(help="none", hint_step=2)) == ["incomplete_element"]
+    assert _reasons(_el(help="shown_solution", hint_step=1)) == ["incomplete_element"]
+    assert _reasons(_el(outcome="correct", gap_type="slip")) == ["incomplete_element"]
+    assert _reasons(_el(help="hint", hint_step=2)) == []
+    assert _reasons(_el(outcome="correct", gap_type="none")) == []
+    assert _reasons(_el(outcome="partial", gap_type="execution")) == []
+
+
 def test_incomplete_elements_are_rejected() -> None:
     assert _reasons(_el(level=None)) == ["incomplete_element"]
     assert _reasons(_el(outcome=None)) == ["incomplete_element"]
