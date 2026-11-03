@@ -1352,6 +1352,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Правки тестов
 
+- `tests/test_compose_contract.py` (C, D-C-119): удалён `test_only_api_has_the_jwt_secret` из #122 — `JWT_SECRET` удаляется вместе с JWT (§2.3 строка 3, §8.15 п.1); из проверки `projector` убрано несуществующее имя `JWT_SECRET`.
 - `tests/session/test_head_guards.py::test_boundary_names_the_missing_prerequisites_once` (D-B-153, до зелёного): проверка «id не в тексте» смотрела на id предпосылки с меткой и не ловила утечку id предпосылки без метки (подмена прошла); теперь проверяются оба id и точный текст. Тест усилен, не ослаблен.
 - `tests/practice/test_check_symbolic_job.py::test_unsupported_form_writes_nothing_yet` → `test_unsupported_form_writes_check_failed_for_the_model` (B, D-B-146): прежний тест закреплял временное поведение до ответа A («`unsupported` нет в каталоге»); A добавил значение в #117, тест проверяет новое поведение: `check.failed {reason: unsupported}` под ключом `check_failed_key`. Тест не ослаблен.
 
