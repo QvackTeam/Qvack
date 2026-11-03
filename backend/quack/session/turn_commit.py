@@ -43,7 +43,7 @@ from quack.events.log import NewEvent, append_events
 from quack.events.values import AnswerSpec
 from quack.llm.labels import LabelMap
 from quack.logging import get_logger
-from quack.practice.markup import TaskMarkup, TestedLevel
+from quack.practice.markup import markup_record
 from quack.practice.role_outputs import TaskCondition
 from quack.practice.task_store import get_task, insert_task_document, task_created_event
 from quack.session.elements import Element
@@ -500,48 +500,6 @@ async def _help_events(db: Db, batch: TurnBatch, learner_id: UUID) -> list[NewEv
 
 
 # --- labels → ids (Т-§4.5) ---
-
-
-def markup_record(markup: TaskMarkup, labels: LabelMap) -> records.TaskMarkupRecord:
-    """Т-§5.2 markup with ids: skills, misconceptions of the options, tasks of `variantOf` and
-    `pairTaskId`."""
-    return records.TaskMarkupRecord(
-        tests=[_tested(t, labels) for t in markup.tests],
-        method_named=markup.method_named,
-        variant_of=_optional(labels, "task", markup.variant_of),
-        answer=markup.answer,
-        options=None
-        if markup.options is None
-        else [
-            records.OptionTrapRecord(
-                option_id=o.option_id,
-                misconception_id=_optional(labels, "misconception", o.misconception),
-                hypothesis=o.hypothesis,
-                neighbor_idea=o.neighbor_idea,
-            )
-            for o in markup.options
-        ],
-        pair_task_id=_optional(labels, "task", markup.pair_task_id),
-        form=markup.form,
-        parts=None
-        if markup.parts is None
-        else [
-            records.TaskPartRecord(
-                part=p.part,
-                answer=p.answer,
-                tests=None if p.tests is None else [_tested(t, labels) for t in p.tests],
-            )
-            for p in markup.parts
-        ],
-    )
-
-
-def _tested(tested: TestedLevel, labels: LabelMap) -> records.TestedLevelRecord:
-    return records.TestedLevelRecord(
-        skill_id=_optional(labels, "skill", tested.skill),
-        new_skill=tested.new_skill,
-        level=tested.level,
-    )
 
 
 def _optional(labels: LabelMap, kind: Any, label: str | None) -> UUID | None:
