@@ -21,6 +21,8 @@ NO_IDEMPOTENCY_KEY: dict[tuple[str, str], str] = {
     ("POST", "/v1/sessions/{session_id}/heartbeat"): "no event; refreshes presence only",
     # ТЗ Ф4 WP22.1: every call issues a new one-time token (Т-§16.1); no event to replay.
     ("POST", "/v1/canvases/{canvas_id}/pairing"): "no event; issues a new one-time token",
+    # ТЗ Ф4 WP22.2: like materials, every photo of the sheet is a new snapshot (Т-§22.6).
+    ("POST", "/v1/canvases/{canvas_id}/photos"): "multipart; each photo is a new snapshot",
     # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
     ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): "no event; the job coalesces",
 }
@@ -83,6 +85,9 @@ def path_for(path: str, ids: Ids) -> str:
 MULTIPART: dict[tuple[str, str], dict[str, tuple[str, bytes, str]]] = {
     ("POST", "/v1/domains/{domain_id}/materials"): {
         "file": ("notes.pdf", b"%PDF-1.7\n1 0 obj\n", "application/pdf")
+    },
+    ("POST", "/v1/canvases/{canvas_id}/photos"): {
+        "file": ("sheet.webp", b"RIFF\x00\x00\x00\x00WEBPVP8 ", "image/webp")
     },
 }
 

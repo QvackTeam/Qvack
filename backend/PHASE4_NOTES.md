@@ -1418,6 +1418,20 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: нет (п.3 — D-C-122 п.4).
 
+### D-C-129. WP22.2: снимок листа — объект, затем `photo.uploaded`; кто может загружать
+- Класс: B
+- WP / место: WP22.2; `quack/canvas/photos.py`, `quack/canvas/router.py`, `quack/api/auth.py` (`get_any_session`)
+- Контекст: WP22.2 называет маршрут, ключ объекта и событие; `T-CP1` — компаньон загружает в свой канвас. Формат тела, проверка типа и идемпотентность не названы.
+- Решение:
+  1. `POST /v1/canvases/{id}/photos` — multipart `file`, как загрузка материалов (D-C-116). Тип — по содержимому, только WebP (`Т-§22.6`), размер — `upload_max_mb`; иначе 415/413 `UPLOAD_REJECTED`.
+  2. Объект `photos/{photo_id}/original-{ulid}.webp` пишется первым, затем `photo.uploaded {canvas_id, photo_id, object_key}` с `session_id` канваса (`Т-§2.3`, `Т-§20.7`). Отдельной таблицы снимков в §6.1 нет — снимок живёт объектом и событием.
+  3. Кто: `get_any_session` (любая область) и `may_open` канваса — `full` владельца или `companion` этого канваса; компаньон другого канваса — 403 `UNAUTHORIZED`, чужой канвас — 404.
+  4. Ключа идемпотентности нет: каждый снимок — новый (исключение `T-E2`, как у материалов).
+- Почему: WP22.2, `Т-§22.6`, `T-CP1`, D-C-128.
+- Обратимость: один модуль, один маршрут.
+- Тесты: `tests/canvas/test_photos_wp22.py`; маршрут — `T-A1`, исключение — `T-E2`.
+- Требует подтверждения владельцем: нет.
+
 ### D-C-130. §4.8: `artifact_updated` и `material_parsed` в канале ученика
 - Класс: B
 - WP / место: §4.8; `quack/api/learner_stream.py`
@@ -1728,6 +1742,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Правки тестов
 
+- `tests/e2e/endpoints.py`, `tests/test_app_assembly.py` (C, WP22.2): маршрут снимка — в `T-A1`, в `NO_IDEMPOTENCY_KEY` и `MULTIPART` (`T-E2`, `T-E3`).
 - `tests/db/test_sql_static.py` (C, WP22.1): в `CROSS_LEARNER_ALLOWED` добавлен `quack/auth/pairing.py:_REDEEM_TOKEN` — согласовано A в #142 (D-A-128).
 - `tests/e2e/endpoints.py`, `tests/test_app_assembly.py` (C, WP22.1): маршруты привязки — в контракте `T-A1`, в `NO_IDEMPOTENCY_KEY` и `NO_BODY` (`T-E2`, `T-E3`).
 - `tests/jobs/test_rules_p4.py::test_handwriting_known_claim_and_reextraction_rows` (A, D-A-135): `skill.split` больше не ставит задачу только по событию. Тест проверяет, что строка — с данными сверх события (по эпизодам, `Т-§2.8`); прежнее утверждение (одна задача без эпизода) расходилось с `Т-§2.8` (§8.15 п.3).
