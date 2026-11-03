@@ -11,7 +11,8 @@ nodes; another learner's id is «not found» (law 1).
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -65,6 +66,15 @@ class TodayEntry(BaseModel):
     score: float
 
 
+class PaceWarning(BaseModel):
+    """`Т-§14.6`: the hub will not be ready by its date at the current pace."""
+
+    hub_id: UUID
+    ready: int
+    not_ready: int
+    forecast: float
+
+
 class TodayView(BaseModel):
     """Empty `items` — no plaque (`Т-§14.4`). `grade_hub_ids` — hubs whose date has passed
     and that have no grade yet: the offer to enter it (WP17.5)."""
@@ -72,6 +82,7 @@ class TodayView(BaseModel):
     items: list[TodayEntry] = []
     minutes: float = 0.0
     grade_hub_ids: list[UUID] = []
+    pace_warnings: list[PaceWarning] = []
 
 
 class PrepMode(BaseModel):
@@ -89,10 +100,110 @@ class Accepted(BaseModel):
     seq: int
 
 
+_MS_PER_DAY = 86_400_000
+_HUB_SKILLS = (
+    "MATCH (d:Domain {id: $domain})-[:HAS_HUB]->(h:Hub)-[i:INCLUDES]->(t:Topic) "
+    "MATCH (t)-[:COVERS]->(s:Skill) "
+    "WHERE d.learnerId = $learner AND h.deadlineAtMs > $now_ms "
+    "RETURN h.id AS hub, h.deadlineAtMs AS deadline, t.id AS topic, "
+    "i.requiredLevels AS levels, properties(s) AS skill"
+)
+_ACTIVE_DAYS = (
+    "SELECT count(DISTINCT (occurred_at AT TIME ZONE %(tz)s)::date) AS n FROM core.events "
+    "WHERE learner_id = %(learner_id)s AND actor = 'learner' AND occurred_at >= %(since)s"
+)
+
+
+def pace_warning(
+    ready_at_ms: list[int],
+    not_ready: int,
+    active_days: int,
+    days_left: float,
+    now_ms: int,
+    settings: Settings,
+) -> float | None:
+    """`Т-§14.6`: the forecast of topics made ready by the deadline when it falls short of the
+    need with the margin `pace_warning_margin`; None — no warning (enough, or no history)."""
+    window = settings.pace_window_days
+    if active_days < settings.pace_min_active_days or not_ready == 0:
+        return None
+    recent = sum(1 for at in ready_at_ms if now_ms - at <= window * _MS_PER_DAY)
+    pace = recent / active_days  # topics per day of activity
+    expected_active_days = days_left * active_days / window
+    forecast = pace * expected_active_days
+    return round(forecast, 3) if forecast < settings.pace_warning_margin * not_ready else None
+
+
+def _ready_at(levels: list[int], skills: list[dict[str, object]]) -> int | None:
+    """When the topic became ready: all required levels proven by a direct basis or implied
+    (as `topic_readiness`), at the time of the last of them; None — not ready."""
+    times: list[int] = []
+    for skill in skills:
+        for n in levels or [3]:
+            status, basis = skill.get(f"l{n}Status"), skill.get(f"l{n}Basis")
+            if status not in ("proven", "implied") or basis not in ("direct", "implied"):
+                return None
+            at = skill.get(f"l{n}ProvenAtMs")
+            times.append(at if isinstance(at, int) else 0)
+    return max(times, default=None)
+
+
+@dataclass
+class _TopicPace:
+    levels: list[int]
+    skills: list[dict[str, object]] = field(default_factory=list)
+
+
+@dataclass
+class _HubPace:
+    deadline_ms: int
+    topics: dict[str, _TopicPace] = field(default_factory=dict)
+
+
+async def _pace(
+    db: Db,
+    neo4j: AsyncDriver,
+    settings: Settings,
+    learner_id: UUID,
+    domain_id: UUID,
+    now: datetime,
+    tz: str,
+) -> list[PaceWarning]:
+    now_ms = int(now.timestamp() * 1000)
+    async with read_session(neo4j) as session:
+        result = await session.run(
+            literal(_HUB_SKILLS), domain=str(domain_id), learner=str(learner_id), now_ms=now_ms
+        )
+        rows = [dict(r) async for r in result]
+    if not rows:
+        return []
+    since = now - timedelta(days=settings.pace_window_days)
+    found = await db.fetch_one(_ACTIVE_DAYS, {"learner_id": learner_id, "tz": tz, "since": since})
+    active = 0 if found is None else int(found["n"])
+    hubs: dict[str, _HubPace] = {}
+    for r in rows:
+        hub = hubs.setdefault(r["hub"], _HubPace(int(r["deadline"])))
+        topic = hub.topics.setdefault(r["topic"], _TopicPace(list(r["levels"] or [])))
+        topic.skills.append(dict(r["skill"]))
+    warnings: list[PaceWarning] = []
+    for hub_id, hub in sorted(hubs.items()):
+        times = [_ready_at(topic.levels, topic.skills) for topic in hub.topics.values()]
+        ready = [at for at in times if at is not None]
+        not_ready = len(times) - len(ready)
+        days_left = (hub.deadline_ms - now_ms) / _MS_PER_DAY
+        forecast = pace_warning(ready, not_ready, active, days_left, now_ms, settings)
+        if forecast is not None:
+            warning = PaceWarning(
+                hub_id=UUID(hub_id), ready=len(ready), not_ready=not_ready, forecast=forecast
+            )
+            warnings.append(warning)
+    return warnings
+
+
 async def _learner_today(db: Db, learner_id: UUID, now: datetime) -> datetime:
     """The learner's date by `core.learners.settings.timezone` (WP17.3), UTC by default."""
     row = await db.fetch_one(_TIMEZONE, {"learner_id": learner_id})
-    zone = UTC
+    zone: ZoneInfo | timezone = UTC
     if row is not None and row["tz"]:
         try:
             zone = ZoneInfo(str(row["tz"]))
@@ -158,10 +269,12 @@ async def today(
         event = NewEvent(type="today.shown", payload=payload, actor="system",
                          idempotency_key=key, domain_id=domain_id)  # fmt: skip
         await append_events(db, learner_id, [event], redis=redis)
+    tz = str(day.tzinfo) if day.tzinfo is not None else "UTC"
     return TodayView(
         items=items,
         minutes=round(settings.review_item_minutes * len(items), 2),
         grade_hub_ids=sorted(UUID(h) for h in past - graded),
+        pace_warnings=await _pace(db, neo4j, settings, learner_id, domain_id, now, tz),
     )
 
 

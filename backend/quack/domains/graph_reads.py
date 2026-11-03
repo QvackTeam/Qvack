@@ -152,11 +152,13 @@ async def topic_view(
         )
         for r in rows
     ]
-    display = TopicDisplay(
-        display_state=_str(topic.get("displayState"), "none"),  # type: ignore[arg-type]
-        display_reason=_str(topic.get("displayReason")),
-        display_level=_int(topic.get("displayLevel")),
-        display_domain_id=_str(topic.get("displayDomainId")),
+    display = TopicDisplay.model_validate(
+        {
+            "display_state": _str(topic.get("displayState"), "none"),
+            "display_reason": _str(topic.get("displayReason")),
+            "display_level": _int(topic.get("displayLevel")),
+            "display_domain_id": _str(topic.get("displayDomainId")),
+        }
     )
     skills = sorted(
         (_skill(dict(s)) for s in record["skills"] if s), key=lambda s: (s.name, str(s.skill_id))
@@ -196,7 +198,7 @@ async def topic_why(
     if await topic_view(db, neo4j, learner_id, topic_id, limit=1) is None:
         return None
     reader = create_graph_reader(neo4j, settings, learner_id=learner_id, db=db)
-    return await reader.why(topic_id, level)  # type: ignore[arg-type]
+    return await reader.why(topic_id, level)
 
 
 async def domain_hubs(

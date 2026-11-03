@@ -3953,6 +3953,36 @@
         "title": "OpenCanvas",
         "type": "object"
       },
+      "PaceWarning": {
+        "description": "`Т-§14.6`: the hub will not be ready by its date at the current pace.",
+        "properties": {
+          "forecast": {
+            "title": "Forecast",
+            "type": "number"
+          },
+          "hub_id": {
+            "format": "uuid",
+            "title": "Hub Id",
+            "type": "string"
+          },
+          "not_ready": {
+            "title": "Not Ready",
+            "type": "integer"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hub_id",
+          "ready",
+          "not_ready",
+          "forecast"
+        ],
+        "title": "PaceWarning",
+        "type": "object"
+      },
       "PairElement": {
         "additionalProperties": false,
         "description": "Пара на различение: two task elements whose markups point at each other\n(`pairTaskId`).",
@@ -5516,6 +5546,14 @@
             "default": 0.0,
             "title": "Minutes",
             "type": "number"
+          },
+          "pace_warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PaceWarning"
+            },
+            "title": "Pace Warnings",
+            "type": "array"
           }
         },
         "title": "TodayView",

@@ -331,7 +331,8 @@ async def test_disputes_check_the_target_and_append_one_event(
     await append_events(pg_db, mine, [answer])
 
     def ask(kind: str, target: str) -> DisputeRequest:
-        return DisputeRequest(target_kind=kind, target_id=target, idempotency_key=target)  # type: ignore[arg-type]
+        body = {"target_kind": kind, "target_id": target, "idempotency_key": target}
+        return DisputeRequest.model_validate(body)
 
     assert await file_dispute(pg_db, neo4j, None, mine, ask("evidence", evidence)) == 2
     assert await file_dispute(pg_db, neo4j, None, other, ask("evidence", evidence)) is None
