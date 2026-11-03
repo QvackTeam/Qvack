@@ -9,7 +9,12 @@ without Redis (or after the subscription breaks) `ops.projector_offsets` is poll
 `material_parsed {material_id}` — new `artifact.updated` / `material.parsed` after the stream
 opened — and `verdict_revised {answer_seq}` for the judged answers of a task whose key was
 disputed (`task.key_disputed`, D-B-167). They are read on the signal `learner:{id}` that
-`append_events` publishes after commit, or by the same polling without Redis (D-C-130)."""
+`append_events` publishes after commit, or by the same polling without Redis (D-C-130).
+
+`jobs_changed {session_id}` (the plaque, `Т-§13.8`) is not an event of the log: the queue
+publishes `{"kind": "jobs_changed", "session_id"}` on the same `learner:{id}` after commit and the
+stream forwards it; without Redis there is none — the client reads `GET /v1/sessions/{id}/jobs`
+after reconnecting (D-C-141)."""
 
 from __future__ import annotations
 
@@ -36,6 +41,7 @@ from quack.logging import get_logger
 log = get_logger(__name__)
 
 EVENT = "projection_advanced"
+JOBS_CHANGED = "jobs_changed"
 
 _OFFSETS = text(
     "SELECT (SELECT applied_seq FROM ops.projector_offsets WHERE learner_id = :l) AS applied, "
@@ -124,6 +130,18 @@ async def _close(pubsub: PubSub) -> None:
         await pubsub.aclose()
 
 
+def _jobs_changed(message: dict[str, Any]) -> bytes | None:
+    """D-C-141: `{"kind": "jobs_changed", "session_id"}` on `learner:{id}` → the §4.8 message;
+    None for the plain signal of `append_events` (a sequence number)."""
+    try:
+        data = orjson.loads(message["data"])
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(data, dict) or data.get("kind") != JOBS_CHANGED:
+        return None
+    return format_sse(JOBS_CHANGED, {"session_id": data.get("session_id")})
+
+
 def _applied_of(message: dict[str, Any]) -> int | None:
     try:
         value = orjson.loads(message["data"])["applied_seq"]
@@ -160,6 +178,10 @@ async def learner_stream(resources: AppResources, learner_id: UUID) -> AsyncIter
                     pubsub = None
                     continue
                 if message is not None and message.get("channel") == signal:
+                    if (plaque := _jobs_changed(message)) is not None:
+                        yield plaque
+                        sent_at = time.monotonic()
+                        continue
                     changed = True
                 elif message is not None:
                     advanced = _applied_of(message)
@@ -192,6 +214,6 @@ async def get_learner_stream(
     learner_id: Annotated[UUID, Depends(get_current_learner_id)],
     resources: Annotated[AppResources, Depends(get_resources)],
 ) -> StreamingResponse:
-    """SSE `projection_advanced` (WP7), `artifact_updated`, `material_parsed` (ТЗ Ф4 §4.8);
-    data are fetched with ordinary GETs."""
+    """SSE `projection_advanced` (WP7), `artifact_updated`, `material_parsed`, `verdict_revised`,
+    `jobs_changed` (ТЗ Ф4 §4.8); data are fetched with ordinary GETs."""
     return sse_bytes_response(learner_stream(resources, learner_id))
