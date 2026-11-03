@@ -8,7 +8,7 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from quack.graph.read import GraphReader, LevelFact, MisconceptionFact, SliceFocus
+from quack.graph.read import EvidenceFact, GraphReader, LevelFact, MisconceptionFact, SliceFocus
 from tests.support import graph_read as fx
 
 
@@ -114,3 +114,16 @@ def test_memory_picture_facts_of_wp14_2() -> None:
     assert quiet.gap_type_confidence is None and quiet.last_lapse_at_ms is None  # law 8
     (misconception,) = sl.misconceptions
     assert misconception.triggers == list(fx.MISCONCEPTION_TRIGGERS)
+
+
+def test_skill_history_says_what_help_was_given() -> None:
+    """D-B-163 (D-A-127): `skill_history` gives the help of each evidence — none, a hint with
+    its step 1–3 or a shown solution (`Т-§10.4`; Evidence `assistance`, `hintStep`, `Т-§3.4.3`)."""
+    (hinted,) = asyncio.run(_reader().skill_history(fx.SKILL_FAILED))
+    assert hinted.assistance == "hint" and hinted.hint_step == fx.HINT_STEP
+    (plain,) = asyncio.run(_reader().skill_history(fx.SKILL_PROVEN))
+    assert plain.assistance == "none" and plain.hint_step is None  # law 8
+    shown = hinted.model_dump() | {"assistance": "shown_solution", "hint_step": None}
+    assert EvidenceFact.model_validate(shown).assistance == "shown_solution"
+    with pytest.raises(ValidationError):  # Т-§7.6: hint steps are 1–3
+        EvidenceFact.model_validate(hinted.model_dump() | {"hint_step": 4})
