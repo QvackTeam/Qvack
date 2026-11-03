@@ -702,3 +702,41 @@ async def test_manifests_cleanup_deletes_only_old_manifests(pg_db: Db) -> None:
         "SELECT created_at FROM ops.turn_manifests WHERE learner_id = %(l)s", {"l": learner}
     )
     assert [r["created_at"] for r in rows] == [now - timedelta(days=5)]
+
+
+async def test_delete_account(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP25 п.3 (`Т-§19.5`, D-A-205): the journal record first, then every row of the learner,
+    its objects under `learners/{id}/` and its subgraph; the log row stays; a replay of the
+    record finds nothing and does not fail; another learner is untouched."""
+    from datetime import UTC, datetime
+
+    from quack.deletion.account import delete_account
+    from quack.deletion.journal import replay_deletions
+    from tests.support.deletions import FakeDeletionJournal
+    from tests.support.storage import InMemoryObjectStore
+
+    learner, other = await create_learner(pg_db), await create_learner(pg_db)
+    for who in (learner, other):
+        await append_events(pg_db, who, _materials(*[uuid4() for _ in range(5)]))
+        await _project_all(pg_db, neo4j, settings, who)
+    store = InMemoryObjectStore()
+    await store.put(f"learners/{learner}/materials/a.pdf", b"x", "application/pdf")
+    await store.put(f"learners/{other}/materials/b.pdf", b"y", "application/pdf")
+    journal, now = FakeDeletionJournal(), datetime(2026, 11, 3, tzinfo=UTC)
+    done = await delete_account(pg_db, neo4j, journal, store, learner, now)
+    assert [r.kind for r in journal.records] == ["account"]
+    for query in (
+        "SELECT count(*) AS n FROM core.learners WHERE learner_id = %(l)s",
+        "SELECT count(*) AS n FROM core.events WHERE learner_id = %(l)s",
+    ):
+        row = await pg_db.fetch_one(query, {"l": learner})
+        assert row is not None and row["n"] == 0, query
+    log = await pg_db.fetch_one(
+        "SELECT kind FROM ops.deletion_log WHERE deletion_id = %(d)s", {"d": done.deletion_id}
+    )
+    assert log is not None and log["kind"] == "account"
+    assert sorted(store.objects) == [f"learners/{other}/materials/b.pdf"]
+    nodes_mine, _ = await _graph(neo4j, learner)
+    nodes_other, _ = await _graph(neo4j, other)
+    assert nodes_mine == set() and nodes_other != set()
+    assert await replay_deletions(pg_db, neo4j, settings, journal, store, now) == 1  # repeatable

@@ -16,6 +16,7 @@ from redis.asyncio import Redis
 
 from quack.config import Settings
 from quack.db import Db
+from quack.deletion.account import apply_account_record
 from quack.deletion.domain import apply_domain_record
 from quack.deletion.topic import apply_topic_record
 from quack.logging import get_logger
@@ -47,9 +48,8 @@ async def _apply(
         return await apply_topic_record(
             db, neo4j, settings, store, record.learner_id, record, redis=redis
         )
-    # the account deletion of Phase 4 comes with the switch of `DELETE /v1/learner` (WP1.3)
-    log.warning("deletion_kind_not_replayed", kind=record.kind, id=str(record.deletion_id))
-    return False
+    await apply_account_record(db, neo4j, store, record.learner_id, record, redis=redis)
+    return True
 
 
 async def _logged(db: Db, learner_id: object, deletion_id: object) -> bool:

@@ -1265,6 +1265,17 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
 - Тесты: `tests/graph/test_projection_runner.py::test_manifests_cleanup_deletes_only_old_manifests`.
 - Требует подтверждения владельцем: нет.
 
+### D-A-205. WP25 п.3: удаление аккаунта Фазы 4 (функция; маршрут — при переходе)
+- Класс: B. WP25 п.3; `Т-§19.5`, `Д-§8.5`, `Д-§8.6`; `quack/deletion/account.py`, `store.delete_learner_graph`, `journal.py`
+- Решение:
+  1. **Порядок.** Запись `account` в журнал R2 первой, иначе `503`. Затем под блокировкой ученика одной транзакцией — все строки ученика в схеме Фазы 4, от детей к родителям, включая `core.events` и `core.learners`; ссылки входа (`core.auth_links`) — по его почте.
+  2. **Остальное хранилище.** Префикс объектов `learners/{id}/` (`ObjectStore.delete_prefix`), подграф Neo4j (`delete_learner_graph`, по меткам), ключ присутствия в Redis. Последней — строка `ops.deletion_log`: она остаётся, по ней работают сверка и повтор.
+  3. **Повторяемо.** Второй запуск ничего не находит. Сверка и повтор (D-A-201) теперь разбирают все три вида записей.
+  4. **Маршрут** `DELETE /v1/learner` Фазы 3 (tombstone и `account.purge_deleted`) переключается на эту функцию с WP1.3. Тогда же вызывается `tracer.delete_learner` LangSmith (#210, D-B-202): на `False` ничего не делать.
+- Почему: §0.4.3 п.1–2; закон 1.
+- Тесты: `tests/graph/test_projection_runner.py::test_delete_account` (строки, объекты и подграф ученика удалены, чужие целы, строка журнала есть, повтор не падает). `delete_learner_graph` добавлен в `NEO4J_WRITERS` (T-A9a).
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.

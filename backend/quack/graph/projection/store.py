@@ -482,6 +482,18 @@ async def replace_learner(
         await session.execute_write(_write, learner_id, SliceDiff([], [], [], []), seq, version)
 
 
+async def delete_learner_graph(driver: AsyncDriver, learner_id: str) -> None:
+    """The deletion of an account (WP25): every node of the learner, per label (law 1)."""
+
+    async def work(tx: AsyncManagedTransaction) -> None:
+        for label in sorted(LABELS):
+            query = f"MATCH (n:{_label(label)}) WHERE n.learnerId = $learner DETACH DELETE n"
+            await tx.run(literal(query), learner=learner_id)
+
+    async with driver.session() as session:
+        await session.execute_write(work)
+
+
 async def stale_learners(driver: AsyncDriver, version: str) -> list[str]:
     """`ops rebuild --stale-rules` (WP3.5, Д-§6.3): learners projected by other rules."""
     query = "MATCH (l:Learner) WHERE coalesce(l.projectorVersion, '') <> $v RETURN l.id AS id"
