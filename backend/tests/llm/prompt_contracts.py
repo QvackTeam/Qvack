@@ -114,6 +114,8 @@ LABEL_FIELDS: dict[str, list[str]] = {
         "tasks.markup.tests.skill",
         "tasks.markup.variantOf",
         "tasks.markup.options.misconception",
+        "tasks.markup.pairTaskId",
+        "tasks.markup.parts.tests.skill",
     ],
     "solution_space@1": ["wrong_branches.misconception"],
     "analyst@1": [

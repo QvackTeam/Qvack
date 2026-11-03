@@ -49,7 +49,13 @@ from quack.llm.pressure import (
     parse_retry_after,
     set_pressure_flag,
 )
-from quack.llm.provider import LLMProvider, ProviderRequest, ProviderResponse, ReasoningEffort
+from quack.llm.provider import (
+    ImageInput,
+    LLMProvider,
+    ProviderRequest,
+    ProviderResponse,
+    ReasoningEffort,
+)
 from quack.llm.streaming import (
     StreamCompleted,
     StreamEvent,
@@ -162,10 +168,12 @@ class LLMGateway:
         prompt_role: str | None = None,
         reasoning_effort: ReasoningEffort | None = None,
         check: Callable[[T], str | None] | None = None,
+        images: Sequence[ImageInput] = (),
     ) -> LLMResult[T]:
         """`prompt_role` takes the template of `prompt_role@prompt_version` while model,
         limits, ledger and outbox stay with `role` (WP5.4); `reasoning_effort` overrides the
-        role effort (WP6.5).
+        role effort (WP6.5); `images` go after the prompt text (Т-§11.1 «Spark с
+        изображением», D-B-170) and are part of the request hash.
 
         `check` finds what the schema cannot (an unknown label, WP14.1): its error text goes
         back to the model once through the repair path; if the second answer is wrong again or
@@ -202,6 +210,9 @@ class LLMGateway:
                     "model": model,
                     "temperature": temperature,
                     "reasoning_effort": effort,
+                    "images": [
+                        [image.mime, hashlib.sha256(image.data).hexdigest()] for image in images
+                    ],
                 }
             )
         ).hexdigest()
@@ -219,6 +230,7 @@ class LLMGateway:
             reasoning_effort=effort,
             max_output_tokens=self.settings.llm_role_max_output_tokens.get(role),
             prompt_cache_key=f"{prompt_role or role}@{prompt_version}",
+            images=tuple(images),
         )
         totals = [0, 0, 0, 0]  # input, output, cached, latency
         try:
