@@ -16,9 +16,12 @@ from quack.api.app import create_app
 from quack.config import Settings
 from quack.db import Db
 from quack.db.postgres import SessionFactory
-from quack.db.redis import projector_applied_channel
+from quack.db.redis import learner_signal_channel, projector_applied_channel
 from quack.events import append_events
+from quack.events.log import NewEvent as P4Event
+from quack.events.log import append_events as p4_append
 from quack.graph.worker import ProjectorWorker
+from tests.db.fixtures import create_learner
 from tests.factories import new_event
 from tests.support.auth import ensure_user, session_cookie, session_token
 from tests.support.broken import BrokenRedis
@@ -173,3 +176,83 @@ async def test_learner_stream_requires_token(
     async with _client(create_app(stream_settings, resources=resources)) as client:
         response = await client.get("/v1/learner/stream")
     assert response.status_code == 401
+
+
+async def _p4_change(pg_db: Db, learner: UUID, redis: Redis | None, type_: str) -> UUID:
+    """One §4.8 change event in the Phase 4 log; returns the id the message names."""
+    object_id = uuid4()
+    payload: dict[str, Any] = (
+        {"material_id": str(object_id), "pages_count": 3}
+        if type_ == "material.parsed"
+        else {
+            "artifact_id": str(object_id),
+            "version": 1,
+            "kind": "notes",
+            "topic_id": str(uuid4()),
+            "text": "notes",
+        }
+    )
+    await p4_append(
+        pg_db,
+        learner,
+        [P4Event(type=type_, payload=payload, actor="code", idempotency_key=str(uuid4()))],
+        redis=redis,
+    )
+    return object_id
+
+
+async def test_learner_stream_reports_artifacts_and_materials(
+    stream_settings: Settings,
+    pg_engine: AsyncEngine,
+    db: SessionFactory,
+    pg_db: Db,
+    neo4j: AsyncDriver,
+    redis: Redis,
+) -> None:
+    """ТЗ Ф4 §4.8 (Redis): `material.parsed` / `artifact.updated` written after the stream
+    opened → `material_parsed {material_id}` / `artifact_updated {artifact_id}` on the signal
+    `learner:{id}`; events before the stream are not repeated."""
+    learner = await create_learner(pg_db)
+    await ensure_user(db, learner)
+    headers = session_cookie(await session_token(pg_db, learner, stream_settings))
+    await _p4_change(pg_db, learner, None, "material.parsed")  # before the stream
+    resources = build_app_resources(
+        stream_settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db
+    )
+    app = create_app(stream_settings, resources=resources)
+    async with (
+        _client(app) as client,
+        client.stream("GET", "/v1/learner/stream", headers=headers) as r,
+    ):
+        lines = r.aiter_lines()
+        assert (await next_sse_event(lines))[0] == "projection_advanced"
+        await _wait_subscribers(redis, learner_signal_channel(learner), 1)
+        material = await _p4_change(pg_db, learner, redis, "material.parsed")
+        assert await next_sse_event(lines) == ("material_parsed", {"material_id": str(material)})
+        artifact = await _p4_change(pg_db, learner, redis, "artifact.updated")
+        assert await next_sse_event(lines) == ("artifact_updated", {"artifact_id": str(artifact)})
+
+
+async def test_learner_stream_reports_changes_without_redis(
+    stream_settings: Settings,
+    pg_engine: AsyncEngine,
+    db: SessionFactory,
+    pg_db: Db,
+    neo4j: AsyncDriver,
+) -> None:
+    """ТЗ Ф4 §4.8 (broken Redis): the change events arrive by polling."""
+    learner = await create_learner(pg_db)
+    await ensure_user(db, learner)
+    headers = session_cookie(await session_token(pg_db, learner, stream_settings))
+    resources = build_app_resources(
+        stream_settings, pg_engine, neo4j, BrokenRedis(), db=pg_db, session_factory=db
+    )
+    app = create_app(stream_settings, resources=resources)
+    async with (
+        _client(app) as client,
+        client.stream("GET", "/v1/learner/stream", headers=headers) as r,
+    ):
+        lines = r.aiter_lines()
+        assert (await next_sse_event(lines))[0] == "projection_advanced"
+        artifact = await _p4_change(pg_db, learner, None, "artifact.updated")
+        assert await next_sse_event(lines) == ("artifact_updated", {"artifact_id": str(artifact)})
