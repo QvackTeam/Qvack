@@ -288,6 +288,12 @@ def target_levels(
     }
 
 
+def in_context_sample(manifest_id: UUID, rate: float) -> bool:
+    """`turn_context_sample_rate` (WP13.9): the full context text is kept for this share of
+    turns; decided by the manifest id, so a retry of the turn decides the same way."""
+    return int(manifest_id.hex[:8], 16) / 0x1_0000_0000 < rate
+
+
 def _goal_topics(goal: SessionGoal, hubs: Sequence[HubGoal]) -> list[UUID]:
     if goal.topic_id is not None:
         return [goal.topic_id]
@@ -527,6 +533,11 @@ class MemoryTurnContextSource:
                 projected_seq=memory_slice.projected_seq,
                 label_table=labels.table(),
                 chunk_ids=[chunk.chunk_id for chunk in chunks],
+                context_text=(
+                    stream.base.prompt
+                    if in_context_sample(request.manifest_id, settings.turn_context_sample_rate)
+                    else None
+                ),
                 degraded_mode=degraded,
                 frozen_slots=(
                     {"profile": frozen.profile, "domain_and_goals": frozen.domain_and_goals}

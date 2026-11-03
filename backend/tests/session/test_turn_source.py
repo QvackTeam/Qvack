@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, cast
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 from quack.config import Settings
 from quack.db import Db
@@ -35,6 +35,7 @@ from quack.session.actions import Action
 from quack.session.turn_source import (
     MemoryTurnContextSource,
     answer_strings,
+    in_context_sample,
     read_journal,
     target_levels,
     turn_effort,
@@ -412,3 +413,14 @@ async def test_target_levels_from_the_hubs() -> None:
     memory = await reader.topic_memory([fx.TOPIC_OPEN])
     found = target_levels(hubs, memory)
     assert found == {fx.SKILL_FAILED: [2, 3], fx.SKILL_QUIET: [2, 3]}
+
+
+def test_context_sample_by_manifest_id() -> None:
+    """WP13.9: about `turn_context_sample_rate` of turns keep the context; the same id decides
+    the same way."""
+    ids = [uuid5(SESSION, str(i)) for i in range(2000)]
+    share = sum(in_context_sample(i, 0.02) for i in ids) / len(ids)
+    assert 0.005 < share < 0.05
+    assert not in_context_sample(UUID(int=0xFFFFFFFF << 96), 0.02)
+    assert in_context_sample(UUID(int=0), 0.02)
+    assert all(not in_context_sample(i, 0.0) for i in ids)

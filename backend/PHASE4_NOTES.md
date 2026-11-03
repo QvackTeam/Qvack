@@ -1301,7 +1301,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (WP14, WP13.2), п.5.
 - Обратимость: один модуль; порт `TurnContextSource` не менялся.
 - Тесты: `tests/session/test_turn_source.py` (5); мутация «снимок пишется каждым ходом» — тест падает.
-- Не решено \[ПРОВЕРИТЬ\]: (1) Подключение: `get_turn_context_source` (`quack/session/router.py`, зона B) соберёт источник из `app.state.resources` процесса API, без правок C, после слияния #175 (`Neo4jGraphReader` с `session_factory`). До этого маршрут отвечает `503`, как и сейчас. (2) Пока не сделаны: ожидание быстрого вердикта (WP13.2); выборка `context_text` по `turn_context_sample_rate`. Это следующие шаги B.
+- Не решено \[ПРОВЕРИТЬ\]: (1) Подключение: `get_turn_context_source` (`quack/session/router.py`, зона B) соберёт источник из `app.state.resources` процесса API, без правок C, после слияния #175 (`Neo4jGraphReader` с `session_factory`). До этого маршрут отвечает `503`, как и сейчас. (2) Быстрый вердикт кодом пишет `record_answer` при записи действия, до хода, поэтому сборка берёт его из журнала, отдельного ожидания нет (WP13.2). `context_text` хранится для доли `turn_context_sample_rate` ходов; решает `manifest_id`, так что повтор хода решает так же. `digest_id` манифеста пуст: у `digest.written` нет своего UUID — \[ПРОВЕРИТЬ\].
 ### D-B-180. Слоты 3–4 из памяти и их снимок на сессию (WP14.1)
 - Класс: B
 - WP / место: WP14.1, `Т-§10.1`, `Т-§9.5`, `Т-§8.5`, `Т-§4.5`, закон 8; `quack/session/turn_inputs.py` (`learner_state`, `learned_lines`, `load_snapshot`), `quack/session/teacher_context.py` (`snapshot_slots`, `frozen_slots`), `quack/session/turn_commit.py` (`TurnManifestRow.frozen_slots`)
