@@ -2232,6 +2232,8 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Правки тестов
 
+- A, 2026-11-03 (D-A-186, D-A-187): тесты потока A названы ID ТЗ §8: `test_every_projector_row_has_a_handler` → `test_handler_table` (T-P4; таблицу событий дают группы того же модуля), `test_schema_is_created_in_neo4j` → `test_schema_created_on_start` (T-P7, плюс повторный старт), `test_success_on_a_trap_task_resists_its_misconceptions` → `test_resist_and_manifest_sources` (T-MS2, плюс проявления ловушки Т1 и гипотезы модели Т3). Утверждения прежние или сильнее.
+
 - `tests/e2e/test_isolation_and_idempotency.py`, `tests/e2e/endpoints.py` (C, WP23.1): три маршрута блоков — в обходе `T-E2`; тема для них записывается в журнал Фазы 4 (`topic.created`), которого структура Фазы 3 в обходе не пишет (D-C-112); `accept` и `DELETE` — в `NO_OTHER_BODY` (тело — только ключ).
 - `tests/test_app_assembly.py` (C, WP23.1): в `EXPECTED_ROUTES` и `_declared_routes` добавлены четыре маршрута конспекта §6.4 (§8.15 п.2 — новый маршрут контракта).
 - `tests/e2e/endpoints.py`, `tests/test_app_assembly.py` (C, WP22.2): маршрут снимка — в `T-A1`, в `NO_IDEMPOTENCY_KEY` и `MULTIPART` (`T-E2`, `T-E3`).

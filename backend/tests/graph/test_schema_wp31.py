@@ -25,8 +25,11 @@ def test_default_dimension_comes_from_settings() -> None:
     assert all(expected in s for s in schema_statements() if "VECTOR INDEX" in s)
 
 
-async def test_schema_is_created_in_neo4j(neo4j: AsyncDriver) -> None:
+async def test_schema_created_on_start(neo4j: AsyncDriver) -> None:
+    """T-P7: constraints, range and vector indexes with filters are created `IF NOT EXISTS` by
+    `verify_schema` (the start of `projector`); a repeated start passes without errors."""
     assert await verify_schema(neo4j) == []
+    assert await verify_schema(neo4j) == []  # the second start
     async with neo4j.session() as session:
         result = await session.run("SHOW INDEXES YIELD name, type RETURN name, type")
         indexes = {r["name"]: r["type"] async for r in result}

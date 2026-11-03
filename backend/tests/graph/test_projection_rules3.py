@@ -98,8 +98,10 @@ _ALIAS_OF = _rel(("Alias", SKILL_OLD), "ALIAS_OF", ("Skill", SKILL))
 # --- the table and the catalog (T-P4, T-P6) -------------------------------------------------
 
 
-def test_every_projector_row_has_a_handler() -> None:
-    """S5: one handler per row; the catalog types «без обработчика» have none (Т-§2.4)."""
+def test_handler_table() -> None:
+    """T-P4 (WP3.2): the table test is this module — the groups below give each event its
+    expected changes of the graph; here: one handler per row of S5, the catalog types «без
+    обработчика» have none (Т-§2.4)."""
     assert set(HANDLERS) == {row.event_type for row in ROWS}
     assert len(SPECS) > len(ROWS)
     for (event_type, version), spec in SPECS.items():
@@ -938,9 +940,18 @@ def test_unclear_verdict_or_missing_answer_gives_nothing() -> None:
     assert _run([_verdict()], *graph) == _run([], *graph)  # the answer event is gone (Т-§2.9)
 
 
-def test_success_on_a_trap_task_resists_its_misconceptions() -> None:
-    """Т-§9.1: a success passing the gate (T1/T2, no shown solution) on a task where an option
-    catches a misconception — `RESISTED` to it."""
+def test_resist_and_manifest_sources() -> None:
+    """T-MS2 (`Т-§9.1`, `Т-§7.8` п.2, п.7): a wrong trap option — a T1 manifestation by code; a
+    hypothesis of a model verdict — a manifestation with its own tier; a success passing the
+    gate (T1/T2, no shown solution) on a task where an option catches a misconception —
+    `RESISTED` to it."""
+    nodes, rels = _run([_answer(), _verdict(misconception_id=MISCONCEPTION)], *_verdict_graph())
+    assert ("Evidence", _ev(0), "MANIFESTS", "Misconception", MISCONCEPTION) in rels
+    assert nodes[("Evidence", _ev(0))]["tier"] == 1
+    disagreed = _verdict(verification="model", method="model", misconception_hypothesis="h",
+                         second_opinion={"requested": True, "agreed": False})  # fmt: skip
+    nodes, rels = _run([_answer(), disagreed], *_verdict_graph())
+    assert any(k[2] == "MANIFESTS" for k in rels) and nodes[("Evidence", _ev(0))]["tier"] == 3
     _, rels = _run([_answer(), _verdict(outcome="correct")], *_verdict_graph())
     assert ("Evidence", _ev(0), "RESISTED", "Misconception", MISCONCEPTION) in rels
     _, rels = _run([_answer(), _verdict(outcome="correct", solution_shown=True)], *_verdict_graph())
