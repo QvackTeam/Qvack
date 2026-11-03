@@ -1,5 +1,5 @@
 """ТЗ Ф4 WP3.3: a batch writes only what changed (`Т-§8.1` ориентир) — the difference between
-the slice read before phase A and the slice after it, in one Neo4j transaction (D-A-138)."""
+the slice read before phase A and the slice after it, in one Neo4j transaction (D-A-181)."""
 
 from __future__ import annotations
 

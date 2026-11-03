@@ -1142,7 +1142,7 @@ def _turn_committed(event: StoredEvent, view: SliceView) -> list[Mutation]:
     """Т-§7.8 п.6: an `Exposure` per exposure of the markup, `OF` its skill. Т-§9.1: a turn that
     targets a misconception marks it with the session (`targetedInSessionId`) and marks its
     tasks (`targetsMisconceptionId`, read for `RESISTED`). Temporary skills of the markup come
-    with `task.created` of the same append (D-A-137)."""
+    with `task.created` of the same append (D-A-180)."""
     p = _payload(event, TurnCommitted)
     learner = str(event.learner_id)
     changes: list[Mutation] = []
@@ -1179,7 +1179,7 @@ def _turn_committed(event: StoredEvent, view: SliceView) -> list[Mutation]:
 
 def _task_closed(event: StoredEvent, view: SliceView) -> list[Mutation]:
     """Т-§8.4: a solution shown on request needs consolidation; the skill fold (WP4.5) reads how
-    the tasks of the skill were closed (D-A-137)."""
+    the tasks of the skill were closed (D-A-180)."""
     p = _payload(event, TaskClosed)
     task = view.resolve("Task", str(p.task_id))
     if task is None:
@@ -1220,7 +1220,7 @@ def _observation_extracted(event: StoredEvent, view: SliceView) -> list[Mutation
     Т-§7.8 п.4: elements — T3 evidence with their quote, help, gap type and the time and `seq`
     of the latest source event; «неясно» — none; a new skill — provisional (`Т-§4.4`); a known
     misconception or a hypothesis — a manifestation (`Т-§9.1`); a root cause — `ROOT_CAUSE`
-    with the confidence of its category (`root_cause_confidence_map`, `Т-§9.4`). D-A-137."""
+    with the confidence of its category (`root_cause_confidence_map`, `Т-§9.4`). D-A-180."""
     p = _payload(event, ObservationExtracted)
     if p.extractor not in EXTRACTOR_PRECEDENCE:
         return []

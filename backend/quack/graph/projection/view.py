@@ -47,7 +47,7 @@ class Need:
     neighbourhood of a task also opens its options and the evidence on it with their relations
     (traps for `RESISTED`, the evidence of a verdict for a dispute, D-A-134); `matches` —
     `(label, prop, value)`: the nodes with that value, with their relations (the evidence of an
-    episode or of an observation, D-A-137).
+    episode or of an observation, D-A-180).
     """
 
     nodes: frozenset[NodeRef] = frozenset()
@@ -193,7 +193,7 @@ class BatchSlice:
                             del self._rels[key]
 
     def diff(self) -> SliceDiff:
-        """What the batch changed against the slice read before it (WP3.3, D-A-138)."""
+        """What the batch changed against the slice read before it (WP3.3, D-A-181)."""
         upsert_nodes: list[NodeRecord] = []
         for (label, node_id), props in sorted(self._nodes.items()):
             before = self._loaded_nodes.get((label, node_id))

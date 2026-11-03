@@ -1,4 +1,4 @@
-"""Neo4j side of the `rules@3` projector (ТЗ Ф4 WP3.3; Т-§2.4, Т-§3.4.7; D-A-138).
+"""Neo4j side of the `rules@3` projector (ТЗ Ф4 WP3.3; Т-§2.4, Т-§3.4.7; D-A-181).
 
 `load_slice` reads what the handlers of a batch declared (`Need`) with their aliases; the batch
 writes its difference (`SliceDiff`) and the watermark on `Learner` in one write transaction —

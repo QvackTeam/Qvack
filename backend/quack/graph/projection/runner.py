@@ -1,4 +1,4 @@
-"""The batch of one learner, `rules@3` (ТЗ Ф4 WP3.3; Т-§2.4; D-A-138).
+"""The batch of one learner, `rules@3` (ТЗ Ф4 WP3.3; Т-§2.4; D-A-181).
 
 Under the learner's advisory lock (the same rebuild and deletion take): the watermark from
 `Learner.projectedSeq`, the next `projector_batch_size` events after it, the slice their handlers

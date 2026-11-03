@@ -1,0 +1,212 @@
+"""ТЗ Ф4 WP3.3, §8.4: the batch loop of `rules@3` on Postgres and Neo4j (D-A-181).
+
+`test_unknown_type_stops_stream` — T-P6; materials and vectors reach Neo4j end to end (the
+search of stream C reads `Chunk`, #135); batches of any size give one graph (part of T-P1).
+"""
+
+from __future__ import annotations
+
+import base64
+import struct
+from typing import Any
+from uuid import UUID, uuid4
+
+from neo4j import AsyncDriver
+
+from quack.config import Settings
+from quack.db import Db
+from quack.events.log import NewEvent, append_events
+from quack.graph.projection.runner import RULES_VERSION, BatchOutcome, project_learner, resume
+from tests.db.fixtures import create_learner
+
+
+def _new(event_type: str, payload: dict[str, Any], key: str, **envelope: Any) -> NewEvent:
+    return NewEvent(type=event_type, payload=payload, actor="code", idempotency_key=key, **envelope)
+
+
+def _vector(values: list[float]) -> str:
+    return base64.b64encode(struct.pack(f"<{len(values)}f", *values)).decode()
+
+
+def _materials(
+    domain: UUID, topic: UUID, skill: UUID, material: UUID, chunk: UUID
+) -> list[NewEvent]:
+    d = str(domain)
+    return [
+        _new("domain.created", {"domain_id": d, "name": "Algebra"}, "d", domain_id=domain),
+        _new(
+            "topic.created",
+            {"topic_id": str(topic), "domain_id": d, "name": "Fractions", "origin": "session"},
+            "t",
+            domain_id=domain,
+        ),
+        _new(
+            "skill.created",
+            {
+                "skill_id": str(skill),
+                "topic_id": str(topic),
+                "domain_id": d,
+                "name": "add fractions",
+                "summary": "s",
+                "status": "active",
+                "origin": "session",
+            },
+            "s",
+            domain_id=domain,
+        ),
+        _new(
+            "material.uploaded",
+            {"material_id": str(material), "object_key": "k", "mime": "application/pdf"},
+            "m",
+            domain_id=domain,
+        ),
+        _new(
+            "chunk.indexed",
+            {
+                "chunk_id": str(chunk),
+                "material_id": str(material),
+                "page": 4,
+                "text": "a/b + c/d",
+                "notation": ["a/b"],
+                "teaches": [str(skill)],
+                "uses": [],
+            },
+            "c",
+            domain_id=domain,
+        ),
+        _new(
+            "embedding.ready",
+            {
+                "node_kind": "chunk",
+                "node_id": str(chunk),
+                "model": "m",
+                "dim": 2,
+                "vector": _vector([0.5, -1.0]),
+            },
+            "e",
+            domain_id=domain,
+        ),
+    ]
+
+
+async def _project_all(db: Db, neo4j: AsyncDriver, settings: Settings, learner: UUID) -> list[str]:
+    statuses: list[str] = []
+    for _ in range(10):  # a watermark that does not move would loop forever
+        outcome: BatchOutcome = await project_learner(db, neo4j, settings, learner)
+        statuses.append(outcome.status)
+        if outcome.status != "applied":
+            break
+    return statuses
+
+
+async def _graph(neo4j: AsyncDriver, learner: UUID) -> tuple[set[Any], set[Any]]:
+    async with neo4j.session() as session:
+        nodes = await session.run(
+            "MATCH (n {learnerId: $l}) RETURN labels(n)[0] AS label, n.id AS id, "
+            "properties(n) AS props",
+            l=str(learner),
+        )
+        found = {(r["label"], r["id"], repr(sorted(r["props"].items()))) async for r in nodes}
+        rels = await session.run(
+            "MATCH (a {learnerId: $l})-[r]->(b) RETURN a.id AS a, type(r) AS t, b.id AS b, "
+            "properties(r) AS props",
+            l=str(learner),
+        )
+        links = {(r["a"], r["t"], r["b"], repr(sorted(r["props"].items()))) async for r in rels}
+    return found, links
+
+
+async def test_materials_and_vectors_reach_neo4j(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings
+) -> None:
+    learner = await create_learner(pg_db)
+    domain, topic, skill, material, chunk = uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
+    await append_events(pg_db, learner, _materials(domain, topic, skill, material, chunk))
+
+    outcome = await project_learner(pg_db, neo4j, settings, learner)
+    assert (outcome.status, outcome.applied_seq) == ("applied", 6)
+    async with neo4j.session() as session:
+        found = await session.run(
+            "MATCH (:Material {id: $m})-[:HAS_CHUNK]->(c:Chunk {id: $c})-[:TEACHES]->"
+            "(:Skill {id: $s})<-[:COVERS]-(:Topic {id: $t})<-[:HAS_TOPIC]-(:Domain {id: $d}) "
+            "MATCH (l:Learner {id: $l}) RETURN properties(c) AS c, properties(l) AS l",
+            m=str(material),
+            c=str(chunk),
+            s=str(skill),
+            t=str(topic),
+            d=str(domain),
+            l=str(learner),
+        )
+        row = await found.single()
+    assert row is not None
+    c = row["c"]
+    assert (c["learnerId"], c["domainId"], c["searchable"]) == (str(learner), str(domain), True)
+    assert c["embedding"] == [0.5, -1.0]
+    assert (row["l"]["projectedSeq"], row["l"]["projectorVersion"]) == (6, RULES_VERSION)
+    offset = await pg_db.fetch_one(
+        "SELECT seq FROM ops.projector_offsets WHERE learner_id = %(learner_id)s",
+        {"learner_id": learner},
+    )
+    assert offset is not None and offset["seq"] == 6
+    again = await project_learner(pg_db, neo4j, settings, learner)
+    assert (again.status, again.applied_seq) == ("empty", 6)
+
+
+async def test_batches_of_any_size_give_one_graph(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings
+) -> None:
+    """Т-§2.5: applying in batches equals applying at once — the next batch reads what the
+    earlier one wrote (the material of a chunk, the chunk of a vector)."""
+    whole, small = await create_learner(pg_db), await create_learner(pg_db)
+    await append_events(pg_db, whole, _materials(*[uuid4() for _ in range(5)]))
+    await append_events(pg_db, small, _materials(*[uuid4() for _ in range(5)]))
+    assert await _project_all(pg_db, neo4j, settings, whole) == ["applied", "empty"]
+    two = settings.model_copy(update={"projector_batch_max_events": 2})
+    assert await _project_all(pg_db, neo4j, two, small) == ["applied"] * 3 + ["empty"]
+    whole_nodes, whole_rels = await _graph(neo4j, whole)
+    small_nodes, small_rels = await _graph(neo4j, small)
+    assert sorted(label for label, _, _ in whole_nodes) == sorted(
+        label for label, _, _ in small_nodes
+    )
+    rel_types = sorted(t for _, t, _, _ in whole_rels)
+    assert rel_types == sorted(t for _, t, _, _ in small_rels)
+    assert rel_types == ["COVERS", "HAS_CHUNK", "HAS_HUB", "HAS_TOPIC", "OWNS", "TEACHES"]
+
+
+async def test_unknown_type_stops_stream(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """T-P6 (Т-§2.4): an unknown type — a row in `ops.projector_failures`, the learner's stream
+    stands, other learners go on; `ops resume` lets it go on (after the code knows the type)."""
+    broken, other = await create_learner(pg_db), await create_learner(pg_db)
+    domain = uuid4()
+    created = _new("domain.created", {"domain_id": str(domain), "name": "A"}, "d")
+    renamed = _new("domain.created", {"domain_id": str(uuid4()), "name": "B"}, "x")
+    await append_events(pg_db, broken, [created, renamed])
+    await append_events(pg_db, other, [_new("domain.created", {"domain_id": str(uuid4()),
+                                                               "name": "C"}, "d")])  # fmt: skip
+    await pg_db.execute(
+        "UPDATE core.events SET type = 'comet.sighted' "
+        "WHERE learner_id = %(learner_id)s AND seq = 2",
+        {"learner_id": broken},
+    )
+
+    failed = await project_learner(pg_db, neo4j, settings, broken)
+    assert (failed.status, failed.applied_seq, failed.failed_seq) == ("failed", 0, 2)
+    row = await pg_db.fetch_one(
+        "SELECT seq, error FROM ops.projector_failures WHERE learner_id = %(learner_id)s",
+        {"learner_id": broken},
+    )
+    assert row is not None and row["seq"] == 2 and "comet.sighted" in row["error"]
+    stopped = await project_learner(pg_db, neo4j, settings, broken)
+    assert (stopped.status, stopped.failed_seq) == ("stopped", 2)
+    assert (await project_learner(pg_db, neo4j, settings, other)).status == "applied"
+    nodes, _ = await _graph(neo4j, broken)
+    assert nodes == set()  # the batch is applied whole or not at all
+
+    await pg_db.execute(
+        "UPDATE core.events SET type = 'domain.created' "
+        "WHERE learner_id = %(learner_id)s AND seq = 2",
+        {"learner_id": broken},
+    )
+    await resume(pg_db, broken)
+    resumed = await project_learner(pg_db, neo4j, settings, broken)
+    assert (resumed.status, resumed.applied_seq) == ("applied", 2)
