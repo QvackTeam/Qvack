@@ -818,7 +818,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
   2. **`asOfSeq`** — наибольший `sourceSeq` входа свёртки (свидетельства, показы), 0 — входа нет. Номер последнего события пачки зависел бы от деления на пачки и ломал бы T-P1.
   3. **Темы хабов** находятся и по срезу (`INCLUDES`, темы домена у `domain_all`), не только запросом к Neo4j.
 - Почему: §0.4.3 п.1–2; закон 7 (пачка целиком или никак).
-- Тесты: `tests/graph/test_projection_batches.py` — `test_batches_equal_rebuild_hypothesis` (T-P1: Hypothesis, 40 делений сценария из 20 событий на пачки; фазы А–В в памяти), `test_applying_a_batch_again_changes_nothing`, `test_script_reaches_every_phase`. Подмена «темы не пересчитываются от изменённых навыков» — тест падает. Сценарий фиксированный, а не случайный по каталогу: случайный — дальше. Чтения Neo4j проверяет `test_projection_runner.py::test_batches_of_any_size_give_one_graph`.
+- Тесты: `tests/graph/test_projection_batches.py` — `test_no_missing_properties` (T-P2: все свойства `Т-§3.4.2`/`Т-§3.4.4` у каждого узла сценария, без `null`), `test_batches_equal_rebuild_hypothesis` (T-P1: Hypothesis, 40 делений сценария из 20 событий на пачки; фазы А–В в памяти), `test_applying_a_batch_again_changes_nothing`, `test_script_reaches_every_phase`. Подмена «темы не пересчитываются от изменённых навыков» — тест падает. Сценарий фиксированный, а не случайный по каталогу: случайный — дальше. Чтения Neo4j проверяет `test_projection_runner.py::test_batches_of_any_size_give_one_graph`.
 - Требует подтверждения владельцем: нет.
 
 ### Ответы потока A (2026-11-02)

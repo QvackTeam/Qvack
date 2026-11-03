@@ -165,3 +165,40 @@ def test_applying_a_batch_again_changes_nothing() -> None:
         return batch.snapshot()
 
     assert _graph(asyncio.run(again())) == _graph(WHOLE)
+
+
+_LEVEL = ("Status", "Basis", "DecisiveEvidenceId", "SuccessW", "FailW", "ProvenAtMs", "FailedAtMs")
+REQUIRED: dict[str, set[str]] = {
+    "Domain": {"name", "status"},
+    "Topic": {"name", "origin", "status", "displayState", "displayReason", "displayLevel",
+              "displayDomainId", "nearestDueAtMs", "visibility", "knownClaimedAtMs"},
+    "Skill": {"name", "summary", "status", "origin", "retState", "retStability", "retDifficulty",
+              "retLastRecallAtMs", "retDueAtMs", "retReviews", "retLapses", "retLastLapseAtMs",
+              "expCount", "expLastExplainedAtMs", "expLastExampleAtMs", "expLastMethodNamedAtMs",
+              "expLastSolutionShownAtMs", "gapType", "gapTypeConfidence", "lastPracticeAtMs",
+              "needsConsolidation", "consolidationLevel", "consolidationSinceMs", "bypassCount",
+              "asOfSeq"} | {f"l{n}{p}" for n in range(1, 7) for p in _LEVEL},
+    "Hub": {"name", "kind", "deadlineAtMs", "origin", "status"},
+    "Evidence": {"domainId", "atMs", "level", "outcome", "assistance", "hintStep", "novelty",
+                 "confidence", "tier", "weight", "verification", "delayed", "solveTimeMs",
+                 "gapType", "quote", "sourceSessionId", "sessionDomainId", "sourceSeq",
+                 "derivedKind", "status", "observationSeq", "extractor", "searchable"},
+    "Exposure": {"atMs", "kind", "approach", "sourceSeq", "sessionDomainId"},
+    "Misconception": {"domainId", "statement", "status", "triggers", "occurrences",
+                      "firstSeenAtMs", "lastSeenAtMs", "watchSinceMs", "fixedAtMs",
+                      "targetedInSessionId", "searchable"},
+    "Task": {"familyId", "source", "verification", "methodNamed"},
+}  # fmt: skip
+
+
+def test_no_missing_properties() -> None:
+    """T-P2 (`Т-§3.4.2`, `Т-§3.4.4`, law 8): after phases A–C every node of the script has every
+    property of its label — explicit values, never absent (`null` deletes in Neo4j)."""
+    nodes, _ = _graph(WHOLE)
+    missing = {
+        (label, node_id): sorted(REQUIRED[label] - set(props) - {"learnerId"})
+        for (label, node_id), props in nodes.items()
+        if label in REQUIRED and REQUIRED[label] - set(props)
+    }
+    assert missing == {}
+    assert all(v is not None for props in nodes.values() for v in props.values())
