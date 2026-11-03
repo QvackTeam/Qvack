@@ -98,7 +98,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | WP0 (зона C) | C | частично: ждёт п.2 (владелец) | — (скрипт п.3а) |
 | WP0 (зона A) | A | выполнен: аудит B1–B7, B21; п.3б, п.3в | — (скрипты п.3б, п.3в) |
 | WP2 (A) | A | **S3 заморожен (G1)** в `phase-4-a-s3-freeze` (D-A-119): 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; Q-A-2, Q-A-3 закрыты | `tests/events`: 82 passed (без инфраструктуры) |
-| WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` (D-A-111); `MisconceptionFact.statement` (D-B-145) — `phase-4-a-g1`; реализация — G2 | `tests/graph/test_read_stub.py`: 10 passed |
+| WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` (D-A-111); `MisconceptionFact.statement` (D-B-145) — `phase-4-a-g1`; факты картины памяти (D-A-126); помощь у свидетельства (D-A-127); реализация — G2 | `tests/graph/test_read_stub.py`: 12 passed |
 | WP7.1 (A), S6 | A | виды задач и таблица правил по событию (D-A-110); строка `known_check` и отмена поручений (D-A-115) — `phase-4-a-g1`; строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 27 passed |
 | S5 (A), WP3.2 таблица | A | строки обработчиков проектора на 38 типов в `phase-4-a-s5` (D-A-125); обработчики — G2 | `tests/graph/test_projector_rows.py`: 3 passed |
 | WP15 швы A (п.4–5 сообщения B), WP7.3 | A | `check_extracted` и `mark_covered` в `phase-4-a-wp15-seams` (D-A-124) | `tests/graph/test_extracted_check.py`, `tests/jobs/test_coverage.py`: 16 passed |
@@ -482,6 +482,13 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Решение: в ответные модели среза добавлены поля, названные техдоком: `SkillFact.gap_type_confidence` (`gapTypeConfidence`, `Т-§3.4.4`, `Т-§8.4`: доля голосов за победивший тип), `SkillFact.last_lapse_at_ms` (`retLastLapseAtMs`; «забыл», `Т-§8.2` п.3), `MisconceptionFact.triggers` (`Т-§3.4.2`, `Т-§9.3`). Нет значения — `None` / пустой список (закон 8: «не было» — явное значение). Поля необязательные: читающий код B и C не меняется. Каталог событий не затронут (S3 заморожен, D-A-119). Заглушка `FixedGraphReader` даёт их у «проваленного» навыка и у заблуждения.
 - Почему: §0.4.3 п.2 (поля названы `Т-§3.4`); S4 — интерфейс A, реализация — G2.
 - Тесты: `tests/graph/test_read_stub.py::test_memory_picture_facts_of_wp14_2`.
+- Требует подтверждения владельцем: нет.
+
+### D-A-127. S4: помощь у свидетельства в `skill_history`
+- Класс: B. WP6.4, WP14.4; вопрос B в D-B-163 (#132); `quack/graph/read/models.py`, `tests/support/graph_read.py`
+- Решение: `EvidenceFact.assistance: Literal["none", "hint", "shown_solution"] = "none"` и `EvidenceFact.hint_step: int | None` (1–3). `skill_history` отдаёт помощь каждого свидетельства («задача, исход, помощь, цитата, дата», `Т-§10.4`). Имена — по свойствам узла `Evidence` (`assistance`, `hintStep`, `Т-§3.4.3`), а не `help` из вопроса B. Перечень значений и ступени 1–3 — `Т-§7.6`. Без подсказки ступени нет — `None` (закон 8). Поля необязательные: читающий код B и C не меняется. Каталог событий не затронут (S3 заморожен, D-A-119). Заглушка `FixedGraphReader` даёт у «проваленного» навыка свидетельство с подсказкой ступени 2.
+- Почему: §0.4.3 п.2 (свойства названы в `Т-§3.4.3`) выше п.7 (единообразие с `ExtractedElementRecord.help` в каталоге).
+- Тесты: `tests/graph/test_read_stub.py::test_skill_history_says_what_help_was_given`.
 - Требует подтверждения владельцем: нет.
 
 ### Ответы потока A (2026-11-02)
@@ -1561,6 +1568,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.9, `known_check` без темы (D-B-149 п. ж): `-k known_check` — 1 failed (запрос без темы записан), коммит `730bf0c`. Зелёный: 26 passed.
 - WP13.9, запись хода (D-B-149): `cd backend && uv run pytest tests/session/test_turn_commit.py` — ошибка сбора (нет `quack.session.turn_commit`), коммит `d7972cc`; на неверной реализации (6 подмен) — каждая роняет 1–2 теста. Зелёный: 6 passed.
 - WP13.9, дедлайн из разговора, подсказки, закрытие задачи (D-B-149 п. г, д): тот же файл — ошибка сбора (нет `AnsweredAction`, `LearnerText`), коммит `6e39af5`; на неверной реализации — 8 подмен, каждая роняет 1–3 теста. Зелёный: 16 passed.
+- S4, помощь у свидетельства (A, D-A-127, `phase-4-a-s4-assistance`, коммит `a6f9ed8`): `uv run pytest tests/graph/test_read_stub.py` — 1 failed (у `EvidenceFact` нет `assistance`), 11 passed. Подмены: нет верхней границы ступени, умолчание `hint`, нет `shown_solution`, ступень по умолчанию 1 — 4/4 роняют тест. Зелёный: 12 passed.
 - WP15, помощь и тип пробела (A, D-A-124 п.3а, коммит `9a1a444`): `uv run pytest tests/graph/test_extracted_check.py` — 1 failed (подсказка без ступени проходит). Подмены: ступень без подсказки, подсказка без ступени, положительный с типом пробела, `partial` обязан `none` — 4/4. Зелёный: 13 passed.
 
 ## Правки тестов
