@@ -108,6 +108,18 @@ def test_unknown_labels_are_rejected() -> None:
     assert _reasons(_el(root_cause=RootCause(skill="S8", confidence="low"))) == ["unknown_label"]
 
 
+def test_help_and_gap_type_must_agree() -> None:
+    """WP15 п.3, `Т-§7.6`: a hint has its step 1–3 and only a hint has one; a positive element
+    has gap type `none` (review of B in #133)."""
+    assert _reasons(_el(help="hint", hint_step=None)) == ["incomplete_element"]
+    assert _reasons(_el(help="none", hint_step=2)) == ["incomplete_element"]
+    assert _reasons(_el(help="shown_solution", hint_step=1)) == ["incomplete_element"]
+    assert _reasons(_el(outcome="correct", gap_type="slip")) == ["incomplete_element"]
+    assert _reasons(_el(help="hint", hint_step=2)) == []
+    assert _reasons(_el(outcome="correct", gap_type="none")) == []
+    assert _reasons(_el(outcome="partial", gap_type="execution")) == []
+
+
 def test_incomplete_elements_are_rejected() -> None:
     assert _reasons(_el(level=None)) == ["incomplete_element"]
     assert _reasons(_el(outcome=None)) == ["incomplete_element"]
@@ -126,7 +138,8 @@ def test_negative_elements_need_a_quote_from_their_sources() -> None:
     hypothesis = _el(kind="misconception_hypothesis", misconception="M1", quote="", level=None)
     assert _reasons(hypothesis) == ["missing_quote"]
     new_skill = NewSkill(name="roots", topic_hint="quadratics")
-    assert _reasons(_el(skill=None, new_skill=new_skill, outcome="correct", quote="")) == [
+    positive = {"outcome": "correct", "gap_type": "none"}
+    assert _reasons(_el(skill=None, new_skill=new_skill, quote="", **positive)) == [
         "missing_quote"
     ]  # `Т-§4.4`: a new skill only with a quote
     assert _reasons(_el(quote="x = 3")) == ["quote_not_in_source"]

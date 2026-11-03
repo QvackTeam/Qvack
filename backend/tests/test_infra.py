@@ -296,7 +296,7 @@ def test_logging_context_and_secret_masking(capsys: pytest.CaptureFixture[str]) 
 
 def test_settings_require_secrets_in_prod() -> None:
     with pytest.raises(ValidationError):
-        Settings(env="prod", jwt_secret="", llm_api_key="")  # type: ignore[arg-type]
+        Settings(env="prod", llm_api_key="")  # type: ignore[arg-type]
     s = Settings(env="test", postgres_dsn="postgresql://a:b@h:5432/d")
     assert s.sqlalchemy_dsn == "postgresql+asyncpg://a:b@h:5432/d"
     assert s.projector_batch_max_events == 100 and s.rebuild_max_tx_ops == 5000

@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack import cli
 from quack.api.app import create_app
-from quack.api.auth import issue_access_token
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.db.redis import llm_pressure_key
 from quack.events import append_events
@@ -40,7 +40,7 @@ from quack.runtime import (
     register_all_handlers,
 )
 from tests.scenario import build_scenario
-from tests.support.auth import ensure_user
+from tests.support.auth import ensure_user, session_cookie, session_token
 from tests.support.resources import build_app_resources, build_job_context
 
 QUACK_ROOT = Path(__file__).resolve().parents[1] / "quack"
@@ -249,6 +249,7 @@ async def test_purge_job_removes_learner_completely(
     settings: Settings,
     pg_engine: AsyncEngine,
     db: SessionFactory,
+    pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
 ) -> None:
@@ -277,12 +278,14 @@ async def test_purge_job_removes_learner_completely(
 
     app = create_app(
         settings,
-        resources=build_app_resources(settings, pg_engine, neo4j, redis, session_factory=db),
+        resources=build_app_resources(
+            settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db
+        ),
     )
-    token = issue_access_token(learner, settings)
+    token = await session_token(pg_db, learner, settings)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.delete("/v1/learner", headers={"Authorization": f"Bearer {token}"})
+        response = await client.delete("/v1/learner", headers=session_cookie(token))
     assert response.status_code == 200
 
     async with db() as session, session.begin():
