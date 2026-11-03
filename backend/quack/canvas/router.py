@@ -1,5 +1,6 @@
 """Routes of canvases (ТЗ Ф4 §6.4 «Канвас», WP21.1, WP21.2): `POST /v1/sessions/{id}/canvases`,
-`GET /v1/canvases/{id}`, `GET /v1/domains/{id}/canvases`, `WS /v1/canvases/{id}/ws`. The
+`GET /v1/canvases/{id}`, `GET /v1/domains/{id}/canvases`, `WS /v1/canvases/{id}/ws`,
+`GET /v1/canvases/{id}/replay` (WP21.6). The
 learner comes only from the session cookie (WP18.3); a session, task, canvas or domain of another
 learner is 404."""
 
@@ -15,7 +16,7 @@ from pydantic import BaseModel
 from quack.api.auth import CurrentSession, get_current_session, websocket_session
 from quack.api.errors import ApiError
 from quack.api.resources import AppResources, get_resources
-from quack.canvas import boards, socket
+from quack.canvas import boards, replay, socket
 from quack.canvas.board import BoardDoc
 
 router = APIRouter(prefix="/v1", tags=["canvas"])
@@ -39,6 +40,18 @@ class CanvasView(BaseModel):
 
 class CanvasList(BaseModel):
     canvases: list[CanvasView]
+
+
+class ReplayChunkView(BaseModel):
+    url: str
+    size: int
+
+
+class ReplayView(BaseModel):
+    """Signed links to the stroke chunks of the canvas, oldest first (Т-§15.7, D-C-135)."""
+
+    chunks: list[ReplayChunkView]
+    expires_in_s: int
 
 
 def _view(canvas: boards.Canvas) -> CanvasView:
@@ -93,6 +106,30 @@ async def domain_canvases(domain_id: UUID, session: Session, resources: Resource
     except boards.CanvasNotFound as exc:
         raise _not_found(exc) from exc
     return CanvasList(canvases=[_view(c) for c in canvases])
+
+
+@router.get("/canvases/{canvas_id}/replay", response_model=ReplayView)
+async def canvas_replay(canvas_id: UUID, session: Session, resources: Resources) -> ReplayView:
+    """WP21.6: links live `object_url_ttl_s`; a canvas without a session has no strokes."""
+    try:
+        canvas = await boards.get_canvas(
+            resources.db, learner_id=session.learner_id, canvas_id=canvas_id
+        )
+    except boards.CanvasNotFound as exc:
+        raise _not_found(exc) from exc
+    ttl_s = resources.settings.object_url_ttl_s
+    chunks: list[replay.ReplayChunk] = []
+    if canvas.session_id is not None:
+        chunks = await replay.replay_chunks(
+            resources.storage,
+            learner_id=session.learner_id,
+            session_id=canvas.session_id,
+            canvas_id=canvas_id,
+            ttl_s=ttl_s,
+        )
+    return ReplayView(
+        chunks=[ReplayChunkView(url=c.url, size=c.size) for c in chunks], expires_in_s=ttl_s
+    )
 
 
 @router.websocket("/canvases/{canvas_id}/ws")
