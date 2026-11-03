@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import text
 
 from tests.e2e.endpoints import (
+    MULTIPART,
     NO_IDEMPOTENCY_KEY,
     Ids,
     body_for,
@@ -216,6 +217,10 @@ async def test_cross_learner_isolation(system: System) -> None:
         url = path_for(path, ids)
         if method == "GET":
             response = await system.client.get(url, headers=b.headers)
+        elif (method, path) in MULTIPART:
+            response = await system.client.request(
+                method, url, files=MULTIPART[(method, path)], headers=b.headers
+            )
         else:
             body = body_for(method, path, ids, f"te3:b:{method}:{path}")
             response = await system.client.request(method, url, json=body, headers=b.headers)

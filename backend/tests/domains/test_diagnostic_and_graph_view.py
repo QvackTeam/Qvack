@@ -39,11 +39,12 @@ from quack.jobs import kinds
 from quack.jobs.queue import claim_next_job, complete_job, enqueue_job
 from quack.jobs.runner import JobRunner
 from tests.domains.conftest import FakeLLMProvider
+from tests.support.auth import session_cookie
 from tests.support.resources import build_job_context
 
 
 def _auth_headers(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+    return session_cookie(token)
 
 
 async def _seed_linear_dag_domain(

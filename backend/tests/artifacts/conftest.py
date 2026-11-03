@@ -12,12 +12,10 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
-import jwt
 import pytest
 from fastapi import FastAPI
 from neo4j import AsyncDriver
@@ -30,6 +28,7 @@ from quack.api.app import create_app
 from quack.artifacts.deps import WorkerDeps
 from quack.compute_client.client import ComputeClient
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.events import NewEvent, append_events
 from quack.graph.neo4j_store import read_applied_seq
@@ -37,11 +36,8 @@ from quack.graph.worker import ProjectorWorker
 from quack.llm.gateway import LLMGateway
 from quack.llm.provider import ProviderRequest, ProviderResponse
 from tests.factories import new_event
+from tests.support.auth import learner_headers, login_hook
 from tests.support.resources import build_app_resources
-
-# ТЗ Потока 1 §2.1 п.2: HS256; with an empty `jwt_secret` in dev/test this constant signs.
-DEV_JWT_SECRET = "quack-dev-jwt-secret"
-TOKEN_TTL = timedelta(days=7)
 
 type AuthHeaders = Callable[[UUID], dict[str, str]]
 
@@ -117,6 +113,7 @@ def app(
     settings: Settings,
     pg_engine: AsyncEngine,
     db: SessionFactory,
+    pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
     fake_provider: FakeProvider,
@@ -127,6 +124,7 @@ def app(
         pg_engine,
         neo4j,
         redis,
+        db=pg_db,
         session_factory=db,
         provider=fake_provider,
         compute=fake_compute,
@@ -135,27 +133,20 @@ def app(
 
 
 @pytest.fixture
-async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
+async def client(app: FastAPI, pg_db: Db, settings: Settings) -> AsyncIterator[httpx.AsyncClient]:
+    """A request marked by `learner_headers` is signed in with a session (D-C-112 п.2)."""
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
+    hooks = {"request": [login_hook(pg_db, settings)]}
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", event_hooks=hooks
+    ) as http:
         yield http
 
 
 @pytest.fixture
 def auth() -> AuthHeaders:
-    """`auth(learner_id)` → `Authorization: Bearer <jwt>` (ТЗ Потока 1 §2.1 п.2)."""
-
-    def headers(learner_id: UUID) -> dict[str, str]:
-        now = datetime.now(UTC)
-        claims = {
-            "sub": str(learner_id),
-            "iat": int(now.timestamp()),
-            "exp": int((now + TOKEN_TTL).timestamp()),
-        }
-        token = jwt.encode(claims, DEV_JWT_SECRET, algorithm="HS256")
-        return {"Authorization": f"Bearer {token}"}
-
-    return headers
+    """`auth(learner_id)` → the request is signed in as the learner (ТЗ Ф4 WP18.3)."""
+    return learner_headers
 
 
 @pytest.fixture
