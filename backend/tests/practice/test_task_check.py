@@ -16,7 +16,7 @@ from quack.events import records
 from quack.events.values import AnswerOption, AnswerSpec
 from quack.llm.gateway import LLMGateway, LLMResult
 from quack.practice.role_outputs import TaskCheckOutput, TaskCondition
-from quack.practice.task_check import NONE_LINE, check_key, check_teacher_task
+from quack.practice.task_check import NONE_LINE, check_key, check_teacher_task, verify_generated
 from quack.practice.task_store import create_task
 from quack.prompts.registry import PromptRegistry
 from tests.db.fixtures import create_learner
@@ -175,3 +175,72 @@ async def test_no_level_fits(pg_db: Db, fits: list[bool]) -> None:
     assert stored.type == "task.markup_disputed"
     corrected = records.TaskMarkupRecord.model_validate(stored.payload["corrected_markup"])
     assert len(corrected.tests) == 2
+
+
+class _Draft:
+    condition = CONDITION
+    answer_spec = CHOICE
+
+
+MARKUP = records.TaskMarkupRecord(
+    tests=[records.TestedLevelRecord(skill_id=SKILL, level=4)],
+    method_named=False,
+    answer=CHOICE,
+)
+
+
+class _Roles:
+    """Answers by role; records the calls."""
+
+    def __init__(self, **answers: TaskCheckOutput) -> None:
+        self.answers = answers
+        self.calls: list[dict[str, Any]] = []
+
+    async def generate_structured(
+        self, role: str, version: int, model: Any, variables: dict[str, Any], *a: Any, **kw: Any
+    ) -> LLMResult[TaskCheckOutput]:
+        self.calls.append({"role": role, "variables": variables, "key": a[3]})
+        return LLMResult(self.answers[role], False, "h", "m", None)
+
+
+async def _verify(gateway: _Roles) -> bool:
+    return await verify_generated(
+        cast(LLMGateway, gateway),
+        SETTINGS,
+        _Draft(),
+        MARKUP,
+        learner_id=uuid4(),
+        key="gen:1:0",
+        skill_names=NAMES,
+        generator_solution="ratio -> 1/e < 1",
+    )
+
+
+async def test_generated_row_with_arbiter() -> None:
+    """`T-TK6`, row «generated»: the checker agrees → kept, no arbiter; disagrees → the arbiter
+    (Wonder) gets both solutions and the disagreement; it agrees → kept; disagrees → thrown."""
+    ok = _Roles(task_checker=_output(levels_fit=[True]))
+    assert await _verify(ok) is True
+    assert [c["role"] for c in ok.calls] == ["task_checker"]
+    assert ok.calls[0]["key"] == "gen:1:0:task_checker@1"
+
+    saved = _Roles(task_checker=_output("B", levels_fit=[True]), task_arbiter=_output("A"))
+    assert await _verify(saved) is True
+    arbiter = saved.calls[1]
+    assert (arbiter["role"], arbiter["key"]) == ("task_arbiter", "gen:1:0:task_arbiter@1")
+    variables = arbiter["variables"]
+    assert variables["generator_solution"] == "ratio -> 1/e < 1"
+    assert variables["checker_solution"] == "B"
+    assert variables["disagreement"] == "the independent answer differs from the key."
+    PromptRegistry().load("task_arbiter", 1).render(variables)
+
+    lost = _Roles(
+        task_checker=_output(levels_fit=[False], note="level 4 needs the method unnamed"),
+        task_arbiter=_output(levels_fit=[False]),
+    )
+    assert await _verify(lost) is False
+    assert lost.calls[1]["variables"]["disagreement"] == (
+        "levels 1 do not fit. Checker's note: level 4 needs the method unnamed"
+    )
+    wrong_key = _Roles(task_checker=_output("B", levels_fit=[True]), task_arbiter=_output("B"))
+    assert await _verify(wrong_key) is False

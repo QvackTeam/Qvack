@@ -1042,8 +1042,9 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Решение: (а) ответ проверяющего — `LearnerAnswer` в типе спецификации, `check()` с `symbolic_background_timeout_ms`; ключ оспорен только при вердикте `incorrect`; иной исход (`partial`, `unclear`, `NotYet`, `CheckFailed`, `NeedsModel`) ключ не оспаривает — судится только разметка. (б) Ключ первым: при обоих расхождениях — `task.key_disputed` с исправленной разметкой. (в) Исправление: `method_named` — по проверяющему, неподходящие уровни убираются, `variant_of` снимается, если «не вариант»; не подошёл ни один уровень — `tests` остаются (иначе разметка без пар). (г) Вход вслепую: условие, варианты без признака верного, заявленная разметка с именами навыков, условие исходной задачи для варианта. (д) Ключ события `task_check:{task_id}`, ключ вызова — с версией промпта; актор — `task_checker@1`; `causation_seq` — событие хода.
 - Почему: §0.4.3 п.2 (WP12.5, `Т-§5.6`), п.5.
 - Обратимость: один модуль.
-- Тесты: `T-TK6` — `tests/practice/test_task_check.py` (3).
-- Не решено \[ПРОВЕРИТЬ\]: строки «сгенерированная» (арбитраж `task_arbiter`, выброс) и «семинар» — с WP12.6 и разбором материала (C); обработчик задачи `task.check` (`{task_ids}` правила `turn.committed`) — при сборке входов (имена навыков из S4).
+- Тесты: `T-TK6` — `tests/practice/test_task_check.py` (4).
+(е) Строка «сгенерированная» — `verify_generated`: та же слепая проверка до банка; расхождение → `task_arbiter` (Wonder) с решением генератора, ответом проверяющего и словами расхождения; арбитр снова расходится (ключ или разметка) — `False`, черновик выбрасывается; ключи вызовов — `{ключ черновика}:{промпт}`.
+- Не решено \[ПРОВЕРИТЬ\]: строка «семинар» — с разбором материала (C); обработчик задачи `task.check` (`{task_ids}` правила `turn.committed`) — при сборке входов (имена навыков из S4).
 - Требует подтверждения владельцем: нет
 
 ### Поток C
@@ -1375,7 +1376,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
-- WP12.5, проверка задачи учителя (D-B-167): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 8 подмен, каждая роняет тест. Зелёный: `tests/practice/test_task_check.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 3 passed.
+- WP12.5, проверка задачи учителя (D-B-167): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 11 подмен, каждая роняет тест. Зелёный: `tests/practice/test_task_check.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 4 passed.
 - D-C-119, весь API на сессиях (C, `phase-4-c-d112`, коммит `e8a6aee`): в Linux против `quack-test-*` с dbmate `pytest tests/test_app_assembly.py tests/domains/test_auth_and_learner.py tests/session/test_auth_and_stream_resilience.py` — 14 failed (старый вход: сессия не принимается маршрутами Фазы 3, код 401 `UNAUTHORIZED`, `/v1/auth/register|login|me` ещё смонтированы, лимит без Redis считает только `auth`), 11 passed. Зелёный — в описании PR.
 - D-C-122 п.4, переполнение куска (C, `phase-4-c-wp21-ws`, коммит `57127c3`): `pytest tests/canvas/test_strokes_wp21.py` — 2 failed (`chunk_max_batches` — `NotImplementedError`, кусок ждёт время при переполнении), 5 passed. Зелёный: `tests/canvas` — 19 passed.
 - WP21.2, WebSocket канваса (C, `phase-4-c-wp21-ws`, коммит `f915ac2`): в Linux против `quack-test-*` с dbmate `pytest tests/canvas/test_canvas_ws.py` — 7 failed (маршрута `WS /v1/canvases/{id}/ws` нет — сокет закрывается при рукопожатии; `publish_canvas` — `NotImplementedError`). Зелёный: `tests/canvas` — 16 passed; `tests/auth`, `tests/test_contracts.py`, `tests/test_app_assembly.py` — зелёные.
