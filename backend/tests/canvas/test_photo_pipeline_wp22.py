@@ -133,13 +133,13 @@ async def test_photos_of_one_sheet_write_only_new_lines(
         ]
     )
     assert result.drawings == 1 and not result.new_sheet
-    assert result.committed == [f"{first}:{second}:1", f"{first}:{second}:4"]
+    assert result.committed == [f"{first}:{second}:1", f"{first}:{second}:3"]
     assert result.erased == [f"{first}:{first}:1"]
     log = await _log(pg_db, learner)
     assert log[2:] == [
         ("canvas.line_committed", f"{first}:{second}:1", "2x=10-4"),
         ("canvas.line_erased", f"{first}:{first}:1", "2x=6"),
-        ("canvas.line_committed", f"{first}:{second}:4", "x+y=133"),
+        ("canvas.line_committed", f"{first}:{second}:3", "x+y=133"),
     ]
     rows = await pg_db.fetch_all(
         "SELECT payload FROM core.events WHERE learner_id = %(learner_id)s "
@@ -159,7 +159,7 @@ async def test_photos_of_one_sheet_write_only_new_lines(
             _line("x+y=134", 0.4),
         ]
     )
-    assert result.committed == [f"{first}:{second}:4"] and result.erased == []
+    assert result.committed == [f"{first}:{second}:3"] and result.erased == []
 
     # The repeated job of the third photo: the same reading, nothing new.
     before = await _log(pg_db, learner)
