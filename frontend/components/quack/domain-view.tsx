@@ -2,13 +2,16 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
-import { useFmt, useMocks, useT } from "@/lib/i18n/provider";
+import { API_MODE } from "@/lib/api/client";
+import { getGraphModel } from "@/lib/graph/mock";
+import { useFmt, useLocale, useMocks, useT } from "@/lib/i18n/provider";
 import { scrollToId } from "@/lib/scroll";
 import { cn } from "@/lib/utils";
 import { useShell } from "./app-shell";
 import { CanvasesList, CanvasSearch } from "./canvases-page";
 import { Composer } from "./composer";
 import { DomainGraph, type GraphHandle } from "./domain-graph";
+import { LayeredGraph } from "./graph/layered-graph";
 import { NumText } from "./num-text";
 import { EmptyDomain } from "./empty-domain";
 import { TodayList } from "./today-list";
@@ -76,6 +79,7 @@ export function DomainView() {
   const tx = useT();
   const { fullDate, inDays } = useFmt();
   const { canvasesOf } = useMocks();
+  const { locale } = useLocale();
   const { domain, startSession, graphMode, setGraphMode } = useShell();
   const router = useRouter();
   const pathname = usePathname();
@@ -116,7 +120,9 @@ export function DomainView() {
   };
 
   const deadlineHub = domain.hubs.find((h) => h.deadline);
-  const hasGraph = domain.topics.length > 0;
+  // The layered graph runs on the slice model. With the API on, the old graph stays until the adapter exists
+  const model = API_MODE ? undefined : getGraphModel(locale, domain.id);
+  const hasGraph = model ? model.topics.length > 0 : domain.topics.length > 0;
   const canvasCount = canvasesOf(domain.id).length;
 
   const [seenDomain, setSeenDomain] = useState(domain.id);
@@ -181,7 +187,11 @@ export function DomainView() {
           ) : hasGraph ? (
             <>
               <div className="hidden min-h-0 flex-1 md:flex">
-                <DomainGraph key={domain.id} ref={graph} domain={domain} mode={graphMode} onModeChange={setGraphMode} />
+                {model ? (
+                  <LayeredGraph key={domain.id} ref={graph} model={model} domain={domain} />
+                ) : (
+                  <DomainGraph key={domain.id} ref={graph} domain={domain} mode={graphMode} onModeChange={setGraphMode} />
+                )}
               </div>
               <div className="md:hidden">
                 <TodayList items={domain.today} idPrefix="m" />

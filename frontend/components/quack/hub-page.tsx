@@ -27,11 +27,12 @@ export function HubPage({ id }: { id: string }) {
   const { domain } = useShell();
   const soon = useSoon();
   const { start, busy } = useStartSession();
-  const hub = domain.hubs.find((h) => h.id === id);
+  // "all" is the hub over the whole subject: not a node on the graph, reached from the pill next to it
+  const hub = id === "all" ? { id, num: "·", title: domain.title, about: "" } : domain.hubs.find((h) => h.id === id);
 
   const data = useMemo(() => {
     if (!hub) return null;
-    const topics = domain.topics.filter((t) => t.hubId === hub.id);
+    const topics = hub.id === "all" ? domain.topics : domain.topics.filter((t) => t.hubId === hub.id);
     // порядок изучения: по глубине «нужно до» внутри главы
     const byId = new Map(topics.map((t) => [t.id, t]));
     const depth = new Map<string, number>();

@@ -250,6 +250,8 @@ export const ru: Dict = {
       `${hubs} ${plural(hubs, "глава", "главы", "глав")} · ${topics} ${plural(topics, "тема", "темы", "тем")}`,
     ariaGraph: (title: string) => `Граф тем «${title}». Стрелки — двигать, плюс и минус — масштаб.`,
     openHubAria: (title: string, n: number) => `Открыть главу ${title}, ${n} ${plural(n, "подтема", "подтемы", "подтем")}`,
+    allTopicsPill: "Все темы",
+    allTopicsPillAria: "Открыть страницу со всеми темами предмета",
     due: "колл.",
   },
   session: {

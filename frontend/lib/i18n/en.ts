@@ -249,6 +249,8 @@ export const en = {
       `${hubs} ${plural2(hubs, "chapter", "chapters")} · ${topics} ${plural2(topics, "topic", "topics")}`,
     ariaGraph: (title: string) => `Topic graph “${title}”. Arrow keys pan, plus and minus zoom.`,
     openHubAria: (title: string, n: number) => `Open chapter ${title}, ${n} ${plural2(n, "subtopic", "subtopics")}`,
+    allTopicsPill: "All topics",
+    allTopicsPillAria: "Open the page with all topics of the subject",
     due: "due",
   },
   session: {
