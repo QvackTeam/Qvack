@@ -30,10 +30,14 @@ from quack.events.event_types import (
     MaterialParsed,
     MaterialUploaded,
     MisconceptionDescribed,
+    ObservationDiagnosed,
+    ObservationExtracted,
+    ObservationSecondOpinion,
     PreferenceSet,
     SessionEnded,
     SkillCreated,
     SkillSplit,
+    TaskClosed,
     TaskCreated,
     TaskKeyDisputed,
     TaskMarkupDisputed,
@@ -43,6 +47,7 @@ from quack.events.event_types import (
     TopicProposed,
     TopicRenamed,
     TopicSplit,
+    TurnCommitted,
     TypoDeclared,
 )
 from quack.events.log import StoredEvent
@@ -679,7 +684,7 @@ class _Markup:
     def _new_id(self, key: str) -> str:
         return deterministic_id(self.event.learner_id, self.event.seq, key)
 
-    def _skill_for(self, description: NewSkill) -> str | None:
+    def skill_for(self, description: NewSkill) -> str | None:
         """One provisional skill per normalized name in the domain; a hint without a topic of
         that name makes a temporary topic (Т-§4.4)."""
         if self.event.domain_id is None:
@@ -737,7 +742,7 @@ class _Markup:
             if t.skill_id is not None:
                 skill = self.view.resolve("Skill", str(t.skill_id))
             elif t.new_skill is not None:
-                skill = self._skill_for(t.new_skill)
+                skill = self.skill_for(t.new_skill)
             else:
                 skill = None
             if skill is not None and (skill, t.level, part) not in pairs:
@@ -867,6 +872,9 @@ def _evidence(
     quote: str = "",
     observation_seq: int = 0,
     extractor: str = "",
+    episode_seq: int = 0,
+    at_ms: int | None = None,
+    source_seq: int | None = None,
 ) -> tuple[str, Props]:
     """A new Evidence (`Т-§3.4.2`) with every property explicit (law 8). `source` — the event of
     the learner's action: its time is `atMs`, its `seq` is `sourceSeq` (law 6). Weight, novelty
@@ -876,7 +884,7 @@ def _evidence(
     props: Props = {
         "learnerId": str(event.learner_id),
         "domainId": domain,
-        "atMs": _ms(source.occurred_at),
+        "atMs": at_ms if at_ms is not None else _ms(source.occurred_at),
         "level": level,
         "outcome": outcome,
         "assistance": assistance,
@@ -892,11 +900,12 @@ def _evidence(
         "quote": quote,
         "sourceSessionId": _id(source.session_id),
         "sessionDomainId": _id(source.domain_id),
-        "sourceSeq": source.seq,
+        "sourceSeq": source_seq if source_seq is not None else source.seq,
         "derivedKind": "direct",
         "status": "active",
         "observationSeq": observation_seq,
         "extractor": extractor,
+        "episodeSeq": episode_seq,
         "searchable": bool(quote.strip()),
     }
     return deterministic_id(event.learner_id, event.seq, f"evidence:{n}"), props
@@ -1114,6 +1123,261 @@ def _dispute_filed(event: StoredEvent, view: SliceView) -> list[Mutation]:
     return [SetProps("Misconception", misconception, {"status": "disputed", "searchable": False})]
 
 
+# --- the teacher's turn, closed tasks, observations (Т-§7.8, Т-§9.1, Т-§8.4, Т-§2.8) --------
+
+# `Т-§2.8`, WP3.6: one extractor version on the hackathon (`Т-§22.10`).
+EXTRACTOR_PRECEDENCE = ("extractor@3",)
+
+
+def _turn_needs(event: StoredEvent) -> Need:
+    p = _payload(event, TurnCommitted)
+    nodes = {("Skill", str(x.skill_id)) for x in p.markup.exposures}
+    nodes |= {("Task", str(t.task_id)) for t in p.markup.tasks}
+    if p.markup.targets_misconception_id is not None:
+        nodes.add(("Misconception", str(p.markup.targets_misconception_id)))
+    return Need(nodes=frozenset(nodes))
+
+
+def _turn_committed(event: StoredEvent, view: SliceView) -> list[Mutation]:
+    """Т-§7.8 п.6: an `Exposure` per exposure of the markup, `OF` its skill. Т-§9.1: a turn that
+    targets a misconception marks it with the session (`targetedInSessionId`) and marks its
+    tasks (`targetsMisconceptionId`, read for `RESISTED`). Temporary skills of the markup come
+    with `task.created` of the same append (D-A-137)."""
+    p = _payload(event, TurnCommitted)
+    learner = str(event.learner_id)
+    changes: list[Mutation] = []
+    for n, exposure in enumerate(p.markup.exposures):
+        skill = view.resolve("Skill", str(exposure.skill_id))
+        if skill is None:
+            continue
+        node = deterministic_id(event.learner_id, event.seq, f"exposure:{n}")
+        props: Props = {
+            "learnerId": learner,
+            "atMs": _ms(event.occurred_at),
+            "kind": exposure.kind,
+            "approach": exposure.approach,
+            "sourceSeq": event.seq,
+            "sessionDomainId": _id(event.domain_id),
+        }
+        changes += [
+            MergeNode("Exposure", node, props),
+            MergeRel("Exposure", node, "OF", "Skill", skill, {}),
+        ]
+    target = p.markup.targets_misconception_id
+    misconception = view.resolve("Misconception", str(target)) if target is not None else None
+    if misconception is None:
+        return changes
+    if event.session_id is not None:
+        session: Props = {"targetedInSessionId": str(event.session_id)}
+        changes.append(SetProps("Misconception", misconception, session))
+    for task in p.markup.tasks:
+        live = view.resolve("Task", str(task.task_id))
+        if live is not None:
+            changes.append(SetProps("Task", live, {"targetsMisconceptionId": misconception}))
+    return changes
+
+
+def _task_closed(event: StoredEvent, view: SliceView) -> list[Mutation]:
+    """Т-§8.4: a solution shown on request needs consolidation; the skill fold (WP4.5) reads how
+    the tasks of the skill were closed (D-A-137)."""
+    p = _payload(event, TaskClosed)
+    task = view.resolve("Task", str(p.task_id))
+    if task is None:
+        return []
+    return [SetProps("Task", task, {"closedHow": p.how, "closedAtMs": _ms(event.occurred_at)})]
+
+
+def _superseded(view: SliceView, evidence: str) -> list[Mutation]:
+    props: Props = {"status": "superseded", "searchable": False}
+    derived = [r.from_id for r in view.in_rels("Evidence", evidence, "DERIVED_FROM")]
+    return [SetProps("Evidence", e, props) for e in (evidence, *derived)]
+
+
+def _observation_needs(event: StoredEvent) -> Need:
+    p = _payload(event, ObservationExtracted)
+    nodes: set[tuple[str, str]] = set()
+    for el in p.elements:
+        if el.skill_id is not None:
+            nodes.add(("Skill", str(el.skill_id)))
+        if el.misconception_id is not None:
+            nodes.add(("Misconception", str(el.misconception_id)))
+        if el.root_cause is not None:
+            nodes.add(("Skill", str(el.root_cause.skill_id)))
+    labels: frozenset[tuple[str, str]] = frozenset()
+    if event.domain_id is not None and any(el.new_skill is not None for el in p.elements):
+        nodes.add(("Domain", str(event.domain_id)))
+        labels = frozenset({(str(event.domain_id), "Skill"), (str(event.domain_id), "Topic")})
+    return Need(
+        nodes=frozenset(nodes),
+        domain_labels=labels,
+        matches=frozenset({("Evidence", "episodeSeq", p.episode_seq)}),
+    )
+
+
+def _observation_extracted(event: StoredEvent, view: SliceView) -> list[Mutation]:
+    """Т-§2.8: the observation of the most preferred extractor, the latest of its seq, is the
+    current one of the episode; the earlier evidence of the episode becomes `superseded`.
+    Т-§7.8 п.4: elements — T3 evidence with their quote, help, gap type and the time and `seq`
+    of the latest source event; «неясно» — none; a new skill — provisional (`Т-§4.4`); a known
+    misconception or a hypothesis — a manifestation (`Т-§9.1`); a root cause — `ROOT_CAUSE`
+    with the confidence of its category (`root_cause_confidence_map`, `Т-§9.4`). D-A-137."""
+    p = _payload(event, ObservationExtracted)
+    if p.extractor not in EXTRACTOR_PRECEDENCE:
+        return []
+    changes: list[Mutation] = []
+    for earlier in view.matching("Evidence", "episodeSeq", p.episode_seq):
+        observed = earlier.props.get("observationSeq")
+        if observed not in (0, event.seq) and earlier.props.get("status") == "active":
+            changes += _superseded(view, earlier.id)
+    domain = _id(event.domain_id)
+    markup = _Markup(event, view, "", domain)
+    for n, el in enumerate(p.elements):
+        if el.skill_id is not None:
+            skill = view.resolve("Skill", str(el.skill_id))
+        elif el.new_skill is not None:
+            skill = markup.skill_for(el.new_skill)
+            changes += markup.changes
+            markup.changes = []
+        else:
+            skill = None
+        if skill is None:
+            continue
+        evidence, props = _evidence(
+            event,
+            n,
+            source=event,
+            domain=domain,
+            level=el.level or 0,
+            outcome=el.outcome or "incorrect",
+            tier=3,
+            verification="model",
+            assistance=el.help,
+            hint_step=el.hint_step or 0,
+            gap_type=el.gap_type,
+            quote=el.quote,
+            observation_seq=event.seq,
+            extractor=p.extractor,
+            episode_seq=p.episode_seq,
+            at_ms=el.at_ms,
+            source_seq=max(el.events, default=event.seq),
+        )
+        changes += [
+            MergeNode("Evidence", evidence, props),
+            MergeRel("Evidence", evidence, "ON", "Skill", skill, {}),
+        ]
+        misconception = None
+        if el.misconception_id is not None:
+            misconception = view.resolve("Misconception", str(el.misconception_id))
+        elif el.new_misconception:
+            misconception = deterministic_id(event.learner_id, event.seq, f"misconception:{n}")
+            changes += _hypothesis(event, misconception, domain, el.new_misconception, skill)
+        if misconception is not None:
+            changes.append(
+                MergeRel("Evidence", evidence, "MANIFESTS", "Misconception", misconception, {})
+            )
+        cause = view.resolve("Skill", str(el.root_cause.skill_id)) if el.root_cause else None
+        if el.root_cause is not None and cause is not None:
+            weight = view.params.root_cause_confidence[el.root_cause.confidence]
+            changes.append(
+                MergeRel("Evidence", evidence, "ROOT_CAUSE", "Skill", cause, {"confidence": weight})
+            )
+    return changes
+
+
+def _diagnosed_needs(event: StoredEvent) -> Need:
+    p = _payload(event, ObservationDiagnosed)
+    near: set[tuple[str, str]] = set()
+    nodes: set[tuple[str, str]] = set()
+    if p.diagnosis.misconception_id is not None:
+        near.add(("Misconception", str(p.diagnosis.misconception_id)))
+    if p.task_id is not None:
+        near.add(("Task", str(p.task_id)))
+    if p.diagnosis.root_cause_skill_id is not None:
+        nodes.add(("Skill", str(p.diagnosis.root_cause_skill_id)))
+    return Need(nodes=frozenset(nodes), neighbourhoods=frozenset(near))
+
+
+def _diagnosis_skills(view: SliceView, p: ObservationDiagnosed) -> tuple[str | None, list[str]]:
+    """The named misconception and its main skill; else the skills the task tests."""
+    misconception = None
+    if p.diagnosis.misconception_id is not None:
+        ref = str(p.diagnosis.misconception_id)
+        misconception = view.resolve("Misconception", ref)
+        about = [r.to_id for r in view.out_rels("Misconception", ref, "ABOUT")]
+        if misconception is not None and about:
+            return misconception, about[:1]
+    if p.task_id is not None and view.node("Task", str(p.task_id)) is not None:
+        return misconception, sorted(
+            {r.to_id for r in view.out_rels("Task", str(p.task_id), "TESTS")}
+        )
+    return misconception, []
+
+
+def _observation_diagnosed(event: StoredEvent, view: SliceView) -> list[Mutation]:
+    """D-A-125 п.2 (`Т-§15.4`, `Т-§7.2`): a found error of a canvas line — evidence of level 0,
+    outcome incorrect, T3, on the skill of the named misconception, else on the skills the task
+    tests; neither — nothing (law 8). The misconception or the hypothesis — a manifestation;
+    the root cause — `ROOT_CAUSE` with the diagnosis confidence."""
+    p = _payload(event, ObservationDiagnosed)
+    misconception, skills = _diagnosis_skills(view, p)
+    if not skills:
+        return []
+    task = view.resolve("Task", str(p.task_id)) if p.task_id is not None else None
+    domain = _id(event.domain_id)
+    changes: list[Mutation] = []
+    for n, skill in enumerate(skills):
+        evidence, props = _evidence(
+            event,
+            n,
+            source=event,
+            domain=domain,
+            level=0,
+            outcome="incorrect",
+            tier=3,
+            verification="model",
+            gap_type=p.diagnosis.gap_type,
+            observation_seq=event.seq,
+        )
+        changes += [
+            MergeNode("Evidence", evidence, props),
+            MergeRel("Evidence", evidence, "ON", "Skill", skill, {}),
+        ]
+        if task is not None:
+            changes.append(MergeRel("Evidence", evidence, "ON_TASK", "Task", task, {}))
+    first = deterministic_id(event.learner_id, event.seq, "evidence:0")
+    hypothesis = p.diagnosis.misconception_hypothesis
+    if misconception is None and hypothesis:
+        misconception = deterministic_id(event.learner_id, event.seq, "misconception")
+        changes += _hypothesis(event, misconception, domain, hypothesis, skills[0])
+    if misconception is not None:
+        changes.append(MergeRel("Evidence", first, "MANIFESTS", "Misconception", misconception, {}))
+    root = p.diagnosis.root_cause_skill_id
+    cause = view.resolve("Skill", str(root)) if root is not None else None
+    if cause is not None:
+        changes.append(
+            MergeRel("Evidence", first, "ROOT_CAUSE", "Skill", cause, {"confidence": p.confidence})
+        )
+    return changes
+
+
+def _second_opinion_needs(event: StoredEvent) -> Need:
+    target = int(event.payload["target_seq"])
+    return Need(matches=frozenset({("Evidence", "observationSeq", target)}))
+
+
+def _second_opinion(event: StoredEvent, view: SliceView) -> list[Mutation]:
+    """D-A-125 п.3 (`Т-§7.7`): an agreed second opinion raises the diagnosis evidence T3 -> T2;
+    a disagreed one leaves it T3."""
+    p = _payload(event, ObservationSecondOpinion)
+    if not p.agreed:
+        return []
+    return [
+        SetProps("Evidence", e.id, {"tier": 2})
+        for e in view.matching("Evidence", "observationSeq", p.target_seq)
+        if e.props.get("episodeSeq") == 0 and e.props.get("tier") == 3
+    ]
+
+
 # Event type -> handler; exactly the types of `ROWS` (T-P4).
 HANDLERS: dict[str, Handler] = {
     "domain.created": Handler(_none, _domain_created),
@@ -1154,4 +1418,9 @@ HANDLERS: dict[str, Handler] = {
     ),
     "typo.declared": Handler(lambda e: _answer_needs(int(e.payload["answer_seq"])), _typo_declared),
     "dispute.filed": Handler(_dispute_needs, _dispute_filed),
+    "turn.committed": Handler(_turn_needs, _turn_committed),
+    "task.closed": Handler(_ref("Task", "task_id"), _task_closed),
+    "observation.extracted": Handler(_observation_needs, _observation_extracted),
+    "observation.diagnosed": Handler(_diagnosed_needs, _observation_diagnosed),
+    "observation.second_opinion": Handler(_second_opinion_needs, _second_opinion),
 }

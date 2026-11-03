@@ -8,10 +8,11 @@ the batch. A handler that reads outside its own `needs(event)` is a program erro
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from quack.config import Settings
 from quack.events.log import StoredEvent
 from quack.graph.projection.mutations import (
     DeleteNode,
@@ -43,7 +44,9 @@ class Need:
     представление», WP3.2); `event_refs` — `(seq, payload field, label)`: the node named by a
     field of that event, with its neighbourhood (the task of an answer for its verdict). The
     neighbourhood of a task also opens its options and the evidence on it with their relations
-    (traps for `RESISTED`, the evidence of a verdict for a dispute, D-A-134).
+    (traps for `RESISTED`, the evidence of a verdict for a dispute, D-A-134); `matches` —
+    `(label, prop, value)`: the nodes with that value, with their relations (the evidence of an
+    episode or of an observation, D-A-137).
     """
 
     nodes: frozenset[NodeRef] = frozenset()
@@ -51,6 +54,7 @@ class Need:
     domain_labels: frozenset[tuple[str, str]] = frozenset()
     events: frozenset[int] = frozenset()
     event_refs: frozenset[tuple[int, str, str]] = frozenset()
+    matches: frozenset[tuple[str, str, int]] = frozenset()
 
     def __or__(self, other: Need) -> Need:
         return Need(
@@ -59,6 +63,7 @@ class Need:
             domain_labels=self.domain_labels | other.domain_labels,
             events=self.events | other.events,
             event_refs=self.event_refs | other.event_refs,
+            matches=self.matches | other.matches,
         )
 
 
@@ -92,6 +97,25 @@ class SliceView(Protocol):
         """An event of the learner by `seq`; `None` — no such event (deleted, Т-§2.9)."""
         ...
 
+    def matching(self, label: str, prop: str, value: int) -> list[NodeRecord]:
+        """The nodes of `label` whose `prop` equals `value`."""
+        ...
+
+    @property
+    def params(self) -> RulesParams: ...
+
+
+@dataclass(frozen=True)
+class RulesParams:
+    """Parameters of `Т-§7`–`Т-§9` the handlers read; they belong to `rules@N` (`Т-§2.5`)."""
+
+    root_cause_confidence: Mapping[str, float]
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> RulesParams:
+        confidence = {str(k): v for k, v in settings.root_cause_confidence_map.items()}
+        return cls(root_cause_confidence=confidence)
+
 
 class BatchSlice:
     """The slice of one learner's batch: the store read plus the changes of the batch.
@@ -102,9 +126,14 @@ class BatchSlice:
     """
 
     def __init__(
-        self, learner_id: str, loaded: SubGraph, events: Sequence[StoredEvent] = ()
+        self,
+        learner_id: str,
+        loaded: SubGraph,
+        events: Sequence[StoredEvent] = (),
+        params: RulesParams | None = None,
     ) -> None:
         self.learner_id = learner_id
+        self.params = params or RulesParams.from_settings(Settings())
         self._events: dict[int, StoredEvent] = {e.seq: e for e in events}
         self._nodes: dict[NodeRef, Props] = {(n.label, n.id): dict(n.props) for n in loaded.nodes}
         self._rels: dict[RelKey, RelRecord] = {r.key: _copy(r) for r in loaded.rels}
@@ -181,6 +210,13 @@ class BatchSlice:
             if ((r.from_label, r.from_id) if out else (r.to_label, r.to_id)) == (label, node_id)
         ]
 
+    def _matching(self, label: str, prop: str, value: int) -> list[NodeRecord]:
+        return [
+            NodeRecord(node_label, node_id, dict(props))
+            for (node_label, node_id), props in sorted(self._nodes.items())
+            if node_label == label and props.get(prop) == value
+        ]
+
     def _neighbours(self, label: str, node_id: str) -> set[NodeRef]:
         return {(r.to_label, r.to_id) for r in self._rels_of(label, node_id, out=True)} | {
             (r.from_label, r.from_id) for r in self._rels_of(label, node_id, out=False)
@@ -202,6 +238,7 @@ class _View:
             if isinstance(value, str):
                 refs.add((label, value))
         near = set(need.neighbourhoods) | refs
+        near |= {(n.label, n.id) for m in need.matches for n in batch._matching(*m)}
         for label, node_id in list(near):
             live = batch._resolve(label, node_id) if label == "Task" else None
             if live is not None:
@@ -252,6 +289,15 @@ class _View:
 
     def in_rels(self, label: str, node_id: str, rel_type: str | None = None) -> list[RelRecord]:
         return self._rels(label, node_id, rel_type, out=False)
+
+    @property
+    def params(self) -> RulesParams:
+        return self._batch.params
+
+    def matching(self, label: str, prop: str, value: int) -> list[NodeRecord]:
+        if (label, prop, value) not in self._need.matches:
+            raise OutsideSliceError(f"{label} with {prop} = {value} are not in needs()")
+        return self._batch._matching(label, prop, value)
 
     def event(self, seq: int) -> StoredEvent | None:
         if seq not in self._need.events:
