@@ -32,6 +32,8 @@ CROSS_LEARNER_ALLOWED: dict[str, str] = {
     "quack/auth/links.py:_LEARNER_BY_EMAIL": "learner of a mail address, unknown before login",
     # D-C-111 (#97): the learner of a request is found by the token of its session.
     "quack/auth/sessions.py:_SESSION_BY_TOKEN": "learner of a session token, unknown before auth",
+    # D-A-128 (#142): the phone has no session; the learner is found by the pairing token.
+    "quack/auth/pairing.py:_REDEEM_TOKEN": "learner of a pairing token, unknown before pairing",
 }
 
 

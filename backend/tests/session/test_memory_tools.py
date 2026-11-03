@@ -26,6 +26,7 @@ from quack.session.tools import (
     MaterialChunk,
     ToolContext,
     VoiceSegment,
+    render_chunks,
     run_tool,
 )
 from tests.support import graph_read as fx
@@ -215,6 +216,8 @@ async def test_search_materials_and_modal_down() -> None:
     assert found.splitlines()[:2] == ['P1. From the material "Lecture 5", page 12:', "> text 0"]
     assert found.count("From the material") == SETTINGS.memory_tool_limits["search_materials"]
     _ids_absent(found, *chunk_ids)
+    nameless = render_chunks([MaterialChunk(chunk_ids[0], None, 3, "text")], lambda _: "P1")
+    assert nameless.splitlines()[0] == "P1. From a material, page 3:"  # D-B-171
 
     down = _ctx(_Reader(), search=None)
     assert await run_tool("search_materials", json.dumps({"query": "q", "skills": []}), down) == (

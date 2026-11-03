@@ -418,6 +418,8 @@ class Settings(BaseSettings):
     conversation_collapse_turns: int = 12
     # WP14.1 (Т-§4.5): label limits per call.
     candidate_skills_k: int = 15
+    # WP12.7 (Т-§5.7 «LIMIT 5»): tasks returned by one selection.
+    task_select_limit: int = 5
     label_max_topics: int = 8
     label_max_tasks: int = 5
     # WP6.2 (D-C-013): practice thresholds moved from quack/artifacts/params.py (ТЗ-П3).
@@ -473,6 +475,9 @@ class Settings(BaseSettings):
     )
     # WP16.3 (Т-§4.3).
     candidate_k: int = 15
+    # WP16.3 (Т-§4.10; D-B-185): a duplicate candidate scores cosine + weight × shared neighbours.
+    hygiene_min_score: float = 0.9
+    hygiene_neighbour_weight: float = 0.1
     # WP16.4 (Т-§4.9).
     domain_autolink_confidence: float = 0.8
     # WP11.2–11.3 (Т-§6.1, Т-§6.4, Т-§6.6).
@@ -503,6 +508,9 @@ class Settings(BaseSettings):
     # WP16.5 (Т-§22.10: one fix round; target value Т-§21.3 is 3).
     viz_max_fix_rounds: int = 1
     viz_static_base_url: str = ""
+    # WP16.5 (Т-§13.6 п.1): the allowed libraries, name → path under `viz_static_base_url`; the
+    # documents name D3, Plotly, KaTeX but no files or versions (D-B-177 [ПРОВЕРИТЬ], C: WP9.2).
+    viz_libraries: dict[str, str] = Field(default_factory=dict)
     # WP10.6 (ТЗ Ф4 §2.3 строка 20): UUIDv5 namespace of the learner pseudonym in traces.
     # Phase 4 decision D-B-105: a fixed namespace, never changed after the first trace.
     langsmith_pseudonym_ns: str = "6f1c2a9e-4b7d-5e3a-9c21-0d8e7f6a5b43"
@@ -569,7 +577,14 @@ class Settings(BaseSettings):
     deletions_s3_secret_key: SecretStr = SecretStr("")
     # WP20 (Т-§10.5, ТЗ §2.3 п.17)
     materials_k: int = 5
+    # Т-§3.4.6, Т-§10.5: the reserve taken inside SEARCH before post-filters and the final k.
+    vector_search_reserve: int = 30
     embedding_dim: int = 768
+    # Т-§10.5: the task instruction of a query «как рекомендует карточка модели»; the starting
+    # value is the card's own example (D-C-117, [ПРОВЕРИТЬ] by the search quality check).
+    embedding_query_instruction: str = (
+        "Given a web search query, retrieve relevant passages that answer the query"
+    )
     modal_token_id: SecretStr = SecretStr("")
     modal_token_secret: SecretStr = SecretStr("")
     # WP21 (Т-§15, Т-§22.11)

@@ -13,8 +13,11 @@ acknowledged again; with the store down nothing is acknowledged and the client r
 the canvas, in any API process, go through Redis pub/sub `canvas:{id}` (`publish_canvas`);
 without Redis a socket gets only its own acks (§4.2).
 
-`line_ready`, `typed_formula`, `check_request` are accepted by the protocol here; recognition,
-step checks and interventions handle them in WP21.3–21.5.
+`line_ready` is recognized in the background (`quack.canvas.recognition`, WP21.3): the socket
+keeps acknowledging batches while Spark reads the line; the result is `canvas.line_committed`
+and `line_recognized` to every device of the canvas. `typed_formula` goes to the log as LaTeX;
+erasing every stroke of a recognized line writes `canvas.line_erased`. `check_request` — step
+checks and interventions, WP21.4–21.5.
 """
 
 from __future__ import annotations
@@ -34,6 +37,13 @@ from redis.exceptions import RedisError
 from quack.api.auth import CurrentSession
 from quack.api.resources import AppResources
 from quack.canvas.boards import Canvas
+from quack.canvas.recognition import (
+    LineBook,
+    commit_typed,
+    erase_line,
+    line_recognized,
+    recognize_line,
+)
 from quack.canvas.strokes import (
     Erasure,
     Point,
@@ -140,6 +150,7 @@ async def serve_canvas(
         resources.storage,
         learner_id=session.learner_id,
         session_id=canvas.session_id,
+        canvas_id=canvas.canvas_id,
         chunk_seconds=resources.settings.stroke_chunk_seconds,
         max_batches=chunk_max_batches(resources.settings),
     )
@@ -152,6 +163,36 @@ async def serve_canvas(
     async def acknowledge(batch_nos: list[int]) -> None:
         for batch_no in batch_nos:
             await send({"type": "ack", "batch_no": batch_no})
+
+    async def deliver(message: dict[str, Any]) -> None:
+        """A server message to every device of the canvas; without Redis — to this socket."""
+        if resources.redis is not None:
+            try:
+                await publish_canvas(resources.redis, canvas.canvas_id, message)
+                return
+            except RedisError as exc:
+                log.warning("canvas_publish_failed", error=str(exc))
+        await send(message)
+
+    book = LineBook()
+    pending: set[asyncio.Task[None]] = set()
+    where = {
+        "learner_id": session.learner_id,
+        "session_id": canvas.session_id,
+        "canvas_id": canvas.canvas_id,
+        "redis": resources.redis,
+    }
+
+    async def recognize(line: LineReadyIn) -> None:
+        strokes = book.line(
+            line.line_id, line.stroke_ids, line.bbox, line.started_at, line.ended_at
+        )
+        committed = await recognize_line(
+            resources.db, resources.llm, resources.compute, line=strokes, **where
+        )
+        if committed is not None:
+            book.recognized(committed)
+        await deliver(line_recognized(line.line_id, committed))
 
     relay = (
         asyncio.create_task(
@@ -185,13 +226,30 @@ async def serve_canvas(
                 if journal.written(message.batch_no):
                     await acknowledge([message.batch_no])
                 else:
-                    journal.add(message.batch(), now=datetime.now(UTC))
+                    batch = message.batch()
+                    journal.add(batch, now=datetime.now(UTC))
                     await acknowledge(await journal.flush_due(now=datetime.now(UTC)))
+                    for line_id, line_text in book.add(batch):
+                        await erase_line(resources.db, line_id=line_id, text=line_text, **where)
+            elif isinstance(message, LineReadyIn):
+                task = asyncio.create_task(recognize(message))
+                pending.add(task)
+                task.add_done_callback(pending.discard)
+            elif isinstance(message, TypedFormulaIn):
+                await commit_typed(
+                    resources.db,
+                    block_id=message.block_id,
+                    latex=message.latex,
+                    at_ms=int(datetime.now(UTC).timestamp() * 1000),
+                    **where,
+                )
             else:
-                log.info("canvas_message_pending", kind=message.type)  # WP21.3–21.5
+                log.info("canvas_message_pending", kind=message.type)  # WP21.4–21.5
     except WebSocketDisconnect:
         pass
     finally:
+        if pending:  # lines already sent are still recognized and written
+            await asyncio.gather(*pending, return_exceptions=True)
         if relay is not None:
             relay.cancel()
             with contextlib.suppress(asyncio.CancelledError):
