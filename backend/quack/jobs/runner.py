@@ -17,7 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.compute_client.client import ComputeClient
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
+from quack.embeddings.client import EmbeddingClient
 from quack.jobs.kinds import KIND_LLM_ROLES
 from quack.jobs.queue import (
     ClaimedJob,
@@ -36,26 +38,33 @@ from quack.llm.errors import LLMBudgetExceededError
 from quack.llm.gateway import LLMGateway
 from quack.llm.pressure import pressured_models
 from quack.logging import get_logger
+from quack.storage.deletions import DeletionJournal
+from quack.storage.objects import ObjectStore
 
 log = get_logger(__name__)
 
 
 @dataclass(frozen=True)
 class JobContext:
-    """Per-process resources of `workers` (ТЗ Фазы 3 §4.2, seam S1).
+    """Per-process resources of `workers` (ТЗ Ф4 §4.2, seam S1).
 
-    The field set is a contract. Handlers take the heavy objects only from here and never
-    create them. `redis = None` means work without Redis (§4.2). Tests build the context with
+    The field set is a contract: every resource of §4.2 but `email`. Handlers take the heavy
+    objects only from here and never create them. `redis = None` means work without Redis.
+    `engine` and `session_factory` leave with SQLAlchemy (WP1.3). Tests build the context with
     `tests.support.resources.build_job_context`.
     """
 
     settings: Settings
+    db: Db
     session_factory: SessionFactory
     engine: AsyncEngine
     neo4j: AsyncDriver
     redis: Redis | None
     llm: LLMGateway
     compute: ComputeClient
+    storage: ObjectStore
+    embeddings: EmbeddingClient
+    deletions: DeletionJournal
 
 
 type JobHandler = Callable[[ClaimedJob, JobContext], Awaitable[None]]

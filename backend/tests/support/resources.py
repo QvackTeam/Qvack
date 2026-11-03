@@ -79,20 +79,30 @@ def build_job_context(
     neo4j: AsyncDriver | Any,
     redis: Redis | Any | None,
     *,
+    db: Db | None = None,
     engine: AsyncEngine | None = None,
     llm: LLMGateway | None = None,
     provider: LLMProvider | None = None,
     compute: ComputeClient | None = None,
+    storage: ObjectStore | None = None,
+    embeddings: EmbeddingClient | None = None,
+    deletions: DeletionJournal | None = None,
 ) -> JobContext:
     """`JobContext` over the test pools. `llm` is used as is (e.g. `FakeLLMProvider.gateway`);
     otherwise a gateway over `provider`, by default the LLM is down (`UnavailableLLMProvider`).
-    Compute defaults to an empty `ComputeScenario` (answers 503)."""
+    Compute defaults to an empty `ComputeScenario` (answers 503); storage, embeddings and the
+    deletion journal are the in-memory doubles. Without `db` (pass `pg_db`, seam S2) the `Db`
+    is over a closed pool, as in `build_app_resources`."""
     return JobContext(
         settings=settings,
+        db=db or Db(AsyncConnectionPool(settings.postgres_dsn, open=False)),
         session_factory=session_factory,
         engine=cast(AsyncEngine, engine),
         neo4j=cast(AsyncDriver, neo4j),
         redis=cast(Redis | None, redis),
         llm=llm or LLMGateway(session_factory, provider or UnavailableLLMProvider(), settings),
         compute=compute or scripted_compute(ComputeScenario()),
+        storage=storage or InMemoryObjectStore(),
+        embeddings=embeddings or FakeEmbeddingClient(settings.embedding_dim),
+        deletions=deletions or FakeDeletionJournal(),
     )

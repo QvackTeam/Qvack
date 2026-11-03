@@ -14,7 +14,7 @@ import inspect
 import math
 import random
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -50,6 +50,12 @@ from quack.llm.pressure import (
     set_pressure_flag,
 )
 from quack.llm.provider import LLMProvider, ProviderRequest, ProviderResponse, ReasoningEffort
+from quack.llm.streaming import (
+    StreamCompleted,
+    StreamEvent,
+    StreamingLLMProvider,
+    StreamRequest,
+)
 from quack.llm.strict_schema import to_strict_json_schema
 from quack.logging import get_logger
 from quack.prompts.registry import PromptRegistry, PromptTemplate
@@ -249,6 +255,54 @@ class LLMGateway:
         await self._finish_outbox(ctx, "completed", value.model_dump(mode="json"), totals)
         usage = LLMUsage(totals[0], totals[1], totals[2], totals[3])
         return LLMResult(value, False, prompt.sha256, response.model, usage)
+
+    # --- streamed steps of the teacher turn (ТЗ Ф4 WP10.2–10.3, D-B-152) ---
+
+    def stream_request(
+        self,
+        role: str,
+        prompt_version: int,
+        response_model: type[BaseModel],
+        variables: dict[str, Any],
+        *,
+        prompt_role: str | None = None,
+        reasoning_effort: ReasoningEffort | None = None,
+        tools: Sequence[Mapping[str, Any]] = (),
+    ) -> tuple[StreamRequest, PromptTemplate]:
+        """The first step of a streamed call: the rendered prompt, the strict schema, model,
+        effort, limits and cache key of `role` — as `generate_structured` builds them."""
+        prompt = self.prompts.load(prompt_role or role, prompt_version)
+        request = ProviderRequest(
+            model=self.settings.model_for_role(role),
+            prompt=prompt.render(variables),
+            json_schema=to_strict_json_schema(response_model),
+            schema_name=response_model.__name__,
+            temperature=0.0,
+            timeout_sec=self.settings.llm_role_timeout_s.get(role, self.settings.llm_timeout_sec),
+            reasoning_effort=reasoning_effort or self.settings.llm_role_reasoning.get(role),
+            max_output_tokens=self.settings.llm_role_max_output_tokens.get(role),
+            prompt_cache_key=f"{prompt_role or role}@{prompt_version}",
+        )
+        return StreamRequest(request, tools=tuple(tools)), prompt
+
+    def streaming(
+        self,
+        role: str,
+        prompt: PromptTemplate,
+        *,
+        learner_id: UUID,
+        session_id: UUID | None,
+        turn_id: UUID | None,
+    ) -> StreamingLLMProvider:
+        """A provider of streamed steps for the turn graph: each step passes the breaker and
+        the model slot (the teacher waits no longer than `teacher_admission_wait_ms`), gets a
+        ledger row and updates the breaker and the pressure flag (WP5 of Phase 3)."""
+        if not hasattr(self.provider, "stream_structured"):
+            raise TypeError(f"{type(self.provider).__name__} does not stream")
+        model = self.settings.model_for_role(role)
+        key = f"stream:{turn_id or uuid4()}"
+        ctx = _CallContext(role, prompt, model, learner_id, session_id, turn_id, key)
+        return _GatewayStream(self, ctx)
 
     # --- admission: semaphores per model (WP5.1) ---
 
@@ -563,6 +617,99 @@ class LLMGateway:
                     ),
                     {"t": spent, "s": ctx.session_id, "l": ctx.learner_id},
                 )
+
+
+class _GatewayStream:
+    """`StreamingLLMProvider` over the gateway. A provider error before the first event of a
+    step is retried like `_attempts` (unavailable, timeout; a 429 of the hot path is not); after
+    the first event nothing is retried — the learner may have seen it. A cut step is passed
+    on: the turn graph retries it with the doubled limit (Т-§11.1)."""
+
+    def __init__(self, gateway: LLMGateway, ctx: _CallContext) -> None:
+        self._gw = gateway
+        self._ctx = ctx
+
+    async def stream_structured(self, request: StreamRequest) -> AsyncIterator[StreamEvent]:
+        gw, settings = self._gw, self._gw.settings
+        provider: StreamingLLMProvider = self._gw.provider  # type: ignore[assignment]
+        ctx = replace(
+            self._ctx, model=request.base.model, reasoning_effort=request.base.reasoning_effort
+        )
+        failures = 0
+        while True:
+            await gw._admit_circuit(ctx)  # pyright: ignore[reportPrivateUsage]
+            started = time.monotonic()
+            deadline = started + request.base.timeout_sec
+            yielded = False
+            try:
+                async with gw._admitted(ctx.role, ctx.model):  # pyright: ignore[reportPrivateUsage]
+                    events = provider.stream_structured(request).__aiter__()
+                    try:
+                        while True:
+                            async with asyncio.timeout(max(deadline - time.monotonic(), 0)):
+                                try:
+                                    event = await anext(events)
+                                except StopAsyncIteration:
+                                    break
+                            if isinstance(event, StreamCompleted):
+                                await self._completed(ctx, event, _latency(started))
+                            yielded = True
+                            yield event
+                    finally:
+                        aclose = getattr(events, "aclose", None)
+                        if aclose is not None:
+                            await aclose()
+                return
+            except ProviderRateLimitedError as exc:
+                gw._circuit_neutral(ctx.model)  # pyright: ignore[reportPrivateUsage]
+                ttl = await gw._rate_limited(ctx, exc, _latency(started))  # pyright: ignore[reportPrivateUsage]
+                raise LLMRateLimitedError(
+                    f"{ctx.prompt.ref}: rate limited", retry_after_sec=ttl
+                ) from exc
+            except ProviderBadRequestError as exc:
+                gw._circuit_neutral(ctx.model)  # pyright: ignore[reportPrivateUsage]
+                await gw._error_ledger(ctx, _latency(started), "error", "bad_request")  # pyright: ignore[reportPrivateUsage]
+                log.warning("llm_bad_request", role=ctx.role, model=ctx.model, body=exc.body)
+                raise LLMUnavailableError(
+                    f"{ctx.prompt.ref}: bad request", reason="bad_request"
+                ) from exc
+            except (ProviderUnavailableError, TimeoutError) as exc:
+                code: UnavailableReason = (
+                    "timeout" if isinstance(exc, TimeoutError) else "unavailable"
+                )
+                await gw._error_ledger(ctx, _latency(started), "error", code)  # pyright: ignore[reportPrivateUsage]
+                await gw._circuit_failure(ctx.model)  # pyright: ignore[reportPrivateUsage]
+                log.warning("llm_unavailable", role=ctx.role, code=code)
+                if yielded or failures >= settings.llm_retry_attempts:
+                    raise LLMUnavailableError(
+                        f"{ctx.prompt.ref}: provider {code}", reason=code
+                    ) from exc
+                failures += 1
+                await gw.sleep(
+                    random.uniform(0, settings.llm_retry_base_ms / 1000 * 2 ** (failures - 1))
+                )
+
+    async def _completed(self, ctx: _CallContext, end: StreamCompleted, latency_ms: int) -> None:
+        gw = self._gw
+        usage = end.usage
+        response = ProviderResponse(
+            content="",
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cached_tokens=usage.cached_tokens,
+            model=end.model or ctx.model,
+            reasoning_tokens=usage.reasoning_tokens,
+        )
+        if end.status == "incomplete":
+            gw._circuit_neutral(ctx.model)  # pyright: ignore[reportPrivateUsage]
+            await gw._ledger(ctx, response, latency_ms, "incomplete", "incomplete")  # pyright: ignore[reportPrivateUsage]
+            return
+        gw._circuit_success(ctx.model)  # pyright: ignore[reportPrivateUsage]
+        await gw._ledger(ctx, response, latency_ms, "ok", None)  # pyright: ignore[reportPrivateUsage]
+        if low_remaining(end.headers, gw.settings.pressure_remaining_share):
+            await set_pressure_flag(
+                gw.redis, ctx.model, gw.settings.pressure_header_ttl_s, "headers", _now()
+            )
 
 
 def _parse[T: BaseModel](model: type[T], content: str) -> tuple[T | None, str]:

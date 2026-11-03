@@ -10,7 +10,7 @@ from uuid import UUID
 import pytest
 
 from quack.config import Settings
-from quack.events.models import StoredEvent
+from quack.events.log import StoredEvent
 from quack.jobs import rules_p4 as r
 from tests.events.samples import sample_payload, uid
 
@@ -24,19 +24,19 @@ def _event(event_type: str, seq: int = 10, **changes: Any) -> StoredEvent:
     return StoredEvent(
         learner_id=LEARNER,
         seq=seq,
-        event_id=UUID(int=seq),
+        id=seq,
         type=event_type,
         schema_version=1,
         actor="api",
-        session_id=changes.pop("session_id", UUID(int=99)),
-        turn_id=None,
         domain_id=None,
+        session_id=changes.pop("session_id", UUID(int=99)),
+        causation_seq=None,
         correlation_id=None,
-        causation_id=None,
         idempotency_key=f"k{seq}",
         payload_hash="h",
-        payload=payload,
         occurred_at=NOW,
+        payload=payload,
+        source_refs=[],
     )
 
 
@@ -187,8 +187,55 @@ def test_agent_request_class_and_kind() -> None:
     assert plan.kind == "agent.viz" and plan.priority_class == "P1"
     later = _event("agent.requested", payload={"kind": "artifact", "needed_in_session": False})
     assert _one(later).priority_class == "P2"
-    known = _event("agent.requested", payload={"kind": "known_check"})
-    assert _kinds(known) == []
+
+
+def test_known_check_request_is_the_known_claim_check() -> None:
+    """B's answer to D-A-110 p.7: `agent.requested {kind: known_check}` -> `check.known_claim`,
+    P1 if needed in the session, else P2; keys as for `known.claimed`."""
+    topic = uid("topic")
+    params = {"topic_id": topic}
+    now = _one(
+        _event(
+            "agent.requested",
+            payload={"kind": "known_check", "params": params, "needed_in_session": True},
+        )
+    )
+    claimed = _one(_event("known.claimed"))
+    assert now.kind == claimed.kind == "check.known_claim"
+    assert now.priority_class == "P1"
+    assert (now.lock_key, now.coalesce_key) == (claimed.lock_key, claimed.coalesce_key)
+    assert now.required_seq == 10
+    assert now.payload["topic_id"] == str(topic)
+    assert now.payload["request_id"] == str(uid("request"))
+    later = _event(
+        "agent.requested",
+        payload={"kind": "known_check", "params": params, "needed_in_session": False},
+    )
+    assert _one(later).priority_class == "P2"
+
+
+def test_known_check_request_without_topic_puts_no_job() -> None:
+    """Review B of #117: `check.known_claim` checks the skills of a topic (WP8.2); a request
+    without `params.topic_id` has nothing to check."""
+    event = _event(
+        "agent.requested",
+        payload={"kind": "known_check", "params": {}, "needed_in_session": True},
+    )
+    assert _kinds(event) == []
+
+
+def test_plan_update_cancels_agent_requests() -> None:
+    """WP7.4, Т-§13.7: the teacher's `planUpdate.cancel_requests` cancels those requests."""
+    first, second = UUID(int=31), UUID(int=32)
+    plan_update = {
+        **sample_payload("turn.committed")["markup"]["plan_update"],
+        "cancel_request_ids": [str(first), str(second)],
+    }
+    markup = {**sample_payload("turn.committed")["markup"], "plan_update": plan_update}
+    event = _event("turn.committed", payload={"markup": markup})
+    assert r.cancelled_requests(event) == [first, second]
+    assert r.cancelled_requests(_event("turn.committed")) == []
+    assert r.cancelled_requests(_event("message.sent")) == []
 
 
 def test_today_shown_coalesces_per_learner() -> None:
