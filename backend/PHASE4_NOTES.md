@@ -1625,6 +1625,20 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Обратимость: одна зависимость, один модуль.
 - Тесты: `tests/auth/test_pairing_wp22.py` (`T-CP1`); маршруты — `T-A1`, исключение — `T-E2`.
 - Требует подтверждения владельцем: нет.
+### D-C-134. WP22.3: конвейер фото — режим листа `recognizer@1`, сравнение с листом, рисунки ждут `segmenter`
+- Класс: B (схема роли C, ключи строк фото); рисунки — BLOCKED-C-204
+- WP / место: WP22.3, S8; `quack/canvas/photo_pipeline.py`, `quack/canvas/recognition.py`, `quack/prompts/recognizer/v1.md`
+- Решение:
+  1. **Два режима `recognizer@1`** — как `builder@1` (D-B-140): переменная `mode` (`line` — строка пера, WP21.3; `sheet` — лист фото), по схеме на режим. `RecognizerSheetOutput {lines: [SheetLine]}`, `SheetLine` — поля `RecognizerOutput` плюс `kind: drawing` и `bbox {left, top, right, bottom}` — доли ширины и высоты изображения от левого верхнего угла (рамка примерная, `Т-§22.6`; строгая схема не принимает кортеж). Отдельной версии промпта ТЗ не называет (строка `recognizer@1` таблицы промптов).
+  2. **Шаги 1–4** (`Т-§22.6`): `/v1/image/align` → один вызов `recognizer` по выровненному снимку (`image/webp`, ключ `recognizer:photo:{photo_id}`) → выравнивание последовательностей с наибольшим числом совпавших пар (пара — только при нормализованном расстоянии Левенштейна ниже `sheet_line_match_threshold`) → в журнал новые и изменённые строки `canvas.line_committed {source: photo, photo_id, bbox, stroke_ids: []}`, время строки — время `photo.uploaded`; строка, ставшая зачёркнутой, — `canvas.line_erased`. Впервые увиденная зачёркнутая строка пишется обоими событиями: она прочитана и стёрта.
+  3. **С чем сравнивается снимок.** «Прошлый снимок» — текущий лист канваса по журналу: последние прочтения строк фото этого листа, сверху вниз по `bbox.top`. Отдельного события листа в каталоге S3 нет, поэтому лист — в id строки: `{sheet}:{photo}:{n}`, где `sheet` — снимок, открывший лист. Изменённая строка сохраняет id; ключ события — `canvas.line_committed:{canvas}:{line}:{photo}`. Совпало меньше `new_sheet_match_share` строк листа — новый лист: все строки снимка новые.
+  4. **Повтор задачи** даёт то же прочтение, и каждая строка совпадает сама с собой — ничего нового (закон 5). Ошибки compute и модели не глотаются: задача повторяется очередью.
+  5. Источник строки — весь снимок с рамкой (`Т-§22.6`), куски не сохраняются. Снимок без канваса — WP22.4, обработчик ничего не пишет.
+  6. **Шаг 5 (рисунки)** — BLOCKED-C-204: в шлюзе нет адаптера `segmenter` (`sam-3.1`, WP10.1 по итогу WP0 п.3д, B). Рисунки считаются и пропускаются (`photo_drawings_skipped`).
+  7. Регистрация обработчика в сборке workers — строка `quack.canvas.photo_pipeline` в `HANDLER_MODULES` (`quack/runtime/__init__.py`, зона A) — поручение A.
+- Почему: ТЗ Ф4 WP22.3, `Т-§22.6`, `Т-§16.3`, D-B-140, D-C-123.
+- Обратимость: код C; формат id строк фото — до первых данных стенда.
+- Тесты: `tests/canvas/test_photo_pipeline_wp22.py`; `tests/llm/test_labels.py` (два режима `recognizer@1`).
 ### D-C-136. WP21.4 п.3: роль `canvas_diagnoser@1` — схема выхода, промпт, перевод в диагноз
 - Класс: B (схема роли C, S8); слой 1 — черновик по тезисам документа, как D-C-132
 - WP / место: WP21.4 п.3, WP21.5, S8; `quack/canvas/diagnosis.py`, `quack/prompts/canvas_diagnoser/v1.md`
@@ -1842,9 +1856,12 @@ PR #77 (dbmate v2.36.0, sha256).
 - ~~BLOCKED-C-203~~ — снят 2026-11-03: слой 1 `artifact_writer@1` — черновик по тезисам документа (D-C-132).
 - **BLOCKED-C-202 (C): нет доктрины (слой 1) роли `recognizer@1`.** Слой 2 написан (D-C-123), роль работает на заглушке; `test_prompt_has_owner_doctrine[recognizer@1]` — `xfail(strict=True)`. Нужно от владельца: текст слоя 1 — как читать рукопись (кириллица и формулы, `Т-§22.2`), что считать зачёркнутым, как выражать неуверенность (§7.6 п.1, §0.4.4 п.13).
 - ~~BLOCKED-C-202~~ — снят 2026-11-03: слой 1 `recognizer@1` — черновик по тезисам документа (D-C-132).
+- BLOCKED-C-204 — рисунки на фото (WP22.3 шаг 5): нет адаптера `segmenter` (`sam-3.1`) в шлюзе — B, WP10.1 (D-C-134 п.6).
 
 ## Красные прогоны
 
+- WP21.3, роль `recognizer@1` (C, `phase-4-c-recognizer`, коммит `bf2b46a`): `pytest tests/llm/test_labels.py -k "recognizer or contracts_file"` — 2 failed (файла промпта нет, `PROMPT_CONTRACTS.md` устарел), 1 xfailed. Зелёный: `tests/llm/test_labels.py` — 59 passed, 1 xfailed (BLOCKED-C-202).
+- WP22.1, привязка (C, `phase-4-c-wp22-pairing`): красный прогон отдельно не снят (облегчённый TDD). Зелёный: `tests/auth`, `tests/canvas`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` — зелёные.
 - WP12.7, подбор задач (D-B-169): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 5 подмен (без `learnerId` задачи, без уровня, без «семейство не встречалось», порядок, лимит), каждая роняет тест. Зелёный: `tests/practice/test_select_tasks.py` против Neo4j — 1 passed.
 - WP12.5, проверка задачи учителя (D-B-167): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 11 подмен, каждая роняет тест. Зелёный: `tests/practice/test_task_check.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 4 passed.
 - WP23.1, документы артефактов (C, `phase-4-c-wp23-artifacts`): красный прогон отдельно не снят (облегчённый TDD по указанию владельца, 2026-11-03). Зелёный: `tests/artifacts/test_documents_wp23.py` + `tests/test_app_assembly.py` — 25 passed; с ключами — `tests/e2e/test_isolation_and_idempotency.py` + `tests/artifacts/test_documents_wp23.py` — 9 passed.
