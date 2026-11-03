@@ -1258,6 +1258,13 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
 - Попутно (ТЗ §0.4.4 п.10): подавления `type: ignore` в коде и тестах A заменены проверкой моделью, `cast` и `isinstance` — их не было из-за ограничений библиотек.
 - Требует подтверждения владельцем: нет.
 
+### D-A-204. WP7.5: обработчик `manifests.cleanup`
+- Класс: B. WP7.5; `Т-§3.2`, `Т-§3.6` (закрывает Ф3 R14); `quack/jobs/cleanup_p4.py`
+- Решение: раз в сутки (ключ `manifests-cleanup:{дата}`, D-A-166) удаляются манифесты ходов всех учеников старше `turn_manifest_retention_days` (по `created_at`). Это межученический оператор периодической задачи, он внесён в `CROSS_LEARNER_ALLOWED` с причиной. Вид — в `JOB_KINDS`/`KIND_LLM_ROLES` без ролей, модуль — в `HANDLER_MODULES` (процедура (б) #173). `calibration.weekly` (`Т-§18.5`) и `exports.cleanup` (`Д-§8.4`, экспорт — C) — без обработчиков: задачи ждут в очереди.
+- Почему: §0.4.3 п.1–2.
+- Тесты: `tests/graph/test_projection_runner.py::test_manifests_cleanup_deletes_only_old_manifests`.
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.

@@ -63,6 +63,8 @@ CROSS_LEARNER_ALLOWED |= (
     | {
         # D-A-200: the projector process walks the learners behind their watermark (Т-§2.4).
         "quack/graph/projection/process.py:_PENDING": "the projector walks every learner",
+        # D-A-204: `manifests.cleanup` deletes the old manifests of every learner (Т-§3.6).
+        "quack/jobs/cleanup_p4.py:_DELETE_OLD": "the periodic cleanup of every learner",
     }
 )
 

@@ -680,3 +680,25 @@ async def test_delete_topic(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -
         )
         found = {r["id"] async for r in result}
     assert found == {T2, S2}
+
+
+async def test_manifests_cleanup_deletes_only_old_manifests(pg_db: Db) -> None:
+    """WP7.5 (`Т-§3.6`, D-A-204): manifests older than `turn_manifest_retention_days` go; newer
+    ones stay."""
+    from datetime import UTC, datetime, timedelta
+
+    from quack.jobs.cleanup_p4 import delete_old_manifests
+
+    learner, now = await create_learner(pg_db), datetime(2026, 11, 3, tzinfo=UTC)
+    for manifest, age in ((uuid4(), 40), (uuid4(), 5)):
+        await pg_db.execute(
+            "INSERT INTO ops.turn_manifests (manifest_id, learner_id, session_id, prompt_version, "
+            "role, model, projected_seq, created_at) VALUES (%(m)s, %(l)s, %(s)s, 'teacher@1', "
+            "'teacher', 'm', 0, %(at)s)",
+            {"m": manifest, "l": learner, "s": uuid4(), "at": now - timedelta(days=age)},
+        )
+    assert await delete_old_manifests(pg_db, now - timedelta(days=30)) >= 1
+    rows = await pg_db.fetch_all(
+        "SELECT created_at FROM ops.turn_manifests WHERE learner_id = %(l)s", {"l": learner}
+    )
+    assert [r["created_at"] for r in rows] == [now - timedelta(days=5)]
