@@ -59,7 +59,7 @@ def test_every_kind_of_the_spec_is_listed_once_and_removed_ones_are_gone() -> No
     assert not set(r.REMOVED_JOB_KINDS) & set(r.JOB_KINDS + r.PERIODIC_JOB_KINDS)
 
 
-def test_every_rule_row_names_known_kinds() -> None:
+def test_rule_table() -> None:
     known = set(r.KIND_SPEC)
     for row in r.RULES:
         assert set(row.job_kinds) <= known, row

@@ -141,7 +141,7 @@ async def test_task_closed_closes_the_episode_and_the_content_goes_to_extraction
     assert len(await jobs_of(jobs_db, learner, "analyst.run")) == 1  # the same task.closed
 
 
-async def test_session_ended_and_turn_limit_and_intent_change(jobs_db: Db) -> None:
+async def test_episode_boundaries(jobs_db: Db) -> None:
     learner = await create_learner(jobs_db)
     log = Log(jobs_db, learner)
     first = await log.put("message.sent")
@@ -224,7 +224,7 @@ async def test_open_episode_of_a_session_is_kept_in_the_counters(jobs_db: Db) ->
 # --- coverage (T-D3) ---------------------------------------------------------------------
 
 
-async def test_episode_without_content_is_covered_by_the_dispatcher(jobs_db: Db) -> None:
+async def test_episode_without_content(jobs_db: Db) -> None:
     """T-D3: only closed answers with code verdicts — `nothing_to_extract`, no job."""
     learner = await create_learner(jobs_db)
     log = Log(jobs_db, learner)

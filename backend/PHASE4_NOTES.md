@@ -700,7 +700,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Класс: B. WP7.4; `Т-§13.8`, `Т-§1.6`; `quack/jobs/queue_p4.py`
 - Решение: каждая смена статуса задачи с `visible` и непустым `session_id` после коммита публикует в `learner:{id}` объект `{"kind": "jobs_changed", "session_id"}` (orjson). Переходы: вставка (`queued`), выбор (`running`), `skipped_budget`, завершение (`succeeded`/`failed`/`cancelled`), возврат в очередь, вытеснение, отмена. При отмене — один сигнал на сессию. Публикация идёт через `Db.on_commit`, сбой пишется в лог (закон 9). Без Redis сигнала нет. Функции очереди принимают `redis=` (по умолчанию `None`); исполнитель и диспетчер передают свой.
 - Почему: §0.4.3 п.1; формат канала решён C (D-C-141), потребитель — `learner_stream.py` (C).
-- Тесты: `tests/jobs/test_queue_p4.py::test_status_change_of_a_visible_job_publishes_jobs_changed` (не до коммита, невидимая и без сессии молчат, по одной публикации на смену).
+- Тесты: `tests/jobs/test_queue_p4.py::test_visible_and_plaque` (не до коммита, невидимая и без сессии молчат, по одной публикации на смену).
 - Требует подтверждения владельцем: нет.
 
 ### Ответы потока A (2026-11-02)
@@ -2095,6 +2095,8 @@ PR #77 (dbmate v2.36.0, sha256).
 - S6 G2 `artifact.topic_refresh` (A, D-A-136, коммит `5eb9b55`): `uv run pytest tests/jobs/test_rules_p4.py` — 1 failed (`NotImplementedError`). Подмены: ключ по склейке и `seq`, блокировка по ученику, нет причины, нет `required_seq`, факты не читаются, подсказки с ключом сессии — 6/6. Зелёный: `tests/jobs` — 35 passed.
 
 ## Правки тестов
+
+- A, 2026-11-03 (#182): тесты WP7 названы ID ТЗ §8: `test_every_rule_row_names_known_kinds` → `test_rule_table` (T-D1), `test_session_ended_and_turn_limit_and_intent_change` → `test_episode_boundaries` (T-D2), `test_episode_without_content_is_covered_by_the_dispatcher` → `test_episode_without_content` (T-D3), `test_coalesce_raises_required_seq_and_keeps_one_job` → `test_coalesce_greatest` (T-D4), `test_cancel_queued_and_running` → `test_cancel_requested` (T-D6), `test_retry_with_growing_pause_then_failed_with_agent_completed` → `test_failed_writes_agent_completed` (T-D8), `test_status_change_of_a_visible_job_publishes_jobs_changed` → `test_visible_and_plaque` (T-D10). `test_max_jobs_per_learner` (T-D5), `test_skipped_budget` (T-D7) уже так названы. T-D9 (`test_periodic_keys`) в #182 нет — периодические задачи Фазы 4 ещё не сделаны.
 
 - `tests/e2e/test_isolation_and_idempotency.py`, `tests/e2e/endpoints.py` (C, WP23.1): три маршрута блоков — в обходе `T-E2`; тема для них записывается в журнал Фазы 4 (`topic.created`), которого структура Фазы 3 в обходе не пишет (D-C-112); `accept` и `DELETE` — в `NO_OTHER_BODY` (тело — только ключ).
 - `tests/test_app_assembly.py` (C, WP23.1): в `EXPECTED_ROUTES` и `_declared_routes` добавлены четыре маршрута конспекта §6.4 (§8.15 п.2 — новый маршрут контракта).

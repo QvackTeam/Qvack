@@ -85,7 +85,7 @@ async def test_enqueue_is_idempotent_by_job_key(jobs_db: Db) -> None:
     assert len(await _rows(jobs_db)) == 1
 
 
-async def test_coalesce_raises_required_seq_and_keeps_one_job(jobs_db: Db) -> None:
+async def test_coalesce_greatest(jobs_db: Db) -> None:
     """T-D4: the second close of a task while the analyst waits lifts its `required_seq`,
     there is no second job; after the start the next event puts a new one."""
     learner = await create_learner(jobs_db)
@@ -357,7 +357,7 @@ async def test_budget_is_per_session_and_inclusive_of_the_limit(jobs_db: Db) -> 
 # --- cancel -------------------------------------------------------------------------------
 
 
-async def test_cancel_queued_and_running(jobs_db: Db) -> None:
+async def test_cancel_requested(jobs_db: Db) -> None:
     """T-D6: `planUpdate` cancels: a waiting job → `cancelled`; a running one is told at the
     pulse and the executor ends it as `cancelled`."""
     learner, stranger = await create_learner(jobs_db), await create_learner(jobs_db)
@@ -418,7 +418,7 @@ async def test_cancel_request_does_not_stop_a_finished_job(jobs_db: Db) -> None:
 # --- failure ------------------------------------------------------------------------------
 
 
-async def test_retry_with_growing_pause_then_failed_with_agent_completed(jobs_db: Db) -> None:
+async def test_failed_writes_agent_completed(jobs_db: Db) -> None:
     """T-D8: attempts out → `failed` and `agent.completed {ok: false}`; there is no DLQ."""
     learner = await create_learner(jobs_db)
     session = uuid4()
@@ -607,7 +607,7 @@ async def test_visible_jobs_of_the_session_only(jobs_db: Db) -> None:
 # --- the plaque signal (T-D10; Т-§13.8, D-C-141) ------------------------------------------
 
 
-async def test_status_change_of_a_visible_job_publishes_jobs_changed(
+async def test_visible_and_plaque(
     jobs_db: Db, redis: Redis
 ) -> None:
     learner, session = await create_learner(jobs_db), uuid4()
