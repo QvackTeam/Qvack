@@ -966,6 +966,7 @@ def _verdict_recorded(event: StoredEvent, view: SliceView) -> list[Mutation]:
     assistance = "shown_solution" if p.solution_shown else "hint" if p.help_step > 0 else "none"
     domain = str(task_props["domainId"])
     changes: list[Mutation] = []
+    made: list[tuple[str, Props]] = []
     for n, (skill, level) in enumerate(pairs):
         evidence, props = _evidence(
             event,
@@ -979,11 +980,16 @@ def _verdict_recorded(event: StoredEvent, view: SliceView) -> list[Mutation]:
             assistance=assistance,
             hint_step=p.help_step,
         )
+        made.append((evidence, props))
         changes += [
             MergeNode("Evidence", evidence, props),
             MergeRel("Evidence", evidence, "ON", "Skill", skill, {}),
             MergeRel("Evidence", evidence, "ON_TASK", "Task", task, {}),
         ]
+    if p.outcome == "correct":
+        done: set[tuple[str, str, int]] = set()
+        for (evidence, props), (skill, level) in zip(made, pairs, strict=True):
+            changes += _derived(event, view, (evidence, props), skill, level, task, done)
     first = deterministic_id(event.learner_id, event.seq, "evidence:0")
     if p.outcome != "correct":
         misconception = None
@@ -1000,6 +1006,55 @@ def _verdict_recorded(event: StoredEvent, view: SliceView) -> list[Mutation]:
         changes += [MergeRel("Evidence", first, "RESISTED", "Misconception", m, {})
                     for m in _trapped(view, task, task_props)]  # fmt: skip
     return changes
+
+
+def _derived(
+    event: StoredEvent,
+    view: SliceView,
+    source: tuple[str, Props],
+    skill: str,
+    level: int,
+    task: str,
+    done: set[tuple[str, str, int]],
+) -> list[Mutation]:
+    """WP4.6, `Т-§7.9`: from a direct positive evidence, one step — `indirect` to a prerequisite
+    over `REQUIRES` (confidence ≥ `requires_min_confidence`), `transfer` over `SAME_IDEA` (either
+    direction, ≥ `same_idea_min_confidence`); level `min(3, source level)`; the weight factor is
+    the fold's (×0.5 / ×0.6). Created with the source over the relations in the slice now: a
+    relation added later derives nothing from the past ([РЕШЕНИЕ Ф4])."""
+    params = view.params
+    targets: list[tuple[str, str]] = [
+        ("indirect", r.to_id)
+        for r in view.out_rels("Skill", skill, "REQUIRES")
+        if _num(r.props.get("confidence")) >= params.requires_min_confidence
+    ]
+    for r in [
+        *view.out_rels("Skill", skill, "SAME_IDEA"),
+        *view.in_rels("Skill", skill, "SAME_IDEA"),
+    ]:
+        if _num(r.props.get("confidence")) >= params.same_idea_min_confidence:
+            targets.append(("transfer", r.to_id if r.from_id == skill else r.from_id))
+    source_id, source_props = source
+    changes: list[Mutation] = []
+    for kind, target in sorted(targets):
+        key = (kind, target, min(3, level))  # one per answer: two sources must not count twice
+        if target == skill or key in done or view.node("Skill", target) is None:
+            continue
+        done.add(key)
+        node = deterministic_id(event.learner_id, event.seq, f"derived:{source_id}:{kind}:{target}")
+        props = source_props | {"level": min(3, level), "derivedKind": kind, "quote": "",
+                                "searchable": False}  # fmt: skip
+        changes += [
+            MergeNode("Evidence", node, props),
+            MergeRel("Evidence", node, "ON", "Skill", target, {}),
+            MergeRel("Evidence", node, "ON_TASK", "Task", task, {}),
+            MergeRel("Evidence", node, "DERIVED_FROM", "Evidence", source_id, {}),
+        ]
+    return changes
+
+
+def _num(value: object) -> float:
+    return float(value) if isinstance(value, int | float) else 0.0
 
 
 def _hypothesis(

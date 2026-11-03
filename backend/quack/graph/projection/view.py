@@ -111,11 +111,17 @@ class RulesParams:
     """Parameters of `Т-§7`–`Т-§9` the handlers read; they belong to `rules@N` (`Т-§2.5`)."""
 
     root_cause_confidence: Mapping[str, float]
+    requires_min_confidence: float = 0.6
+    same_idea_min_confidence: float = 0.7
 
     @classmethod
     def from_settings(cls, settings: Settings) -> RulesParams:
         confidence = {str(k): v for k, v in settings.root_cause_confidence_map.items()}
-        return cls(root_cause_confidence=confidence)
+        return cls(
+            root_cause_confidence=confidence,
+            requires_min_confidence=settings.requires_min_confidence,
+            same_idea_min_confidence=settings.same_idea_min_confidence,
+        )
 
 
 @dataclass(frozen=True)
@@ -365,6 +371,12 @@ class _View:
                     (r.from_label, r.from_id)
                     for r in batch._rels_of("Task", live, out=False)
                     if r.rel_type == "ON_TASK"
+                }
+                # ... and the skills of its markup with their relations (WP4.6, D-A-185).
+                near |= {
+                    (r.to_label, r.to_id)
+                    for r in batch._rels_of("Task", live, out=True)
+                    if r.rel_type == "TESTS"
                 }
         self._near: frozenset[NodeRef] = frozenset(near)
 

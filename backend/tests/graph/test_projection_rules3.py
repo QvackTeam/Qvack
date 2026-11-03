@@ -1170,3 +1170,39 @@ def test_second_opinion_raises_an_agreed_diagnosis_to_t2() -> None:
         opinion = _event(82, "observation.second_opinion", {"target_seq": 81, "agreed": agreed})
         nodes, _ = _run([diagnosis, opinion], *_verdict_graph())
         assert nodes[("Evidence", _ev(0, 81))]["tier"] == tier
+
+
+def test_derived_evidence() -> None:
+    """T-F7 (WP4.6, `Т-§7.9`): from a direct positive evidence, one step: `indirect` over
+    `REQUIRES` with enough confidence, `transfer` over `SAME_IDEA` in either direction; level
+    `min(3, source)`, `DERIVED_FROM` the source; nothing from a failure or a weak relation."""
+    third, weak = str(UUID(int=0x53)), str(UUID(int=0x54))
+    nodes, rels = _verdict_graph()
+    nodes += [
+        _node("Skill", third, domainId=DOMAIN, name="t", summary="s", status="active",
+              origin="session"),
+        _node("Skill", weak, domainId=DOMAIN, name="w", summary="s", status="active",
+              origin="session"),
+    ]  # fmt: skip
+    rels += [
+        _rel(("Skill", SKILL), "REQUIRES", ("Skill", SKILL_B), origin="model", confidence=0.9),
+        _rel(("Skill", third), "SAME_IDEA", ("Skill", SKILL), confidence=0.8),
+        _rel(("Skill", SKILL), "REQUIRES", ("Skill", weak), origin="model", confidence=0.1),
+    ]
+    graph, links = _run([_answer(), _verdict(outcome="correct")], nodes, rels)
+    derived = {
+        str(k[1]): graph[("Evidence", str(k[1]))]
+        for k in links
+        if k[0] == "Evidence" and k[2] == "DERIVED_FROM"
+    }
+    found = sorted(
+        (str(p["derivedKind"]), int(p["level"]), k[4])  # type: ignore[arg-type]
+        for e, p in derived.items()
+        for k in links
+        if k[:3] == ("Evidence", e, "ON")
+    )
+    # sources at levels 3 and 4 give one derived evidence of level 3 per target, not two
+    assert found == [("indirect", 3, SKILL_B), ("transfer", 3, third)]
+    assert all(p["tier"] == 1 and p["outcome"] == "correct" for p in derived.values())
+    _, links = _run([_answer(), _verdict(outcome="incorrect")], nodes, rels)
+    assert not [k for k in links if k[2] == "DERIVED_FROM"]
