@@ -151,10 +151,13 @@ def test_perfect_mix_is_calibrated_zero_skew() -> None:
 def test_calibration_needs_min_reports_and_the_gate() -> None:
     events = [answer(i, confidence=3) for i in range(1, 10)]  # 9 reports
     assert learned(events, [evidence(i) for i in range(1, 10)]).confidence_brier is None
-    # Ten reports, but one outcome does not pass the gate and one is `partial`: eight pairs.
+    # Ten reports, but one outcome does not pass the gate: nine pairs.
     events = [answer(i, confidence=3) for i in range(1, 11)]
-    ev = [evidence(i) for i in range(1, 9)] + [evidence(9, gate=False), evidence(10, "partial")]
+    ev = [evidence(i) for i in range(1, 10)] + [evidence(10, gate=False)]
     fold = learned(events, ev)
+    # Nor does `partial` count (it never opens the gate).
+    partial = learned(events, [evidence(i) for i in range(1, 10)] + [evidence(10, "partial")])
+    assert partial.confidence_brier is None
     assert fold.confidence_brier is None and fold.confidence_bias is None
 
 
