@@ -254,3 +254,19 @@ class StateAt(_Fact):
     learner_id: UUID
     seq: int
     skills: list[SkillFact] = []
+
+
+class CandidateSkill(_Fact):
+    """A candidate skill of the extractor (`Т-§7.6`, WP15 п.2): its label is built from it."""
+
+    skill_id: UUID
+    name: str
+    topic_id: UUID
+
+
+class ExtractionCandidates(_Fact):
+    """Input of `extractor@3` from memory (WP15 п.2): candidate skills and the known
+    misconceptions of those skills."""
+
+    skills: list[CandidateSkill]
+    misconceptions: list[MisconceptionFact]
