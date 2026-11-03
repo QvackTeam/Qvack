@@ -46,7 +46,6 @@ from quack.logging import get_logger
 log = get_logger(__name__)
 
 WRITER_ROLE = "artifact_writer"
-WRITER_VERSION = 1
 NOTES_TYPE = "notes"
 NO_LEARNER_SKILL = "None."
 
@@ -285,11 +284,14 @@ async def refresh_topic_notes(
     if context is None:
         log.info("topic_refresh_unknown_topic", topic_id=str(topic_id))
         return None
+    prompt = settings.llm_roles[WRITER_ROLE].prompt  # `artifact_writer@N`, §0.4
+    if prompt is None:
+        raise ValueError("role 'artifact_writer' has no prompt")
     blocks: list[SystemBlock] = []
     for attempt in range(2):  # Т-§17.3: a violation — one more generation, then dropped
         result = await gateway.generate_structured(
             WRITER_ROLE,
-            WRITER_VERSION,
+            int(prompt.rsplit("@", 1)[1]),
             ArtifactWriterOutput,
             context.variables,
             learner_id,
@@ -309,7 +311,7 @@ async def refresh_topic_notes(
         kind="notes",
         owner_id=topic_id,
         blocks=blocks,
-        created_by=f"{WRITER_ROLE}@{WRITER_VERSION}",
+        created_by=prompt,
         redis=redis,
     )
     return notes.version
