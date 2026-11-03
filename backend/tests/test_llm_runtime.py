@@ -267,6 +267,21 @@ async def test_semaphores_are_per_model_and_role(
     assert api.peak == {SPARK: 3}  # api: three spark calls at once
 
 
+async def test_hard_call_takes_the_hard_model(
+    db: SessionFactory, role_prompts: PromptRegistry
+) -> None:
+    """Т-§11.1 «Spark, для сложных — Wonder» (WP12.4, WP12.6, D-B-166): `hard=True` calls the
+    role's `hard_model`; without it — the role's model; a role without one ignores `hard`."""
+    provider = _scripted()
+    gw = _gw(db, provider, role_prompts)
+    hard_model = gw.settings.llm_roles["solution_space"].hard_model
+    assert hard_model is not None and hard_model != SPARK
+    await _ask(gw, "solution_space", prompt_role="extractor", hard=True)
+    await _ask(gw, "solution_space", prompt_role="extractor")
+    await _ask(gw, "extractor", hard=True)
+    assert [c.model for c in provider.calls] == [hard_model, SPARK, SPARK]
+
+
 async def test_retry_on_unavailable_then_success(
     db: SessionFactory, role_prompts: PromptRegistry
 ) -> None:
