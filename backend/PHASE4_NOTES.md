@@ -102,7 +102,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | WP7.1 (A), S6 | A | виды задач и таблица правил по событию (D-A-110); строка `known_check` и отмена поручений (D-A-115) — `phase-4-a-g1`; строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 27 passed |
 | S5 (A), WP3.2 таблица | A | строки обработчиков проектора на 38 типов в `phase-4-a-s5` (D-A-125); обработчики — G2 | `tests/graph/test_projector_rows.py`: 3 passed |
 | S1 (A), `JobContext` | A | поля §4.2 `db`, `storage`, `embeddings`, `deletions` в `phase-4-a-g1` (D-A-114) | `tests/jobs/test_job_context.py`: 2 passed |
-| WP3.1 (A) | A | схема Neo4j Фазы 4 в `quack/db/neo4j.py`: уникальность `id` для Hub, Option, Material, Chunk, Digest, Profile; range по `learnerId` на метках, где его ещё нет; составной `(learnerId, retDueAtMs)` на Skill; пять векторных индексов с фильтрующими свойствами и `embedding_dim`; сосуществует с индексами Фазы 3 до WP1.3. WP3.2 часть 1 (D-A-129) в `phase-4-a-wp3-projector`: срез с проверкой `needs`, изменения, обработчики структуры (домен, темы, навык, связи, хабы) и `embedding.ready`; остальные 26 строк S5, фазы Б–В, режимы, пересборка — дальше | `tests/graph/test_schema_wp31.py` + `test_infra.py`: 4 passed (Neo4j 2026.06.0) |
+| WP3.1 (A) | A | схема Neo4j Фазы 4 в `quack/db/neo4j.py`: уникальность `id` для Hub, Option, Material, Chunk, Digest, Profile; range по `learnerId` на метках, где его ещё нет; составной `(learnerId, retDueAtMs)` на Skill; пять векторных индексов с фильтрующими свойствами и `embedding_dim`; сосуществует с индексами Фазы 3 до WP1.3. WP3.2 части 1–2 (D-A-129, D-A-130) в `phase-4-a-wp3-projector`: срез с проверкой `needs`, изменения, обработчики структуры, `embedding.ready`, «знаю», предпочтения, материалы, сводка, заблуждения, конец сессии (20 из 38); остальные 18 строк S5, фазы Б–В, режимы, пересборка — дальше | `tests/graph/test_schema_wp31.py` + `test_infra.py`: 4 passed (Neo4j 2026.06.0) |
 | WP1.1–1.2 (A) | A | выполнен в `phase-4-a-wp1` (шов S2): базовая миграция dbmate, `Db`, `append_events`, параметры §6.7 потока A. WP1.4 (`.squawk.toml`, S16) — к G2; WP1.3 — к G3/G4 | `tests/db`: 19 passed |
 | WP0 (зона B) | B | выполнен: аудит, п.3г, п.3д, п.5 | — (скрипт п.3г) |
 | Этап I G1 (B: S7, S8, S11, S13) | B | контракты в `phase-4-b`, тесты контрактов зелёные | см. «Красные прогоны» |
@@ -470,6 +470,18 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
   7. **Вектор `embedding.ready`** — base64 от float32 (WP20.2), порядок байтов little-endian. В документах порядок не назван, сообщено C (#135).
 - Почему: §0.4.3 п.1–2, п.5; законы 3, 8.
 - Тесты: `tests/graph/test_projection_rules3.py` — `T-P3`, `T-P5`, группа структуры `T-P4`, неизвестный тип `T-P6`. `test_every_projector_row_has_a_handler` красный, пока нет обработчиков остальных 26 строк S5.
+- Требует подтверждения владельцем: нет.
+
+### D-A-130. WP3.2 `rules@3`, часть 2: «знаю», предпочтения, материалы, сводка, заблуждения, конец сессии
+- Класс: B. WP3.2; `Т-§3.4.2`, `Т-§3.4.3`, `Т-§3.4.6`, `Т-§9.1`, `Т-§9.5`, `Т-§13.5`; `quack/graph/projection/handlers.py`
+- Решение:
+  1. **Необязательный id в свойстве.** Нет id — явная пустая строка `''` (закон 8: `Material.sessionId` без сессии, `Misconception.targetedInSessionId` после конца сессии). `Т-§3.4.4` задаёт правила для перечислений, счётчиков и времён, но не для id.
+  2. **Единственные узлы.** `Profile` (1:1 с учеником) — id UUIDv5(learner_id, 0, `profile`). `Digest` (последняя сводка домена, 1:1) — UUIDv5(learner_id, 0, `digest:<domain_id>`). `seq = 0` в журнале не бывает. Новая сводка заменяет прежнюю на том же узле.
+  3. **`preference.set`**: ключ `language` пишется в свойство `prefLanguage` («pref» + ключ в PascalCase, WP5.3 — `prefLanguage`). Набор ключей задаёт запись (`PATCH /v1/learner/preferences`, WP5.3). `digest.written.manner` пишется в `Profile.learnedManner` (§6.2).
+  4. **`Material`** — `domainId` из конверта события, `mime`, `sessionId`, `pagesCount` (0 до `material.parsed`). **`Chunk`** — `page`, `text`, `notation`, `domainId` из конверта и `searchable` = «есть текст» (`Т-§3.4.6`, ревью C #135). `TEACHES` и `USES` ведут к навыкам через `Alias`.
+  5. **`known.claimed`** → `Topic.knownClaimedAtMs` = время события в мс. **`session.ended`** снимает `targetedInSessionId` у заблуждений домена сессии: у сессии один домен, `Т-§22.9`.
+- Почему: §0.4.3 п.2, п.5; закон 8.
+- Тесты: `tests/graph/test_projection_rules3.py`, группа 2 (6).
 - Требует подтверждения владельцем: нет.
 
 ### Ответы потока A (2026-11-02)
@@ -1344,6 +1356,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.9, запись хода (D-B-149): `cd backend && uv run pytest tests/session/test_turn_commit.py` — ошибка сбора (нет `quack.session.turn_commit`), коммит `d7972cc`; на неверной реализации (6 подмен) — каждая роняет 1–2 теста. Зелёный: 6 passed.
 - WP13.9, дедлайн из разговора, подсказки, закрытие задачи (D-B-149 п. г, д): тот же файл — ошибка сбора (нет `AnsweredAction`, `LearnerText`), коммит `6e39af5`; на неверной реализации — 8 подмен, каждая роняет 1–3 теста. Зелёный: 16 passed.
 - WP3.2 часть 1 (A, D-A-129, `phase-4-a-wp3-projector`, коммиты `ceeec40`, `cabeccc`): `uv run pytest tests/graph/test_projection_rules3.py` — 12 failed (11 `NotImplementedError`, 1 — пустая таблица обработчиков). Подмены: проверка среза пропускает чужой узел или связи, тип контроля хаба домена, старые `INCLUDES` остаются, снятый дедлайн не 0, вектор без `Alias`, `origin` у `SAME_IDEA`, созданная тема теряет «знаю», петля после слияния — 9/9 роняют тест. Тесты «предложенная → созданная тема» и «петля после слияния» добавлены после реализации и проверены подменой. Зелёный: 13 passed; `test_every_projector_row_has_a_handler` остаётся красным до остальных строк S5.
+- WP3.2 часть 2 (A, D-A-130, коммит `4f6f66c`): `uv run pytest tests/graph/test_projection_rules3.py` — 7 failed (6 `KeyError` — нет обработчика, таблица). Подмены: время «знаю» 0, ключ предпочтения не в PascalCase, кусок без текста ищется, навыки куска без `Alias`, сводка на событие, нет манеры, конец сессии снимает чужое нацеливание, страницы не записаны — 8/8. Проверка «чужая сессия» добавлена после реализации и проверена подменой. Зелёный: 19 passed, таблица — красная до остальных 18 строк.
 
 ## Правки тестов
 

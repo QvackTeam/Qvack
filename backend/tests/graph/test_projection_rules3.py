@@ -409,6 +409,11 @@ def test_digest_written_replaces_the_digest_of_the_domain() -> None:
     assert nodes[("Profile", PROFILE)]["learnedManner"] == "m2"
 
 
+OTHER = str(UUID(int=0x62))
+_OTHER_TARGET = _node("Misconception", OTHER, domainId=DOMAIN, statement="o", triggers=[],
+                      targetedInSessionId=str(UUID(int=0x5F)))  # fmt: skip
+
+
 def test_misconception_described_and_session_ended() -> None:
     described = {"misconception_id": MISCONCEPTION, "statement": "adds denominators",
                  "triggers": ["unlike denominators"]}  # fmt: skip
@@ -423,8 +428,9 @@ def test_misconception_described_and_session_ended() -> None:
                 session_id=SESSION,
             ),
         ],
-        [_DOMAIN, _MISCONCEPTION],
+        [_DOMAIN, _MISCONCEPTION, _OTHER_TARGET],
     )
+    assert nodes[("Misconception", OTHER)] == _OTHER_TARGET.props  # targeted in another session
     assert nodes[("Misconception", MISCONCEPTION)] == _MISCONCEPTION.props | {
         "statement": "adds denominators",
         "triggers": ["unlike denominators"],
