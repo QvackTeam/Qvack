@@ -23,8 +23,10 @@ from neo4j import AsyncDriver
 from redis.asyncio import Redis
 
 from quack.config import Settings
+from quack.db import Db
 from quack.db.neo4j import cypher, read_session
 from quack.db.postgres import SessionFactory
+from quack.embeddings.client import EmbeddingClient
 from quack.events.values import GapType, Level
 from quack.graph.folds import retrievability
 from quack.graph.overlay import SessionOverlay
@@ -42,12 +44,9 @@ from quack.graph.read.models import (
     LevelFact,
     LevelStatus,
     MemorySlice,
-    MisconceptionDetail,
     MisconceptionFact,
     MisconceptionStatus,
     PastSolution,
-    PrepContext,
-    PrerequisiteFact,
     ProfileFacts,
     RequiresLink,
     ReviewCandidate,
@@ -61,6 +60,8 @@ from quack.graph.read.models import (
     TopicRequires,
     WhyFacts,
 )
+from quack.graph.read.neo4j_extras import ExtraReads
+from quack.graph.read.neo4j_profile import read_profile
 from quack.graph.slice import SliceDeps, read_consistent_slice
 
 type Row = dict[str, Any]
@@ -204,7 +205,7 @@ class _Loaded:
     roots: dict[str, int] = field(default_factory=dict)
 
 
-class Neo4jGraphReader:
+class Neo4jGraphReader(ExtraReads):
     """The reader of a process over `ctx.neo4j`. `session_factory` (Postgres) lets
     `slice_for_turn` wait for the whole journal of the learner; without it the wait target is
     the tail of the overlay (D-A-140). `clock` gives the current time in ms (retention is
@@ -218,12 +219,16 @@ class Neo4jGraphReader:
         learner_id: UUID | None = None,
         session_factory: SessionFactory | None = None,
         redis: Redis | None = None,
+        embedder: EmbeddingClient | None = None,
         clock: Callable[[], int] | None = None,
+        db: Db | None = None,
     ) -> None:
+        self._db = db
         self._neo4j = neo4j
         self._settings = settings
         self._bound = learner_id
         self._session_factory = session_factory
+        self._embedder = embedder
         self._redis = redis
         self._clock = clock or (lambda: int(time.time() * 1000))
 
@@ -236,6 +241,7 @@ class Neo4jGraphReader:
             session_factory=self._session_factory,
             redis=self._redis,
             clock=self._clock,
+            db=self._db,
         )
 
     # --- plumbing -------------------------------------------------------------------------
@@ -965,36 +971,45 @@ class Neo4jGraphReader:
             )
         return out
 
-    # --- GraphReader: ExtraReads (separate file, see module docstring) ----------------------
+    # --- GraphReader: ExtraReads (neo4j_extras.py) ---------------------------------------------
+    # A reader bound to a learner answers nothing about another one (law 1, D-A-144): the
+    # methods that take `learner_id` are guarded here, the ones that start from an id of a node
+    # through `_owner`.
+
+    def _foreign(self, learner_id: UUID) -> bool:
+        return self._bound is not None and learner_id != self._bound
+
+    async def _xowner(self, label: str, node_id: UUID) -> str | None:
+        owner = await super()._xowner(label, node_id)
+        if owner is not None and self._bound is not None and owner != str(self._bound):
+            return None
+        return owner
 
     async def review_candidates(
         self, learner_id: UUID, now_ms: int, scope: ReviewScope | None = None
     ) -> list[ReviewCandidate]:
-        raise NotImplementedError("ExtraReads (neo4j_extras.py)")
-
-    async def prep_context(self, hub_id: UUID, now_ms: int) -> PrepContext:
-        raise NotImplementedError("ExtraReads (neo4j_extras.py)")
-
-    async def skill_history(
-        self, skill_id: UUID, level: Level | None = None, limit: int = 10
-    ) -> list[EvidenceFact]:
-        raise NotImplementedError("ExtraReads (neo4j_extras.py)")
-
-    async def prerequisites(self, skill_id: UUID, limit: int = 10) -> list[PrerequisiteFact]:
-        raise NotImplementedError("ExtraReads (neo4j_extras.py)")
+        if self._foreign(learner_id):
+            return []
+        return await super().review_candidates(learner_id, now_ms, scope)
 
     async def similar_mistakes(
         self, learner_id: UUID, evidence_id: UUID | None = None, text: str | None = None
     ) -> list[SimilarMistake]:
-        raise NotImplementedError("ExtraReads (neo4j_extras.py)")
+        if self._foreign(learner_id):
+            return []
+        return await super().similar_mistakes(learner_id, evidence_id, text)
 
     async def past_solution(
         self, learner_id: UUID, task_id: UUID | None = None, skill_id: UUID | None = None
     ) -> list[PastSolution]:
-        raise NotImplementedError("ExtraReads (neo4j_extras.py)")
+        if self._foreign(learner_id):
+            return []
+        return await super().past_solution(learner_id, task_id, skill_id)
 
     async def state_at(self, learner_id: UUID, seq_n: int, skill_ids: Sequence[UUID]) -> StateAt:
-        raise NotImplementedError("ExtraReads (neo4j_extras.py)")
+        if self._foreign(learner_id):
+            return StateAt(learner_id=learner_id, seq=seq_n)
+        return await super().state_at(learner_id, seq_n, skill_ids)
 
     async def extraction_candidates(
         self,
@@ -1006,10 +1021,13 @@ class Neo4jGraphReader:
         topic_id: UUID | None = None,
         skill_ids: Sequence[UUID] | None = None,
     ) -> ExtractionCandidates:
-        raise NotImplementedError("ExtraReads (neo4j_extras.py)")
-
-    async def misconception_detail(self, misconception_id: UUID) -> MisconceptionDetail | None:
-        raise NotImplementedError("ExtraReads (neo4j_extras.py)")
+        if self._foreign(learner_id):
+            return ExtractionCandidates(skills=[], misconceptions=[])
+        return await super().extraction_candidates(
+            learner_id, session_id, episode_vector, k, topic_id=topic_id, skill_ids=skill_ids
+        )
 
     async def profile(self, learner_id: UUID) -> ProfileFacts:
-        raise NotImplementedError("ExtraReads (neo4j_extras.py)")
+        if self._foreign(learner_id):
+            return ProfileFacts(learner_id=learner_id)
+        return await read_profile(self._neo4j, learner_id)
