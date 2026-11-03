@@ -14,7 +14,7 @@ D-B-159.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID
@@ -260,3 +260,42 @@ def teacher_variables(slots: TeacherSlots) -> dict[str, str]:
         "tail": render_tail(slots.frozen.changes, slots.skill),
         "guard_feedback": "",
     }
+
+
+# WP14.5 (Т-§10.1): slots cut first when the context is over `teacher_context_max_tokens`, in
+# this order; the conversation goes last (D-B-164).
+TRIM_ORDER = ("materials", "memory_picture", "labels")
+
+
+def estimate_tokens(text: str) -> int:
+    """WP14.5: the size before the call by characters, `len / 4` (the Meta tokenizer is not
+    named in the documents; `usage` of `ops.llm_usage` corrects it)."""
+    return len(text) // 4
+
+
+def _cut(text: str, *, from_start: bool) -> str:
+    lines = text.splitlines()
+    if not lines:
+        return text
+    return "\n".join(lines[1:] if from_start else lines[:-1])
+
+
+def fit_budget(
+    render: Callable[[dict[str, str]], str], variables: dict[str, str], max_tokens: int
+) -> dict[str, str]:
+    """Drop lines until the rendered context fits `max_tokens`: the last lines of slots 8, 7,
+    9 (the least important come last), then the oldest lines of the conversation; the current
+    action of the learner (the last block of slot 5) is never cut."""
+    out = dict(variables)
+    for name in TRIM_ORDER:
+        while estimate_tokens(render(out)) > max_tokens and out[name]:
+            out[name] = _cut(out[name], from_start=False)
+    lines = out["conversation"].splitlines()
+    current = max(
+        (i for i, line in enumerate(lines) if line == "Current action"), default=len(lines)
+    )
+    head, tail = lines[:current], lines[current:]
+    while estimate_tokens(render(out)) > max_tokens and head:
+        head = head[1:]
+        out["conversation"] = "\n".join([*head, *tail])
+    return out

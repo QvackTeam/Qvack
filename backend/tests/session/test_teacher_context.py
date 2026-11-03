@@ -53,6 +53,7 @@ from quack.session.memory_picture import (
 )
 from quack.session.teacher_context import (
     SLOT_VARIABLES,
+    TRIM_ORDER,
     GoalTopic,
     HubGoal,
     LearnerSkill,
@@ -61,6 +62,8 @@ from quack.session.teacher_context import (
     Profile,
     SessionGoal,
     TeacherSlots,
+    estimate_tokens,
+    fit_budget,
     frozen_slots,
     render_labels,
     render_materials,
@@ -690,3 +693,50 @@ def test_skill_invocation_in_tail() -> None:
     # The skill does not touch the frozen slots or the cached prefix.
     for name in ("profile", "domain_and_goals", "conversation", "tools_and_elements"):
         assert called[name] == next_turn[name]
+
+
+# --- T-CX5 ----------------------------------------------------------------------------------
+
+
+def test_context_budget_trim() -> None:
+    """`T-CX5`: over `teacher_context_max_tokens` slots 8, 7, 9 are cut first, the conversation
+    last; the current action of the learner stays; under the limit nothing changes."""
+    prompt = PromptRegistry().load("teacher", 2)
+    conversation = "\n".join(
+        [
+            *(f"Turn {n}\nLearner: question {n}" for n in range(1, 40)),
+            "Current action",
+            "Learner: now?",
+        ]
+    )
+    variables = teacher_variables(
+        _slots(
+            conversation=conversation,
+            memory_picture="\n".join(f"skill line {n} " + "x" * 200 for n in range(30)),
+            materials="\n".join(f"> chunk {n} " + "y" * 200 for n in range(30)),
+        )
+    )
+    full = estimate_tokens(prompt.render(variables))
+    assert estimate_tokens("abcd" * 10) == 10
+    assert fit_budget(prompt.render, variables, full) == variables
+
+    # a little over: only materials are cut, from their end
+    cut = fit_budget(prompt.render, variables, full - 100)
+    assert cut["memory_picture"] == variables["memory_picture"]
+    assert cut["conversation"] == variables["conversation"]
+    assert variables["materials"].startswith(cut["materials"]) and cut["materials"]
+    assert estimate_tokens(prompt.render(cut)) <= full - 100
+
+    # much over: slots 8, 7, 9 empty, then the oldest conversation lines go, never the action
+    fixed = estimate_tokens(
+        prompt.render(
+            {**variables, "conversation": "", "materials": "", "memory_picture": "", "labels": ""}
+        )
+    )
+    tight = fit_budget(prompt.render, variables, fixed + 40)
+    assert tight["materials"] == tight["memory_picture"] == tight["labels"] == ""
+    assert tight["conversation"].endswith("Current action\nLearner: now?")
+    assert "question 1\n" not in tight["conversation"]
+    assert variables["conversation"].endswith(tight["conversation"])
+    assert estimate_tokens(prompt.render(tight)) <= fixed + 40
+    assert TRIM_ORDER == ("materials", "memory_picture", "labels")
