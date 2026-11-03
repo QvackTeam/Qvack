@@ -25,9 +25,14 @@ from quack.config import Settings
 from quack.db.db import Db
 from quack.events.event_types import MisconceptionDescribed
 from quack.events.log import NewEvent, StoredEvent, append_events
-from quack.graph.read import GraphReader, ManifestationFact, MisconceptionDetail
+from quack.graph.read import (
+    GraphReader,
+    ManifestationFact,
+    MisconceptionDetail,
+    create_graph_reader,
+)
 from quack.jobs.queue import ClaimedJob
-from quack.jobs.runner import JobContext
+from quack.jobs.runner import JobContext, register_job_handler
 from quack.llm.gateway import LLMGateway
 from quack.practice.repo import event_by_seq
 from quack.practice.task_store import get_task
@@ -143,3 +148,11 @@ async def run_misconception_describe(
         facts=facts,
         domain_id=trigger.domain_id if trigger is not None else None,
     )
+
+
+@register_job_handler("misconception.describe")
+async def handle_misconception_describe(job: ClaimedJob, ctx: JobContext) -> None:
+    if job.learner_id is None:
+        raise ValueError("misconception.describe needs learner_id")
+    reader = create_graph_reader(ctx.neo4j, ctx.settings, learner_id=job.learner_id)
+    await run_misconception_describe(job, ctx, reader)
