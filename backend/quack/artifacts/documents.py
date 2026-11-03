@@ -11,6 +11,10 @@ Notes are an ordered list of blocks (Т-§17.2). A block the learner edited or w
 system block marked as a supplement (`supplementTo`), which the learner accepts (merged into the
 own block) or deletes (П-11.1).
 
+Topic cards are an ordered list of cards (Т-§17.5, D-C-140): each card is a task of the bank
+(`card_id` is its `task_id`), the artifact holds what the learner sees of it; versioning is the
+same, only the content of a version differs by kind (`_CODECS`).
+
 The topic or hub must be the learner's: its `topic.created` / `topic.proposed` / `hub.created`
 is in the event log (law 1; the hot path does not wait for Neo4j, Т-§20.7).
 """
@@ -18,7 +22,7 @@ is in the event log (law 1; the hot path does not wait for Neo4j, Т-§20.7).
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal
 from uuid import UUID, uuid5
@@ -46,6 +50,9 @@ type BlockKind = Literal[
     "custom",
 ]
 type Owner = Literal["system", "learner"]
+# Т-§17.5: the kinds of cards (П-11.2) — definition or formula, sign → method, distinction,
+# against a misconception.
+type CardKind = Literal["definition", "sign_to_method", "distinction", "against_misconception"]
 
 # Т-§17.2: what the learner writes from scratch is a `custom` block (§2.3 строка 14).
 LEARNER_BLOCK_KIND: BlockKind = "custom"
@@ -80,6 +87,27 @@ class Block(BaseModel):
 _BLOCKS: TypeAdapter[list[Block]] = TypeAdapter(list[Block])
 
 
+class Card(BaseModel):
+    """A topic card, Т-§17.5 (D-C-140): `card_id` — the task of the bank behind it (its markup
+    and answer spec live there, Т-§5.1); `prompt` — what the learner sees. A card the learner
+    edited is `owner = learner`."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    card_id: UUID
+    kind: CardKind
+    prompt: str
+    owner: Owner
+    generated_by: dict[str, Any] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("generatedBy", "generated_by"),
+        serialization_alias="generatedBy",
+    )
+
+
+_CARDS: TypeAdapter[list[Card]] = TypeAdapter(list[Card])
+
+
 class SystemBlock(BaseModel):
     """A block written by the system (the artifact writer, WP23.2). `block_id` names the block of
     the current version it updates; None — a new block."""
@@ -103,6 +131,7 @@ class Artifact:
     hub_id: UUID | None
     version: int  # 0 — nothing saved yet
     blocks: tuple[Block, ...]
+    cards: tuple[Card, ...] = ()
 
 
 class ArtifactNotFound(Exception):
@@ -360,6 +389,18 @@ async def version_blocks(
     return _decode(row["content"])
 
 
+async def _version_items(
+    db: Db, learner_id: UUID, artifact_id: UUID, version: int, codec: _Codec
+) -> tuple[Any, ...]:
+    row = await db.fetch_one(
+        _VERSION_CONTENT,
+        {"learner_id": learner_id, "artifact_id": artifact_id, "version": version},
+    )
+    if row is None:
+        raise ArtifactNotFound(f"artifact {artifact_id} has no version {version}")
+    return codec.decode(row["content"])
+
+
 async def _save_learner(
     db: Db,
     learner_id: UUID,
@@ -402,22 +443,19 @@ async def _replay(
     conflict = IdempotencyConflictError(key, "", "")
     if payload["artifact_id"] != str(artifact_id):
         raise conflict
-    before: tuple[Block, ...] = ()
+    artifact = await find_artifact(db, learner_id=learner_id, artifact_id=artifact_id)
+    codec = _CODECS[artifact.kind]
+    before: tuple[Any, ...] = ()
     if version > 1:
-        before = await version_blocks(
-            db, learner_id=learner_id, artifact_id=artifact_id, version=version - 1
-        )
-    written = await version_blocks(
-        db, learner_id=learner_id, artifact_id=artifact_id, version=version
-    )
+        before = await _version_items(db, learner_id, artifact_id, version - 1, codec)
+    written = await _version_items(db, learner_id, artifact_id, version, codec)
     try:
         again = tuple(change(list(before)))
     except (ArtifactNotFound, NotASupplement):
         raise conflict from None
     if again != written:
         raise conflict
-    artifact = await find_artifact(db, learner_id=learner_id, artifact_id=artifact_id)
-    return replace(artifact, version=version, blocks=written)
+    return codec.at(replace(artifact, version=version), written)
 
 
 async def _save(
@@ -441,34 +479,36 @@ async def _save(
         if row is None:
             raise ArtifactNotFound(f"artifact {artifact_id} not found")
         version = int(row["current_version"])
-        current: tuple[Block, ...] = ()
+        codec = _CODECS[row["kind"]]
+        current: tuple[Any, ...] = ()
         if version > 0:
             stored = await db.fetch_one(_VERSION_CONTENT, {**params, "version": version})
             assert stored is not None
-            current = _decode(stored["content"])
-        blocks = tuple(change(list(current)))
-        if blocks == current:
-            return _artifact(row, None, blocks=current)
+            current = codec.decode(stored["content"])
+        items = tuple(change(list(current)))
+        if items == current:
+            return codec.at(_artifact(row, None, blocks=()), current)
         version += 1
         await db.execute(
             _INSERT_VERSION,
             {
                 **params,
                 "version": version,
-                "content": Jsonb(_encode(blocks)),
+                "content": Jsonb(codec.encode(items)),
                 "skill_version": skill_version,
                 "created_by": created_by,
             },
         )
         await db.execute(_SET_CURRENT, {**params, "version": version})
-        artifact = _artifact({**row, "current_version": version}, None, blocks=blocks)
+        row = {**row, "current_version": version}
+        artifact = codec.at(_artifact(row, None, blocks=()), items)
         payload = ArtifactUpdated(
             artifact_id=artifact_id,
             version=version,
             kind=artifact.kind,
             topic_id=artifact.topic_id,
             hub_id=artifact.hub_id,
-            text=blocks_text(blocks),
+            text=codec.text(items),
         )
         await append_events(
             db,
@@ -554,12 +594,48 @@ def _decode(content: Any) -> tuple[Block, ...]:
 
 
 def _artifact(row: Any, content: Any, *, blocks: tuple[Block, ...] | None = None) -> Artifact:
-    return Artifact(
+    artifact = Artifact(
         artifact_id=row["artifact_id"],
         kind=row["kind"],
         domain_id=row["domain_id"],
         topic_id=row["topic_id"],
         hub_id=row["hub_id"],
         version=int(row["current_version"]),
-        blocks=blocks if blocks is not None else _decode(content),
+        blocks=(),
     )
+    if blocks is not None:
+        return replace(artifact, blocks=blocks)
+    codec = _CODECS[artifact.kind]
+    return codec.at(artifact, codec.decode(content))
+
+
+@dataclass(frozen=True)
+class _Codec:
+    """The content of a version by kind: blocks (notes, cheat sheet) or cards (D-C-140)."""
+
+    decode: Callable[[Any], tuple[Any, ...]]
+    encode: Callable[[Sequence[Any]], dict[str, Any]]
+    text: Callable[[Sequence[Any]], str]
+    at: Callable[[Artifact, tuple[Any, ...]], Artifact]
+
+
+def _encode_cards(cards: Sequence[Card]) -> dict[str, Any]:
+    return {"cards": [card.model_dump(mode="json", by_alias=True) for card in cards]}
+
+
+def _decode_cards(content: Any) -> tuple[Card, ...]:
+    return tuple(_CARDS.validate_python((content or {}).get("cards", [])))
+
+
+def _cards_text(cards: Sequence[Card]) -> str:
+    return _MERGE_SEPARATOR.join(card.prompt for card in cards if card.prompt)
+
+
+_BLOCK_CODEC = _Codec(_decode, _encode, blocks_text, lambda a, items: replace(a, blocks=items))
+_CODECS: dict[str, _Codec] = {
+    "notes": _BLOCK_CODEC,
+    "cheatsheet": _BLOCK_CODEC,
+    "cards": _Codec(
+        _decode_cards, _encode_cards, _cards_text, lambda a, items: replace(a, cards=items)
+    ),
+}
