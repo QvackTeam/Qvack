@@ -23,14 +23,19 @@ from quack.graph.read import (
     EvidenceFact,
     ExtractionCandidates,
     Frontier,
+    HubGoal,
     HubReadiness,
+    HubTopicGoal,
     LevelFact,
+    ManifestationFact,
     MaterialRef,
     MemorySlice,
+    MisconceptionDetail,
     MisconceptionFact,
     PastSolution,
     PrepContext,
     PrerequisiteFact,
+    ProfileFacts,
     RequiresLink,
     ReviewCandidate,
     ReviewScope,
@@ -39,6 +44,7 @@ from quack.graph.read import (
     SkillFact,
     SliceFocus,
     StateAt,
+    TopicMemory,
     TopicRequires,
     WhyFacts,
 )
@@ -94,6 +100,9 @@ _REQUIRES: dict[UUID, list[RequiresLink]] = {
 _TOPIC_OF = {SKILL_PROVEN: TOPIC_READY, SKILL_FAILED: TOPIC_OPEN, SKILL_QUIET: TOPIC_OPEN}
 _NAMES = {SKILL_PROVEN: "add fractions", SKILL_FAILED: "common denominator",
           SKILL_QUIET: "reduce a fraction"}  # fmt: skip
+_TOPIC_NAMES = {TOPIC_READY: "adding fractions", TOPIC_OPEN: "reducing fractions"}
+GOAL_DEADLINE_MS = NOW_MS + 5 * 86_400_000
+EVIDENCE_MANIFEST = UUID(int=0xE3)
 # Signals of the failed skill: a gap type with its confidence and a memory lapse (Т-§8.2, Т-§8.4).
 _SIGNALS: dict[UUID, dict[str, Any]] = {
     SKILL_FAILED: {
@@ -119,10 +128,25 @@ def _evidence(evidence_id: UUID, skill_id: UUID, outcome: str, seq: int) -> Evid
     )
 
 
+def _misconception(**extra: Any) -> MisconceptionFact:
+    return MisconceptionFact.model_validate(
+        {
+            "misconception_id": MISCONCEPTION,
+            "skill_id": SKILL_FAILED,
+            "status": "suspected",
+            "statement": MISCONCEPTION_STATEMENT,
+            "triggers": list(MISCONCEPTION_TRIGGERS),
+            **extra,
+        }
+    )
+
+
 def _skill(skill_id: UUID) -> SkillFact:
     return SkillFact(
         skill_id=skill_id,
+        name=_NAMES[skill_id],
         topic_id=_TOPIC_OF[skill_id],
+        topic_name=_TOPIC_NAMES[_TOPIC_OF[skill_id]],
         domain_id=DOMAIN,
         levels=_LEVELS[skill_id],
         requires=_REQUIRES.get(skill_id, []),
@@ -270,3 +294,77 @@ class FixedGraphReader:
         )
         known = [misconception] if SKILL_FAILED in wanted else []
         return ExtractionCandidates(skills=skills, misconceptions=known)
+
+    async def domain_goals(self, domain_id: UUID) -> list[HubGoal]:
+        return [
+            HubGoal(
+                hub_id=HUB,
+                name="fractions exam",
+                kind="exam",
+                control_type="tasks",
+                deadline_at_ms=GOAL_DEADLINE_MS,
+                topics=[
+                    HubTopicGoal(topic_id=t, name=_TOPIC_NAMES[t], required_levels=[2, 3])
+                    for t in (TOPIC_READY, TOPIC_OPEN)
+                ],
+            )
+        ]
+
+    async def profile(self, learner_id: UUID) -> ProfileFacts:
+        return ProfileFacts(
+            learner_id=learner_id,
+            prefs={"language": "ru", "answer_length": "short"},
+            manner="short steps, no lectures",
+            learned_helpful_approach="small_steps",
+            learned_confidence_brier=0.21,
+            learned_confidence_bias="over",
+            learned_branch_rate=None,  # fewer than `profile_min_samples`: «no data»
+            learned_reasoning_share=0.4,
+        )
+
+    async def topic_memory(self, topic_ids: Sequence[UUID]) -> list[TopicMemory]:
+        found = []
+        for topic_id in topic_ids:
+            if topic_id not in _TOPIC_NAMES:
+                continue
+            skills = [_skill(s) for s in _LEVELS if _TOPIC_OF[s] == topic_id]
+            found.append(
+                TopicMemory(
+                    topic_id=topic_id,
+                    name=_TOPIC_NAMES[topic_id],
+                    domain_id=DOMAIN,
+                    skills=skills,
+                    misconceptions=[_misconception()] if topic_id == TOPIC_OPEN else [],
+                )
+            )
+        return found
+
+    async def misconception_detail(self, misconception_id: UUID) -> MisconceptionDetail | None:
+        if misconception_id != MISCONCEPTION:
+            return None
+        return MisconceptionDetail(
+            misconception_id=MISCONCEPTION,
+            status="confirmed",
+            statement=MISCONCEPTION_STATEMENT,
+            triggers=list(MISCONCEPTION_TRIGGERS),
+            skill_id=SKILL_FAILED,
+            skill_name=_NAMES[SKILL_FAILED],
+            manifestations=[
+                ManifestationFact(
+                    evidence_id=EVIDENCE_FAILED,
+                    quote="a = b",
+                    task_id=None,
+                    source_seq=110,
+                    at_ms=NOW_MS - 110,
+                    tier="code",
+                ),
+                ManifestationFact(
+                    evidence_id=EVIDENCE_MANIFEST,
+                    quote=None,
+                    task_id=UUID(int=0x77),
+                    source_seq=115,
+                    at_ms=NOW_MS - 115,
+                    tier="model",
+                ),
+            ],
+        )

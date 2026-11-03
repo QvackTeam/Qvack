@@ -43,6 +43,7 @@ EXPECTED_TABLES = frozenset(
 EXTENSIONS: tuple[frozenset[tuple[str, str]], ...] = (
     frozenset({("core", "pairing_tokens")}),  # D-A-128: WP22.1, Т-§16.1
     frozenset(),  # D-A-128: its index by learner, CONCURRENTLY (Д-§6.2)
+    frozenset(),  # D-A-137: `ops.turn_manifests.frozen_slots` (Т-§10.1)
 )
 
 # dbmate keeps its own bookkeeping table in `public`; everything of ours is in core/content/ops.
@@ -129,3 +130,15 @@ def test_pairing_tokens_table(p4_database: str) -> None:
     }
     assert primary_key == ["token_hash"]
     assert "learner_id" in leading
+
+
+def test_turn_manifests_frozen_slots_column(p4_database: str) -> None:
+    """D-A-137 (WP14.1, Т-§10.1): slots 3 and 4 frozen at the session start live in the
+    manifest of the first turn; a nullable JSONB — later turns carry none."""
+    query = (
+        "SELECT data_type, is_nullable FROM information_schema.columns "
+        "WHERE table_schema = 'ops' AND table_name = 'turn_manifests' "
+        "AND column_name = 'frozen_slots'"
+    )
+    with psycopg.connect(p4_database) as conn:
+        assert conn.execute(query).fetchall() == [("jsonb", "YES")]
