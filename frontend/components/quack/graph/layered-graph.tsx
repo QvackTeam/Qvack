@@ -4,7 +4,7 @@ import { Maximize2, Minus, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { GAP_Y, layoutGraph, loadPositions, savePositions } from "@/lib/graph/layout";
+import { GAP_X, GAP_Y, layoutGraph, loadPositions, savePositions } from "@/lib/graph/layout";
 import { onGraph, type GraphModel, type GraphTopic } from "@/lib/graph/types";
 import { useT } from "@/lib/i18n/provider";
 import type { Domain, TopicState } from "@/lib/mock/types";
@@ -32,6 +32,10 @@ const LEARNER = "local";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 4);
+const smooth = (a: number, b: number, v: number) => {
+  const t = clamp((v - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Canvas cannot use CSS classes, so colours and fonts are read once from probe elements */
@@ -97,6 +101,10 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const target = useRef(new Map<string, Pt>());
   const posTween = useRef<number | null>(null);
   const posMs = useRef(TWEEN_MS);
+  // Labels fade in and out on their own clock, so a label never blinks when the zoom or a collision changes its fate
+  const labelVis = useRef(new Map<string, number>());
+  const textW = useRef(new Map<string, number>());
+  const lastDraw = useRef(0);
   const colY = useRef(new Map<string, number>());
   const colEls = useRef(new Map<string, HTMLElement>());
   const colScroll = useRef<HTMLElement | null>(null);
@@ -131,17 +139,24 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       byHub.set(l.hubId, [...(byHub.get(l.hubId) ?? []), l.topicId]);
       hubsOf.set(l.topicId, [...(hubsOf.get(l.topicId) ?? []), l.hubId]);
     }
-    return { byHub, hubsOf, edges: model.requires.filter((e) => layout.nodes.has(e.topicId) && layout.nodes.has(e.requiresId)) };
+    const edges = model.requires.filter((e) => layout.nodes.has(e.topicId) && layout.nodes.has(e.requiresId));
+    // Topics with more links are more important when two labels fight for the same place
+    const degree = new Map<string, number>();
+    for (const e of edges) {
+      degree.set(e.topicId, (degree.get(e.topicId) ?? 0) + 1);
+      degree.set(e.requiresId, (degree.get(e.requiresId) ?? 0) + 1);
+    }
+    return { byHub, hubsOf, edges, degree };
   }, [model, layout]);
   const scene = useRef({ layout, model, topicMap, hubMap, colW: column.width, links });
 
-  const draw = useCallback(() => {
+  const draw = useCallback((): boolean => {
     const c = canvas.current;
     const col = colors.current;
     const { w, h } = sizeRef.current;
-    if (!c || !col || !w || !h) return;
+    if (!c || !col || !w || !h) return false;
     const ctx = c.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) return false;
     const { layout: L, model: m, topicMap: topics, hubMap: hubs, colW, links } = scene.current;
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -280,39 +295,84 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       ctx.fill();
     }
 
-    // Labels. Stage 4 replaces this with levels of detail and collision handling
-    ctx.textAlign = "center";
-    ctx.lineJoin = "round";
-    ctx.font = `500 12px ${col.label}`;
-    ctx.textBaseline = "bottom";
+    // Labels. A topic label fades with the size of a slot on screen, a hub label later: on the far view the hubs are
+    // what the eye holds on to. Labels never overlap: the more important one stays (hub, then hovered, then busier topic).
+    const now = performance.now();
+    const dt = Math.min(100, now - lastDraw.current);
+    lastDraw.current = now;
+    const ease = 1 - Math.exp(-dt / 90);
+    const unit = GAP_X * k;
+    const fadeTopic = smooth(40, 78, unit);
+    const fadeHub = smooth(8, 26, unit);
+    type Label = { key: string; text: string; x: number; y: number; above: boolean; prio: number; fade: number; deg: number; fill: string; font: string };
+    const labels: Label[] = [];
+    const hubFont = `500 12px ${col.label}`;
+    const topicFont = `400 11px ${col.body}`;
     for (const n of L.hubs) {
       const p = pos(n.key);
       if (!p) continue;
       const x = sx(p.x), y = sy(p.y);
-      if (!near(x, y, 80)) continue;
-      const text = (hubs.get(n.id)?.name ?? "").toUpperCase();
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = col.cloth;
-      ctx.strokeText(text, x, y - rH - 5);
-      ctx.fillStyle = col.paper;
-      ctx.fillText(text, x, y - rH - 5);
+      if (!near(x, y, 120)) continue;
+      labels.push({ key: n.key, text: (hubs.get(n.id)?.name ?? "").toUpperCase(), x, y: y - rH - 5, above: true, prio: 3, fade: fadeHub, deg: 0, fill: col.paper, font: hubFont });
     }
-    if (k >= 0.55) {
-      ctx.font = `400 11px ${col.body}`;
-      ctx.textBaseline = "top";
-      for (const n of L.topics) {
-        const p = pos(n.key);
-        const t = topics.get(n.id);
-        if (!p || !t) continue;
-        const x = sx(p.x), y = sy(p.y);
-        if (!near(x, y, 80)) continue;
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = col.cloth;
-        ctx.strokeText(t.name, x, y + rT + 4);
-        ctx.fillStyle = col.dim;
-        ctx.fillText(t.name, x, y + rT + 4);
+    for (const n of L.topics) {
+      const p = pos(n.key);
+      const t = topics.get(n.id);
+      if (!p || !t) continue;
+      const x = sx(p.x), y = sy(p.y);
+      if (!near(x, y, 120)) continue;
+      const hot = n.key === hovered;
+      labels.push({ key: n.key, text: t.name, x, y: y + rT + 4, above: false, prio: hot ? 2 : 1, fade: hot ? 1 : fadeTopic, deg: links.degree.get(n.id) ?? 0, fill: hot ? col.paper : col.dim, font: topicFont });
+    }
+    labels.sort((a, b) => b.prio - a.prio || b.deg - a.deg || (a.key < b.key ? -1 : 1));
+    // Boxes already taken, in a coarse grid so a crowded graph stays cheap
+    const CELL = 80;
+    const grid = new Map<string, { x0: number; y0: number; x1: number; y1: number }[]>();
+    const cellsOf = (bx: { x0: number; y0: number; x1: number; y1: number }) => {
+      const out: string[] = [];
+      for (let gx = Math.floor(bx.x0 / CELL); gx <= Math.floor(bx.x1 / CELL); gx++) for (let gy = Math.floor(bx.y0 / CELL); gy <= Math.floor(bx.y1 / CELL); gy++) out.push(`${gx},${gy}`);
+      return out;
+    };
+    let settling = false;
+    ctx.textAlign = "center";
+    ctx.lineJoin = "round";
+    ctx.textBaseline = "alphabetic";
+    for (const lb of labels) {
+      let target = 0;
+      if (lb.fade > 0.02) {
+        const wKey = `${lb.font}|${lb.text}`;
+        let tw = textW.current.get(wKey);
+        if (tw === undefined) {
+          ctx.font = lb.font;
+          tw = ctx.measureText(lb.text).width;
+          textW.current.set(wKey, tw);
+        }
+        const hgt = 13;
+        const bx = { x0: lb.x - tw / 2 - 3, x1: lb.x + tw / 2 + 3, y0: lb.above ? lb.y - hgt : lb.y - 1, y1: lb.above ? lb.y + 2 : lb.y + hgt };
+        const cells = cellsOf(bx);
+        const clash = cells.some((c) => (grid.get(c) ?? []).some((o) => bx.x0 < o.x1 && bx.x1 > o.x0 && bx.y0 < o.y1 && bx.y1 > o.y0));
+        if (!clash) {
+          target = 1;
+          for (const c of cells) grid.set(c, [...(grid.get(c) ?? []), bx]);
+        }
       }
+      const was = labelVis.current.get(lb.key) ?? 0;
+      const vis = Math.abs(target - was) < 0.01 ? target : was + (target - was) * ease;
+      if (vis !== target) settling = true;
+      labelVis.current.set(lb.key, vis);
+      const alpha = lb.fade * vis;
+      if (alpha < 0.02) continue;
+      ctx.font = lb.font;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = lb.above ? 4 : 3;
+      ctx.strokeStyle = col.cloth;
+      ctx.textBaseline = lb.above ? "bottom" : "top";
+      ctx.strokeText(lb.text, lb.x, lb.y);
+      ctx.fillStyle = lb.fill;
+      ctx.fillText(lb.text, lb.x, lb.y);
     }
+    ctx.globalAlpha = 1;
+    return settling;
   }, []);
 
   const frame = useCallback(
@@ -337,7 +397,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
         if (t >= 1) viewTween.current = null;
         else again = true;
       }
-      draw();
+      if (draw()) again = true;
       if (again) raf.current = requestAnimationFrame(loop.current);
     },
     [draw],
