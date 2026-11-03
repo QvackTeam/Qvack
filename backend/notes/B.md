@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-B-196. Иллюстрация: ключ, ответ только с `url`, подсказка (WP16.6)
+- Класс: B
+- WP / место: `agent.illustration`; `quack/agents/illustration.py`, `quack/agents/delivery.py` (`result_ref`)
+- Контекст: в `quack/storage/keys.py` (C) нет ключа иллюстрации; `Illustration` может прийти только с `url`; промпта у роли нет.
+- Решение: ключ `learners/{learner}/illustrations/{request_id}-{ULID}.{png|jpg|webp|bin}` собирается в модуле B из `learner_prefix` и `new_ulid` (C не правим; если C заведёт `illustration_key`, заменить). Ответ только с `url` — `agent.completed {ok: false, error: image_url_only}`: скачивать с чужого хоста без правила нельзя, внешняя ссылка не есть ключ хранилища [ПРОВЕРИТЬ на стенде: какую форму отдаёт `muse-image-1.0`]. Нет `params.description` — `ok: false, error: no_description`, без вызова модели. Подсказка модели — `description` с фиксированным префиксом «концептуальная иллюстрация, без формул, графиков и математических схем» (П-4.5). Актор события — `agent:illustration` (у роли нет версии промпта, формат `<role>@<N>` не подходит).
+- Почему: ТЗ Ф4 WP16.6, П-4.5, Т-§3.3, Т-§13.9, D-B-187
+- Обратимость: да
+- Тесты: `tests/agents/test_illustration.py`
+- Требует подтверждения владельцем: нет
+
 ### D-B-193. «Я это уже знаю»: уровень, число задач, ключ ответа (WP8.2, WP16.6)
 - Класс: B
 - WP / место: `check.known_claim`; `quack/agents/task_generation.py`, `Settings.known_check_max_tasks`
