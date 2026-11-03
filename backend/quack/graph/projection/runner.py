@@ -5,7 +5,8 @@ Under the learner's advisory lock (the same rebuild and deletion take): the wate
 declared, phase A, then the difference and the new watermark in one Neo4j transaction; the copy
 of the watermark in `ops.projector_offsets` after the commit. An event the projector cannot
 apply stops the learner's stream with a row in `ops.projector_failures`; `resume` removes it.
-Phases B–C (folds and topics) plug in after phase A with WP4–WP6.
+Phase B folds the skills the batch touched (WP4); misconceptions, the profile and topics
+(WP5–WP6) plug in after it.
 """
 
 from __future__ import annotations
@@ -21,7 +22,14 @@ from quack.db import Db
 from quack.db.db import LockKeyspace
 from quack.events.log import StoredEvent
 from quack.graph.projection.phase_a import EventFailed, apply_events, batch_need
-from quack.graph.projection.store import load_slice, read_watermark, write_batch
+from quack.graph.projection.phase_b import fold_dirty_skills
+from quack.graph.projection.skill_fold import FoldParams
+from quack.graph.projection.store import (
+    load_fold_inputs,
+    load_slice,
+    read_watermark,
+    write_batch,
+)
 from quack.graph.projection.types import NodeRef
 from quack.graph.projection.view import BatchSlice, Need, RulesParams
 
@@ -106,6 +114,10 @@ async def project_learner(
                 str(learner_id), loaded, earlier, RulesParams.from_settings(settings)
             )
             apply_events(events, batch)
+            dirty = batch.dirty_skills()
+            if dirty:  # phase B (WP4): folds of the skills the batch touched
+                batch.extend(await load_fold_inputs(neo4j, str(learner_id), dirty))
+                fold_dirty_skills(batch, dirty, FoldParams.from_settings(settings), events[-1].seq)
         except EventFailed as failed:
             await db.execute(
                 _RECORD_FAILURE, params | {"seq": failed.seq, "error": repr(failed.cause)[:2000]}

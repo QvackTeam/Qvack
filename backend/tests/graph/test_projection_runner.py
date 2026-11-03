@@ -148,6 +148,19 @@ async def test_materials_and_vectors_reach_neo4j(
         {"learner_id": learner},
     )
     assert offset is not None and offset["seq"] == 6
+    async with neo4j.session() as session:
+        found = await session.run(
+            "MATCH (s:Skill {id: $s}) RETURN properties(s) AS s", s=str(skill)
+        )
+        state = (await found.single() or {"s": {}})["s"]
+    # Phase B: a new skill gets every state property explicit (Т-§3.4.4, law 8).
+    assert (state["l1Status"], state["l6Basis"], state["retState"], state["expCount"]) == (
+        "unknown",
+        "none",
+        "none",
+        0,
+    )
+    assert state["asOfSeq"] == 6
     again = await project_learner(pg_db, neo4j, settings, learner)
     assert (again.status, again.applied_seq) == ("empty", 6)
 

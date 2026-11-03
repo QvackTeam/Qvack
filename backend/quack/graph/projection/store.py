@@ -209,6 +209,27 @@ async def _read_slice(
     return out.subgraph()
 
 
+async def _read_fold(tx: AsyncManagedTransaction, learner: str, skills: set[str]) -> SubGraph:
+    """Phase B input of dirty skills: the skill with its evidence and exposures, the tasks of the
+    evidence with their options and markup (Т-§8.1)."""
+    out = _Collected()
+    seen = await _neighbourhoods(tx, learner, {("Skill", s) for s in skills}, out)
+    evidence = {
+        (r.from_label, r.from_id)
+        for r in out.rels.values()
+        if r.rel_type == "ON" and (r.to_label, r.to_id) in seen
+    }
+    await _neighbourhoods(tx, learner, evidence, out)
+    tasks = {(r.to_label, r.to_id) for r in out.rels.values() if r.rel_type == "ON_TASK"}
+    await _neighbourhoods(tx, learner, tasks, out)
+    return out.subgraph()
+
+
+async def load_fold_inputs(driver: AsyncDriver, learner_id: str, skills: set[str]) -> SubGraph:
+    async with read_session(driver) as session:
+        return await session.execute_read(_read_fold, learner_id, skills)
+
+
 async def load_slice(
     driver: AsyncDriver, learner_id: str, need: Need, event_refs: Iterable[NodeRef] = ()
 ) -> SubGraph:

@@ -217,6 +217,43 @@ class BatchSlice:
         ]
         return SliceDiff(upsert_nodes, delete_nodes, upsert_rels, delete_rels)
 
+    def extend(self, loaded: SubGraph) -> None:
+        """Phase B reads more of the store after phase A (the evidence of dirty skills): what
+        the slice does not hold yet joins it as read, what the batch changed or deleted stays."""
+        for n in loaded.nodes:
+            ref = (n.label, n.id)
+            if ref not in self._nodes and ref not in self._loaded_nodes:
+                self._nodes[ref] = dict(n.props)
+                self._loaded_nodes[ref] = dict(n.props)
+        for r in loaded.rels:
+            if r.key not in self._rels and r.key not in self._loaded_rels:
+                self._rels[r.key] = _copy(r)
+                self._loaded_rels[r.key] = _copy(r)
+
+    def node(self, label: str, node_id: str) -> Props | None:
+        """Phase B reads the whole slice: folds are not handlers of one event (no `needs`)."""
+        props = self._nodes.get((label, node_id))
+        return None if props is None else dict(props)
+
+    def rels(self, label: str, node_id: str, rel_type: str, *, out: bool) -> list[RelRecord]:
+        return [r for r in self._rels_of(label, node_id, out=out) if r.rel_type == rel_type]
+
+    def dirty_skills(self) -> set[str]:
+        """Skills whose fold input the batch changed (Т-§2.4, phase B): new skills, evidence and
+        exposures added, changed or moved."""
+        d = self.diff()
+        dirty = {
+            r.to_id for r in [*d.upsert_rels, *d.delete_rels]
+            if r.rel_type in ("ON", "OF") and r.to_label == "Skill"
+        }  # fmt: skip
+        for n in d.upsert_nodes:
+            if n.label == "Skill" and ("Skill", n.id) not in self._loaded_nodes:
+                dirty.add(n.id)
+            elif n.label in ("Evidence", "Exposure"):
+                rel = "ON" if n.label == "Evidence" else "OF"
+                dirty |= {r.to_id for r in self.rels(n.label, n.id, rel, out=True)}
+        return {s for s in dirty if ("Skill", s) in self._nodes}
+
     def snapshot(self) -> SubGraph:
         """Every node and relationship of the slice now (for tests and rebuild)."""
         return SubGraph(
