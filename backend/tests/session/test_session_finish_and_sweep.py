@@ -20,7 +20,7 @@ from quack.jobs.queue import ClaimedJob, enqueue_job
 from quack.jobs.runner import JOB_HANDLERS, JobRunner
 from quack.session import lifecycle
 from tests.session.fixtures import SeededDomain
-from tests.session.helpers import make_token
+from tests.support.auth import learner_headers
 from tests.support.dispatch import dispatch, mark_dispatched
 from tests.support.resources import build_job_context
 
@@ -186,7 +186,7 @@ async def test_finish_session_writes_completed_enqueues_jobs_deletes_presence_an
 
     # Foreign learner or unknown session id -> 404 NOT_FOUND, leaving the session active.
     stranger = uuid4()
-    stranger_headers = {"Authorization": f"Bearer {make_token(settings, stranger)}"}
+    stranger_headers = learner_headers(stranger)
     for headers, sid in ((stranger_headers, str(session_id)), (auth_headers, str(uuid4()))):
         not_found = await client.post(
             f"/v1/sessions/{sid}/finish",

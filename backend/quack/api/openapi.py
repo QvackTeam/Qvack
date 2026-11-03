@@ -19,12 +19,9 @@ from quack.api.errors import ErrorResponse
 COMPONENT_REF = "#/components/schemas/{model}"
 ERROR_REF = COMPONENT_REF.format(model=ErrorResponse.__name__)
 
-# Routes reachable without a session: register and login of Phase 3 (WP1.2) until they are
-# removed (§2.3 row 3), and the sign-in routes of ТЗ Ф4 WP18.
+# Routes reachable without a session: the sign-in routes of ТЗ Ф4 WP18.
 PUBLIC_ROUTES = frozenset(
     {
-        ("post", "/v1/auth/register"),
-        ("post", "/v1/auth/login"),
         ("post", "/auth/link"),
         ("get", "/auth/link/verify"),
         ("get", "/auth/google/start"),
@@ -57,7 +54,7 @@ SSE_EVENTS = {
 DEFAULT_VALIDATION_MODELS = ("HTTPValidationError", "ValidationError")
 
 ERROR_DESCRIPTIONS = {
-    "401": "UNAUTHORIZED: missing, invalid or revoked token",
+    "401": "UNAUTHENTICATED: no session, or it expired or was revoked",
     "404": "NOT_FOUND: the resource does not exist or belongs to another learner",
     "409": "IDEMPOTENCY_CONFLICT or TURN_LOCKED",
     "422": "VALIDATION_ERROR",
