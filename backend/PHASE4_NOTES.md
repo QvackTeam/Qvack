@@ -1429,6 +1429,21 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: нет (п.3 — D-C-122 п.4).
 
+### D-C-125. WP23.1: артефакт — документ с версиями; конспект блоками, защита правок ученика
+- Класс: B
+- WP / место: WP23.1, §6.4 «Артефакты»; `quack/artifacts/documents.py`, `quack/artifacts/notes_routes.py`
+- Контекст: WP23.1, `Т-§17.1`–`Т-§17.2`, П-11.1 задают версии, поля блока и «дополнение» к блоку ученика, но не называют: как хранятся блоки в `content.artifact_versions.content`, сколько артефактов одного вида у темы, как помечается дополнение, что делает запись генератора с блоками прошлой версии.
+- Решение:
+  1. Один артефакт вида на тему (`notes`, `cards`) или хаб (`cheatsheet`): `artifact_id = uuid5(QUACK_UUID_NS, "artifact:{kind}:{learner_id}:{topic|hub}")`. Строка создаётся при первом чтении (`INSERT … ON CONFLICT DO NOTHING`), чтобы ученик мог написать первый блок по id. Принадлежность темы или хаба — по `topic.created` / `topic.proposed` / `hub.created` в журнале ученика (закон 1, `Т-§20.7`).
+  2. `content = {"blocks": [...]}`. Поля блока — имена `Т-§17.2`: `block_id`, `kind`, `content`, `owner`, `sources`, `skills`, `generatedBy`; дополнение — `supplementTo` (id блока ученика), имени в документах нет.
+  3. Сохранение: блокировка строки артефакта, новая версия, `current_version` и `artifact.updated {…, text}` — одна транзакция (`Т-§2.3`). `text` — содержимое блоков через пустую строку. Ключ — `artifact.updated:{artifact_id}:{version}`. Те же блоки ещё раз ничего не пишут (закон 5). Актор: `learner` для правок, роль с версией (`artifact_writer@1`) для генератора; `created_by` — то же.
+  4. Запись генератора (WP23.2): блок с `block_id` системного блока заменяет его на месте; с `block_id` блока ученика — встаёт сразу после него дополнением, блок ученика не меняется; без `block_id` — в конец. Id нового блока и дополнения — `uuid5` от артефакта, автора, номера блока во входе, блока ученика и хэша текста: повтор задачи генератора с теми же блоками ничего не пишет (закон 5, ревью B #138). Системные блоки, которые генератор не назвал, уходят: он возвращает всю системную часть. Блоки ученика остаются всегда; неотвеченное дополнение остаётся, пока к тому же блоку не пришло новое.
+  5. Ученик: `PUT` правит блок (он становится `owner = learner`, дополнение перестаёт быть дополнением) или по новому `block_id` дописывает блок `custom` (§2.3 строка 14). `accept` сливает дополнение с его блоком (содержимое через пустую строку, `sources` и `skills` объединяются). `DELETE` удаляет блок вместе с его неотвеченными дополнениями. `accept` не дополнения — `422 VALIDATION_ERROR` (§4.5: новых кодов нет).
+  6. Все три маршрута ученика принимают `idempotency_key` (§6.4 «изменяющие — `idempotency_key`», `T-E2`). Ключ события — `artifact.edit:{key}`. Повтор: тот же запрос, применённый к версии перед записанной, даёт её же — ответ этой версией, без записи; иначе — `409 IDEMPOTENCY_CONFLICT`. Запрос, который ничего не изменил, события не пишет, и его повтор просто снова ничего не меняет.
+- Почему: WP23.1, `Т-§17.1`–`Т-§17.2`, П-11.1, §0.4.3.
+- Обратимость: модель блока и одна функция слияния.
+- Тесты: `tests/artifacts/test_documents_wp23.py`; маршруты в `tests/test_app_assembly.py` (`T-A1`).
+- Осталось: сообщение `artifact_updated {artifact_id}` в `GET /v1/learner/stream` (§4) и маршруты карточек и cheat sheet — WP23.4–23.5. Старые маршруты заметок Фазы 3 (`/v1/artifacts/notes`, `GET /v1/artifacts`, `/v1/artifacts/search`) удаляются отдельно (§2.3 строка 14): на них держится `quack/artifacts/router.py` вместе с практикой.
 ### D-C-129. WP22.2: снимок листа — объект, затем `photo.uploaded`; кто может загружать
 - Класс: B
 - WP / место: WP22.2; `quack/canvas/photos.py`, `quack/canvas/router.py`, `quack/api/auth.py` (`get_any_session`)
@@ -1686,6 +1701,7 @@ PR #77 (dbmate v2.36.0, sha256).
 ## Красные прогоны
 
 - WP12.4, пространство решения (D-B-166): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 7 подмен (без `proof`, без уровня 6, метка вместо id, повторная постройка, без `IS NULL`, без LaTeX условия, `hard=False`), каждая роняет тест. Зелёный: `tests/test_llm_runtime.py`, `tests/practice`, `tests/llm`, `tests/test_settings_meta_api.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/e2e/test_llm_seams_e2e.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 272 passed.
+- WP23.1, документы артефактов (C, `phase-4-c-wp23-artifacts`): красный прогон отдельно не снят (облегчённый TDD по указанию владельца, 2026-11-03). Зелёный: `tests/artifacts/test_documents_wp23.py` + `tests/test_app_assembly.py` — 25 passed; с ключами — `tests/e2e/test_isolation_and_idempotency.py` + `tests/artifacts/test_documents_wp23.py` — 9 passed.
 - WP20.3, тело `embedding.compute` (C, `phase-4-c-wp20-modal`, коммит `5ff4812`): в Linux `pytest tests/embeddings/test_embedding_compute.py` — ошибка сбора (нет модуля); на неверной реализации (без пропуска готовых узлов) — 1 failed. Зелёный: с `tests/db/test_sql_static.py`, `tests/test_contracts.py` — 14 passed.
 - WP20.3, клиент Modal (C, `phase-4-c-wp20-modal`, коммит `92d406a`): `uv run pytest tests/embeddings` — ошибка сбора (нет `EMBEDDING_APP`, `EMBEDDER_CLASS`, параметра `query_instruction`). На неверной реализации (инструкция у документов; ошибки Modal не переводятся в `EmbeddingsUnavailable`) — по 1 failed. Зелёный: `tests/embeddings` (6, в Linux с `modal/` рядом), `tests/storage/test_s1_resources.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, `tests/test_app_assembly.py` — 46 passed. Правка теста красного коммита: `SecretStr("")` вместо `""` в `model_copy` (ошибка теста, не контракта).
 - WP20.4, поиск кусков (C, `phase-4-c-wp20-search`): красный прогон отдельно не снят (облегчённый TDD). Зелёный: `tests/materials/test_materials_search_wp20.py` + `tests/test_contracts.py` — 9 passed.
@@ -1769,6 +1785,8 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Правки тестов
 
+- `tests/e2e/test_isolation_and_idempotency.py`, `tests/e2e/endpoints.py` (C, WP23.1): три маршрута блоков — в обходе `T-E2`; тема для них записывается в журнал Фазы 4 (`topic.created`), которого структура Фазы 3 в обходе не пишет (D-C-112); `accept` и `DELETE` — в `NO_OTHER_BODY` (тело — только ключ).
+- `tests/test_app_assembly.py` (C, WP23.1): в `EXPECTED_ROUTES` и `_declared_routes` добавлены четыре маршрута конспекта §6.4 (§8.15 п.2 — новый маршрут контракта).
 - `tests/e2e/endpoints.py`, `tests/test_app_assembly.py` (C, WP22.2): маршрут снимка — в `T-A1`, в `NO_IDEMPOTENCY_KEY` и `MULTIPART` (`T-E2`, `T-E3`).
 - `tests/db/test_sql_static.py` (C, WP22.1): в `CROSS_LEARNER_ALLOWED` добавлен `quack/auth/pairing.py:_REDEEM_TOKEN` — согласовано A в #142 (D-A-128).
 - `tests/e2e/endpoints.py`, `tests/test_app_assembly.py` (C, WP22.1): маршруты привязки — в контракте `T-A1`, в `NO_IDEMPOTENCY_KEY` и `NO_BODY` (`T-E2`, `T-E3`).
