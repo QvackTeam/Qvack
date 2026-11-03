@@ -19,8 +19,18 @@ NO_IDEMPOTENCY_KEY: dict[tuple[str, str], str] = {
     # ТЗ Ф4 WP21.1: `{task_id?}` only; every call opens a new canvas of the session (D-C-118).
     ("POST", "/v1/sessions/{session_id}/canvases"): "each call opens a new canvas",
     ("POST", "/v1/sessions/{session_id}/heartbeat"): "no event; refreshes presence only",
+    # ТЗ Ф4 WP22.1: every call issues a new one-time token (Т-§16.1); no event to replay.
+    ("POST", "/v1/canvases/{canvas_id}/pairing"): "no event; issues a new one-time token",
+    # ТЗ Ф4 WP22.2: like materials, every photo of the sheet is a new snapshot (Т-§22.6).
+    ("POST", "/v1/canvases/{canvas_id}/photos"): "multipart; each photo is a new snapshot",
     # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
     ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): "no event; the job coalesces",
+}
+
+# Routes without a body model: the key is not sent.
+NO_BODY = {
+    ("POST", "/v1/sessions/{session_id}/heartbeat"),
+    ("POST", "/v1/canvases/{canvas_id}/pairing"),
 }
 
 MUTATING = {"post", "put", "patch", "delete"}
@@ -79,6 +89,9 @@ def path_for(path: str, ids: Ids) -> str:
 MULTIPART: dict[tuple[str, str], dict[str, tuple[str, bytes, str]]] = {
     ("POST", "/v1/domains/{domain_id}/materials"): {
         "file": ("notes.pdf", b"%PDF-1.7\n1 0 obj\n", "application/pdf")
+    },
+    ("POST", "/v1/canvases/{canvas_id}/photos"): {
+        "file": ("sheet.webp", b"RIFF\x00\x00\x00\x00WEBPVP8 ", "image/webp")
     },
 }
 
@@ -151,9 +164,10 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
         },
         ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"): {},
         ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"): {},
+        ("POST", "/v1/canvases/{canvas_id}/pairing"): {},
         ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): {"domain_id": str(ids.domain_id)},
     }
     body = dict(bodies[(method, path)])
-    if (method, path) != ("POST", "/v1/sessions/{session_id}/heartbeat"):  # no body model
+    if (method, path) not in NO_BODY:
         body["idempotency_key"] = key
     return body
