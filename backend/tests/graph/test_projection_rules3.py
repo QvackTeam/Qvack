@@ -945,14 +945,17 @@ def test_typo_declared_disputes_the_verdict_evidence_as_slip() -> None:
 
 
 def test_dispute_of_evidence_misconception_or_verdict() -> None:
-    """Т-§2.8: the target gets `disputed` together with the evidence derived from it."""
+    """Т-§2.8: the target gets `disputed` together with the evidence derived from it. A verdict
+    is named like its key `verdict:{answer_seq}:{part}` — `"<answer_seq>:<part>"` (D-A-134)."""
     derived = _ev(9)
     graph_nodes, graph_rels = _verdict_graph()
     nodes, _ = _run(
         [
             _answer(),
             _verdict(),
-            _event(73, "dispute.filed", {"target_kind": "verdict", "target_id": str(VERDICT_SEQ)}),
+            _event(
+                73, "dispute.filed", {"target_kind": "verdict", "target_id": f"{ANSWER_SEQ}:main"}
+            ),
         ],
         graph_nodes,
         graph_rels,
