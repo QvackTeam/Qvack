@@ -11,6 +11,7 @@ from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -184,6 +185,17 @@ def create_app(
         response.headers["X-Trace-ID"] = trace_id
         return response
 
+    # ТЗ Ф4 WP9.2, Д-§2.1: the frontend on app./preview.qvack.online calls this API with the
+    # session cookie. An exact origin list with credentials, never `*`. Added last, so it is the
+    # outermost layer and answers a preflight before routing and authentication.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Content-Type", "X-Request-ID"],
+        expose_headers=["X-Request-ID", "X-Trace-ID"],
+    )
     app.include_router(_health_router())
     app.include_router(_healthz_router())
     # Domains and artifacts attach authentication and the `actions` limit in their routers
