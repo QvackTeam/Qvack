@@ -100,6 +100,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | WP2 (A) | A | **S3 заморожен (G1)** в `phase-4-a-s3-freeze` (D-A-119): 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; Q-A-2, Q-A-3 закрыты | `tests/events`: 82 passed (без инфраструктуры) |
 | WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` (D-A-111); `MisconceptionFact.statement` (D-B-145) — `phase-4-a-g1`; реализация — G2 | `tests/graph/test_read_stub.py`: 10 passed |
 | WP7.1 (A), S6 | A | виды задач и таблица правил по событию (D-A-110); строка `known_check` и отмена поручений (D-A-115) — `phase-4-a-g1`; строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 27 passed |
+| WP15 швы A (п.4–5 сообщения B), WP7.3 | A | `check_extracted` и `mark_covered` в `phase-4-a-wp15-seams` (D-A-124) | `tests/graph/test_extracted_check.py`, `tests/jobs/test_coverage.py`: 16 passed |
 | S1 (A), `JobContext` | A | поля §4.2 `db`, `storage`, `embeddings`, `deletions` в `phase-4-a-g1` (D-A-114) | `tests/jobs/test_job_context.py`: 2 passed |
 | WP3.1 (A) | A | схема Neo4j Фазы 4 в `quack/db/neo4j.py`: уникальность `id` для Hub, Option, Material, Chunk, Digest, Profile; range по `learnerId` на метках, где его ещё нет; составной `(learnerId, retDueAtMs)` на Skill; пять векторных индексов с фильтрующими свойствами и `embedding_dim`; сосуществует с индексами Фазы 3 до WP1.3. Остальное WP3 (обработчики, фазы А–В) — дальше | `tests/graph/test_schema_wp31.py` + `test_infra.py`: 4 passed (Neo4j 2026.06.0) |
 | WP1.1–1.2 (A) | A | выполнен в `phase-4-a-wp1` (шов S2): базовая миграция dbmate, `Db`, `append_events`, параметры §6.7 потока A. WP1.4 (`.squawk.toml`, S16) — к G2; WP1.3 — к G3/G4 | `tests/db`: 19 passed |
@@ -442,6 +443,23 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 
 ### D-A-123. Вопросы C к владельцу — решены C в D-C-122, A согласен
 - Класс: B. C решил свои четыре вопроса по поручению владельца в D-C-122 (`phase-4-c-wp21-ws`), раньше этой записи. A сверил с документами и согласен со всеми пунктами: (1) блок набора формул — инструмент слоя ученика, не вид блока (`П-9.4`, `Т-§15.3`); (2) поправка §0.4.7/§7.4 снята — как D-A-120; (3) расхождения по `JWT_SECRET` в `Д-§7` нет; (4) переполнение куска — `chunk_max_batches = ceil(stroke_chunk_seconds · 1000 / stroke_batch_ms)` из двух параметров `Т-§15.2`, без новых чисел. Отдельных решений A по этим вопросам нет.
+
+### D-A-124. Швы WP15 для B: проверка элементов `extractor@3` и запись покрытия
+- Класс: B. WP15 п.4, п.8 (`Т-§7.6`, `Т-§4.4`, `Т-§2.1`), WP7.3 (`Т-§2.8`); `quack/graph/evidence_validation.py` (`check_extracted`), `quack/jobs/coverage.py` (`mark_covered`)
+- Контекст: B просит (п.5 сообщения B): проверку элементов на записях Фазы 4 и функцию записи `ops.coverage` в транзакции `observation.extracted`. Ядро не может импортировать модель B (`quack.agents.schemas.ExtractedElement`, §4.1).
+- Решение:
+  1. `check_extracted(elements, EpisodeCheckContext) -> CheckedElements(elements, rejected)`. Вход — протокол `ExtractorElementLike` с полями модели B (тест проверяет, что модель B ему соответствует). Контекст: `skill_labels`, `misconception_labels` (`LabelMap.labels(...)`), `episode` (`seq → EpisodeSource(text, at_ms)` — только события эпизода, `Т-§7.5`), `task_levels`, `code_verdicts` — их собирает B.
+  2. Порядок проверок `Т-§7.6`: метки (навык, заблуждение, корень ошибки — неизвестная метка корня отклоняет элемент: «метки существуют») → полнота → номера внутри эпизода → цитата → уровень не выше разметки задачи → `code_verdict_exists` (WP15 п.8; только `evidence`: толкование закрытого ответа гипотезой остаётся). Первая непройденная проверка — причина в `rejected {index, reason, quote}`.
+  3. Полнота, где документ молчит: `evidence` называет ровно одно из трёх — метку навыка, новый навык, «неясно» (`Т-§7.6`: «навык (метка, описание нового или „неясно“)») — и имеет уровень и исход; гипотеза — метку заблуждения или новую формулировку.
+  3а. Помощь и тип пробела согласованы (WP15 п.3, `Т-§7.6`; ревью B в #133): ступень есть только у `hint` и у `hint` она есть; у положительного элемента (`correct`) тип пробела — `none`. Иначе — `incomplete_element`. У `partial` тип пробела может быть любым.
+  4. «Неясно» — не отказ: элемент записывается с `skill_unclear` и без `skill_id` (это ответ извлекателя по `Т-§7.6`, а не провал проверки); свидетельства из него проектор не строит (WP5).
+  5. Цитата обязательна у отрицательного элемента и гипотезы (`Т-§7.6`) и у нового навыка (`Т-§4.4`: «только с цитатой»); цитата без краевых пробелов должна быть подстрокой одного из указанных событий.
+  6. Время элемента — время самого позднего из указанных событий (`Т-§2.1`: «время из исходных событий»; так же, как в Фазе 3).
+  7. `mark_covered(db, learner_id, *, episode_seq, extractor, status, observation_seq)`: `extracted` — с `seq` наблюдения, `nothing_to_extract` — без него (иначе `ValueError`); повтор заменяет строку (`ON CONFLICT … DO UPDATE`), так что переизвлечение указывает на новое наблюдение. Вызванная внутри `db.transaction()` вступает в транзакцию вызывающего (закон 7).
+- Почему: §0.4.3 п.2, п.5; законы 5, 6, 7.
+- Обратимость: две функции, данных нет.
+- Тесты: `tests/graph/test_extracted_check.py` (13), `tests/jobs/test_coverage.py` (4). Проверено на неверной реализации: 10 подмен (нет проверки цитаты, нет `code_verdict_exists`, нет потолка уровня, время самого раннего события, новый навык без цитаты, неверный `index`, неизвестная метка корня принята, `evidence` без навыка принят, повтор не заменяет строку, `extracted` без наблюдения принят) — каждая роняет тест.
+- Требует подтверждения владельцем: нет.
 
 ### D-A-126. S4: факты картины памяти WP14.2 — уверенность типа пробела, «забыл», условия проявления
 - Класс: B. WP6.4, WP14.2; вопрос B в D-B-157 (#131); `quack/graph/read/models.py`, `tests/support/graph_read.py`
@@ -1404,6 +1422,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - D-B-144 (грамматика API, отношения): `cd backend && uv run pytest tests/practice/test_grammar_relations.py` — 5 failed, 4 passed (отказы и так отказы), коммит `b2d0309`. Зелёный: 9 passed; с затронутыми (`tests/practice`, `tests/session/test_phase4_contracts.py`, `tests/test_contracts.py`) — 116 passed.
 
 - S3, заморозка (A, `phase-4-a-s3-freeze`, коммит `dc04d39`): `pytest tests/events/test_catalog.py -k frozen_kinds` — 5 failed (другие значения `kind` и чужая привязка `topic_id`/`hub_id` принимаются), 1 passed. Зелёный: `tests/events`, `tests/jobs` — 111 passed.
+- Швы WP15 (A, `phase-4-a-wp15-seams`, коммит `5281ea1`, D-A-124): `QUACK_TEST_REQUIRE_INFRA=1 pytest tests/graph/test_extracted_check.py tests/jobs/test_coverage.py` — 15 failed (`NotImplementedError`), 1 passed (модель B подходит протоколу); на заведомо неверных реализациях — 10 из 10 подмен роняют тест (D-A-124). В красном прогоне был ложный зелёный: тест отката ловил `RuntimeError`, а `NotImplementedError` — его подкласс; исправлено до красного коммита. Зелёный — в описании PR.
 - S4, поля картины памяти (A, `phase-4-a-s4-fields`, коммит `9ccd3eb`, D-A-126): `pytest tests/graph/test_read_stub.py -k wp14` — 1 failed (у навыка нет типа пробела с уверенностью и времени провала памяти). Зелёный — в описании PR.
 - S3, `session.started.resumed` (A, `phase-4-a-session-resumed`, коммит `5b2f6f4`, D-A-121): `pytest tests/events/test_catalog.py -k resumed` — 1 failed (`resumed` нет у модели). Зелёный — в описании PR.
 - S6, `known_check` без темы (A, `phase-4-a-g1`, ревью B #117): `pytest tests/jobs/test_rules_p4.py -k without_topic` — 1 failed (ставится `check.known_claim` с `topic_id = "None"`). Зелёный — в описании #117.
@@ -1424,10 +1443,12 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.9, `known_check` без темы (D-B-149 п. ж): `-k known_check` — 1 failed (запрос без темы записан), коммит `730bf0c`. Зелёный: 26 passed.
 - WP13.9, запись хода (D-B-149): `cd backend && uv run pytest tests/session/test_turn_commit.py` — ошибка сбора (нет `quack.session.turn_commit`), коммит `d7972cc`; на неверной реализации (6 подмен) — каждая роняет 1–2 теста. Зелёный: 6 passed.
 - WP13.9, дедлайн из разговора, подсказки, закрытие задачи (D-B-149 п. г, д): тот же файл — ошибка сбора (нет `AnsweredAction`, `LearnerText`), коммит `6e39af5`; на неверной реализации — 8 подмен, каждая роняет 1–3 теста. Зелёный: 16 passed.
+- WP15, помощь и тип пробела (A, D-A-124 п.3а, коммит `9a1a444`): `uv run pytest tests/graph/test_extracted_check.py` — 1 failed (подсказка без ступени проходит). Подмены: ступень без подсказки, подсказка без ступени, положительный с типом пробела, `partial` обязан `none` — 4/4. Зелёный: 13 passed.
 
 ## Правки тестов
 
 - `tests/session/test_sessions_db.py::test_start_writes_the_event_and_the_row` (B, D-B-155): нагрузка `session.started` получила поле `resumed: false` (D-A-121, #130) — ожидание дополнено полем. Проверка не ослаблена.
+- `tests/graph/test_extracted_check.py::test_negative_elements_need_a_quote_from_their_sources` (A, D-A-124 п.3а, до слияния #133): положительный элемент с новым навыком получил `gap_type = none` — прежние данные нарушали контракт выхода (WP15 п.3). Проверяемое утверждение (`missing_quote`) то же.
 - `tests/test_compose_contract.py` (C, D-C-119): удалён `test_only_api_has_the_jwt_secret` из #122 — `JWT_SECRET` удаляется вместе с JWT (§2.3 строка 3, §8.15 п.1); из проверки `projector` убрано несуществующее имя `JWT_SECRET`.
 - `tests/session/test_head_guards.py::test_boundary_names_the_missing_prerequisites_once` (D-B-153, до зелёного): проверка «id не в тексте» смотрела на id предпосылки с меткой и не ловила утечку id предпосылки без метки (подмена прошла); теперь проверяются оба id и точный текст. Тест усилен, не ослаблен.
 - `tests/practice/test_check_symbolic_job.py::test_unsupported_form_writes_nothing_yet` → `test_unsupported_form_writes_check_failed_for_the_model` (B, D-B-146): прежний тест закреплял временное поведение до ответа A («`unsupported` нет в каталоге»); A добавил значение в #117, тест проверяет новое поведение: `check.failed {reason: unsupported}` под ключом `check_failed_key`. Тест не ослаблен.
