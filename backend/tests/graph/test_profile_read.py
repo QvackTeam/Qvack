@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import pytest
 from neo4j import AsyncDriver, Query
 
+from quack.config import Settings
 from quack.graph.profile_fold import (
     ProfileInputs,
     ProfileParams,
@@ -21,6 +22,7 @@ from quack.graph.profile_fold import (
 )
 from quack.graph.read.models import ProfileFacts
 from quack.graph.read.neo4j_profile import read_profile
+from quack.graph.read.reader import create_graph_reader
 
 
 @pytest.fixture
@@ -99,6 +101,9 @@ async def test_no_profile_is_an_empty_profile_and_learners_are_isolated(
     await _write(neo4j_driver, other, ProfileInputs(prefs={"prefLanguage": "de"}, manner="m"))
     assert await read_profile(neo4j_driver, mine) == ProfileFacts(learner_id=mine)
     assert (await read_profile(neo4j_driver, other)).prefs == {"language": "de"}
+    reader = create_graph_reader(neo4j_driver, Settings(), learner_id=mine)
+    assert await reader.profile(other) == ProfileFacts(learner_id=other)  # law 1, D-A-144
     await _write(neo4j_driver, mine, ProfileInputs(prefs={"prefLanguage": "ru"}))
     assert (await read_profile(neo4j_driver, mine)).prefs == {"language": "ru"}
     assert (await read_profile(neo4j_driver, other)).prefs == {"language": "de"}
+    assert (await reader.profile(mine)).prefs == {"language": "ru"}

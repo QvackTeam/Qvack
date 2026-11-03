@@ -21,6 +21,7 @@ from quack.graph.memory import InMemoryGraph
 from quack.graph.mutations import Mutation, UpsertNode, UpsertRel
 from quack.graph.overlay import SessionOverlay
 from quack.graph.read import SliceFocus, create_graph_reader
+from quack.graph.read.models import ProfileFacts
 from quack.graph.read.neo4j_reader import Neo4jGraphReader, level_is_ready_direct
 
 NOW = 1_700_000_000_000
@@ -477,8 +478,8 @@ async def test_factory_reader_is_bound_to_its_learner(
 async def test_factory_and_extras(settings: Settings, neo4j_driver: AsyncDriver) -> None:
     reader = create_graph_reader(neo4j_driver, settings, learner_id=uuid4())
     assert isinstance(reader, Neo4jGraphReader)
-    with pytest.raises(NotImplementedError):
-        await reader.profile(uuid4())
+    other = uuid4()
+    assert await reader.profile(other) == ProfileFacts(learner_id=other)  # bound: law 1
 
 
 async def test_factory_reader_does_not_leak_through_extra_reads(

@@ -60,6 +60,7 @@ from quack.graph.read.models import (
     WhyFacts,
 )
 from quack.graph.read.neo4j_extras import ExtraReads
+from quack.graph.read.neo4j_profile import read_profile
 from quack.graph.slice import SliceDeps, read_consistent_slice
 
 type Row = dict[str, Any]
@@ -1023,4 +1024,6 @@ class Neo4jGraphReader(ExtraReads):
         )
 
     async def profile(self, learner_id: UUID) -> ProfileFacts:
-        raise NotImplementedError("WP5.3: read_profile (neo4j_profile.py, PR #176)")
+        if self._foreign(learner_id):
+            return ProfileFacts(learner_id=learner_id)
+        return await read_profile(self._neo4j, learner_id)
