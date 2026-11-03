@@ -1087,6 +1087,27 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Решено (2026-11-03): D-A-122 п.1 (#130) — `content.study_plans` строит код при старте сессии с целью-хабом (и при записи хода, если плана нет): порция — вершина графа `REQUIRES` тем хаба со сжатыми SCC (`graph.read.topic_requires`, S4), порядок — топологический; модель план хаба не пишет. Согласуется с WP13.6 и `Т-§4.6`. Реализация — B (WP13.6), отдельным пунктом.
 - Требует подтверждения владельцем: нет
 
+### D-B-167. Проверка задачи учителя после хода (WP12.5, строка «учитель на лету»)
+- Класс: B
+- WP / место: WP12.5, `Т-§5.6`, `T-TK6`; `quack/practice/task_check.py` (`check_teacher_task`)
+- Контекст: `Т-§5.6`: Spark решает задачу независимо и оценивает разметку (метод назван, вариант, уровень); ответ сравнивается тем же кодом, что ответы учеников; расхождение — `task.key_disputed` или `task.markup_disputed`, неверная разметка исправляется пересвёрткой. Не названы: что делать, если код не может решить ключ (медленный тип, compute недоступен, ответ не разобран); что идёт первым при обоих расхождениях; какой вид у исправленной разметки; ключ события.
+- Решение: (а) ответ проверяющего — `LearnerAnswer` в типе спецификации, `check()` с `symbolic_background_timeout_ms`; ключ оспорен только при вердикте `incorrect`; иной исход (`partial`, `unclear`, `NotYet`, `CheckFailed`, `NeedsModel`) ключ не оспаривает — судится только разметка. (б) Ключ первым: при обоих расхождениях — `task.key_disputed` с исправленной разметкой. (в) Исправление: `method_named` — по проверяющему, неподходящие уровни убираются, `variant_of` снимается, если «не вариант»; не подошёл ни один уровень — `tests` остаются (иначе разметка без пар). (г) Вход вслепую: условие, варианты без признака верного, заявленная разметка с именами навыков, условие исходной задачи для варианта. (д) Ключ события `task_check:{task_id}`, ключ вызова — с версией промпта; актор — `task_checker@1`; `causation_seq` — событие хода.
+- Почему: §0.4.3 п.2 (WP12.5, `Т-§5.6`), п.5.
+- Обратимость: один модуль.
+- Тесты: `T-TK6` — `tests/practice/test_task_check.py` (4).
+(е) Строка «сгенерированная» — `verify_generated`: та же слепая проверка до банка; расхождение → `task_arbiter` (Wonder) с решением генератора, ответом проверяющего и словами расхождения; арбитр снова расходится (ключ или разметка) — `False`, черновик выбрасывается; ключи вызовов — `{ключ черновика}:{промпт}`.
+- Не решено \[ПРОВЕРИТЬ\]: строка «семинар» — с разбором материала (C); обработчик задачи `task.check` (`{task_ids}` правила `turn.committed`) — при сборке входов (имена навыков из S4).
+### D-B-166. Пространство решения задачи (WP12.4)
+- Класс: B
+- WP / место: WP12.4, `Т-§5.5`, `Т-§11.1`, `T-TK5`; `quack/practice/solution_space.py` (`build_solution_space`), `quack/config.py` (`RoleConfig.hard_model`, `model_for_role(hard=)`), `quack/llm/gateway.py` (`generate_structured(hard=)`)
+- Контекст: WP12.4 — роль `solution_space`, Spark; Wonder — для ответа `proof` и уровня 6; хранится в документе задачи с версией. `Т-§11.1`: строка «solution\_space — Spark, для сложных — Wonder», так же `task_generator`; ролей в таблице 26 (`T-AI1`), отдельной роли «глубокой» нет. Не названы: как одна роль зовёт две модели; что хранить на месте метки заблуждения неверной ветки (метки живут один вызов, `Т-§4.5`); откуда уровни задачи (в `content.tasks` разметки нет); что делать при двух задачах на одну задачу (правило банка и запрос канваса).
+- Решение: (а) у строки роли — `hard_model` (Wonder для `solution_space`, `task_generator`); `generate_structured(hard=True)` зовёт его, учёт, лимиты и outbox остаются у роли; роли без `hard_model` флаг не меняет. Новой роли нет — таблица `Т-§11.1` цела. (б) Сложная — ответ `proof` или уровень 6 в `tests` разметки; разметка читается из `task.created` по `created_seq` документа. (в) Заблуждение неверной ветки хранится его id (строкой) вместо метки; метка, неизвестная после повтора, — null. (г) Версия — версия промпта (`solution_space@1`); ключ вызова `solution_space:{task_id}:{prompt}`; запись — `UPDATE … WHERE solution_space IS NULL`: первое сохранённое пространство остаётся, повторная задача ничего не строит. (д) Пространство — содержимое документа задачи, не память ученика: события нет (закон 1 о модели ученика). (е) Имена полей JSON `content.tasks.solution_space` (`key_steps[].statement`, `key_steps[].expression {latex, sympy}`, `wrong_branches[].sign|gap_type|misconception`, `hints`) — шов с C: канвас WP21.4 читает их своим SQL; переименование — только с сообщением C (ревью C #144).
+- Почему: §0.4.3 п.2 (WP12.4, `Т-§5.5`, `Т-§11.1`), п.5.
+- Обратимость: один модуль и поле строки роли.
+- Тесты: `T-TK5` — `tests/practice/test_solution_space.py` (6); `tests/test_llm_runtime.py::test_hard_call_takes_the_hard_model`.
+- Не решено \[ПРОВЕРИТЬ\]: `model_for_role` берёт модель из `llm_role_models` (Фаза 2), а не из `llm_roles[role].model` — модель строки таблицы на вызов не влияет (кроме `hard_model`); провести через WP10 (G4). Обработчики `task.solution_space`/`agent.solution_space` — после чтения заблуждений навыка из S4 и источника эталонного решения.
+- Требует подтверждения владельцем: нет
+
 ### D-B-157. Картина памяти `renderer@1` (WP14.2)
 - Класс: B
 - WP / место: WP14.2, `Т-§10.2`, `Т-§8.2`–`Т-§8.7`; `quack/session/memory_picture.py`
@@ -1197,6 +1218,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `T-X1` — `tests/agents/test_extract_episode.py::test_extracted_elements_checked_on_the_episode`, `test_record_extraction`, `test_record_extraction_commits_nothing_on_failure`.
 - Не решено \[ПРОВЕРИТЬ\]: потолок уровня — по задаче целиком, не по части (`part`) ответа; задача `extract.episode` (сборка окна из журнала, кандидаты из S4, `task_tests` из `content.tasks`) — следующим шагом WP15.
 - Требует подтверждения владельцем: нет
+### D-B-168. Генерация задач (WP12.6)
+- Класс: B
+- WP / место: WP12.6, `Т-§5.4`, `Т-§5.6`, `Т-§11.1`; `quack/practice/task_generation.py` (`generate_tasks`, `GenerationRequest`); `markup_record` перенесён из `quack/session/turn_commit.py` в `quack/practice/markup.py` (generation в `practice` не может импортировать `session`, §4.1)
+- Контекст: WP12.6 — `task_generator` (Spark; `proof` и уровень 6 — Wonder), варианты одного шага — общий `familyId`; переиспользовать генерацию Фазы 3, новое — проверка `task_checker`/`task_arbiter`. Код Фазы 3 (`quack/practice/generation.py`, вызов в `quack/artifacts/practice.py` — зона C) пишет `core.task_bank` и уходит с WP1.3. Не названы: что делать с вариантом, чья разметка нарушает `Т-§5.3`; идентификаторы задач и семейства при повторе; что делать с частью вариантов, не прошедших проверку.
+- Решение: (а) новый модуль на `content.tasks` + `task.created` (WP12.1): вызов с `check` — нарушения `validate_markup` уходят модели один раз; вариант, неверный и после повтора, отбрасывается без проверки. (б) Каждый вариант — `verify_generated` (D-B-167) с ключом `{ключ запроса}:{номер}`; не прошёл — выброшен, остальные сохраняются. (в) `familyId` и `task_id` — `uuid5` от ключа запроса (и номера): повтор задачи пишет те же события (закон 5). (г) Сохранённое — `source: generated`, `verification: checked`, актор — `task_generator@1`. (д) Сложный вызов — `hard=True` при `proof` или уровне 6 (D-B-166). Переименование `task_gen` → `task_generator` в `quack/artifacts/practice.py` — зона C, не трогаю (код уходит с WP1.3).
+- Почему: §0.4.3 п.2 (WP12.6, `Т-§5.4`, `Т-§5.6`), п.5.
+- Обратимость: один модуль.
+- Тесты: `tests/practice/test_task_generation.py` (5).
+- Не решено \[ПРОВЕРИТЬ\]: потребители (подбор при пустом банке, поручения учителя `agent.task_generation`, пробники, «я это уже знаю», карточки C) подключаются своими WP; источник `course_context`, `excluded_families` — при сборке входов.
+
 ### D-B-170. Изображение во входе вызова роли (шов S12)
 - Класс: B
 - WP / место: WP21.3 (`recognizer`), WP11.6 (`verdict_free`), `Т-§11.1` «Spark с изображением»; `quack/llm/provider.py` (`ImageInput`, `ProviderRequest.images`), `quack/llm/responses_client.py` (`image_data_url`), `quack/llm/gateway.py` (`generate_structured(images=)`); вопрос-блокер C в #134
@@ -1689,6 +1720,10 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP12.6, генерация задач (D-B-168): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 7 подмен, каждая роняет тест. Зелёный: `tests/practice/test_task_generation.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 5 passed.
+- WP12.5, проверка задачи учителя (D-B-167): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 11 подмен, каждая роняет тест. Зелёный: `tests/practice/test_task_check.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 4 passed.
+- WP12.4, пространство решения (D-B-166): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 7 подмен (без `proof`, без уровня 6, метка вместо id, повторная постройка, без `IS NULL`, без LaTeX условия, `hard=False`), каждая роняет тест. Зелёный: `tests/test_llm_runtime.py`, `tests/practice`, `tests/llm`, `tests/test_settings_meta_api.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/e2e/test_llm_seams_e2e.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 272 passed.
+- WP12.5, проверка задачи учителя (D-B-167): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 11 подмен, каждая роняет тест. Зелёный: `tests/practice/test_task_check.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 4 passed.
 - WP23.1, документы артефактов (C, `phase-4-c-wp23-artifacts`): красный прогон отдельно не снят (облегчённый TDD по указанию владельца, 2026-11-03). Зелёный: `tests/artifacts/test_documents_wp23.py` + `tests/test_app_assembly.py` — 25 passed; с ключами — `tests/e2e/test_isolation_and_idempotency.py` + `tests/artifacts/test_documents_wp23.py` — 9 passed.
 - WP20.3, тело `embedding.compute` (C, `phase-4-c-wp20-modal`, коммит `5ff4812`): в Linux `pytest tests/embeddings/test_embedding_compute.py` — ошибка сбора (нет модуля); на неверной реализации (без пропуска готовых узлов) — 1 failed. Зелёный: с `tests/db/test_sql_static.py`, `tests/test_contracts.py` — 14 passed.
 - WP20.3, клиент Modal (C, `phase-4-c-wp20-modal`, коммит `92d406a`): `uv run pytest tests/embeddings` — ошибка сбора (нет `EMBEDDING_APP`, `EMBEDDER_CLASS`, параметра `query_instruction`). На неверной реализации (инструкция у документов; ошибки Modal не переводятся в `EmbeddingsUnavailable`) — по 1 failed. Зелёный: `tests/embeddings` (6, в Linux с `modal/` рядом), `tests/storage/test_s1_resources.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, `tests/test_app_assembly.py` — 46 passed. Правка теста красного коммита: `SecretStr("")` вместо `""` в `model_copy` (ошибка теста, не контракта).
