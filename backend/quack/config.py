@@ -596,6 +596,23 @@ class Settings(BaseSettings):
     team_daily_alert_usd: float = 60.0
     backup_interval_hours: int = 6
     backup_retention_days: int = 14
+    # `ops backup` (Д-§8.1, Д-§7): R2 key limited to the bucket; `file:///dir` in the endpoint
+    # writes into a directory instead (tests, local stack).
+    backup_bucket: str = "quack-backups"
+    backup_s3_endpoint: SecretStr = SecretStr("")
+    backup_s3_access_key: SecretStr = SecretStr("")
+    backup_s3_secret_key: SecretStr = SecretStr("")
+    backup_age_public_key: str = ""
+    backup_local_dir: str = "/backups"
+    heartbeat_backup_url: SecretStr = SecretStr("")
+    alert_webhook_url: SecretStr = SecretStr("")
+    # `ops db-roles` (Д-§7): passwords of the three Postgres roles.
+    app_db_password: SecretStr = SecretStr("")
+    reader_db_password: SecretStr = SecretStr("")
+    migrator_db_password: SecretStr = SecretStr("")
+    # Д-§14.3: the chat is not chosen yet, the body shape follows the setting (ops/notify.py).
+    alert_webhook_format: Literal["slack", "discord", "telegram"] = "slack"
+    alert_webhook_chat_id: str = ""
     cors_origins: list[str] = Field(
         default_factory=lambda: ["https://app.qvack.online", "https://preview.qvack.online"]
     )
@@ -674,6 +691,14 @@ class Settings(BaseSettings):
                     self.s3_secret_key,
                     self.deletions_s3_access_key,
                     self.deletions_s3_secret_key,
+                    self.backup_s3_endpoint,
+                    self.backup_s3_access_key,
+                    self.backup_s3_secret_key,
+                    self.heartbeat_backup_url,
+                    self.alert_webhook_url,
+                    self.app_db_password,
+                    self.reader_db_password,
+                    self.migrator_db_password,
                     self.modal_token_id,
                     self.modal_token_secret,
                 )

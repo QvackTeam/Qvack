@@ -14,13 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.compute_client.client import create_compute_client
 from quack.config import Settings
+from quack.db import open_db
 from quack.db.neo4j import create_driver
 from quack.db.postgres import SessionFactory, create_engine, create_session_factory
 from quack.db.redis import create_redis
+from quack.embeddings.client import create_embedding_client
 from quack.jobs.kinds import JOB_KINDS
 from quack.jobs.runner import JOB_HANDLERS, JobContext, JobHandler
 from quack.llm.gateway import LLMGateway
 from quack.llm.responses_client import ResponsesClient
+from quack.storage.deletions import create_deletion_journal
+from quack.storage.objects import create_object_store
 
 # WP2.2: modules that hold `@register_job_handler` (kind -> module is checked by T-Q7).
 HANDLER_MODULES: tuple[str, ...] = (
@@ -33,7 +37,8 @@ HANDLER_MODULES: tuple[str, ...] = (
 
 
 async def create_job_context(settings: Settings) -> JobContext:
-    """Build the resources of §4.2 once per process, in creation order (WP2.1)."""
+    """Build the resources of ТЗ Ф4 §4.2 once per process, in creation order (WP2.1)."""
+    db = await open_db(settings)
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
     neo4j = create_driver(settings)
@@ -41,23 +46,32 @@ async def create_job_context(settings: Settings) -> JobContext:
     provider = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
     return JobContext(
         settings=settings,
+        db=db,
         session_factory=session_factory,
         engine=engine,
         neo4j=neo4j,
         redis=redis,
         llm=LLMGateway(session_factory, provider, settings),
         compute=create_compute_client(settings),
+        storage=create_object_store(settings),
+        embeddings=create_embedding_client(settings),
+        deletions=create_deletion_journal(settings),
     )
 
 
 async def close_job_context(context: JobContext) -> None:
-    """Close in reverse creation order: compute, llm, redis, neo4j, engine (§4.2)."""
+    """Close in reverse creation order: deletions, embeddings, storage, compute, llm, redis,
+    neo4j, engine, db (§4.2)."""
+    await context.deletions.aclose()
+    await context.embeddings.aclose()
+    await context.storage.aclose()
     await context.compute.aclose()
     await context.llm.aclose()
     if context.redis is not None:
         await context.redis.aclose()
     await context.neo4j.close()
     await context.engine.dispose()
+    await context.db.close()
 
 
 @dataclass(frozen=True)

@@ -89,15 +89,27 @@ class SkillFact(_Fact):
     recall_probability: float | None = Field(default=None, ge=0.0, le=1.0)
     due_at_ms: int | None = None
     consolidation_flag: bool = False
+    # `Т-§8.4`: the weighted majority of the last negative evidence and its share of votes; the
+    # teacher sees the type only above `gap_type_min_confidence` (WP14.2).
     gap_type: GapType | None = None
+    gap_type_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    # `Т-§8.2` п.3: the last failure after a delay on a proven level — «забыл» (retLastLapseAtMs);
+    # None — no lapse yet (law 8).
+    last_lapse_at_ms: int | None = None
     exposures: list[ExposureFact] = []
     requires: list[RequiresLink] = []
 
 
 class MisconceptionFact(_Fact):
+    """`statement` — the extractor's wording of a new one, rewritten by the analyst on
+    confirmation (Т-§9.3); `check.model` shows it to the model (D-B-145). `triggers` — the
+    conditions it shows in, written with the statement (`misconception.described`, WP14.2)."""
+
     misconception_id: UUID
     skill_id: UUID
     status: MisconceptionStatus
+    statement: str
+    triggers: list[str] = []
     confused_with_skill_id: UUID | None = None
     manifestation_count: int = Field(default=0, ge=0)
     quotes: list[str] = Field(default=[], max_length=2)

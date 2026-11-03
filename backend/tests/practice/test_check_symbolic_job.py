@@ -15,8 +15,8 @@ from quack.events import records
 from quack.events.event_types import AnswerSubmitted
 from quack.events.keys import check_failed_key, verdict_key
 from quack.events.log import NewEvent, append_events
-from quack.events.values import AnswerSpec, LearnerAnswer, MathValue
-from quack.practice.check import NeedsModel, Verdict
+from quack.events.values import AnswerSpec, CheckFailed, LearnerAnswer, MathValue
+from quack.practice.check import Verdict
 from quack.practice.model_check import record_verdict
 from quack.practice.role_outputs import TaskCondition
 from quack.practice.symbolic_job import insure_symbolic
@@ -129,11 +129,16 @@ async def test_timeout_or_compute_down_is_check_failed(pg_db: Db) -> None:
     assert [(r["type"], r["payload"]["reason"]) for r in rows] == [("check.failed", "timeout")]
 
 
-async def test_unsupported_form_writes_nothing_yet(pg_db: Db) -> None:
-    """D-B-146: `unsupported` has no `CheckFailedReason` in the catalog yet (question to A)."""
+async def test_unsupported_form_writes_check_failed_for_the_model(pg_db: Db) -> None:
+    """D-B-146 (A answered in #117): a form without a structural check is
+    `check.failed {reason: unsupported}`; the S6 row `check.failed → check.model` takes it
+    (Т-§6.6 «нет её — проверка моделью»)."""
     learner_id = await create_learner(pg_db)
     seq = await _answer(pg_db, learner_id)
     unsupported = MathCheckResponse(status="failed", reason="unsupported")
     result, _ = await _insure(pg_db, learner_id, seq, unsupported)
-    assert isinstance(result, NeedsModel)
-    assert await _types(pg_db, learner_id) == []
+    assert isinstance(result, CheckFailed) and result.reason == "unsupported"
+    rows = await _types(pg_db, learner_id)
+    assert [(r["type"], r["idempotency_key"], r["payload"]["reason"]) for r in rows] == [
+        ("check.failed", check_failed_key(seq, "main"), "unsupported")
+    ]
