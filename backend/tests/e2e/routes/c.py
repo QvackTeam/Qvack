@@ -106,6 +106,27 @@ async def _canvas_with_a_line(system: System, learner: Learner, ids: Ids) -> Ids
     return ids.replace(canvas_id=canvas.canvas_id, line_id="t1")
 
 
+async def _hub_of_the_walk(system: System, learner: Learner, ids: Ids) -> Ids:
+    """WP23.5: one hub in the Phase 4 log (`hub.created`) for the cheat sheet routes."""
+    hub_id, domain_id = uuid4(), uuid4()
+    created = NewEvent(
+        type="hub.created",
+        payload={
+            "hub_id": hub_id,
+            "domain_id": domain_id,
+            "name": "Calculus exam",
+            "kind": "request",
+            "origin": "learner",
+            "control_type": "tasks",
+        },
+        actor="code",
+        idempotency_key=f"te2:hub:{hub_id}",
+        domain_id=domain_id,
+    )
+    await append_events(system.resources.db, learner.learner_id, [created])
+    return ids.replace(hub_id=hub_id)
+
+
 async def _card_of_topic(system: System, learner: Learner, ids: Ids) -> UUID:
     """WP23.4: a card of the walk's Phase 4 topic, as the writer leaves it — its task already in
     the bank (D-C-140)."""
@@ -151,6 +172,8 @@ STREAM = Stream(
         "block_id": NO_ID,
         # WP23.4: a card of the topic (the task behind it).
         "card_id": NO_ID,
+        # WP23.5: a hub of the walk (the cheat sheet routes).
+        "hub_id": NO_ID,
         # WP21.3: a recognized line of the canvas the walk opens for the correction route.
         "line_id": "none",
     },
@@ -243,6 +266,24 @@ STREAM = Stream(
             requires=("canvas_id", "line_id"),
             body=lambda ids, v: {"text": ["x=2", "x=3"][v], "sympy": None},
         ),
+        # ТЗ Ф4 §6.4, WP23.5: the consent to a cheat sheet and the review of the learner's one.
+        Route(
+            "POST",
+            "/v1/hubs/{hub_id}/cheatsheet",
+            stage=272,
+            requires=("hub_id",),
+            prepare=_hub_of_the_walk,
+            body=lambda ids, v: {},
+            no_other_body="the body has no field besides the key",
+        ),
+        Route(
+            "POST",
+            "/v1/hubs/{hub_id}/cheatsheet/review",
+            stage=274,
+            requires=("hub_id",),
+            body=lambda ids, v: {},
+            no_other_body="the body has no field besides the key",
+        ),
         # --- routes without `idempotency_key`; each reason is a ТЗ rule ---
         # ТЗ Ф4 §6.4: the body is `{timezone}` only; no event, a repeat sets the same value.
         Route(
@@ -317,6 +358,8 @@ STREAM = Stream(
             # ТЗ Ф4 §6.4 «Артефакты», WP23.1, WP23.4
             ("GET", "/v1/topics/{topic_id}/notes"),
             ("GET", "/v1/topics/{topic_id}/cards"),
+            # ТЗ Ф4 §6.4, WP23.5
+            ("GET", "/v1/hubs/{hub_id}/cheatsheet"),
             # §6.4: new endpoints of Phase 3
             ("GET", "/v1/learner/stream"),
         }
@@ -325,5 +368,6 @@ STREAM = Stream(
         "quack.artifacts.router:router",
         "quack.artifacts.notes_routes:router",
         "quack.artifacts.cards_routes:router",
+        "quack.artifacts.hub_cheatsheet_routes:router",
     ),
 )
