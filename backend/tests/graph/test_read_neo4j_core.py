@@ -455,8 +455,27 @@ async def test_watermark_falls_back_to_applied_seq(
         await _drop(neo4j_driver, learner)
 
 
+async def test_factory_reader_is_bound_to_its_learner(
+    settings: Settings, neo4j_driver: AsyncDriver, world: World
+) -> None:
+    """C's blocker on #175 (law 1): a reader from the factory with learner B does not return
+    the nodes of learner A by their ids — for every method that starts from an id."""
+    other = await _build(neo4j_driver, seq=4)
+    try:
+        mine = create_graph_reader(neo4j_driver, settings, learner_id=other.learner)
+        assert await mine.topic_memory([UUID(world.t1)]) == []
+        assert await mine.topic_requires(UUID(world.domain)) == []
+        assert await mine.recall_probability(UUID(world.s1), 1) is None
+        assert await mine.domain_goals(UUID(world.domain)) == []
+        assert (await mine.topic_readiness(UUID(world.hub))).total == 0
+        own = create_graph_reader(neo4j_driver, settings, learner_id=world.learner)
+        assert [m.topic_id for m in await own.topic_memory([UUID(world.t1)])] == [UUID(world.t1)]
+    finally:
+        await _drop(neo4j_driver, other.learner)
+
+
 async def test_factory_and_extras(settings: Settings, neo4j_driver: AsyncDriver) -> None:
-    reader = create_graph_reader(neo4j_driver, settings)
+    reader = create_graph_reader(neo4j_driver, settings, learner_id=uuid4())
     assert isinstance(reader, Neo4jGraphReader)
     with pytest.raises(NotImplementedError):
         await reader.profile(uuid4())

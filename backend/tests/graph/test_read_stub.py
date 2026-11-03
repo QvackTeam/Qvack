@@ -192,4 +192,5 @@ def test_factory_builds_the_neo4j_reader() -> None:
     from quack.graph.read import create_graph_reader
     from quack.graph.read.neo4j_reader import Neo4jGraphReader
 
-    assert isinstance(create_graph_reader(None, Settings()), Neo4jGraphReader)  # type: ignore[arg-type]
+    reader = create_graph_reader(None, Settings(), learner_id=fx.LEARNER)  # type: ignore[arg-type]
+    assert isinstance(reader, Neo4jGraphReader)
