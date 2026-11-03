@@ -70,6 +70,8 @@ class Ids:
     # WP23.1: the block the walk writes and the supplement the system adds to it.
     learner_block_id: UUID = NO_MATERIAL
     block_id: UUID = NO_MATERIAL
+    # WP23.4: a card of the topic (the task behind it).
+    card_id: UUID = NO_MATERIAL
 
 
 def path_for(path: str, ids: Ids) -> str:
@@ -82,6 +84,7 @@ def path_for(path: str, ids: Ids) -> str:
         material_id=ids.material_id,
         canvas_id=ids.canvas_id,
         block_id=ids.block_id,
+        card_id=ids.card_id,
     )
 
 
@@ -164,6 +167,8 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
         },
         ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"): {},
         ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"): {},
+        ("PATCH", "/v1/cards/{card_id}"): {"prompt": ["When the ratio test?", "Other"][v]},
+        ("DELETE", "/v1/cards/{card_id}"): {},
         ("POST", "/v1/canvases/{canvas_id}/pairing"): {},
         ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): {"domain_id": str(ids.domain_id)},
     }
