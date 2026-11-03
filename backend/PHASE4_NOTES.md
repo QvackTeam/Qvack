@@ -1227,6 +1227,19 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: нет (п.3 — D-C-122 п.4).
 
+### D-C-128. WP22.1: привязка телефона — токен, обмен, область `companion`
+- Класс: B
+- WP / место: WP22.1, §6.4 «Вход» и «Канвас»; `quack/auth/pairing.py`, `quack/auth/router.py`, `quack/api/auth.py`, `quack/api/openapi.py`
+- Контекст: WP22.1, `Т-§16.1`, `T-CP1` («любой другой эндпоинт → 403»). Таблица — `core.pairing_tokens` (D-A-128, #142). Код ошибки для 403 и место проверки области не названы; §4.5 запрещает новые коды.
+- Решение:
+  1. `POST /v1/canvases/{id}/pairing` (сессия `full`): токен 128 бит (`new_token`), в базе хэш, срок `pairing_ttl_s`; сессия и задача — из канваса (`content.canvas_boards`, свой SQL пакета `quack.auth`, §4.1). Чужой канвас или канвас без сессии — 404. Ключа идемпотентности нет: каждый вызов выдаёт новый одноразовый токен, события нет (исключение `T-E2`).
+  2. `POST /companion/pair {token}` — публичный маршрут: погашение одним `UPDATE … SET used_at … WHERE used_at IS NULL AND expires_at > now RETURNING` и сессия `companion` этого канваса — одна транзакция; кука — как у обычного входа (`Т-§19.1`). Неизвестный, использованный или истёкший токен — `401 UNAUTHENTICATED`. Ключ погашения — в `CROSS_LEARNER_ALLOWED` (согласовано в #142).
+  3. Область: `get_current_session` пропускает только `full`; сессия `companion` на любом маршруте за ней — `403 UNAUTHORIZED` (код Фазы 3, §4.5 «остальные коды не меняются»). Сокет канваса проверяет область сам (`may_open`, D-C-121); загрузка снимков (WP22.2) получит свою зависимость «`full` или `companion` этого канваса».
+- Почему: WP22.1, `Т-§16.1`, `T-CP1`, §4.5.
+- Обратимость: одна зависимость, один модуль.
+- Тесты: `tests/auth/test_pairing_wp22.py` (`T-CP1`); маршруты — `T-A1`, исключение — `T-E2`.
+- Требует подтверждения владельцем: нет.
+
 ### D-C-120. `observation.diagnosed` пишется только при найденной ошибке
 - Класс: B (тип C по §6.3; владелец поручил C решить по документам, 2026-11-03)
 - WP / место: WP21.4 п.3, WP5.1, §6.3; `Т-§7.1`, `Т-§15.4`, `Т-§7.6`, П-9.7; будущий код C `quack/canvas/` (быстрый слой)
@@ -1355,6 +1368,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP22.1, привязка (C, `phase-4-c-wp22-pairing`): красный прогон отдельно не снят (облегчённый TDD). Зелёный: `tests/auth`, `tests/canvas`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` — зелёные.
 - D-C-119, весь API на сессиях (C, `phase-4-c-d112`, коммит `e8a6aee`): в Linux против `quack-test-*` с dbmate `pytest tests/test_app_assembly.py tests/domains/test_auth_and_learner.py tests/session/test_auth_and_stream_resilience.py` — 14 failed (старый вход: сессия не принимается маршрутами Фазы 3, код 401 `UNAUTHORIZED`, `/v1/auth/register|login|me` ещё смонтированы, лимит без Redis считает только `auth`), 11 passed. Зелёный — в описании PR.
 - D-C-122 п.4, переполнение куска (C, `phase-4-c-wp21-ws`, коммит `57127c3`): `pytest tests/canvas/test_strokes_wp21.py` — 2 failed (`chunk_max_batches` — `NotImplementedError`, кусок ждёт время при переполнении), 5 passed. Зелёный: `tests/canvas` — 19 passed.
 - WP21.2, WebSocket канваса (C, `phase-4-c-wp21-ws`, коммит `f915ac2`): в Linux против `quack-test-*` с dbmate `pytest tests/canvas/test_canvas_ws.py` — 7 failed (маршрута `WS /v1/canvases/{id}/ws` нет — сокет закрывается при рукопожатии; `publish_canvas` — `NotImplementedError`). Зелёный: `tests/canvas` — 16 passed; `tests/auth`, `tests/test_contracts.py`, `tests/test_app_assembly.py` — зелёные.
@@ -1422,6 +1436,8 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Правки тестов
 
+- `tests/db/test_sql_static.py` (C, WP22.1): в `CROSS_LEARNER_ALLOWED` добавлен `quack/auth/pairing.py:_REDEEM_TOKEN` — согласовано A в #142 (D-A-128).
+- `tests/e2e/endpoints.py`, `tests/test_app_assembly.py` (C, WP22.1): маршруты привязки — в контракте `T-A1`, в `NO_IDEMPOTENCY_KEY` и `NO_BODY` (`T-E2`, `T-E3`).
 - `tests/test_compose_contract.py` (C, D-C-119): удалён `test_only_api_has_the_jwt_secret` из #122 — `JWT_SECRET` удаляется вместе с JWT (§2.3 строка 3, §8.15 п.1); из проверки `projector` убрано несуществующее имя `JWT_SECRET`.
 - `tests/session/test_head_guards.py::test_boundary_names_the_missing_prerequisites_once` (D-B-153, до зелёного): проверка «id не в тексте» смотрела на id предпосылки с меткой и не ловила утечку id предпосылки без метки (подмена прошла); теперь проверяются оба id и точный текст. Тест усилен, не ослаблен.
 - `tests/practice/test_check_symbolic_job.py::test_unsupported_form_writes_nothing_yet` → `test_unsupported_form_writes_check_failed_for_the_model` (B, D-B-146): прежний тест закреплял временное поведение до ответа A («`unsupported` нет в каталоге»); A добавил значение в #117, тест проверяет новое поведение: `check.failed {reason: unsupported}` под ключом `check_failed_key`. Тест не ослаблен.
