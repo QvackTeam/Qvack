@@ -618,7 +618,6 @@ Output fields:
 - `crossed_out`: boolean
 
 Input blocks: none
-Layer 1: stub, owner's doctrine pending (BLOCKED-C-202)
 
 ## Edit points after G1
 
