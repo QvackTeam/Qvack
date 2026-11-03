@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -345,9 +346,13 @@ async def test_pressure_flag_blocks_kinds_using_that_model(
     """WP5.3: while `llm:pressure:{model}` is set, kinds whose roles run on the model wait;
     kinds without a model (P1 maintenance) are still claimed. The flag expires → claimed."""
     model = settings.model_for_role("extractor")
-    assert KIND_LLM_ROLES["turn.extract"] == ("extractor",)
+    assert KIND_LLM_ROLES["extract.episode"] == ("extractor",)
     learner = uuid4()
-    extract = await _enqueue(db, kinds.turn_extract(learner, uuid4(), {}, required_seq=None))
+    # `turn.extract` left with the Phase 3 turn (D-B-210): the kind of the same role is the episode.
+    episode = replace(
+        kinds.turn_extract(learner, uuid4(), {}, required_seq=None), kind="extract.episode"
+    )
+    extract = await _enqueue(db, episode)
     sweep = await _enqueue(db, kinds.session_sweep_inactive())
     await _exec(
         db, "UPDATE ops.jobs SET priority = 0 WHERE id = :id", id=extract
@@ -365,7 +370,7 @@ async def test_pressure_flag_blocks_kinds_using_that_model(
         db,
         "w-pressure",
         context,
-        handlers={"turn.extract": handler, "session.sweep_inactive": handler},
+        handlers={"extract.episode": handler, "session.sweep_inactive": handler},
     )
     assert await runner.run_one()
     assert claimed == [sweep]

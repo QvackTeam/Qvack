@@ -56,72 +56,6 @@
         "title": "ActionRecordedFrame",
         "type": "object"
       },
-      "ActiveSession": {
-        "additionalProperties": false,
-        "properties": {
-          "domain_id": {
-            "format": "uuid",
-            "title": "Domain Id",
-            "type": "string"
-          },
-          "last_activity_at": {
-            "format": "date-time",
-            "title": "Last Activity At",
-            "type": "string"
-          },
-          "last_checkpoint_turn": {
-            "title": "Last Checkpoint Turn",
-            "type": "integer"
-          },
-          "last_turn_index": {
-            "title": "Last Turn Index",
-            "type": "integer"
-          },
-          "mode": {
-            "title": "Mode",
-            "type": "string"
-          },
-          "session_id": {
-            "format": "uuid",
-            "title": "Session Id",
-            "type": "string"
-          },
-          "started_at": {
-            "format": "date-time",
-            "title": "Started At",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "topic_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Topic Id"
-          }
-        },
-        "required": [
-          "session_id",
-          "domain_id",
-          "topic_id",
-          "mode",
-          "status",
-          "started_at",
-          "last_activity_at",
-          "last_turn_index",
-          "last_checkpoint_turn"
-        ],
-        "title": "ActiveSession",
-        "type": "object"
-      },
       "AnswerAction": {
         "additionalProperties": false,
         "description": "`answer.submitted` (+ instant verdict in the same transaction, Т-§6.1).",
@@ -998,41 +932,6 @@
           "task_id"
         ],
         "title": "CheckSkipAction",
-        "type": "object"
-      },
-      "CheckpointView": {
-        "additionalProperties": false,
-        "properties": {
-          "key_observations": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Key Observations",
-            "type": "array"
-          },
-          "open_threads": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Open Threads",
-            "type": "array"
-          },
-          "rolling_summary": {
-            "title": "Rolling Summary",
-            "type": "string"
-          },
-          "up_to_turn_index": {
-            "title": "Up To Turn Index",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "up_to_turn_index",
-          "rolling_summary",
-          "open_threads",
-          "key_observations"
-        ],
-        "title": "CheckpointView",
         "type": "object"
       },
       "ChoiceElement": {
@@ -2247,6 +2146,42 @@
         "title": "ExportTopic",
         "type": "object"
       },
+      "FeedEvent": {
+        "description": "An event of the session feed (`GET /v1/sessions/{id}`, D-B-210).",
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "actor",
+          "occurred_at",
+          "payload"
+        ],
+        "title": "FeedEvent",
+        "type": "object"
+      },
       "FinishDiagnosticRequest": {
         "properties": {
           "idempotency_key": {
@@ -2295,52 +2230,6 @@
           "seq"
         ],
         "title": "FinishDiagnosticResponse",
-        "type": "object"
-      },
-      "FinishResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "end_seq": {
-            "title": "End Seq",
-            "type": "integer"
-          },
-          "session_id": {
-            "format": "uuid",
-            "title": "Session Id",
-            "type": "string"
-          },
-          "status": {
-            "const": "completed",
-            "title": "Status",
-            "type": "string"
-          },
-          "summary_stats": {
-            "additionalProperties": true,
-            "title": "Summary Stats",
-            "type": "object"
-          }
-        },
-        "required": [
-          "session_id",
-          "status",
-          "summary_stats",
-          "end_seq"
-        ],
-        "title": "FinishResponse",
-        "type": "object"
-      },
-      "FinishSessionRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "idempotency_key": {
-            "title": "Idempotency Key",
-            "type": "string"
-          }
-        },
-        "required": [
-          "idempotency_key"
-        ],
-        "title": "FinishSessionRequest",
         "type": "object"
       },
       "FlagUnclearAction": {
@@ -2522,25 +2411,6 @@
         "title": "Hint",
         "type": "object"
       },
-      "HintRequest": {
-        "properties": {
-          "idempotency_key": {
-            "title": "Idempotency Key",
-            "type": "string"
-          },
-          "turn_id": {
-            "format": "uuid",
-            "title": "Turn Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "turn_id",
-          "idempotency_key"
-        ],
-        "title": "HintRequest",
-        "type": "object"
-      },
       "HintRequestAction": {
         "additionalProperties": false,
         "properties": {
@@ -2566,40 +2436,6 @@
           "task_id"
         ],
         "title": "HintRequestAction",
-        "type": "object"
-      },
-      "HintResponse": {
-        "properties": {
-          "hint_level": {
-            "title": "Hint Level",
-            "type": "integer"
-          },
-          "hint_text": {
-            "title": "Hint Text",
-            "type": "string"
-          },
-          "independence_penalty": {
-            "title": "Independence Penalty",
-            "type": "number"
-          },
-          "seq": {
-            "title": "Seq",
-            "type": "integer"
-          },
-          "task_id": {
-            "format": "uuid",
-            "title": "Task Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "task_id",
-          "hint_level",
-          "hint_text",
-          "independence_penalty",
-          "seq"
-        ],
-        "title": "HintResponse",
         "type": "object"
       },
       "HubTopicLevels": {
@@ -3323,81 +3159,6 @@
           "resist_count"
         ],
         "title": "MisconceptionNodeView",
-        "type": "object"
-      },
-      "NextTaskRequest": {
-        "properties": {
-          "idempotency_key": {
-            "title": "Idempotency Key",
-            "type": "string"
-          },
-          "kind": {
-            "default": "math",
-            "enum": [
-              "open",
-              "math",
-              "code",
-              "choice"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "topic_id": {
-            "format": "uuid",
-            "title": "Topic Id",
-            "type": "string"
-          },
-          "turn_id": {
-            "format": "uuid",
-            "title": "Turn Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "topic_id",
-          "turn_id",
-          "idempotency_key"
-        ],
-        "title": "NextTaskRequest",
-        "type": "object"
-      },
-      "NextTaskResponse": {
-        "properties": {
-          "degraded": {
-            "title": "Degraded",
-            "type": "boolean"
-          },
-          "difficulty": {
-            "title": "Difficulty",
-            "type": "number"
-          },
-          "family_id": {
-            "title": "Family Id",
-            "type": "string"
-          },
-          "kind": {
-            "title": "Kind",
-            "type": "string"
-          },
-          "prompt_text": {
-            "title": "Prompt Text",
-            "type": "string"
-          },
-          "task_id": {
-            "format": "uuid",
-            "title": "Task Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "task_id",
-          "family_id",
-          "difficulty",
-          "kind",
-          "prompt_text",
-          "degraded"
-        ],
-        "title": "NextTaskResponse",
         "type": "object"
       },
       "NoteCreateRequest": {
@@ -4172,38 +3933,58 @@
         "type": "object"
       },
       "SessionDetail": {
-        "additionalProperties": false,
+        "description": "`GET /v1/sessions/{id}`: the session and its feed of events by `seq` (D-B-210).",
         "properties": {
-          "checkpoint": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CheckpointView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "domain_id": {
             "format": "uuid",
             "title": "Domain Id",
             "type": "string"
           },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/FeedEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "hub_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hub Id"
+          },
+          "intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
+          },
           "last_activity_at": {
             "format": "date-time",
             "title": "Last Activity At",
-            "type": "string"
-          },
-          "last_checkpoint_turn": {
-            "title": "Last Checkpoint Turn",
-            "type": "integer"
-          },
-          "last_turn_index": {
-            "title": "Last Turn Index",
-            "type": "integer"
-          },
-          "mode": {
-            "title": "Mode",
             "type": "string"
           },
           "session_id": {
@@ -4211,12 +3992,27 @@
             "title": "Session Id",
             "type": "string"
           },
+          "start_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Seq"
+          },
           "started_at": {
             "format": "date-time",
             "title": "Started At",
             "type": "string"
           },
           "status": {
+            "enum": [
+              "active",
+              "ended"
+            ],
             "title": "Status",
             "type": "string"
           },
@@ -4231,29 +4027,32 @@
               }
             ],
             "title": "Topic Id"
-          },
-          "turns": {
-            "items": {
-              "$ref": "#/components/schemas/TurnView"
-            },
-            "title": "Turns",
-            "type": "array"
           }
         },
         "required": [
           "session_id",
           "domain_id",
+          "intent",
           "topic_id",
-          "mode",
+          "hub_id",
           "status",
           "started_at",
+          "ended_at",
           "last_activity_at",
-          "last_turn_index",
-          "last_checkpoint_turn",
-          "turns"
+          "start_seq",
+          "events"
         ],
         "title": "SessionDetail",
         "type": "object"
+      },
+      "SessionIntent": {
+        "enum": [
+          "learn",
+          "practice",
+          "review",
+          "free"
+        ],
+        "type": "string"
       },
       "SessionJob": {
         "additionalProperties": false,
@@ -4303,9 +4102,24 @@
         "title": "SessionJobsResponse",
         "type": "object"
       },
-      "SessionListItem": {
+      "SessionListResponse": {
         "additionalProperties": false,
-        "description": "A row of the session history: the active session and the closed ones.",
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SessionView"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "title": "SessionListResponse",
+        "type": "object"
+      },
+      "SessionView": {
         "properties": {
           "domain_id": {
             "format": "uuid",
@@ -4324,49 +4138,7 @@
             ],
             "title": "Ended At"
           },
-          "goal": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Goal"
-          },
-          "last_activity_at": {
-            "format": "date-time",
-            "title": "Last Activity At",
-            "type": "string"
-          },
-          "last_checkpoint_turn": {
-            "title": "Last Checkpoint Turn",
-            "type": "integer"
-          },
-          "last_turn_index": {
-            "title": "Last Turn Index",
-            "type": "integer"
-          },
-          "mode": {
-            "title": "Mode",
-            "type": "string"
-          },
-          "session_id": {
-            "format": "uuid",
-            "title": "Session Id",
-            "type": "string"
-          },
-          "started_at": {
-            "format": "date-time",
-            "title": "Started At",
-            "type": "string"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          },
-          "topic_id": {
+          "hub_id": {
             "anyOf": [
               {
                 "format": "uuid",
@@ -4376,61 +4148,23 @@
                 "type": "null"
               }
             ],
-            "title": "Topic Id"
-          }
-        },
-        "required": [
-          "session_id",
-          "domain_id",
-          "topic_id",
-          "mode",
-          "status",
-          "started_at",
-          "last_activity_at",
-          "last_turn_index",
-          "last_checkpoint_turn",
-          "goal",
-          "ended_at"
-        ],
-        "title": "SessionListItem",
-        "type": "object"
-      },
-      "SessionListResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "sessions": {
-            "items": {
-              "$ref": "#/components/schemas/SessionListItem"
-            },
-            "title": "Sessions",
-            "type": "array"
-          }
-        },
-        "required": [
-          "sessions"
-        ],
-        "title": "SessionListResponse",
-        "type": "object"
-      },
-      "SessionStarted": {
-        "additionalProperties": false,
-        "properties": {
-          "domain_id": {
-            "format": "uuid",
-            "title": "Domain Id",
-            "type": "string"
+            "title": "Hub Id"
           },
-          "mode": {
-            "title": "Mode",
-            "type": "string"
+          "intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
           },
-          "plan": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "title": "Plan",
-            "type": "array"
+          "last_activity_at": {
+            "format": "date-time",
+            "title": "Last Activity At",
+            "type": "string"
           },
           "session_id": {
             "format": "uuid",
@@ -4438,14 +4172,25 @@
             "type": "string"
           },
           "start_seq": {
-            "title": "Start Seq",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Seq"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
           },
           "status": {
             "enum": [
               "active",
-              "completed",
-              "abandoned"
+              "ended"
             ],
             "title": "Status",
             "type": "string"
@@ -4466,13 +4211,16 @@
         "required": [
           "session_id",
           "domain_id",
+          "intent",
           "topic_id",
-          "mode",
+          "hub_id",
           "status",
-          "plan",
+          "started_at",
+          "ended_at",
+          "last_activity_at",
           "start_seq"
         ],
-        "title": "SessionStarted",
+        "title": "SessionView",
         "type": "object"
       },
       "ShortAnswerElement": {
@@ -4820,53 +4568,34 @@
         "title": "StartDiagnosticResponse",
         "type": "object"
       },
-      "StartSessionRequest": {
+      "StartSession": {
         "additionalProperties": false,
+        "description": "`POST /v1/sessions` (WP13.10): the domain, the intent, a topic or a hub.",
         "properties": {
           "domain_id": {
             "format": "uuid",
             "title": "Domain Id",
             "type": "string"
           },
-          "goal": {
+          "hub_id": {
             "anyOf": [
               {
+                "format": "uuid",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Goal"
+            "title": "Hub Id"
           },
           "idempotency_key": {
+            "format": "uuid",
             "title": "Idempotency Key",
             "type": "string"
           },
-          "mode": {
-            "default": "learn",
-            "enum": [
-              "learn",
-              "practice",
-              "review"
-            ],
-            "title": "Mode",
-            "type": "string"
-          },
-          "plan": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Plan"
+          "intent": {
+            "$ref": "#/components/schemas/SessionIntent"
           },
           "topic_id": {
             "anyOf": [
@@ -4883,9 +4612,10 @@
         },
         "required": [
           "domain_id",
+          "intent",
           "idempotency_key"
         ],
-        "title": "StartSessionRequest",
+        "title": "StartSession",
         "type": "object"
       },
       "StatusFrame": {
@@ -4916,97 +4646,6 @@
           "state"
         ],
         "title": "StatusFrame",
-        "type": "object"
-      },
-      "SubmitRequest": {
-        "properties": {
-          "answer": {
-            "title": "Answer",
-            "type": "string"
-          },
-          "idempotency_key": {
-            "title": "Idempotency Key",
-            "type": "string"
-          },
-          "response_time_sec": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Response Time Sec"
-          },
-          "turn_id": {
-            "format": "uuid",
-            "title": "Turn Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "turn_id",
-          "answer",
-          "idempotency_key"
-        ],
-        "title": "SubmitRequest",
-        "type": "object"
-      },
-      "SubmitResponse": {
-        "properties": {
-          "evaluator": {
-            "title": "Evaluator",
-            "type": "string"
-          },
-          "feedback": {
-            "title": "Feedback",
-            "type": "string"
-          },
-          "independence": {
-            "title": "Independence",
-            "type": "number"
-          },
-          "is_correct": {
-            "title": "Is Correct",
-            "type": "boolean"
-          },
-          "score": {
-            "title": "Score",
-            "type": "number"
-          },
-          "seq": {
-            "title": "Seq",
-            "type": "integer"
-          },
-          "skill_scores": {
-            "items": {},
-            "title": "Skill Scores",
-            "type": "array"
-          },
-          "task_id": {
-            "format": "uuid",
-            "title": "Task Id",
-            "type": "string"
-          },
-          "triggered_misconceptions": {
-            "items": {},
-            "title": "Triggered Misconceptions",
-            "type": "array"
-          }
-        },
-        "required": [
-          "task_id",
-          "evaluator",
-          "is_correct",
-          "score",
-          "independence",
-          "feedback",
-          "skill_scores",
-          "triggered_misconceptions",
-          "seq"
-        ],
-        "title": "SubmitResponse",
         "type": "object"
       },
       "TaskElement": {
@@ -5407,127 +5046,6 @@
           "role"
         ],
         "title": "TurnCommittedFrame",
-        "type": "object"
-      },
-      "TurnRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "hints_used": {
-            "default": 0,
-            "title": "Hints Used",
-            "type": "integer"
-          },
-          "idempotency_key": {
-            "title": "Idempotency Key",
-            "type": "string"
-          },
-          "related_task_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Related Task Id"
-          },
-          "response_time_sec": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Response Time Sec"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          }
-        },
-        "required": [
-          "text",
-          "idempotency_key"
-        ],
-        "title": "TurnRequest",
-        "type": "object"
-      },
-      "TurnView": {
-        "additionalProperties": false,
-        "properties": {
-          "degraded_mode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Degraded Mode"
-          },
-          "pedagogical_move": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pedagogical Move"
-          },
-          "related_task_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Related Task Id"
-          },
-          "role": {
-            "enum": [
-              "student",
-              "teacher"
-            ],
-            "title": "Role",
-            "type": "string"
-          },
-          "seq": {
-            "title": "Seq",
-            "type": "integer"
-          },
-          "text": {
-            "title": "Text",
-            "type": "string"
-          },
-          "turn_id": {
-            "format": "uuid",
-            "title": "Turn Id",
-            "type": "string"
-          },
-          "turn_index": {
-            "title": "Turn Index",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "turn_index",
-          "turn_id",
-          "role",
-          "text",
-          "seq"
-        ],
-        "title": "TurnView",
         "type": "object"
       },
       "TypedFormula": {
@@ -10252,7 +9770,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/StartSessionRequest"
+                "$ref": "#/components/schemas/StartSession"
               }
             }
           },
@@ -10263,7 +9781,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionStarted"
+                  "$ref": "#/components/schemas/SessionView"
                 }
               }
             },
@@ -10333,7 +9851,7 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/ActiveSession"
+                      "$ref": "#/components/schemas/SessionView"
                     },
                     {
                       "type": "null"
@@ -10733,6 +10251,97 @@
         ]
       }
     },
+    "/v1/sessions/{session_id}/end": {
+      "post": {
+        "description": "`session.ended {reason: learner}` (WP13.10); the learner's end is final, a repeat changes\nnothing.",
+        "operationId": "end_session_v1_sessions__session_id__end_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "End Session"
+      }
+    },
     "/v1/sessions/{session_id}/events": {
       "get": {
         "operationId": "session_events_v1_sessions__session_id__events_get",
@@ -10802,106 +10411,6 @@
           }
         },
         "summary": "Session Events"
-      }
-    },
-    "/v1/sessions/{session_id}/finish": {
-      "post": {
-        "operationId": "finish_session_v1_sessions__session_id__finish_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Session Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FinishSessionRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FinishResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "VALIDATION_ERROR"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "RATE_LIMITED; details.retry_after_sec"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
-          }
-        },
-        "summary": "Finish Session"
       }
     },
     "/v1/sessions/{session_id}/heartbeat": {
@@ -11053,436 +10562,6 @@
           }
         },
         "summary": "Session Jobs"
-      }
-    },
-    "/v1/sessions/{session_id}/tasks/next": {
-      "post": {
-        "operationId": "next_task_v1_sessions__session_id__tasks_next_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Session Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NextTaskRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NextTaskResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "VALIDATION_ERROR"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "RATE_LIMITED; details.retry_after_sec"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
-          }
-        },
-        "summary": "Next Task",
-        "tags": [
-          "artifacts"
-        ]
-      }
-    },
-    "/v1/sessions/{session_id}/tasks/{task_id}/hint": {
-      "post": {
-        "operationId": "give_hint_v1_sessions__session_id__tasks__task_id__hint_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Session Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "task_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Task Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/HintRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HintResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "VALIDATION_ERROR"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "RATE_LIMITED; details.retry_after_sec"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
-          }
-        },
-        "summary": "Give Hint",
-        "tags": [
-          "artifacts"
-        ]
-      }
-    },
-    "/v1/sessions/{session_id}/tasks/{task_id}/submit": {
-      "post": {
-        "operationId": "submit_answer_v1_sessions__session_id__tasks__task_id__submit_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Session Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "task_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Task Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SubmitRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SubmitResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "VALIDATION_ERROR"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "RATE_LIMITED; details.retry_after_sec"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
-          }
-        },
-        "summary": "Submit Answer",
-        "tags": [
-          "artifacts"
-        ]
-      }
-    },
-    "/v1/sessions/{session_id}/turns": {
-      "post": {
-        "operationId": "post_turn_v1_sessions__session_id__turns_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "session_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Session Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TurnRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "text/event-stream": {
-                "schema": {
-                  "description": "named events `event: <name>\\ndata: <json>` (С-§8.5); events in order: `turn_started` {turn_id, turn_index, user_seq}; `status` {\"state\": \"thinking\"} once, right after `turn_started`, before the model call (WP6.3); `token` {delta}, one or more; `task_evaluated` when the turn checks a task answer; `task_assigned` when the turn assigns a task, after `task_evaluated` (WP6.4); `turn_completed` {turn_id, committed_seq, degraded_mode} after the turn is committed; `done` last",
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "VALIDATION_ERROR"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "RATE_LIMITED; details.retry_after_sec"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
-          }
-        },
-        "summary": "Post Turn"
       }
     },
     "/v1/topics/{topic_id}": {

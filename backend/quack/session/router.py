@@ -11,36 +11,23 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from quack.api.auth import CurrentSession, get_current_session, require_terms
 from quack.api.errors import ApiError
 from quack.api.resources import AppResources, get_resources
-from quack.compute_client.client import ComputeClient
 from quack.config import Settings
 from quack.events.errors import IdempotencyConflictError
 from quack.jobs.queue_p4 import visible_jobs
-from quack.llm.gateway import LLMGateway
-from quack.session import lifecycle, sessions, stream, turns
+from quack.session import lifecycle, sessions, stream
 from quack.session.action_turn import TurnContextSource, turn_frames
 from quack.session.actions import Action, ActionAccepted, ActionFrame
-from quack.session.deps import (
-    current_learner_id,
-    enforce_turn_rate_limit,
-    get_compute_client,
-    get_llm_gateway,
-    get_settings_dep,
-)
+from quack.session.deps import current_learner_id, get_settings_dep
 from quack.session.keepalive import sse_keepalive_response
 from quack.session.record import record_action
 from quack.session.schemas import (
-    ActiveSession,
-    FinishResponse,
-    FinishSessionRequest,
     HeartbeatResponse,
     SessionDetail,
     SessionJob,
     SessionJobsResponse,
     SessionListResponse,
-    SessionStarted,
-    StartSessionRequest,
-    TurnRequest,
 )
+from quack.session.sessions import SessionView, StartSession
 from quack.session.turn_graph import TurnSlots
 from quack.session.turn_source import source_of
 
@@ -100,8 +87,8 @@ def get_turn_context_source(request: Request) -> TurnContextSource:
 # current `terms_version` — `403 CONSENT_REQUIRED`.
 @router.post("/sessions", status_code=201, dependencies=[Depends(require_terms)])
 async def start_session(
-    body: StartSessionRequest, learner_id: LearnerId, resources: Resources, settings: SettingsDep
-) -> SessionStarted:
+    body: StartSession, learner_id: LearnerId, resources: Resources, settings: SettingsDep
+) -> SessionView:
     return await lifecycle.start_session(resources, settings, learner_id, body)
 
 
@@ -124,7 +111,7 @@ async def list_sessions(
 
 
 @router.get("/sessions/active")
-async def get_active_session(learner_id: LearnerId, resources: Resources) -> ActiveSession | None:
+async def get_active_session(learner_id: LearnerId, resources: Resources) -> SessionView | None:
     return await lifecycle.get_active_session(resources, learner_id)
 
 
@@ -161,36 +148,11 @@ async def heartbeat(
     return await lifecycle.heartbeat(resources, settings, learner_id, session_id)
 
 
-@router.post("/sessions/{session_id}/finish")
-async def finish_session(
-    session_id: UUID, body: FinishSessionRequest, learner_id: LearnerId, resources: Resources
-) -> FinishResponse:
-    return await lifecycle.finish_session(resources, learner_id, session_id, body)
-
-
-@router.post("/sessions/{session_id}/turns")
-async def post_turn(
-    session_id: UUID,
-    body: TurnRequest,
-    request: Request,
-    learner_id: LearnerId,
-    resources: Resources,
-    settings: SettingsDep,
-    gateway: Annotated[LLMGateway, Depends(get_llm_gateway)],
-    compute: Annotated[ComputeClient, Depends(get_compute_client)],
-) -> StreamingResponse:
-    await enforce_turn_rate_limit(resources, settings, learner_id)
-    events = await turns.open_turn(
-        resources,
-        settings,
-        gateway,
-        compute,
-        learner_id,
-        session_id,
-        body,
-        str(getattr(request.state, "request_id", "")),
-    )
-    return sse_keepalive_response(events, settings.sse_keepalive_s)
+@router.post("/sessions/{session_id}/end")
+async def end_session(session_id: UUID, learner_id: LearnerId, resources: Resources) -> SessionView:
+    """`session.ended {reason: learner}` (WP13.10); the learner's end is final, a repeat changes
+    nothing."""
+    return await lifecycle.end_session(resources, learner_id, session_id)
 
 
 @router.post(
