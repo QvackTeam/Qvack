@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -12,7 +12,6 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
-from quack.api.auth import get_current_learner_id
 from quack.api.ratelimit import enforce_action_rate_limit
 from quack.artifacts.documents import (
     ArtifactNotFound,
@@ -31,6 +30,7 @@ from quack.config import Settings
 from quack.db import Db
 from quack.events.log import NewEvent, append_events
 from tests.db.fixtures import create_learner
+from tests.support.auth import session_cookie, session_token
 from tests.support.resources import build_app_resources
 
 WRITER = "artifact_writer@1"
@@ -317,26 +317,30 @@ async def test_other_learner_sees_nothing(pg_db: Db) -> None:
 @pytest.fixture
 def notes_client(
     settings: Settings, pg_engine: AsyncEngine, pg_db: Db
-) -> Callable[[UUID], httpx.AsyncClient]:
-    """The API over `pg_db`; the learner is set by overriding the auth dependency, so the test
-    does not depend on the sign-in of D-C-119 (sessions) still under review."""
+) -> Callable[[UUID], Awaitable[httpx.AsyncClient]]:
+    """The API over `pg_db`, signed in with a real Phase 4 session of the learner (D-C-119);
+    without Redis the `actions` limit is off."""
 
-    def make(learner_id: UUID) -> httpx.AsyncClient:
+    async def make(learner_id: UUID) -> httpx.AsyncClient:
         app = create_app(settings)
         app.state.resources = build_app_resources(settings, pg_engine, None, None, db=pg_db)
-        app.dependency_overrides[get_current_learner_id] = lambda: learner_id
         app.dependency_overrides[enforce_action_rate_limit] = lambda: None
-        return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+        cookie = session_cookie(await session_token(pg_db, learner_id, settings))
+        return httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test", headers=cookie
+        )
 
     return make
 
 
-async def test_notes_routes(pg_db: Db, notes_client: Callable[[UUID], httpx.AsyncClient]) -> None:
+async def test_notes_routes(
+    pg_db: Db, notes_client: Callable[[UUID], Awaitable[httpx.AsyncClient]]
+) -> None:
     """§6.4 «Артефакты»: read the notes, write and edit a block, accept a supplement, delete;
     another learner — 404, accepting a non-supplement — 422."""
     learner_id, other = await create_learner(pg_db), await create_learner(pg_db)
     topic_id = await _topic(pg_db, learner_id)
-    async with notes_client(learner_id) as client:
+    async with await notes_client(learner_id) as client:
         notes = (await client.get(f"/v1/topics/{topic_id}/notes")).json()
         assert (notes["version"], notes["blocks"], notes["kind"]) == (0, [], "notes")
         base = f"/v1/artifacts/{notes['artifact_id']}/blocks"
@@ -387,7 +391,7 @@ async def test_notes_routes(pg_db: Db, notes_client: Callable[[UUID], httpx.Asyn
         assert repeat.json() == deleted.json()
         gone = await client.request("DELETE", f"{base}/{mine}", json={"idempotency_key": "d2"})
         assert gone.status_code == 404
-    async with notes_client(other) as client:
+    async with await notes_client(other) as client:
         assert (await client.get(f"/v1/topics/{topic_id}/notes")).status_code == 404
         foreign = {"content": "x", "idempotency_key": "put-1"}
         assert (await client.put(f"{base}/{uuid4()}", json=foreign)).status_code == 404

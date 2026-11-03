@@ -1,5 +1,5 @@
-"""Assembled API: routes, one JWT contract, auth before validation and the single rate
-limiter (ТЗ Фазы 3 §8.2, WP1.1, WP1.2, WP1.5)."""
+"""Assembled API: routes, one session contract, auth before validation and the single rate
+limiter (ТЗ Фазы 3 §8.2, WP1.1, WP1.2, WP1.5; ТЗ Ф4 WP18.3 — sign-in is a session)."""
 
 from __future__ import annotations
 
@@ -7,48 +7,38 @@ import asyncio
 import inspect
 import json
 import re
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import httpx
-import jwt
 import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app, write_openapi
 from quack.api.errors import ErrorResponse
 from quack.api.openapi import render_openapi
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory, create_engine
 from quack.db.redis import ratelimit_key
+from tests.support.auth import session_cookie, session_token
 from tests.support.broken import BrokenNeo4jDriver, BrokenRedis
 from tests.support.resources import build_app_resources
 
 PUBLIC_ROUTES = {
-    ("POST", "/v1/auth/register"),
-    ("POST", "/v1/auth/login"),
     # ТЗ Ф4 WP18: sign-in routes.
     ("POST", "/auth/link"),
     ("GET", "/auth/link/verify"),
     ("GET", "/auth/google/start"),
     ("GET", "/auth/google/callback"),
-}
-# ТЗ Ф4 WP18.3: routes on Phase 4 sessions answer `UNAUTHENTICATED`; the Phase 3 routes keep
-# `UNAUTHORIZED` until the whole API moves to sessions (D-C-112).
-SESSION_ROUTES = {
-    ("POST", "/auth/logout"),
-    ("GET", "/v1/me"),
-    ("PATCH", "/v1/learner/settings"),
-    ("POST", "/v1/consents"),
-    ("DELETE", "/v1/consents/research"),
 }
 # Т-§19.1: the start of the Google flow is a redirect only, it has no 2xx body.
 REDIRECT_ONLY_ROUTES = {("GET", "/auth/google/start")}
@@ -65,6 +55,7 @@ def make_app(
     settings: Settings,
     pg_engine: AsyncEngine,
     db: SessionFactory,
+    pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
 ) -> AppFactory:
@@ -73,8 +64,32 @@ def make_app(
 
     def make(*, redis_client: Any = redis, **overrides: Any) -> FastAPI:
         cfg = settings.model_copy(update=overrides)
-        resources = build_app_resources(cfg, pg_engine, neo4j, redis_client, session_factory=db)
+        resources = build_app_resources(
+            cfg, pg_engine, neo4j, redis_client, db=pg_db, session_factory=db
+        )
         return create_app(cfg, resources=resources)
+
+    return make
+
+
+type SignIn = Callable[[], Awaitable[tuple[str, dict[str, str]]]]
+
+
+@pytest.fixture
+def sign_in(db: SessionFactory, pg_db: Db, settings: Settings) -> SignIn:
+    """A new learner with a Phase 4 session (ТЗ Ф4 WP18.3): `(learner_id, headers)`.
+    `/v1/auth/register` is removed (D-A-113); the `auth.users` row stays for the Phase 3
+    deletion until WP25."""
+
+    async def make() -> tuple[str, dict[str, str]]:
+        learner_id = uuid4()
+        async with db() as session, session.begin():
+            await session.execute(
+                text("INSERT INTO auth.users (id, email, password_hash) VALUES (:id, :e, '!')"),
+                {"id": learner_id, "e": f"{learner_id}@test.invalid"},
+            )
+        token = await session_token(pg_db, learner_id, settings)
+        return str(learner_id), session_cookie(token)
 
     return make
 
@@ -107,15 +122,13 @@ def _protected_routes(app: FastAPI) -> Iterator[tuple[str, str]]:
 
 def _assert_unauthorized(response: httpx.Response, what: str) -> None:
     assert response.status_code == 401, f"{what}: {response.status_code} {response.text}"
-    method, _, path = what.partition(" ")
-    code = "UNAUTHENTICATED" if (method, path) in SESSION_ROUTES else "UNAUTHORIZED"
-    assert ErrorResponse.model_validate(response.json()).error.code == code, what
+    assert ErrorResponse.model_validate(response.json()).error.code == "UNAUTHENTICATED", what
 
 
 async def test_every_protected_route_requires_auth_before_validation(
     assembled_app: FastAPI, api: httpx.AsyncClient
 ) -> None:
-    """T-A2: no `Authorization`, valid UUIDs in the path, empty body → 401 everywhere."""
+    """T-A2: no session cookie, valid UUIDs in the path, empty body → 401 everywhere."""
     routes = sorted(set(_protected_routes(assembled_app)))
     for method, path in (("GET", p) for p in PACKAGE_PROBES):
         assert (method, path) in routes, f"{method} {path} is not mounted"
@@ -125,36 +138,20 @@ async def test_every_protected_route_requires_auth_before_validation(
         _assert_unauthorized(response, f"{method} {path}")
 
 
-def _foreign_token(learner_id: str) -> str:
-    now = datetime.now(UTC)
-    claims = {
-        "sub": learner_id,
-        "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(days=1)).timestamp()),
-    }
-    return jwt.encode(claims, "not-the-quack-secret-0123456789abcdef", algorithm="HS256")
-
-
-async def test_single_jwt_contract_across_packages(api: httpx.AsyncClient) -> None:
-    """T-A3: a login token works in domains, session and artifacts; after
-    `DELETE /v1/learner` and with a foreign signature it gets 401 in all three."""
-    email = f"t-a3-{uuid4().hex[:12]}@example.com"
-    password = "correct-horse-battery"
-    registered = await api.post("/v1/auth/register", json={"email": email, "password": password})
-    assert registered.status_code == 201, registered.text
-    login = await api.post("/v1/auth/login", json={"email": email, "password": password})
-    assert login.status_code == 200, login.text
-    token = login.json()["token"]
-    learner_id = login.json()["learner_id"]
-    headers = {"Authorization": f"Bearer {token}"}
+async def test_single_session_contract_across_packages(
+    api: httpx.AsyncClient, sign_in: SignIn
+) -> None:
+    """T-A3: one session works in domains, session and artifacts; after `DELETE /v1/learner`
+    and with an unknown cookie it gets 401 in all three (ТЗ Ф4 WP18.3)."""
+    _, headers = await sign_in()
 
     for path in PACKAGE_PROBES:
         response = await api.get(path, headers=headers)
         assert response.status_code == 200, f"{path}: {response.text}"
 
-    foreign = {"Authorization": f"Bearer {_foreign_token(learner_id)}"}
+    foreign = session_cookie("not-a-session-token")
     for path in PACKAGE_PROBES:
-        _assert_unauthorized(await api.get(path, headers=foreign), f"foreign signature {path}")
+        _assert_unauthorized(await api.get(path, headers=foreign), f"unknown session {path}")
 
     deleted = await api.delete("/v1/learner", headers=headers)
     assert deleted.status_code == 200, deleted.text
@@ -182,10 +179,16 @@ EXPECTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("PATCH", "/v1/learner/settings"),
         ("POST", "/v1/consents"),
         ("DELETE", "/v1/consents/research"),
+        # ТЗ Ф4 WP20.1, WP20.5 (stream C)
+        ("POST", "/v1/domains/{domain_id}/materials"),
+        ("GET", "/v1/domains/{domain_id}/materials"),
+        ("GET", "/v1/materials/{material_id}"),
+        ("GET", "/v1/search"),
+        # ТЗ Ф4 WP21.1 (stream C)
+        ("POST", "/v1/sessions/{session_id}/canvases"),
+        ("GET", "/v1/canvases/{canvas_id}"),
+        ("GET", "/v1/domains/{domain_id}/canvases"),
         # stream 1
-        ("POST", "/v1/auth/register"),
-        ("POST", "/v1/auth/login"),
-        ("GET", "/v1/auth/me"),
         ("PATCH", "/v1/learner/preferences"),
         ("DELETE", "/v1/learner"),
         ("GET", "/v1/domains"),
@@ -243,11 +246,11 @@ def _declared_routes() -> list[tuple[str, str]]:
     """`(method, path)` of every route as the routers declare it, with duplicates kept."""
     from quack.artifacts.notes_routes import router as notes_router
     from quack.artifacts.router import router as artifacts_router
-    from quack.domains.router import _protected, _public
+    from quack.domains.router import _protected
     from quack.session.router import router as session_router
 
     declared: list[tuple[str, str]] = []
-    for router in (_public, _protected, session_router, artifacts_router, notes_router):
+    for router in (_protected, session_router, artifacts_router, notes_router):
         for route in router.routes:
             assert isinstance(route, APIRoute), route
             declared.extend((method, route.path) for method in sorted(route.methods or ()))
@@ -278,14 +281,11 @@ def test_pending_routes_are_still_pending(assembled_app: FastAPI) -> None:
     assert mounted == set(), f"remove from PENDING_ROUTES: {sorted(mounted)}"
 
 
-async def test_static_session_route_wins_over_parametric(api: httpx.AsyncClient) -> None:
+async def test_static_session_route_wins_over_parametric(
+    api: httpx.AsyncClient, sign_in: SignIn
+) -> None:
     """T-A1: `GET /v1/sessions/active` answers 200 `null`, not 422 from `{session_id}`."""
-    email = f"t-a1-{uuid4().hex[:12]}@example.com"
-    registered = await api.post(
-        "/v1/auth/register", json={"email": email, "password": "correct-horse-battery"}
-    )
-    assert registered.status_code == 201, registered.text
-    headers = {"Authorization": f"Bearer {registered.json()['token']}"}
+    _, headers = await sign_in()
     response = await api.get("/v1/sessions/active", headers=headers)
     assert response.status_code == 200, response.text
     assert response.json() is None
@@ -312,36 +312,33 @@ async def _client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
         yield client
 
 
-async def _register(client: httpx.AsyncClient) -> tuple[str, dict[str, str]]:
-    email = f"rl-{uuid4().hex[:12]}@example.com"
-    response = await client.post(
-        "/v1/auth/register", json={"email": email, "password": "correct-horse-battery"}
-    )
-    assert response.status_code == 201, response.text
-    return response.json()["learner_id"], {"Authorization": f"Bearer {response.json()['token']}"}
-
-
-async def test_rate_limit_local_fallback_without_redis(make_app: AppFactory) -> None:
-    """T-A4: with Redis down 10 logins from one IP pass, the 11th is `429 RATE_LIMITED`."""
-    app = make_app(redis_client=BrokenRedis(), auth_requests_per_ip_per_min=10)
+async def test_rate_limit_local_fallback_without_redis(
+    make_app: AppFactory, sign_in: SignIn
+) -> None:
+    """T-A4: with Redis down 10 actions of a learner pass the limiter, the 11th is
+    `429 RATE_LIMITED` (the per-IP `auth` limit went with `/v1/auth/login`, D-A-113). The
+    body is empty: the limiter counts before validation, so the passing ones are 422."""
+    app = make_app(redis_client=BrokenRedis(), learner_actions_per_min=10)
+    _, headers = await sign_in()
     async with _client(app) as client:
-        body = {"email": "nobody@example.com", "password": "wrong-password-123"}
         for attempt in range(10):
-            response = await client.post("/v1/auth/login", json=body)
-            assert response.status_code == 401, f"attempt {attempt}: {response.text}"
-        blocked = await client.post("/v1/auth/login", json=body)
+            response = await client.patch("/v1/learner/preferences", headers=headers)
+            assert response.status_code == 422, f"attempt {attempt}: {response.text}"
+        blocked = await client.patch("/v1/learner/preferences", headers=headers)
         assert blocked.status_code == 429, blocked.text
         error = ErrorResponse.model_validate(blocked.json()).error
         assert error.code == "RATE_LIMITED"
         assert error.details["retry_after_sec"] > 0
 
 
-async def test_actions_and_turns_rate_limits(make_app: AppFactory, redis: Redis) -> None:
+async def test_actions_and_turns_rate_limits(
+    make_app: AppFactory, redis: Redis, sign_in: SignIn
+) -> None:
     """T-A5: `learner_actions_per_min` for POST/PATCH/DELETE, `turns_per_min` for turns,
     GET unlimited, heartbeat outside `actions`, Redis keys carry a TTL."""
     app = make_app(learner_actions_per_min=3, turns_per_min=1)
     async with _client(app) as client:
-        learner_id, headers = await _register(client)
+        learner_id, headers = await sign_in()
         for i in range(3):
             created = await client.post(
                 "/v1/domains",
@@ -360,7 +357,7 @@ async def test_actions_and_turns_rate_limits(make_app: AppFactory, redis: Redis)
         assert await redis.ttl(ratelimit_key("actions", learner_id)) > 0
 
         # a new learner: heartbeats do not spend `actions`, so three creations still fit
-        other_id, other = await _register(client)
+        other_id, other = await sign_in()
         for _ in range(5):
             beat = await client.post(f"/v1/sessions/{uuid4()}/heartbeat", headers=other)
             assert beat.status_code == 404, beat.text
@@ -374,7 +371,7 @@ async def test_actions_and_turns_rate_limits(make_app: AppFactory, redis: Redis)
         assert await redis.get(ratelimit_key("actions", other_id)) == "3"
 
         # turns: the second turn of the window is refused (the session does not matter)
-        third_id, third = await _register(client)
+        third_id, third = await sign_in()
         first_turn = await client.post(
             f"/v1/sessions/{uuid4()}/turns",
             json={"text": "hi", "idempotency_key": str(uuid4())},
@@ -390,11 +387,11 @@ async def test_actions_and_turns_rate_limits(make_app: AppFactory, redis: Redis)
         assert await redis.ttl(ratelimit_key("turns", third_id)) > 0
 
 
-async def test_turn_limit_without_redis_is_local(make_app: AppFactory) -> None:
+async def test_turn_limit_without_redis_is_local(make_app: AppFactory, sign_in: SignIn) -> None:
     """T-E8 in small: the turn limit does not fail open when Redis is down."""
     app = make_app(redis_client=BrokenRedis(), turns_per_min=1)
     async with _client(app) as client:
-        _, headers = await _register(client)
+        _, headers = await sign_in()
         for expected_blocked in (False, True):
             response = await client.post(
                 f"/v1/sessions/{uuid4()}/turns",
@@ -407,10 +404,10 @@ async def test_turn_limit_without_redis_is_local(make_app: AppFactory) -> None:
 # --- WP1.6: thresholds read from Settings at request time ------------------------------------
 
 
-async def test_search_limits_come_from_settings(make_app: AppFactory) -> None:
+async def test_search_limits_come_from_settings(make_app: AppFactory, sign_in: SignIn) -> None:
     app = make_app(search_min_query_len=4, search_default_limit=7, search_max_limit=9)
     async with _client(app) as client:
-        _, headers = await _register(client)
+        _, headers = await sign_in()
         too_short = await client.get("/v1/artifacts/search", params={"q": "abc"}, headers=headers)
         assert too_short.status_code == 422, too_short.text
         assert too_short.json()["error"]["code"] == "VALIDATION_ERROR"

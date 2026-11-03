@@ -3,13 +3,15 @@
 Each learner gets an `auth.users` row, `learner.registered` and one domain with a confirmed
 structure from a fixture, all through `append_events` with `actor = "system"` and without a
 model. IDs and idempotency keys are deterministic (`uuid5(QUACK_UUID_NS, "seed:{i}:…")`), so a
-second run with the same N creates nothing new; tokens are issued again.
+second run with the same N creates nothing new; each run opens new sessions (ТЗ Ф4 WP18.3):
+the token of the file is the session cookie.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid5
@@ -17,8 +19,9 @@ from uuid import UUID, uuid5
 import orjson
 from sqlalchemy import text
 
-from quack.api.auth import issue_access_token
+from quack.auth.sessions import open_session
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.events import append_events
 from quack.events.models import NewEvent
@@ -27,7 +30,7 @@ from quack.graph.ids import QUACK_UUID_NS
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "loadtest" / "fixtures"
 DEFAULT_FIXTURE = "default"
 SEEDED_PREFERENCES: dict[str, Any] = {"seeded": True}
-# Not a password hash: seeded learners log in with the issued token only.
+# Not a password hash: seeded learners sign in with the session token of the file only.
 _NO_PASSWORD = "!seeded"
 
 
@@ -144,6 +147,7 @@ async def _check_prod(session_factory: SessionFactory, settings: Settings, confi
 
 async def seed_learners(
     session_factory: SessionFactory,
+    db: Db,
     settings: Settings,
     *,
     count: int,
@@ -171,11 +175,8 @@ async def seed_learners(
                 },
             )
             await append_events(session, learner_id, events, publish_wakeup=False)
-        seeded.append(
-            SeededLearner(
-                learner_id, issue_access_token(learner_id, settings), domain_id, topic_ids
-            )
-        )
+        token = await open_session(db, settings, learner_id=learner_id, now=datetime.now(UTC))
+        seeded.append(SeededLearner(learner_id, token, domain_id, topic_ids))
     return seeded
 
 

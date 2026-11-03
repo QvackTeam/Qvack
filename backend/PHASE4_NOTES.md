@@ -443,6 +443,13 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 ### D-A-123. Вопросы C к владельцу — решены C в D-C-122, A согласен
 - Класс: B. C решил свои четыре вопроса по поручению владельца в D-C-122 (`phase-4-c-wp21-ws`), раньше этой записи. A сверил с документами и согласен со всеми пунктами: (1) блок набора формул — инструмент слоя ученика, не вид блока (`П-9.4`, `Т-§15.3`); (2) поправка §0.4.7/§7.4 снята — как D-A-120; (3) расхождения по `JWT_SECRET` в `Д-§7` нет; (4) переполнение куска — `chunk_max_batches = ceil(stroke_chunk_seconds · 1000 / stroke_batch_ms)` из двух параметров `Т-§15.2`, без новых чисел. Отдельных решений A по этим вопросам нет.
 
+### D-A-126. S4: факты картины памяти WP14.2 — уверенность типа пробела, «забыл», условия проявления
+- Класс: B. WP6.4, WP14.2; вопрос B в D-B-157 (#131); `quack/graph/read/models.py`, `tests/support/graph_read.py`
+- Решение: в ответные модели среза добавлены поля, названные техдоком: `SkillFact.gap_type_confidence` (`gapTypeConfidence`, `Т-§3.4.4`, `Т-§8.4`: доля голосов за победивший тип), `SkillFact.last_lapse_at_ms` (`retLastLapseAtMs`; «забыл», `Т-§8.2` п.3), `MisconceptionFact.triggers` (`Т-§3.4.2`, `Т-§9.3`). Нет значения — `None` / пустой список (закон 8: «не было» — явное значение). Поля необязательные: читающий код B и C не меняется. Каталог событий не затронут (S3 заморожен, D-A-119). Заглушка `FixedGraphReader` даёт их у «проваленного» навыка и у заблуждения.
+- Почему: §0.4.3 п.2 (поля названы `Т-§3.4`); S4 — интерфейс A, реализация — G2.
+- Тесты: `tests/graph/test_read_stub.py::test_memory_picture_facts_of_wp14_2`.
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
@@ -908,6 +915,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/practice/test_check_symbolic_job.py`.
 - Ответ A (#117, 2026-11-03): `unsupported` есть в `CheckFailedReason`. Страховка пишет `check.failed {reason: unsupported}` вместо «ничего не писать»; строка S6 `check.failed → check.model` отдаёт ответ модели (`Т-§6.6`).
 - Требует подтверждения владельцем: нет
+
 ### D-B-144. Грамматика API пускает отношения — режим `interval` проходит проверку разметки
 - Класс: B
 - WP / место: WP12.3, WP11.5; `quack/practice/grammar.py` (`grammar_ok`, D-B-115)
@@ -1158,7 +1166,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Требует подтверждения владельцем: нет.
 
 ### D-C-112. Перевод входа API с JWT на сессии (WP18.3) — предложение потокам A и B
-- Класс: B (пересечение зон, §7.3) — **ждёт ответа A и B**
+- Класс: B (пересечение зон, §7.3) — принято A (D-A-112, D-A-113) и B (#103); п.1–2 выполнены в D-C-119, п.3 — B, п.4 — A (WP1.3)
 - WP / место: WP18.3, WP18.4; `quack/api/auth.py` (C), объявления в роутерах A и B
 - Контекст: §2.3 строка 3 удаляет пароль, JWT, `auth.users`, `/v1/auth/register|login`; WP18.3 — `learner_id` только из сессии. На входе Фазы 3 (`get_current_learner_id`) сидят роутеры всех потоков: A — `quack/domains/router.py`; B — `quack/session/deps.py`; C — `quack/artifacts/router.py`, `quack/api/learner_stream.py`, `quack/api/ratelimit.py`. Токены JWT выпускают тесты: A — `tests/domains/*` (8 файлов); B — `tests/session/*` (5); корневые `test_app_assembly`, `test_dispatcher`, `test_jobs_phase3`, `test_learner_stream`, `test_loadtest_scenario`, `test_neo4j_outage`, `test_ops_phase3`; C — `tests/artifacts/conftest.py`, `tests/e2e/system.py`, `tests/support/auth.py`.
 - Предложение:
@@ -1201,14 +1209,14 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Требует подтверждения владельцем: п.3 — подтверждено 2026-11-02.
 
 ### D-C-114. WP21.2: структура куска штрихов, отсечение повторов, порог переполнения
-- Класс: B; п.3 — вопрос владельцу
+- Класс: B; п.3 — решён в D-C-122 п.4
 - WP / место: WP21.2; `quack/canvas/strokes.py`
 - Контекст: `Т-§15.1`–`Т-§15.2` и WP21.2 задают формат точек (`dx, dy, dt, нажим`), MessagePack, zstd, кусок раз в `stroke_chunk_seconds` «или при переполнении», `ack` после записи и отсечение повтора по номеру пачки; не названы структура документа куска и порог переполнения.
 - Решение: (1) кусок — `{"batches": [{"batch_no", "strokes": [{"stroke_id", "points"}], "erasures": [{"stroke_ids", "at_ms"}]}]}`; первая точка штриха абсолютная, следующие — разностью; номер пачки хранится в куске для проигрывания. (2) Отсечение повторов — множество виденных `batch_no` журнала канваса в процессе API; ключ куска — `canvas_chunk_key` с ULID, поэтому два процесса не перезапишут кусок друг друга. (3) **Порог переполнения** документы не называют: сейчас кусок пишется по времени и при закрытии сокета (`flush`). Вопрос владельцу: нужен ли порог (число точек или байт) и какое значение — тогда это новый параметр `Settings`.
 - Почему: §0.4.3 п.5, `Т-§3.3`.
 - Обратимость: одна функция кодирования (у куска нет потребителей, кроме проигрывания).
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
-- Требует подтверждения владельцем: п.3.
+- Требует подтверждения владельцем: нет (п.3 — D-C-122 п.4).
 
 ### D-C-125. WP23.1: артефакт — документ с версиями; конспект блоками, защита правок ученика
 - Класс: B
@@ -1224,7 +1232,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: WP23.1, `Т-§17.1`–`Т-§17.2`, П-11.1, §0.4.3.
 - Обратимость: модель блока и одна функция слияния.
 - Тесты: `tests/artifacts/test_documents_wp23.py`; маршруты в `tests/test_app_assembly.py` (`T-A1`).
-- Осталось: сообщение `artifact_updated {artifact_id}` в `GET /v1/learner/stream` (§4) и маршруты карточек и cheat sheet — WP23.4–23.5. Тест маршрутов подменяет вход; после #123 (D-C-119) перевести на `session_cookie`. Старые маршруты заметок Фазы 3 (`/v1/artifacts/notes`, `GET /v1/artifacts`, `/v1/artifacts/search`) удаляются отдельно (§2.3 строка 14): на них держится `quack/artifacts/router.py` вместе с практикой.
+- Осталось: сообщение `artifact_updated {artifact_id}` в `GET /v1/learner/stream` (§4) и маршруты карточек и cheat sheet — WP23.4–23.5. Старые маршруты заметок Фазы 3 (`/v1/artifacts/notes`, `GET /v1/artifacts`, `/v1/artifacts/search`) удаляются отдельно (§2.3 строка 14): на них держится `quack/artifacts/router.py` вместе с практикой.
 - Требует подтверждения владельцем: нет.
 
 ### D-C-120. `observation.diagnosed` пишется только при найденной ошибке
@@ -1253,6 +1261,87 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/auth/test_auth_routes.py`, `tests/test_app_assembly.py`.
 - Требует подтверждения владельцем: нет.
 
+### D-C-119. Весь API на сессиях; пароль, JWT и `/v1/auth/register|login|me` удалены (D-C-112 п.1–2, D-A-113)
+- Класс: B (правка файлов A и B по согласованию, §7.3; D-A-112, D-A-113, B в #103)
+- WP / место: WP18.3, §2.3 строка 3, §4.5, §8.15; `quack/api/auth.py`, `quack/domains/router.py`, `quack/domains/auth.py` (удалён), `quack/domains/schemas.py`, `quack/api/ratelimit.py`, `quack/api/openapi.py`, `quack/config.py`, `quack/ops/seed.py`, `quack/cli.py`, `loadtest/scenario.py`, `compose.yaml`, `.env.example`, `tests/support/auth.py`
+- Решение:
+  1. `get_current_learner_id(request) -> UUID` — имя и подпись те же, роутеры A, B, C не менялись: ученик берётся из куки сессии (`get_current_session`); без сессии, с истёкшей или отозванной — 401 `UNAUTHENTICATED` (§4.5). Переходно, до переноса удаления на `Db` (WP25, A): ученик с `auth.users.deleted_at` или строкой `ops.deletion_tombstones` тоже отклоняется (D-C-004) — так `test_two_phase_account_deletion`, `T-A3` и проверка надгробия в артефактах сохраняют утверждения. Наличие строки `auth.users` больше не требуется (вход — сессия ученика `core.learners`).
+  2. Удалены по D-A-113: `POST /v1/auth/register`, `POST /v1/auth/login`, `GET /v1/auth/me`, публичный роутер с лимитом `auth`, `quack/domains/auth.py` целиком (`register_learner`, `login_learner`, `get_learner_me`, `hash_password`, `verify_password`, `normalize_email`), выпуск и проверка JWT (`issue_access_token`, `decode_access_token`, `DEV_JWT_SECRET`, `JWT_ALGORITHM`), схемы `RegisterRequest`, `LoginRequest`, `AuthResponse`, `LearnerMeResponse`. Вместе с ними — то, что без них мертво: `enforce_auth_rate_limit` и `auth_requests_per_ip_per_min` (лимиты входа теперь — `auth_link_per_*`, WP18), `jwt_secret`, `jwt_ttl_days`, проверка `JWT_SECRET` в prod, `JWT_SECRET` в `compose.yaml` и `.env.example`. Код `UNAUTHORIZED` в `ErrorCode` остаётся (§4.5: «остальные коды Фазы 3 не меняются»).
+  3. `ops seed-learners`: токен в файле — сессия `core.auth_sessions` (`open_session`), не JWT; проверка `JWT_SECRET` снята, роль `ops` по-прежнему без секретов (Д-§7). `loadtest/scenario.py` шлёт куку `quack_session` вместо `Authorization`.
+  4. Тестовый вход (D-C-112 п.2): `tests/support/auth.py` — `login` (кука на клиенте), `session_token` + `session_cookie` (кука одного запроса), `learner_headers` + `login_hook` (клиент, который ходит за многих учеников: хук открывает сессию ученика один раз и шлёт её куку вместо пометки). API пометку не читает: запрос с ней без хука — 401 (`test_request_without_session_is_rejected`). `ensure_users_hook` и JWT в тестах удалены; `ensure_user` остаётся для строки `auth.users`, пока на ней работают удаление и настройки Фазы 3.
+  5. `auth.users`, старая миграция и `learner.registered` журнала Фазы 3 не трогаются — WP1.3 (A, D-C-112 п.4). E2E-ученик и ученик `T-A3`/`T-A5` получают те же строки, что писал удалённый маршрут, и сессию.
+- Почему: §2.3 строка 3, WP18.3 («пароль, JWT, `auth.users`, `/v1/auth/register|login` удаляются»), §6.4 «старый → новый», §8.15 п.1–2, D-A-113.
+- Обратимость: одна зависимость `get_current_learner_id`; удалённое — в истории git.
+- Тесты: всё затронутое — в описании PR; «Правки тестов» — ниже.
+- Требует подтверждения владельцем: нет. Д-§7 `JWT_SECRET` не называет, `Т-§` JWT отвергает — с документами расхождения нет (D-C-122 п.3; прежний вопрос C снят). Компаньон (`scope = companion`) на маршрутах Фазы 3 пока проходит как полная сессия — запрет (`T-CP1`, 403) делает WP22.
+
+### D-C-116. WP20.1, WP20.5: маршруты материалов и поиска на сессиях
+- Класс: B
+- WP / место: WP20.1, WP20.5; `quack/materials/router.py`, `quack/materials/library.py`, `tests/e2e/endpoints.py`
+- Контекст: §6.4 называет `POST/GET /v1/domains/{id}/materials`, `GET /v1/materials/{id}`, `GET /v1/search`; WP20.1 — multipart с необязательным `session_id`. Не названы: ключ идемпотентности загрузки, размер выдачи и минимальная длина запроса поиска (D-C-113 п.4), ответ на список материалов чужого домена.
+- Решение: (1) Вход — только кука сессии (`get_current_session`, WP18.3), не JWT Фазы 3 (D-C-113 п.5); без сессии — 401 `UNAUTHENTICATED`. (2) Загрузка — без `idempotency_key`: WP20.1 его не называет, каждая загрузка — новый материал со своим ключом `material.uploaded:{material_id}`; в обходе `T-E2` маршрут — в `NO_IDEMPOTENCY_KEY` с причиной. (3) Поиск берёт параметры полнотекстового поиска Фазы 3: `search_min_query_len`, `search_default_limit`, `search_max_limit` (те же проверки, что у `GET /v1/artifacts/search`, 422 `VALIDATION_ERROR`). (4) Список материалов чужого или неизвестного домена — 404 `NOT_FOUND`, не пустой список (`T-E3`); проверка домена — та же, что у загрузки (D-C-113 п.1). (5) Ответы: материал — `material_id, domain_id, session_id, mime, status, pages_count, created_at`; карточка — материал, `file_url`, страницы `page, text, image_url`; поиск — `hits` из `session_id, seq, type, snippet`.
+- Почему: §0.4.3 п.5, §4.5, WP18.3.
+- Обратимость: один модуль маршрутов.
+- Тесты: `tests/materials/test_materials_routes.py`, `tests/e2e/test_isolation_and_idempotency.py` (`T-E2`, `T-E3`), `tests/test_app_assembly.py`.
+- Риск перехода: домен проверяется по `domain.created` в журнале Фазы 4, а домены пока создаёт маршрут A Фазы 3 в старом журнале — загрузить материал через API можно будет, когда создание домена перейдёт на `Db` (R-W, A). Компаньон (`scope = companion`, `T-CP1` → 403) — общей проверкой в WP22, не здесь.
+- Требует подтверждения владельцем: нет.
+
+### D-C-124. WP21.2/WP22.1: что получает `companion` по сокету канваса; повтор пачки между сокетами (ответ на ревью B #128)
+- Класс: B
+- WP / место: WP21.2, WP22.1; `quack/canvas/socket.py`
+- Контекст: WP21.2 — «`companion` для своего канваса — только статус»; WP22.1 — «видеть его статус — и ничего больше». Какие сообщения сервера (WP21.2: `ack`, `line_recognized`, `mark`, `hint`, `layer_update`, `task_closed`) — «статус», не перечислено. Ревью B #128 п.1–3.
+- Решение:
+  1. `companion` получает из канала `canvas:{id}` только `COMPANION_KINDS = {task_closed}`: распознавания, пометки, подсказки и слой — содержимое решения, не статус (§0.4.3 — консервативно, «и ничего больше»). Расширить перечень — WP22, если понадобится статус снимка.
+  2. Любое сообщение `companion` закрывает сокет `1008` до разбора (право раньше формата, ревью B п.3).
+  3. Повтор пачки между сокетами (переподключение или другой процесс `api` после записи куска, до `ack`): состояния в API не добавляется; читатель журнала штрихов (WP21.3, проигрывание) пропускает пачку с уже встреченным `batch_no` канваса (предложение B п.1, WP21.2 «повтор отсекается по `batch_no`»).
+- Почему: WP21.2, WP22.1, §0.4.3.
+- Обратимость: одна константа и одно условие.
+- Тесты: `tests/canvas/test_canvas_ws.py` (`test_sign_in_and_scope`, `test_canvas_channel_reaches_every_socket`).
+- Требует подтверждения владельцем: нет.
+
+### D-C-122. Открытые вопросы C, решённые по документам (владелец поручил C, 2026-11-03)
+- Класс: B (п.1, п.3, п.4 — пробелы, решены по §0.4.1 и §0.4.3); п.2 — снятое предложение
+- Решения:
+  1. **Блок набора формул (D-C-118, ревью B #116 п.4).** Это **инструмент слоя ученика, а не вид блока**. Основания: П-9.4 даёт закрытый перечень «Блоки на доске: задача…, визуализация, подсказка, справочная карточка», а «блок набора формул» стоит в перечне «Инструменты» рядом с пером и ластиком. Там же: «Слой ученика — его штрихи и набранные формулы», то есть набранная формула — содержимое слоя ученика, как штрих. `Т-§15.3`: «набранные формулы — блок набора с клавиатуры — дают LaTeX напрямую». Поэтому `typed_formula {block_id, latex}` (WP21.2) ссылается на блок доски, в котором набрана формула, — для решения это блок задачи, где строки проверяются (WP21.4 «для каждой новой строки в блоке задачи»). Вид блока не добавляется, `BoardDoc` не меняется.
+  2. **Поправка §0.4.7 и §7.4 — снята.** §0.4.7 уже требует один полный прогон на итоговом состоянии ветки перед PR, без прогонов на промежуточных состояниях, а §7.4 прямо требует записывать красный прогон в `PHASE4_NOTES.md`. Это явные контракты ТЗ (§0.4.1 уровень 5), а предложение C стоит на уровне 7 и по §0.4.1 не применяется. Работаем по ТЗ, конфликты заметок снимаем объединением сторон.
+  3. **`JWT_SECRET` в Д-§7 — расхождения нет.** Д-§7 («Конфиг и секреты») `JWT_SECRET` не называет; `Т-§` отвергает JWT («нельзя отозвать до истечения срока»); ТЗ Ф4 §2.3 строка 3 его удаляет. Правка документа не нужна; вопрос C в D-C-119 был ошибочным и снят.
+  4. **Переполнение куска штрихов (D-C-114 п.3, D-C-121).** `Т-§15.2`: кусок пишется «раз в `stroke_chunk_seconds` или при переполнении». Переполнение — когда в памяти ждёт больше пачек, чем клиент шлёт за одно окно куска: `chunk_max_batches = ceil(stroke_chunk_seconds · 1000 / stroke_batch_ms)` (10 с / 300 мс → 34). Новых чисел нет: граница выводится из двух параметров `Т-§15.2`. Это консервативно (§0.4.3, абзац о значениях параметров): при повторной отправке накопленного после обрыва кусок пишется сразу, и данные дольше не ждут в памяти без подтверждения. `StrokeJournal(max_batches=…)`, `flush_due` и `due_in` учитывают переполнение.
+- Тесты: `tests/canvas/test_strokes_wp21.py` (`test_chunk_batches_from_the_settings`, `test_overflow_writes_the_chunk_before_its_time`).
+- Требует подтверждения владельцем: нет (поручено решить C).
+
+### D-C-121. WP21.2: WebSocket канваса — вход, коды закрытия, формат пачки, повтор подтверждения
+- Класс: B
+- WP / место: WP21.2, WP22.1, `Т-§1.6`, `Т-§15.1`, `Т-§15.2`, `Т-§20.7`; `quack/canvas/socket.py`, `quack/canvas/router.py`, `quack/canvas/strokes.py`, `quack/api/auth.py` (`websocket_session`), `tests/support/ws.py`
+- Контекст: WP21.2 называет маршрут, сообщения клиента и сервера, кусок и `ack`. Не названы: коды отказа и закрытия сокета, вид точек в `stroke_batch`, ответ на повтор уже записанной пачки, повтор записи при недоступном хранилище, вид пары «компаньон шлёт сообщение».
+- Решение:
+  1. Вход — кука сессии в рукопожатии (`websocket_session`, то же разрешение сессии, что у HTTP). Можно открыть: `full` ученика-владельца канваса или `companion` этого канваса (`canvas_id` сессии, WP22.1). Иначе — нет сессии, чужой или неизвестный канвас, компаньон другого канваса, канвас без сессии — сокет не принимается: `close 1008` (RFC 6455 §7.4.1 — нарушение политики) до `accept`.
+  2. Компаньон получает только статус — сообщения сервера канала `canvas:{id}`. Любое его сообщение закрывает сокет кодом 1008.
+  3. Неразбираемое сообщение (не JSON, неизвестный `type`, нет полей) — `close 1007`. Сообщения — строгие модели Pydantic, лишние поля запрещены.
+  4. `stroke_batch {batch_no, strokes: [{stroke_id, points: [[x, y, t_ms, pressure], …]}], erasures: [{stroke_ids, at_ms}]}`: точки в сообщении абсолютные, в разностную запись их переводит журнал (`Т-§15.1`). Время — мс устройства, как в куске (D-C-114).
+  5. Повтор `batch_no`: ещё не записанная пачка — отсекается, `ack` придёт с записью куска; уже записанная — `ack` шлётся снова (первый мог потеряться, иначе клиент повторял бы вечно). Новое в журнале — `written(batch_no)`.
+  6. Хранилище недоступно: подтверждений нет, пачки ждут; повтор записи — по следующей пачке клиента, в том числе повторной (`Т-§20.7` «клиент повторит»), и при закрытии сокета, а не в цикле сервера. Новое в журнале — `due_in(now)`: сокет ждёт сообщение клиента не дольше, чем до срока куска.
+  7. При закрытии сокета ожидающие пачки пишутся (подтвердить уже некому — клиент повторит неподтверждённое при новом подключении).
+  8. `publish_canvas(redis, canvas_id, message)` — сообщения сервера всем сокетам канваса во всех процессах API (`Т-§15.2`); каждый сокет подписан на `canvas:{id}`. Без Redis — только свои `ack` (§4.2). Ошибка Redis заканчивает пересылку, а не сокет.
+  9. `line_ready`, `typed_formula`, `check_request` протокол принимает и проверяет, обрабатывают их WP21.3–21.5 (пока — запись в лог `canvas_message_pending`).
+  10. Тесты WebSocket — без новой зависимости: `tests/support/ws.py` вызывает приложение ASGI на цикле теста (`TestClient` Starlette крутит своё событийное кольцо и ломает пулы фикстур).
+- Почему: §0.4.3 п.5, RFC 6455, `Т-§15.2`, `Т-§20.7`.
+- Обратимость: один модуль.
+- Тесты: `tests/canvas/test_canvas_ws.py`.
+- Переполнение куска — D-C-122 п.4.
+- Требует подтверждения владельцем: нет.
+
+### D-C-118. WP21.1: документ доски и маршруты канвасов
+- Класс: B; схема документа — на ревью B (B #103)
+- WP / место: WP21.1; `quack/canvas/board.py`, `quack/canvas/boards.py`, `quack/canvas/router.py`
+- Контекст: `Т-§15.1` и П-9.4 задают состав доски (блоки, расположение, слой учителя, версии) и два слоя разными структурами; WP21.1 — три маршрута и `agent.requested {kind: solution_space}` для задачи на лету без пространства. Не названы: поля документа, ключ идемпотентности открытия, проверка сессии и домена, отличие «задачи на лету».
+- Решение: (1) **Документ** `BoardDoc` (строгий, `extra=forbid`): `blocks` (`block_id`, `kind`: task | visualization | hint | reference_card, `task_id?`, `layout {x, y, width?, height?, collapsed}`); `learner` — `typed_formulas {block_id, latex}` (штрихи — в журнале штрихов, строки — события); `teacher` — `marks {mark_id, line_id, kind: error|question, text}`, `hints {hint_id, task_id, step 1–3, text, line_id?}`, `visualizations {item_id, block_id, artifact_id}`, `scaffolds {item_id, block_id, text}`. Слои — разные модели: элемент учителя в слой ученика не проходит проверку. Версия — колонка `version`. (2) Открытие по задаче — блок `task` (`b1`). (3) «Задача на лету» — `content.tasks.source = teacher`; без `solution_space` — `agent.requested {kind: solution_space, params.task_id, needed_in_session: true}` под ключом `solution_space:{task_id}` и с `request_id = uuid5(QUACK_UUID_NS, ключ)` (закон 5, по ревью B #116: один запрос на задачу, второй канвас по ней ничего не пишет), `actor = code`, `domain_id` и `session_id` — сессии канваса, в одной транзакции со строкой; у задач банка пространство строит `task.solution_space` по `task.created` (WP12.4). (4) Сессия ученика — по `session.started` в журнале, домен — по `domain.created` (закон 1, как D-C-113); чужое — 404. Домен канваса — домен его сессии. (5) Открытие без ключа: каждый вызов — новый канвас; в обходе `T-E2` — `NO_IDEMPOTENCY_KEY` с причиной.
+- Почему: §0.4.3 п.5, закон 1, WP18.3.
+- Обратимость: модели документа (данных нет, §0.3).
+- Тесты: `tests/canvas/test_boards_wp21.py`, `tests/e2e/test_isolation_and_idempotency.py`, `tests/test_app_assembly.py`.
+- Риск перехода: сессии пока стартуют маршрутом B Фазы 3 в старом журнале — открыть канвас через API можно, когда старт сессии пишет `session.started` в журнал Фазы 4.
+- Требует подтверждения владельцем: нет; поля документа — ревью B.
+- Ревью B (#116), ответы: п.1 (ключ) — исправлено, тест `test_one_request_per_task`; п.2 (`domain_id` у `agent.requested`) — да, из `session.started` той же выборкой; п.3 (`actor`) — `code` (`FIXED_ACTORS`); п.4 (`TypedFormula.block_id`) — формула ссылается на блок доски, в котором набрана (обычно блок задачи); отдельного вида «блок набора» в видах блоков П-9.4 нет, хотя П-9.4 называет «блок набора формул» среди инструментов — решено в D-C-122 п.1: инструмент слоя ученика, вид блока не добавлен. п.5 (график без артефакта) — модель `PlotSpec` у B в `quack.session`, канвас её импортировать не может (§4.1); пока на доску кладётся только визуализация-артефакт, простой график — нет; вынести `PlotSpec` в ядро или класть график артефактом — решение B при WP21.5. п.6 (`hint.shown {source: canvas}`) — в WP21.5 (C). п.7 — риск перехода, как выше.
+
 #### Ответ A: таблицы C в базовой миграции и D-A-103 (2026-11-02)
 
 Таблицы C в `backend/db/migrations/20261102000001_baseline.sql` (`phase-4-a-wp1`, `4a75a2c`) сверены
@@ -1275,6 +1364,12 @@ PR #77 (dbmate v2.36.0, sha256).
 ## Красные прогоны
 
 - WP23.1, документы артефактов (C, `phase-4-c-wp23-artifacts`): красный прогон отдельно не снят (облегчённый TDD по указанию владельца, 2026-11-03). Зелёный: `tests/artifacts/test_documents_wp23.py` + `tests/test_app_assembly.py` — 25 passed; с ключами — `tests/e2e/test_isolation_and_idempotency.py` + `tests/artifacts/test_documents_wp23.py` — 9 passed.
+- D-C-119, весь API на сессиях (C, `phase-4-c-d112`, коммит `e8a6aee`): в Linux против `quack-test-*` с dbmate `pytest tests/test_app_assembly.py tests/domains/test_auth_and_learner.py tests/session/test_auth_and_stream_resilience.py` — 14 failed (старый вход: сессия не принимается маршрутами Фазы 3, код 401 `UNAUTHORIZED`, `/v1/auth/register|login|me` ещё смонтированы, лимит без Redis считает только `auth`), 11 passed. Зелёный — в описании PR.
+- D-C-122 п.4, переполнение куска (C, `phase-4-c-wp21-ws`, коммит `57127c3`): `pytest tests/canvas/test_strokes_wp21.py` — 2 failed (`chunk_max_batches` — `NotImplementedError`, кусок ждёт время при переполнении), 5 passed. Зелёный: `tests/canvas` — 19 passed.
+- WP21.2, WebSocket канваса (C, `phase-4-c-wp21-ws`, коммит `f915ac2`): в Linux против `quack-test-*` с dbmate `pytest tests/canvas/test_canvas_ws.py` — 7 failed (маршрута `WS /v1/canvases/{id}/ws` нет — сокет закрывается при рукопожатии; `publish_canvas` — `NotImplementedError`). Зелёный: `tests/canvas` — 16 passed; `tests/auth`, `tests/test_contracts.py`, `tests/test_app_assembly.py` — зелёные.
+- WP21.1, ключ запроса пространства (C, `phase-4-c-wp21-boards`, коммит `3318d8a`, ревью B #116): `pytest tests/canvas/test_boards_wp21.py` — 1 failed (`test_one_request_per_task`: ключ `canvas:{canvas_id}:solution_space`, `actor = system`, без `domain_id`), 4 passed. Зелёный на `f693231`: `tests/canvas`, `tests/e2e/test_isolation_and_idempotency.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` — 24 passed.
+- WP21.1, доска и канвасы (C, `phase-4-c-wp21-boards`, коммит `0012acb`): в Linux `pytest tests/canvas/test_boards_wp21.py` — ошибка сбора (нет `quack.canvas.board`); на неверной реализации (запрос пространства для любой задачи без него) — 1 failed. Зелёный: `tests/canvas`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/materials` — 61 passed. Правка теста красного коммита: домен в тестах создаётся событием `domain.created` (проверка домена — D-C-118 п.4).
+- WP20, маршруты (C, `phase-4-c-api-sessions`, коммит `e2fb068`): в Linux против `quack-test-*` с dbmate `pytest tests/materials/test_materials_routes.py` — 4 failed (маршрутов нет: 404 вместо 201/401/415/200). Зелёный: `tests/materials`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/auth` — 66 passed.
 - WP13.1, согласие на старте сессии (D-B-151): `uv run pytest tests/session/test_session_terms.py` — 2 failed (старт без согласия `201`, без cookie `201`), коммит `f5029a2`. Зелёный: 2 passed; `tests/session` и `tests/llm/test_labels.py` зелёные; `tests/e2e` — 13 failed (`403` на старте, правка у C).
 - WP11.3, WP11.6 на полях A #117 (D-B-145, D-B-146): `uv run pytest tests/practice/test_check_symbolic_job.py tests/practice/test_check_model.py` — 1 failed (`unsupported` ничего не писал) и ошибка сбора (нет `known_misconceptions`), коммит `72e96fb`. Зелёный: `tests/practice`, `tests/events`, `tests/graph/test_read_stub.py`, `tests/jobs/test_rules_p4.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` — 234 passed.
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
@@ -1312,6 +1407,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - D-B-144 (грамматика API, отношения): `cd backend && uv run pytest tests/practice/test_grammar_relations.py` — 5 failed, 4 passed (отказы и так отказы), коммит `b2d0309`. Зелёный: 9 passed; с затронутыми (`tests/practice`, `tests/session/test_phase4_contracts.py`, `tests/test_contracts.py`) — 116 passed.
 
 - S3, заморозка (A, `phase-4-a-s3-freeze`, коммит `dc04d39`): `pytest tests/events/test_catalog.py -k frozen_kinds` — 5 failed (другие значения `kind` и чужая привязка `topic_id`/`hub_id` принимаются), 1 passed. Зелёный: `tests/events`, `tests/jobs` — 111 passed.
+- S4, поля картины памяти (A, `phase-4-a-s4-fields`, коммит `9ccd3eb`, D-A-126): `pytest tests/graph/test_read_stub.py -k wp14` — 1 failed (у навыка нет типа пробела с уверенностью и времени провала памяти). Зелёный — в описании PR.
 - S3, `session.started.resumed` (A, `phase-4-a-session-resumed`, коммит `5b2f6f4`, D-A-121): `pytest tests/events/test_catalog.py -k resumed` — 1 failed (`resumed` нет у модели). Зелёный — в описании PR.
 - S6, `known_check` без темы (A, `phase-4-a-g1`, ревью B #117): `pytest tests/jobs/test_rules_p4.py -k without_topic` — 1 failed (ставится `check.known_claim` с `topic_id = "None"`). Зелёный — в описании #117.
 - G1 потока A (`phase-4-a-g1`, коммит `692f4f3`): `pytest tests/jobs tests/graph/test_read_stub.py tests/events/test_catalog.py` — 7 failed (`JobContext` без полей §4.2 и порядок закрытия; `known_check` без задачи; нет `cancelled_requests`; `MisconceptionFact` без `statement` — 2; `check.failed {reason: unsupported}` отклонён), 104 passed. Зелёный — в описании PR.
@@ -1336,6 +1432,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 - `tests/e2e/test_isolation_and_idempotency.py`, `tests/e2e/endpoints.py` (C, WP23.1): три маршрута блоков — в обходе `T-E2`; тема для них записывается в журнал Фазы 4 (`topic.created`), которого структура Фазы 3 в обходе не пишет (D-C-112); `accept` и `DELETE` — в `NO_OTHER_BODY` (тело — только ключ).
 - `tests/test_app_assembly.py` (C, WP23.1): в `EXPECTED_ROUTES` и `_declared_routes` добавлены четыре маршрута конспекта §6.4 (§8.15 п.2 — новый маршрут контракта).
+- `tests/test_compose_contract.py` (C, D-C-119): удалён `test_only_api_has_the_jwt_secret` из #122 — `JWT_SECRET` удаляется вместе с JWT (§2.3 строка 3, §8.15 п.1); из проверки `projector` убрано несуществующее имя `JWT_SECRET`.
 - `tests/session/test_head_guards.py::test_boundary_names_the_missing_prerequisites_once` (D-B-153, до зелёного): проверка «id не в тексте» смотрела на id предпосылки с меткой и не ловила утечку id предпосылки без метки (подмена прошла); теперь проверяются оба id и точный текст. Тест усилен, не ослаблен.
 - `tests/practice/test_check_symbolic_job.py::test_unsupported_form_writes_nothing_yet` → `test_unsupported_form_writes_check_failed_for_the_model` (B, D-B-146): прежний тест закреплял временное поведение до ответа A («`unsupported` нет в каталоге»); A добавил значение в #117, тест проверяет новое поведение: `check.failed {reason: unsupported}` под ключом `check_failed_key`. Тест не ослаблен.
 
@@ -1343,6 +1440,13 @@ PR #77 (dbmate v2.36.0, sha256).
 - `tests/llm/test_phase4_ai_layer.py` (`T111`): `max_output_tokens` десяти ролей — по замеру (D-B-134); `Т-§11.1` разрешает менять конфиг по замеру. Сила проверки не меняется.
 - `tests/test_contracts.py` (`T-A6`): в `PRODUCT` добавлен `agents` (ТЗ Ф4 §4.1). Сила проверки не меняется.
 - `compute/tests/math/test_equivalence.py`: `PARAMS` берётся из `test_params.py` (у `Params` новые поля, D-B-124). Утверждения не менялись.
+
+- D-C-119 (C, по D-A-113 и D-C-112 п.2): удалены вместе с кодом (§8.15 п.1) — `tests/domains/test_auth_and_learner.py::test_register_normalizes_email_and_rejects_duplicate` (вход по ссылке и ученик по адресу — `T-AU1` `test_magic_link_flow`), `::test_login_and_me_jwt_validation` (сессия, отзыв, 401 без неё — `T-AU4` `test_session_revocation`, `tests/auth/test_auth_routes.py::test_bad_link_and_no_session_are_401`), `::test_auth_rate_limiting_per_ip` (лимиты входа на адрес и IP — `T-AU2` `test_link_rate_limits_*`); `tests/session/test_fixtures.py::test_token_uses_dev_secret_when_jwt_secret_is_empty` (JWT нет); `tests/test_ops_phase3.py::test_seed_learners_refuses_without_jwt_secret` (JWT_SECRET нет, сессия не требует секрета); `tests/test_settings_meta_api.py::test_prod_jwt_secret_is_at_least_32_bytes` (JWT нет).
+- D-C-119, перенос на сессии (§8.15 п.2), утверждения те же: способ входа — `login`/`session_cookie`/`learner_headers` вместо Bearer (`tests/domains/*`, `tests/session/*`, `tests/artifacts/conftest.py`, `tests/e2e/system.py`, корневые `test_dispatcher`, `test_jobs_phase3`, `test_learner_stream`, `test_neo4j_outage`, `test_ops_phase3`); `test_update_preferences_and_idempotency` и `test_two_phase_account_deletion` — только вход (D-A-113). Код 401 — `UNAUTHENTICATED` вместо `UNAUTHORIZED` (§4.5) в `test_auth_and_stream_resilience.py`, `test_artifacts_search_export.py`, `test_app_assembly.py` (`T-A2`, `T-A3`), `test_two_phase_account_deletion`.
+- D-C-119, замена удалённого маршрута равным: «после удаления запрос отклонён» в `test_two_phase_account_deletion` проверяется на `PATCH /v1/learner/preferences` (был `GET /v1/auth/me`); «токены сида работают» в `test_seed_learners` и «после удаления вход отклонён» в `T-E` (`test_journey_and_laws.py`) — на `GET /v1/domains` (были `/v1/auth/me` и `/v1/auth/login`); `T-A3` переименован в `test_single_session_contract_across_packages`: чужая подпись JWT → неизвестная кука. `test_learner_without_auth_user_row_is_rejected` → `test_request_without_session_is_rejected` (без сессии — 401; строки `auth.users` для входа больше нет).
+- D-C-119, по ревью B (комментарий к `4db22c4`): `tests/session/test_session_terms.py` (B, #111) — вход только кукой сессии (`session_token` + `session_cookie`) вместо Bearer и `ensure_users_hook`; без куки — 401 `UNAUTHENTICATED`; утверждения 403 `CONSENT_REQUIRED` и 201 те же. `tests/session/fixtures.py` сохраняет `dependency_overrides[require_terms]` (D-B-151).
+- D-C-119, локальный лимитёр без Redis (`T-A4`, `T-E8` в `test_degradation.py`): лимит `auth` по IP ушёл с `/v1/auth/login`; та же проверка «N проходят, N+1 — 429 `RATE_LIMITED` без Redis» — на лимите `actions` (`learner_actions_per_min`), утверждения те же.
+- `tests/test_thresholds_in_settings.py`, `tests/test_infra.py`, `tests/test_settings_meta_api.py`: убраны `auth_requests_per_ip_per_min`, `jwt_ttl_days`, `jwt_secret` (параметры удалены, D-C-119); остальные утверждения те же. `tests/test_loadtest_scenario.py`: заголовок ученика — кука `quack_session`.
 
 ## Вопросы к команде
 

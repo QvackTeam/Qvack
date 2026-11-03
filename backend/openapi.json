@@ -437,44 +437,45 @@
         "title": "ArtifactView",
         "type": "object"
       },
-      "AuthResponse": {
+      "Block": {
+        "additionalProperties": false,
+        "description": "П-9.4: task (condition and room for the solution), visualization, hint, reference card.",
         "properties": {
-          "display_name": {
+          "block_id": {
+            "title": "Block Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "task",
+              "visualization",
+              "hint",
+              "reference_card"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/Layout"
+          },
+          "task_id": {
             "anyOf": [
               {
+                "format": "uuid",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Display Name"
-          },
-          "email": {
-            "title": "Email",
-            "type": "string"
-          },
-          "learner_id": {
-            "format": "uuid",
-            "title": "Learner Id",
-            "type": "string"
-          },
-          "preferences": {
-            "additionalProperties": true,
-            "title": "Preferences",
-            "type": "object"
-          },
-          "token": {
-            "title": "Token",
-            "type": "string"
+            "title": "Task Id"
           }
         },
         "required": [
-          "token",
-          "learner_id",
-          "email"
+          "block_id",
+          "kind"
         ],
-        "title": "AuthResponse",
+        "title": "Block",
         "type": "object"
       },
       "BlockEdit": {
@@ -495,6 +496,123 @@
           "content"
         ],
         "title": "BlockEdit",
+        "type": "object"
+      },
+      "BoardDoc": {
+        "additionalProperties": false,
+        "properties": {
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/Block"
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "learner": {
+            "$ref": "#/components/schemas/LearnerLayer"
+          },
+          "teacher": {
+            "$ref": "#/components/schemas/TeacherLayer"
+          }
+        },
+        "title": "BoardDoc",
+        "type": "object"
+      },
+      "Body_upload_material_v1_domains__domain_id__materials_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_material_v1_domains__domain_id__materials_post",
+        "type": "object"
+      },
+      "CanvasList": {
+        "properties": {
+          "canvases": {
+            "items": {
+              "$ref": "#/components/schemas/CanvasView"
+            },
+            "title": "Canvases",
+            "type": "array"
+          }
+        },
+        "required": [
+          "canvases"
+        ],
+        "title": "CanvasList",
+        "type": "object"
+      },
+      "CanvasView": {
+        "properties": {
+          "canvas_id": {
+            "format": "uuid",
+            "title": "Canvas Id",
+            "type": "string"
+          },
+          "doc": {
+            "$ref": "#/components/schemas/BoardDoc"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "canvas_id",
+          "session_id",
+          "task_id",
+          "doc",
+          "version",
+          "updated_at"
+        ],
+        "title": "CanvasView",
         "type": "object"
       },
       "CheatsheetRefreshRequest": {
@@ -1486,6 +1604,50 @@
         "title": "HeartbeatResponse",
         "type": "object"
       },
+      "Hint": {
+        "additionalProperties": false,
+        "description": "A quiet hint near the place where the learner is stuck, one step at a time (П-9.5).",
+        "properties": {
+          "hint_id": {
+            "title": "Hint Id",
+            "type": "string"
+          },
+          "line_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Id"
+          },
+          "step": {
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Step",
+            "type": "integer"
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hint_id",
+          "task_id",
+          "step",
+          "text"
+        ],
+        "title": "Hint",
+        "type": "object"
+      },
       "HintRequest": {
         "properties": {
           "idempotency_key": {
@@ -1555,45 +1717,64 @@
         "title": "KeyedRequest",
         "type": "object"
       },
-      "LearnerMeResponse": {
+      "Layout": {
+        "additionalProperties": false,
+        "description": "Where a block lies and whether it is collapsed (П-9.4 «двигать, сворачивать»).",
         "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
+          "collapsed": {
+            "default": false,
+            "title": "Collapsed",
+            "type": "boolean"
           },
-          "display_name": {
+          "height": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "number"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Display Name"
+            "title": "Height"
           },
-          "email": {
-            "title": "Email",
-            "type": "string"
+          "width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
           },
-          "learner_id": {
-            "format": "uuid",
-            "title": "Learner Id",
-            "type": "string"
+          "x": {
+            "default": 0,
+            "title": "X",
+            "type": "number"
           },
-          "preferences": {
-            "additionalProperties": true,
-            "title": "Preferences",
-            "type": "object"
+          "y": {
+            "default": 0,
+            "title": "Y",
+            "type": "number"
           }
         },
-        "required": [
-          "learner_id",
-          "email",
-          "created_at"
-        ],
-        "title": "LearnerMeResponse",
+        "title": "Layout",
+        "type": "object"
+      },
+      "LearnerLayer": {
+        "additionalProperties": false,
+        "description": "The learner's strokes are in the journal; here — what the learner typed.",
+        "properties": {
+          "typed_formulas": {
+            "items": {
+              "$ref": "#/components/schemas/TypedFormula"
+            },
+            "title": "Typed Formulas",
+            "type": "array"
+          }
+        },
+        "title": "LearnerLayer",
         "type": "object"
       },
       "LearnerSettings": {
@@ -1652,24 +1833,177 @@
         "title": "LinkSent",
         "type": "object"
       },
-      "LoginRequest": {
+      "Mark": {
+        "additionalProperties": false,
+        "description": "A mark on a step (WP21.5): `error` confirmed, `question` when unsure (Т-§12.4).",
         "properties": {
-          "email": {
-            "minLength": 1,
-            "title": "Email",
+          "kind": {
+            "enum": [
+              "error",
+              "question"
+            ],
+            "title": "Kind",
             "type": "string"
           },
-          "password": {
-            "minLength": 1,
-            "title": "Password",
+          "line_id": {
+            "title": "Line Id",
+            "type": "string"
+          },
+          "mark_id": {
+            "title": "Mark Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
             "type": "string"
           }
         },
         "required": [
-          "email",
-          "password"
+          "mark_id",
+          "line_id",
+          "kind",
+          "text"
         ],
-        "title": "LoginRequest",
+        "title": "Mark",
+        "type": "object"
+      },
+      "MaterialDetailView": {
+        "properties": {
+          "file_url": {
+            "title": "File Url",
+            "type": "string"
+          },
+          "material": {
+            "$ref": "#/components/schemas/MaterialView"
+          },
+          "pages": {
+            "items": {
+              "$ref": "#/components/schemas/MaterialPageView"
+            },
+            "title": "Pages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "material",
+          "file_url",
+          "pages"
+        ],
+        "title": "MaterialDetailView",
+        "type": "object"
+      },
+      "MaterialList": {
+        "properties": {
+          "materials": {
+            "items": {
+              "$ref": "#/components/schemas/MaterialView"
+            },
+            "title": "Materials",
+            "type": "array"
+          }
+        },
+        "required": [
+          "materials"
+        ],
+        "title": "MaterialList",
+        "type": "object"
+      },
+      "MaterialPageView": {
+        "properties": {
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page",
+          "text",
+          "image_url"
+        ],
+        "title": "MaterialPageView",
+        "type": "object"
+      },
+      "MaterialView": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "domain_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain Id"
+          },
+          "material_id": {
+            "format": "uuid",
+            "title": "Material Id",
+            "type": "string"
+          },
+          "mime": {
+            "title": "Mime",
+            "type": "string"
+          },
+          "pages_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages Count"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "material_id",
+          "domain_id",
+          "session_id",
+          "mime",
+          "status",
+          "pages_count",
+          "created_at"
+        ],
+        "title": "MaterialView",
         "type": "object"
       },
       "Me": {
@@ -2044,6 +2378,24 @@
         "title": "NoteUpdateResponse",
         "type": "object"
       },
+      "OpenCanvas": {
+        "properties": {
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "title": "OpenCanvas",
+        "type": "object"
+      },
       "PrereqEdge": {
         "additionalProperties": false,
         "description": "`from_topic_id` is a prerequisite of `to_topic_id`: (from)-[:PREREQ_OF]->(to).",
@@ -2161,40 +2513,82 @@
         "title": "ProposeStructureResponse",
         "type": "object"
       },
-      "RegisterRequest": {
+      "Scaffold": {
+        "additionalProperties": false,
+        "description": "A scaffold of the solution with gaps the learner fills with the pen (П-9.5).",
         "properties": {
-          "display_name": {
+          "block_id": {
+            "title": "Block Id",
+            "type": "string"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "block_id",
+          "text"
+        ],
+        "title": "Scaffold",
+        "type": "object"
+      },
+      "SearchHitView": {
+        "description": "WP20.5: the session, `seq`, the snippet and the type of a found event.",
+        "properties": {
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "session_id": {
             "anyOf": [
               {
+                "format": "uuid",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Display Name"
+            "title": "Session Id"
           },
-          "email": {
-            "minLength": 1,
-            "title": "Email",
+          "snippet": {
+            "title": "Snippet",
             "type": "string"
           },
-          "password": {
-            "minLength": 8,
-            "title": "Password",
+          "type": {
+            "title": "Type",
             "type": "string"
-          },
-          "preferences": {
-            "additionalProperties": true,
-            "title": "Preferences",
-            "type": "object"
           }
         },
         "required": [
-          "email",
-          "password"
+          "session_id",
+          "seq",
+          "type",
+          "snippet"
         ],
-        "title": "RegisterRequest",
+        "title": "SearchHitView",
+        "type": "object"
+      },
+      "SearchHits": {
+        "properties": {
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHitView"
+            },
+            "title": "Hits",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hits"
+        ],
+        "title": "SearchHits",
         "type": "object"
       },
       "SearchResponse": {
@@ -2923,6 +3317,41 @@
         "title": "SubmitResponse",
         "type": "object"
       },
+      "TeacherLayer": {
+        "additionalProperties": false,
+        "properties": {
+          "hints": {
+            "items": {
+              "$ref": "#/components/schemas/Hint"
+            },
+            "title": "Hints",
+            "type": "array"
+          },
+          "marks": {
+            "items": {
+              "$ref": "#/components/schemas/Mark"
+            },
+            "title": "Marks",
+            "type": "array"
+          },
+          "scaffolds": {
+            "items": {
+              "$ref": "#/components/schemas/Scaffold"
+            },
+            "title": "Scaffolds",
+            "type": "array"
+          },
+          "visualizations": {
+            "items": {
+              "$ref": "#/components/schemas/Visualization"
+            },
+            "title": "Visualizations",
+            "type": "array"
+          }
+        },
+        "title": "TeacherLayer",
+        "type": "object"
+      },
       "TopicDetailResponse": {
         "properties": {
           "artifacts": {
@@ -3271,6 +3700,26 @@
         "title": "TurnView",
         "type": "object"
       },
+      "TypedFormula": {
+        "additionalProperties": false,
+        "description": "A formula typed in a typing block (`typed_formula {block_id, latex}`, WP21.2).",
+        "properties": {
+          "block_id": {
+            "title": "Block Id",
+            "type": "string"
+          },
+          "latex": {
+            "title": "Latex",
+            "type": "string"
+          }
+        },
+        "required": [
+          "block_id",
+          "latex"
+        ],
+        "title": "TypedFormula",
+        "type": "object"
+      },
       "UpdatePreferencesRequest": {
         "properties": {
           "idempotency_key": {
@@ -3367,6 +3816,32 @@
           "seq"
         ],
         "title": "UpdateTopicStatusResponse",
+        "type": "object"
+      },
+      "Visualization": {
+        "additionalProperties": false,
+        "description": "A visualization laid next to the solution (П-9.5; artifact `Т-§13.6`).",
+        "properties": {
+          "artifact_id": {
+            "format": "uuid",
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "block_id": {
+            "title": "Block Id",
+            "type": "string"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "block_id",
+          "artifact_id"
+        ],
+        "title": "Visualization",
         "type": "object"
       }
     }
@@ -3715,7 +4190,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "422": {
             "content": {
@@ -3776,7 +4251,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -3869,7 +4344,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -3970,7 +4445,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -4095,7 +4570,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "422": {
             "content": {
@@ -4178,7 +4653,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -4289,7 +4764,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -4382,7 +4857,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -4441,86 +4916,27 @@
         ]
       }
     },
-    "/v1/auth/login": {
-      "post": {
-        "operationId": "login_endpoint_v1_auth_login_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "VALIDATION_ERROR"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "RATE_LIMITED; details.retry_after_sec"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
-          }
-        },
-        "summary": "Login Endpoint",
-        "tags": [
-          "domains"
-        ]
-      }
-    },
-    "/v1/auth/me": {
+    "/v1/canvases/{canvas_id}": {
       "get": {
-        "operationId": "me_endpoint_v1_auth_me_get",
+        "operationId": "get_canvas_v1_canvases__canvas_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "canvas_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Canvas Id",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LearnerMeResponse"
+                  "$ref": "#/components/schemas/CanvasView"
                 }
               }
             },
@@ -4534,9 +4950,9 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
-          "503": {
+          "404": {
             "content": {
               "application/json": {
                 "schema": {
@@ -4544,48 +4960,7 @@
                 }
               }
             },
-            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
-          }
-        },
-        "summary": "Me Endpoint",
-        "tags": [
-          "domains"
-        ]
-      }
-    },
-    "/v1/auth/register": {
-      "post": {
-        "operationId": "register_endpoint_v1_auth_register_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RegisterRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
           },
           "422": {
             "content": {
@@ -4597,16 +4972,6 @@
             },
             "description": "VALIDATION_ERROR"
           },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "RATE_LIMITED; details.retry_after_sec"
-          },
           "503": {
             "content": {
               "application/json": {
@@ -4618,9 +4983,9 @@
             "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
           }
         },
-        "summary": "Register Endpoint",
+        "summary": "Get Canvas",
         "tags": [
-          "domains"
+          "canvas"
         ]
       }
     },
@@ -4656,7 +5021,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -4737,7 +5102,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -4820,7 +5185,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "422": {
             "content": {
@@ -4879,7 +5244,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -4962,7 +5327,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5045,7 +5410,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5104,6 +5469,79 @@
         ]
       }
     },
+    "/v1/domains/{domain_id}/canvases": {
+      "get": {
+        "operationId": "domain_canvases_v1_domains__domain_id__canvases_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CanvasList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Domain Canvases",
+        "tags": [
+          "canvas"
+        ]
+      }
+    },
     "/v1/domains/{domain_id}/diagnostic/answer": {
       "post": {
         "operationId": "answer_diagnostic_endpoint_v1_domains__domain_id__diagnostic_answer_post",
@@ -5148,7 +5586,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5251,7 +5689,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5354,7 +5792,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5469,7 +5907,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5552,7 +5990,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5588,6 +6026,180 @@
         "summary": "Get Domain Graph Endpoint",
         "tags": [
           "domains"
+        ]
+      }
+    },
+    "/v1/domains/{domain_id}/materials": {
+      "get": {
+        "operationId": "list_materials_v1_domains__domain_id__materials_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "List Materials",
+        "tags": [
+          "materials"
+        ]
+      },
+      "post": {
+        "operationId": "upload_material_v1_domains__domain_id__materials_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_material_v1_domains__domain_id__materials_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Upload Material",
+        "tags": [
+          "materials"
         ]
       }
     },
@@ -5635,7 +6247,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5738,7 +6350,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5841,7 +6453,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5944,7 +6556,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6037,7 +6649,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6118,7 +6730,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -6189,7 +6801,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -6270,7 +6882,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -6343,7 +6955,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "503": {
             "content": {
@@ -6359,6 +6971,79 @@
         "summary": "Get Learner Stream",
         "tags": [
           "learner"
+        ]
+      }
+    },
+    "/v1/materials/{material_id}": {
+      "get": {
+        "operationId": "get_material_v1_materials__material_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "material_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Material Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaterialDetailView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Get Material",
+        "tags": [
+          "materials"
         ]
       }
     },
@@ -6384,7 +7069,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "503": {
             "content": {
@@ -6400,6 +7085,102 @@
         "summary": "Me",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/v1/search": {
+      "get": {
+        "description": "D-C-116: the query length and the size of the answer follow the Phase 3 search\n(`search_min_query_len`, `search_default_limit`, `search_max_limit`).",
+        "operationId": "search_v1_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "domain_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchHits"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Search",
+        "tags": [
+          "materials"
         ]
       }
     },
@@ -6460,7 +7241,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "422": {
             "content": {
@@ -6516,7 +7297,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -6592,7 +7373,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "503": {
             "content": {
@@ -6642,7 +7423,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6676,6 +7457,109 @@
           }
         },
         "summary": "Get Session"
+      }
+    },
+    "/v1/sessions/{session_id}/canvases": {
+      "post": {
+        "operationId": "open_canvas_v1_sessions__session_id__canvases_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenCanvas"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CanvasView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Open Canvas",
+        "tags": [
+          "canvas"
+        ]
       }
     },
     "/v1/sessions/{session_id}/events": {
@@ -6713,7 +7597,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6793,7 +7677,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6883,7 +7767,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6973,7 +7857,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7086,7 +7970,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7199,7 +8083,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7303,7 +8187,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7393,7 +8277,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7474,7 +8358,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7557,7 +8441,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7650,7 +8534,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7733,7 +8617,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {

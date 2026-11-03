@@ -14,31 +14,31 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from quack.api.app import create_app
 from quack.api.errors import ErrorResponse
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
+from tests.support.auth import learner_headers, login_hook
 from tests.support.broken import BrokenNeo4jDriver
 from tests.support.resources import build_app_resources
 
 
 @pytest.fixture
 async def api(
-    settings: Settings, pg_engine: AsyncEngine, db: SessionFactory, redis: object
+    settings: Settings, pg_engine: AsyncEngine, db: SessionFactory, pg_db: Db, redis: object
 ) -> AsyncIterator[httpx.AsyncClient]:
     resources = build_app_resources(
-        settings, pg_engine, BrokenNeo4jDriver(), redis, session_factory=db
+        settings, pg_engine, BrokenNeo4jDriver(), redis, db=pg_db, session_factory=db
     )
     app = create_app(settings, resources=resources)
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    hooks = {"request": [login_hook(pg_db, settings)]}
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", event_hooks=hooks
+    ) as client:
         yield client
 
 
 async def _learner_with_domain(api: httpx.AsyncClient) -> tuple[dict[str, str], str]:
-    reg = await api.post(
-        "/v1/auth/register",
-        json={"email": f"{uuid4().hex}@example.com", "password": "correct horse battery"},
-    )
-    assert reg.status_code == 201, reg.text
-    headers = {"Authorization": f"Bearer {reg.json()['token']}"}
+    headers = learner_headers(uuid4())
     created = await api.post(
         "/v1/domains", json={"name": "Algebra", "idempotency_key": uuid4().hex}, headers=headers
     )

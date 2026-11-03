@@ -10,11 +10,14 @@ from fastapi import FastAPI
 
 # `(method, path)` without `idempotency_key`, with the reason (ТЗ Фазы 3 §8.7, T-E2).
 NO_IDEMPOTENCY_KEY: dict[tuple[str, str], str] = {
-    ("POST", "/v1/auth/register"): "creates the account; a repeat is 409 by email",
-    ("POST", "/v1/auth/login"): "reads only; issues a new token",
     ("DELETE", "/v1/learner"): "one tombstone per learner; a repeat is a no-op",
     # ТЗ Ф4 §6.4: the body is `{timezone}` only; no event, a repeat sets the same value.
     ("PATCH", "/v1/learner/settings"): "no event; sets core.learners.settings",
+    # ТЗ Ф4 WP20.1: a multipart upload with an optional `session_id`; every upload is a new
+    # material with its own `material.uploaded` key (D-C-116).
+    ("POST", "/v1/domains/{domain_id}/materials"): "multipart; each upload is a new material",
+    # ТЗ Ф4 WP21.1: `{task_id?}` only; every call opens a new canvas of the session (D-C-118).
+    ("POST", "/v1/sessions/{session_id}/canvases"): "each call opens a new canvas",
     ("POST", "/v1/sessions/{session_id}/heartbeat"): "no event; refreshes presence only",
     # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
     ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): "no event; the job coalesces",
@@ -34,7 +37,9 @@ def mutating_routes(app: FastAPI) -> set[tuple[str, str]]:
     }
 
 
-_NO_ID = UUID(int=0)
+# The walks upload no material and open no canvas: routes with `{material_id}` or
+# `{canvas_id}` get an id nobody has.
+NO_MATERIAL = UUID(int=0)
 
 
 @dataclass(frozen=True)
@@ -50,9 +55,11 @@ class Ids:
     diagnostic_session_id: UUID
     diagnostic_task_id: UUID
     structure_version: int
+    material_id: UUID = NO_MATERIAL
+    canvas_id: UUID = NO_MATERIAL
     # WP23.1: the block the walk writes and the supplement the system adds to it.
-    learner_block_id: UUID = _NO_ID
-    block_id: UUID = _NO_ID
+    learner_block_id: UUID = NO_MATERIAL
+    block_id: UUID = NO_MATERIAL
 
 
 def path_for(path: str, ids: Ids) -> str:
@@ -62,8 +69,18 @@ def path_for(path: str, ids: Ids) -> str:
         session_id=ids.session_id,
         task_id=ids.task_id,
         artifact_id=ids.artifact_id,
+        material_id=ids.material_id,
+        canvas_id=ids.canvas_id,
         block_id=ids.block_id,
     )
+
+
+# Routes with a multipart body instead of JSON: the files of a valid request.
+MULTIPART: dict[tuple[str, str], dict[str, tuple[str, bytes, str]]] = {
+    ("POST", "/v1/domains/{domain_id}/materials"): {
+        "file": ("notes.pdf", b"%PDF-1.7\n1 0 obj\n", "application/pdf")
+    },
+}
 
 
 def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> dict[str, Any]:
@@ -105,6 +122,7 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
         },
         ("POST", "/v1/sessions/{session_id}/finish"): {},
         ("POST", "/v1/sessions/{session_id}/heartbeat"): {},
+        ("POST", "/v1/sessions/{session_id}/canvases"): {},
         ("POST", "/v1/sessions/{session_id}/turns"): {"text": ["Hello", "Bye"][v]},
         ("POST", "/v1/sessions/{session_id}/tasks/next"): {
             "topic_id": str(ids.topic_id),
