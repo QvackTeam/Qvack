@@ -2301,6 +2301,17 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
 - Тесты: `tests/artifacts/test_topic_refresh_wp23.py`.
 - Требует подтверждения владельцем: нет.
 
+### D-C-145. §4.8: `projection_advanced {applied_seq, topics}` и отметки Фазы 4 (#188)
+- Класс: B
+- WP / место: §4.8, WP7; `quack/api/learner_stream.py`
+- Решение:
+  1. `applied_seq` и `last_seq` берутся из `ops.projector_offsets.seq` и `core.learners.seq` через `Db`. Таблиц Фазы 3 (`applied_seq`, `core.learner_seq`) в базовой миграции Фазы 4 нет. Отметку пишет проектор `rules@3` (D-A-181).
+  2. Объект проектора `{"applied_seq", "topics"}` в `projector:applied:{id}` (D-A-190) даёт `projection_advanced {applied_seq, topics}` («публикует, какие темы изменились», `Т-§2.4`). Опрос без Redis тем не знает и шлёт только `applied_seq`.
+- Почему: §4.8, `Т-§2.4`, `Т-§1.6`.
+- Обратимость: одно чтение и один разбор.
+- Тесты: `tests/test_learner_stream.py`.
+- Требует подтверждения владельцем: нет.
+
 ### D-C-142. WP9.3: шаг squawk в CI — новые миграции, правила вне `Д-§5.2` п.2 исключены
 - Класс: B (C по §7.3: `.github/**`; конфиг — S16 A, D-A-187, #185)
 - WP / место: WP1.4, WP9.3, `Д-§5.2` п.2, `Д-§6.2`; `.github/workflows/ci.yml` (job `squawk`), `tests/test_ci_squawk.py`
