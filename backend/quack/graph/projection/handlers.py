@@ -32,6 +32,10 @@ from quack.events.event_types import (
     SessionEnded,
     SkillCreated,
     SkillSplit,
+    TaskCreated,
+    TaskKeyDisputed,
+    TaskMarkupDisputed,
+    TaskVerified,
     TopicCreated,
     TopicHidden,
     TopicProposed,
@@ -39,7 +43,9 @@ from quack.events.event_types import (
     TopicSplit,
 )
 from quack.events.log import StoredEvent
+from quack.events.records import TaskMarkupRecord, TestedLevelRecord
 from quack.events.registry import SPECS, EventPayload, payload_model
+from quack.events.values import NewSkill
 from quack.graph.ids import deterministic_id
 from quack.graph.projection.mutations import (
     DeleteNode,
@@ -610,6 +616,228 @@ def _skill_split(event: StoredEvent, view: SliceView) -> list[Mutation]:
     return changes
 
 
+# --- tasks (Т-§4.4, Т-§5.1, Т-§5.2, Т-§5.6) --------------------------------------------------
+
+_CHECKS = {"task.verified": "checked", "task.key_disputed": "disputed",
+           "task.markup_disputed": "disputed"}  # fmt: skip
+
+
+def _norm(name: str) -> str:
+    """Normalized name (Т-§4.4): case and runs of spaces do not count."""
+    return " ".join(name.casefold().split())
+
+
+def _all_tests(markup: TaskMarkupRecord) -> list[TestedLevelRecord]:
+    return [*markup.tests, *(t for part in markup.parts or [] for t in part.tests or [])]
+
+
+def _markup_need(markup: TaskMarkupRecord, domain: UUID | None) -> Need:
+    tests = _all_tests(markup)
+    nodes = {("Skill", str(t.skill_id)) for t in tests if t.skill_id is not None}
+    nodes |= {("Misconception", str(o.misconception_id)) for o in markup.options or []
+              if o.misconception_id is not None}  # fmt: skip
+    labels: set[tuple[str, str]] = set()
+    if domain is not None:
+        nodes.add(("Domain", str(domain)))
+        if any(t.new_skill is not None for t in tests):
+            labels = {(str(domain), "Skill"), (str(domain), "Topic")}
+    return Need(nodes=frozenset(nodes), domain_labels=frozenset(labels))
+
+
+def _task_needs(event: StoredEvent) -> Need:
+    if event.type == "task.created":
+        p = _payload(event, TaskCreated)
+        return _markup_need(p.markup, event.domain_id)
+    check = _payload(event, _CHECK_MODELS[event.type])
+    need = Need(neighbourhoods=frozenset({("Task", str(check.task_id))}))
+    if check.corrected_markup is not None:
+        need = need | _markup_need(check.corrected_markup, event.domain_id)
+    return need
+
+
+class _Markup:
+    """Changes of one markup of a task: provisional skills and topics, `TESTS {level}`, options
+    and traps. New ids — UUIDv5 of `(learner_id, seq, key)` with a key per new node."""
+
+    def __init__(self, event: StoredEvent, view: SliceView, task: str, domain: str) -> None:
+        self.event, self.view, self.task, self.domain = event, view, task, domain
+        self.learner = str(event.learner_id)
+        self.changes: list[Mutation] = []
+        self._skills: dict[str, str] | None = None
+        self._topics: dict[str, str] = {}
+
+    def _new_id(self, key: str) -> str:
+        return deterministic_id(self.event.learner_id, self.event.seq, key)
+
+    def _skill_for(self, description: NewSkill) -> str | None:
+        """One provisional skill per normalized name in the domain; a hint without a topic of
+        that name makes a temporary topic (Т-§4.4)."""
+        if self.event.domain_id is None:
+            return None
+        if self._skills is None:
+            self._skills = {_norm(str(n.props["name"])): n.id
+                            for n in self.view.domain_nodes(self.domain, "Skill")}  # fmt: skip
+            self._topics = {_norm(str(n.props["name"])): n.id
+                            for n in self.view.domain_nodes(self.domain, "Topic")}  # fmt: skip
+        key = _norm(description.name)
+        if key in self._skills:
+            return self._skills[key]
+        topic_key = _norm(description.topic_hint)
+        topic = self._topics.get(topic_key)
+        if topic is None:
+            topic = self._new_id(f"topic:{topic_key}")
+            self.changes += [
+                MergeNode(
+                    "Topic",
+                    topic,
+                    {
+                        "learnerId": self.learner,
+                        "domainId": self.domain,
+                        "name": description.topic_hint.strip(),
+                        "origin": "session",
+                        "status": "proposed",
+                        "knownClaimedAtMs": 0,
+                    },
+                ),
+                MergeRel("Domain", self.domain, "HAS_TOPIC", "Topic", topic, {}),
+            ]
+            self._topics[topic_key] = topic
+        skill = self._new_id(f"skill:{key}")
+        self.changes += [
+            MergeNode(
+                "Skill",
+                skill,
+                {
+                    "learnerId": self.learner,
+                    "domainId": self.domain,
+                    "name": description.name.strip(),
+                    "summary": "",
+                    "status": "provisional",
+                    "origin": "session",
+                },
+            ),
+            MergeRel("Topic", topic, "COVERS", "Skill", skill, {}),
+        ]
+        self._skills[key] = skill
+        return skill
+
+    def apply(self, markup: TaskMarkupRecord, *, replace: bool) -> list[Mutation]:
+        pairs: list[tuple[str, int]] = []
+        for t in _all_tests(markup):
+            if t.skill_id is not None:
+                skill = self.view.resolve("Skill", str(t.skill_id))
+            elif t.new_skill is not None:
+                skill = self._skill_for(t.new_skill)
+            else:
+                skill = None
+            if skill is not None and (skill, t.level) not in pairs:
+                pairs.append((skill, t.level))
+        if replace:
+            for r in self.view.out_rels("Task", self.task, "TESTS"):
+                level = r.props["level"]
+                if (r.to_id, level) not in pairs:
+                    key = {"level": level}
+                    self.changes.append(
+                        DeleteRel("Task", self.task, "TESTS", "Skill", r.to_id, key)
+                    )
+            options = self.view.out_rels("Task", self.task, "HAS_OPTION")
+            self.changes += [DeleteNode("Option", r.to_id) for r in options]
+        self.changes += [
+            MergeRel("Task", self.task, "TESTS", "Skill", skill, {"level": level})
+            for skill, level in pairs
+        ]
+        self._options(markup, pairs[0][0] if pairs else None)
+        return self.changes
+
+    def _options(self, markup: TaskMarkupRecord, first_skill: str | None) -> None:
+        """Options of a choice answer and their traps (Т-§5.2). A trap on a hypothesis is a
+        misconception with status `unknown` about the first tested skill (WP3.2, D-A-132)."""
+        traps = {o.option_id: o for o in markup.options or []}
+        for option in markup.answer.options or []:
+            trap = traps.get(option.option_id)
+            node = self._new_id(f"option:{option.option_id}")
+            self.changes += [
+                MergeNode(
+                    "Option",
+                    node,
+                    {
+                        "learnerId": self.learner,
+                        "label": option.option_id,
+                        "isCorrect": option.correct,
+                        "neighborIdea": trap.neighbor_idea if trap is not None else False,
+                    },
+                ),
+                MergeRel("Task", self.task, "HAS_OPTION", "Option", node, {}),
+            ]
+            if trap is None:
+                continue
+            if trap.misconception_id is not None:
+                misconception = self.view.resolve("Misconception", str(trap.misconception_id))
+                if misconception is not None:
+                    self.changes.append(
+                        MergeRel("Option", node, "TRAPS", "Misconception", misconception, {})
+                    )
+            elif trap.hypothesis is not None and first_skill is not None:
+                misconception = self._new_id(f"misconception:{option.option_id}")
+                self.changes += [
+                    MergeNode(
+                        "Misconception",
+                        misconception,
+                        {
+                            "learnerId": self.learner,
+                            "domainId": self.domain,
+                            "statement": trap.hypothesis,
+                            "status": "unknown",
+                            "triggers": [],
+                            "targetedInSessionId": "",
+                            "searchable": bool(trap.hypothesis.strip()),
+                        },
+                    ),
+                    MergeRel("Misconception", misconception, "ABOUT", "Skill", first_skill, {}),
+                    MergeRel("Option", node, "TRAPS", "Misconception", misconception, {}),
+                ]
+
+
+def _task_created(event: StoredEvent, view: SliceView) -> list[Mutation]:
+    p = _payload(event, TaskCreated)
+    task, domain = str(p.task_id), _id(event.domain_id)
+    head: list[Mutation] = [
+        MergeNode(
+            "Task",
+            task,
+            {
+                "learnerId": str(event.learner_id),
+                "domainId": domain,
+                "familyId": str(p.family_id),
+                "source": p.source,
+                "verification": p.verification,
+                "methodNamed": p.markup.method_named,
+            },
+        ),
+    ]
+    return head + _Markup(event, view, task, domain).apply(p.markup, replace=False)
+
+
+def _task_checked(event: StoredEvent, view: SliceView) -> list[Mutation]:
+    """Т-§5.6: the result of the check of a task; a corrected markup replaces the old one.
+    Lowering the verdicts of a disputed task to class model — with the evidence (D-A-132)."""
+    p = _payload(event, _CHECK_MODELS[event.type])
+    task = str(p.task_id)
+    props = view.node("Task", task)
+    if props is None:
+        return []
+    changes: list[Mutation] = [SetProps("Task", task, {"verification": _CHECKS[event.type]})]
+    if p.corrected_markup is not None:
+        markup = p.corrected_markup
+        changes.append(SetProps("Task", task, {"methodNamed": markup.method_named}))
+        changes += _Markup(event, view, task, str(props["domainId"])).apply(markup, replace=True)
+    return changes
+
+
+_CHECK_MODELS = {"task.verified": TaskVerified, "task.key_disputed": TaskKeyDisputed,
+                 "task.markup_disputed": TaskMarkupDisputed}  # fmt: skip
+
+
 # Event type -> handler; exactly the types of `ROWS` (T-P4).
 HANDLERS: dict[str, Handler] = {
     "domain.created": Handler(_none, _domain_created),
@@ -639,4 +867,8 @@ HANDLERS: dict[str, Handler] = {
     "misconception.merged": Handler(_merge_needs, _merged),
     "topic.split": Handler(_topic_split_needs, _topic_split),
     "skill.split": Handler(_skill_split_needs, _skill_split),
+    "task.created": Handler(_task_needs, _task_created),
+    "task.verified": Handler(_task_needs, _task_checked),
+    "task.key_disputed": Handler(_task_needs, _task_checked),
+    "task.markup_disputed": Handler(_task_needs, _task_checked),
 }

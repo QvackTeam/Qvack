@@ -7,7 +7,7 @@ relationships (the old node of a merge, Т-§2.8). Neo4j properties are `camelCa
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from quack.graph.projection.types import Props
 
@@ -38,11 +38,14 @@ class MergeRel:
 
 @dataclass(frozen=True)
 class DeleteRel:
+    """`key_props` — the identity props of the type (`REL_IDENTITY`), e.g. `{"level": 3}`."""
+
     from_label: str
     from_id: str
     rel_type: str
     to_label: str
     to_id: str
+    key_props: Props = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -12,7 +12,19 @@ from dataclasses import dataclass, field
 type PropValue = str | int | float | bool | list[str] | list[int] | list[float]
 type Props = dict[str, PropValue]
 type NodeRef = tuple[str, str]  # (label, id)
-type RelKey = tuple[str, str, str, str, str]  # (from_label, from_id, type, to_label, to_id)
+# (from_label, from_id, type, to_label, to_id) plus the identity props of the type, if any.
+type RelKey = tuple[object, ...]
+
+# Relationship types with more than one relationship between the same two nodes, told apart by
+# these props: a task tests a skill at several levels, `(Task)-[:TESTS {level}]->(Skill)`.
+REL_IDENTITY: dict[str, tuple[str, ...]] = {"TESTS": ("level",)}
+
+
+def rel_key(
+    from_label: str, from_id: str, rel_type: str, to_label: str, to_id: str, props: Props
+) -> RelKey:
+    ident = tuple(props.get(name) for name in REL_IDENTITY.get(rel_type, ()))
+    return (from_label, from_id, rel_type, to_label, to_id, *ident)
 
 
 @dataclass(frozen=True)
@@ -33,7 +45,9 @@ class RelRecord:
 
     @property
     def key(self) -> RelKey:
-        return (self.from_label, self.from_id, self.rel_type, self.to_label, self.to_id)
+        return rel_key(
+            self.from_label, self.from_id, self.rel_type, self.to_label, self.to_id, self.props
+        )
 
 
 @dataclass

@@ -20,7 +20,15 @@ from quack.graph.projection.mutations import (
     Mutation,
     SetProps,
 )
-from quack.graph.projection.types import NodeRecord, NodeRef, Props, RelKey, RelRecord, SubGraph
+from quack.graph.projection.types import (
+    NodeRecord,
+    NodeRef,
+    Props,
+    RelKey,
+    RelRecord,
+    SubGraph,
+    rel_key,
+)
 
 
 @dataclass(frozen=True)
@@ -82,7 +90,7 @@ class BatchSlice:
     def __init__(self, learner_id: str, loaded: SubGraph) -> None:
         self.learner_id = learner_id
         self._nodes: dict[NodeRef, Props] = {(n.label, n.id): dict(n.props) for n in loaded.nodes}
-        self._rels: dict[RelKey, Props] = {r.key: dict(r.props) for r in loaded.rels}
+        self._rels: dict[RelKey, RelRecord] = {r.key: _copy(r) for r in loaded.rels}
 
     def view(self, need: Need) -> SliceView:
         """The view of one handler: reads outside `need` raise `OutsideSliceError`."""
@@ -105,20 +113,26 @@ class BatchSlice:
                     for end in ((from_label, from_id), (to_label, to_id)):
                         if end not in self._nodes:
                             raise ValueError(f"MergeRel {rel_type} with a missing end {end}")
-                    key = (from_label, from_id, rel_type, to_label, to_id)
-                    self._rels[key] = {**self._rels.get(key, {}), **props}
-                case DeleteRel(from_label, from_id, rel_type, to_label, to_id):
-                    self._rels.pop((from_label, from_id, rel_type, to_label, to_id), None)
+                    key = rel_key(from_label, from_id, rel_type, to_label, to_id, props)
+                    old = self._rels.get(key)
+                    merged = {**(old.props if old else {}), **props}
+                    self._rels[key] = RelRecord(
+                        from_label, from_id, rel_type, to_label, to_id, merged
+                    )
+                case DeleteRel(from_label, from_id, rel_type, to_label, to_id, key_props):
+                    key = rel_key(from_label, from_id, rel_type, to_label, to_id, key_props)
+                    self._rels.pop(key, None)
                 case DeleteNode(label, node_id):
                     self._nodes.pop((label, node_id), None)
-                    for key in [k for k in self._rels if (label, node_id) in (k[:2], k[3:])]:
-                        del self._rels[key]
+                    for key, r in list(self._rels.items()):
+                        if (label, node_id) in ((r.from_label, r.from_id), (r.to_label, r.to_id)):
+                            del self._rels[key]
 
     def snapshot(self) -> SubGraph:
         """Every node and relationship of the slice now (for tests and rebuild)."""
         return SubGraph(
             nodes=[NodeRecord(label, i, dict(p)) for (label, i), p in sorted(self._nodes.items())],
-            rels=[RelRecord(*key, dict(p)) for key, p in sorted(self._rels.items())],
+            rels=[_copy(r) for _, r in sorted(self._rels.items(), key=lambda item: str(item[0]))],
         )
 
     # --- reads without the guard (the view checks the need first) ---
@@ -129,24 +143,31 @@ class BatchSlice:
             if node_id in seen or ("Alias", node_id) not in self._nodes:
                 return None
             seen.add(node_id)
-            targets = [k[4] for k in self._rels if k[:3] == ("Alias", node_id, "ALIAS_OF")]
+            targets = [
+                r.to_id
+                for r in self._rels.values()
+                if (r.from_label, r.from_id, r.rel_type) == ("Alias", node_id, "ALIAS_OF")
+            ]
             if len(targets) != 1:
                 return None
             node_id = targets[0]
         return node_id
 
     def _rels_of(self, label: str, node_id: str, *, out: bool) -> list[RelRecord]:
-        end = slice(0, 2) if out else slice(3, 5)
         return [
-            RelRecord(*key, dict(p))
-            for key, p in sorted(self._rels.items())
-            if key[end] == (label, node_id)
+            _copy(r)
+            for _, r in sorted(self._rels.items(), key=lambda item: str(item[0]))
+            if ((r.from_label, r.from_id) if out else (r.to_label, r.to_id)) == (label, node_id)
         ]
 
     def _neighbours(self, label: str, node_id: str) -> set[NodeRef]:
         return {(r.to_label, r.to_id) for r in self._rels_of(label, node_id, out=True)} | {
             (r.from_label, r.from_id) for r in self._rels_of(label, node_id, out=False)
         }
+
+
+def _copy(r: RelRecord) -> RelRecord:
+    return RelRecord(r.from_label, r.from_id, r.rel_type, r.to_label, r.to_id, dict(r.props))
 
 
 class _View:
