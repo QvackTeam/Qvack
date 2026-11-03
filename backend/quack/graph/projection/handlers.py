@@ -31,15 +31,24 @@ from quack.events.event_types import (
     PreferenceSet,
     SessionEnded,
     SkillCreated,
+    SkillSplit,
     TopicCreated,
     TopicHidden,
     TopicProposed,
     TopicRenamed,
+    TopicSplit,
 )
 from quack.events.log import StoredEvent
 from quack.events.registry import SPECS, EventPayload, payload_model
 from quack.graph.ids import deterministic_id
-from quack.graph.projection.mutations import DeleteRel, MergeNode, MergeRel, Mutation, SetProps
+from quack.graph.projection.mutations import (
+    DeleteNode,
+    DeleteRel,
+    MergeNode,
+    MergeRel,
+    Mutation,
+    SetProps,
+)
 from quack.graph.projection.types import Props
 from quack.graph.projection.view import NOTHING, Need, SliceView
 
@@ -450,6 +459,157 @@ def _session_ended(event: StoredEvent, view: SliceView) -> list[Mutation]:
     ]
 
 
+# --- merges and splits (Т-§2.8) ---------------------------------------------------------------
+
+_MERGED = {
+    "skill.merged": "Skill",
+    "topic.merged": "Topic",
+    "misconception.merged": "Misconception",
+}
+# Relations of which the target keeps its own and the old ones are not moved, `(type, out)`: one
+# home topic of a skill, one domain of a topic, one main skill of a misconception (`Т-§3.4.3`).
+_OWN_RELS: dict[str, frozenset[tuple[str, bool]]] = {
+    "Skill": frozenset({("COVERS", False)}),
+    "Topic": frozenset({("HAS_TOPIC", False)}),
+    "Misconception": frozenset({("ABOUT", True), ("CONFUSED_WITH", True)}),
+}
+
+
+def _merge_needs(event: StoredEvent) -> Need:
+    label = _MERGED[event.type]
+    ends = {(label, str(event.payload["from_id"])), (label, str(event.payload["into_id"]))}
+    return Need(neighbourhoods=frozenset(ends))
+
+
+def _merged(event: StoredEvent, view: SliceView) -> list[Mutation]:
+    """Relations and evidence go to the target, the old node is deleted and its id becomes an
+    `Alias` of the target; aliases of the old node move with its other relations (Т-§2.8). A
+    relation the target already has, or one that would lead to the target itself, is dropped.
+    The target's state is folded again in phase B."""
+    label = _MERGED[event.type]
+    old_ref, into_ref = str(event.payload["from_id"]), str(event.payload["into_id"])
+    old, target = view.resolve(label, old_ref), view.resolve(label, into_ref)
+    if old is None or target is None or old == target:
+        return []
+    own = _OWN_RELS[label]
+    target_out = {(r.rel_type, r.to_label, r.to_id) for r in view.out_rels(label, into_ref)}
+    target_in = {(r.rel_type, r.from_label, r.from_id) for r in view.in_rels(label, into_ref)}
+    changes: list[Mutation] = []
+    for r in view.out_rels(label, old_ref):
+        if (r.rel_type, True) in own or (r.to_label, r.to_id) == (label, target):
+            continue
+        if (r.rel_type, r.to_label, r.to_id) not in target_out:
+            changes.append(MergeRel(label, target, r.rel_type, r.to_label, r.to_id, r.props))
+    for r in view.in_rels(label, old_ref):
+        if (r.rel_type, False) in own or (r.from_label, r.from_id) == (label, target):
+            continue
+        if (r.rel_type, r.from_label, r.from_id) not in target_in:
+            changes.append(MergeRel(r.from_label, r.from_id, r.rel_type, label, target, r.props))
+    return [
+        *changes,
+        DeleteNode(label, old),
+        MergeNode("Alias", old, {"learnerId": str(event.learner_id)}),
+        MergeRel("Alias", old, "ALIAS_OF", label, target, {}),
+    ]
+
+
+def _topic_split_needs(event: StoredEvent) -> Need:
+    p = _payload(event, TopicSplit)
+    return Need(
+        nodes=frozenset(("Topic", str(part.topic_id)) for part in p.into),
+        neighbourhoods=frozenset(
+            {("Topic", str(p.topic_id))}
+            | {("Skill", str(skill)) for part in p.into for skill in part.skill_ids}
+        ),
+    )
+
+
+def _topic_split(event: StoredEvent, view: SliceView) -> list[Mutation]:
+    """Skills are distributed between the parts (Т-§2.8). A part with the old id keeps the
+    topic and takes the part's name; a new part is a topic of the same domain with the origin
+    and status of the split one. A split topic that is not a part is left without skills and
+    hidden (D-A-131)."""
+    p = _payload(event, TopicSplit)
+    old = view.resolve("Topic", str(p.topic_id))
+    old_props = view.node("Topic", str(p.topic_id))
+    if old is None or old_props is None:
+        return []
+    domain = str(old_props["domainId"])
+    changes: list[Mutation] = []
+    parts: set[str] = set()
+    for part in p.into:
+        topic = view.resolve("Topic", str(part.topic_id))
+        if topic is None:
+            topic = str(part.topic_id)
+            changes += [
+                MergeNode(
+                    "Topic",
+                    topic,
+                    {
+                        "learnerId": str(event.learner_id),
+                        "domainId": domain,
+                        "name": part.name,
+                        "origin": old_props["origin"],
+                        "status": old_props["status"],
+                        "knownClaimedAtMs": 0,
+                    },
+                ),
+                MergeRel("Domain", domain, "HAS_TOPIC", "Topic", topic, {}),
+            ]
+        else:
+            changes.append(SetProps("Topic", topic, {"name": part.name}))
+        parts.add(topic)
+        for skill_ref in part.skill_ids:
+            skill = view.resolve("Skill", str(skill_ref))
+            if skill is None:
+                continue
+            for r in view.in_rels("Skill", str(skill_ref), "COVERS"):
+                if r.from_id != topic:
+                    changes.append(DeleteRel("Topic", r.from_id, "COVERS", "Skill", skill))
+            changes.append(MergeRel("Topic", topic, "COVERS", "Skill", skill, {}))
+    if old not in parts:
+        changes.append(SetProps("Topic", old, {"status": "hidden"}))
+    return changes
+
+
+def _skill_split_needs(event: StoredEvent) -> Need:
+    p = _payload(event, SkillSplit)
+    topics = {("Topic", str(part.topic_id)) for part in p.into}
+    return Need(nodes=frozenset({("Skill", str(p.skill_id)), *topics}))
+
+
+def _skill_split(event: StoredEvent, view: SliceView) -> list[Mutation]:
+    """New skills appear; the old evidence stays on the old skill and the dispatcher re-extracts
+    its episodes (Т-§2.8). A part takes the domain, status and origin of the split skill; its
+    summary is not known yet — `''` (D-A-131)."""
+    p = _payload(event, SkillSplit)
+    old = view.node("Skill", str(p.skill_id))
+    if old is None:
+        return []
+    changes: list[Mutation] = []
+    for part in p.into:
+        topic = view.resolve("Topic", str(part.topic_id))
+        if topic is None:
+            continue
+        skill = str(part.skill_id)
+        changes += [
+            MergeNode(
+                "Skill",
+                skill,
+                {
+                    "learnerId": str(event.learner_id),
+                    "domainId": old["domainId"],
+                    "name": part.name,
+                    "summary": "",
+                    "status": old["status"],
+                    "origin": old["origin"],
+                },
+            ),
+            MergeRel("Topic", topic, "COVERS", "Skill", skill, {}),
+        ]
+    return changes
+
+
 # Event type -> handler; exactly the types of `ROWS` (T-P4).
 HANDLERS: dict[str, Handler] = {
     "domain.created": Handler(_none, _domain_created),
@@ -474,4 +634,9 @@ HANDLERS: dict[str, Handler] = {
         _ref("Misconception", "misconception_id"), _misconception_described
     ),
     "session.ended": Handler(_session_ended_needs, _session_ended),
+    "skill.merged": Handler(_merge_needs, _merged),
+    "topic.merged": Handler(_merge_needs, _merged),
+    "misconception.merged": Handler(_merge_needs, _merged),
+    "topic.split": Handler(_topic_split_needs, _topic_split),
+    "skill.split": Handler(_skill_split_needs, _skill_split),
 }

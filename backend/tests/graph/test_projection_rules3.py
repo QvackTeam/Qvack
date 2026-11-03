@@ -475,6 +475,7 @@ def test_skill_merged_moves_relations_and_leaves_an_alias() -> None:
             _rel(
                 ("Skill", SKILL), "REQUIRES", ("Skill", SKILL_OLD), origin="model", confidence=0.9
             ),
+            _rel(("Skill", SKILL_OLD), "SAME_IDEA", ("Skill", SKILL), confidence=0.8),
             _rel(("Evidence", EVIDENCE), "ON", ("Skill", SKILL_OLD)),
             _rel(("Alias", ALIAS_EARLIER), "ALIAS_OF", ("Skill", SKILL_OLD)),
         ],
