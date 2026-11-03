@@ -30,7 +30,7 @@ from quack.config import Settings
 from quack.db.db import Db
 from quack.events.event_types import MessageSent, TaskClosed, TaskCreated
 from quack.events.log import StoredEvent
-from quack.events.values import AnswerSpec, Verdict
+from quack.events.values import AnswerSpec, Level, Verdict
 from quack.graph.read import GraphReader, HubGoal, MemorySlice, SliceFocus, TopicMemory
 from quack.graph.read.materials import materials_prefetch
 from quack.llm.gateway import LLMGateway
@@ -58,7 +58,15 @@ from quack.session.teacher_context import (
     teacher_variables,
 )
 from quack.session.teacher_output import TeacherOutputV2
-from quack.session.tools import TOOLS, MaterialChunk, ToolContext, run_tool, tool_definition
+from quack.session.tools import (
+    TOOLS,
+    CanvasLine,
+    MaterialChunk,
+    ToolContext,
+    VoiceSegment,
+    run_tool,
+    tool_definition,
+)
 from quack.session.turn_commit import AnsweredAction, LearnerText, TurnManifestRow
 from quack.session.turn_graph import AssembledTurn, Effort, GuardInputs, Role
 from quack.session.turn_inputs import learner_state, load_learner_skill, load_plan, load_snapshot
@@ -80,6 +88,7 @@ _COMPLETED = (
     "SELECT payload FROM core.events WHERE learner_id = %(l)s AND type = 'agent.completed' "
     "AND payload->>'request_id' = ANY(%(ids)s) ORDER BY seq"
 )
+_LINE_EVENTS = ("canvas.line_committed", "canvas.line_erased", "handwriting.corrected")
 _TASK_ACTIONS = {
     "hint.requested": "hint_request",
     "solution.requested": "solution_request",
@@ -99,6 +108,8 @@ class SessionJournal:
     repeated_failure: bool
     requests: dict[UUID, str] = field(default_factory=dict)
     revised: list[RevisedCheck] = field(default_factory=list)
+    canvas_lines: dict[str, CanvasLine] = field(default_factory=dict)
+    voice: list[VoiceSegment] = field(default_factory=list)
     skill_invocation: str | None = None
     answered: AnsweredAction | None = None
     answered_verdict: Verdict | None = None
@@ -158,6 +169,26 @@ def _requests(events: Sequence[StoredEvent]) -> dict[UUID, str]:
     return found
 
 
+def _canvas(events: Sequence[StoredEvent]) -> tuple[dict[str, CanvasLine], list[VoiceSegment]]:
+    """Canvas lines by the numbers of slot 5 (`L1…`, in the order of the session, D-B-163) and
+    the voice segments, for `voice_at_line` and `past_solution` (WP14.4)."""
+    numbers: dict[tuple[str, str], str] = {}
+    lines: dict[str, CanvasLine] = {}
+    voice: list[VoiceSegment] = []
+    for event in events:
+        if event.type in _LINE_EVENTS:
+            p = event.payload
+            label = numbers.setdefault((str(p["canvas_id"]), p["line_id"]), f"L{len(numbers) + 1}")
+            if event.type == "canvas.line_committed":
+                lines[label] = CanvasLine(p["text"], p["started_at_ms"], p["ended_at_ms"])
+            elif event.type == "handwriting.corrected" and label in lines:
+                lines[label] = replace(lines[label], text=p["text"])
+        elif event.type == "voice.transcribed":
+            p = event.payload
+            voice.append(VoiceSegment(p["text"], p["started_at_ms"], p["ended_at_ms"]))
+    return lines, voice
+
+
 def read_journal(events: Sequence[StoredEvent], action_seq: int) -> SessionJournal:
     """The goal, active tasks, texts and the answered action of the session up to the action."""
     ordered = sorted(events, key=lambda e: e.seq)
@@ -199,6 +230,8 @@ def read_journal(events: Sequence[StoredEvent], action_seq: int) -> SessionJourn
         repeated_failure=_repeated_failure(ordered, answer_tasks, skills),
         requests=_requests(ordered),
         revised=_revised(ordered),
+        canvas_lines=_canvas(ordered)[0],
+        voice=_canvas(ordered)[1],
     )
     action = next((e for e in ordered if e.seq == action_seq), None)
     if action is None:
@@ -237,6 +270,22 @@ def answer_strings(spec: AnswerSpec) -> list[str]:
     values = [spec.value] if spec.value is not None else []
     values.extend(spec.items or [])
     return [form for value in values for form in (value.latex, value.sympy) if form]
+
+
+def target_levels(
+    hubs: Sequence[HubGoal], memory: Sequence[TopicMemory]
+) -> dict[UUID, list[Level]]:
+    """Т-§8.5: the target set of a skill — the levels its topic's hubs require (union)."""
+    required: dict[UUID, set[Level]] = {}
+    for hub in hubs:
+        for topic in hub.topics:
+            required.setdefault(topic.topic_id, set()).update(topic.required_levels)
+    return {
+        skill.skill_id: sorted(required[item.topic_id])
+        for item in memory
+        if item.topic_id in required
+        for skill in item.skills
+    }
 
 
 def _goal_topics(goal: SessionGoal, hubs: Sequence[HubGoal]) -> list[UUID]:
@@ -337,6 +386,7 @@ class MemoryTurnContextSource:
         topics = _goal_topics(journal.goal, hubs)
         memory: list[TopicMemory] = await reader.topic_memory(topics) if topics else []
         topic_skills = [s.skill_id for m in memory for s in m.skills]
+        targets = target_levels(hubs, memory)
         focus = SliceFocus(
             skill_ids=list(dict.fromkeys([*journal.task_skills, *topic_skills])),
             topic_ids=topics,
@@ -378,6 +428,7 @@ class MemoryTurnContextSource:
                     slice=memory_slice,
                     focus=focus,
                     skill_names=names,
+                    target_levels=targets,
                     analyst_summary=digest,
                     agent_results=[
                         f"{labels.label('request', r) or 'a request'}: {kind} is ready"
@@ -425,6 +476,8 @@ class MemoryTurnContextSource:
             now_ms=self._clock(),
             domain_id=request.domain_id,
             skill_names=names,
+            canvas_lines=journal.canvas_lines,
+            voice=journal.voice,
         )
 
         async def execute_tool(name: str, arguments: str) -> str:

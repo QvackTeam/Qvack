@@ -36,6 +36,7 @@ from quack.session.turn_source import (
     MemoryTurnContextSource,
     answer_strings,
     read_journal,
+    target_levels,
     turn_effort,
 )
 from tests.db.fixtures import create_learner
@@ -359,3 +360,55 @@ def test_journal_revisions_and_requests() -> None:
     ]
     assert journal.requests == {viz: "viz", card: "card"}
     assert read_journal([*events, _turn(10, [2], [])], 10).revised == []
+
+
+def _line(seq: int, canvas: UUID, line_id: str, text: str) -> StoredEvent:
+    return _event(
+        seq,
+        "canvas.line_committed",
+        {
+            "canvas_id": str(canvas),
+            "line_id": line_id,
+            "text": text,
+            "kind": "text",
+            "bbox": [0, 0, 1, 1],
+            "stroke_ids": [],
+            "started_at_ms": seq * 1000,
+            "ended_at_ms": seq * 1000 + 500,
+            "source": "pen",
+            "recognition_confidence": 0.9,
+            "crossed_out": False,
+        },
+    )
+
+
+def test_journal_canvas_lines_by_slot_numbers() -> None:
+    """WP14.4: the tools see the lines by the numbers of slot 5 (D-B-163): in the order of the
+    session, an erased line keeps its number, a learner correction replaces the text."""
+    canvas = uuid4()
+    events = [
+        _line(1, canvas, "a", "x = 1"),
+        _event(2, "canvas.line_erased", {"canvas_id": str(canvas), "line_id": "a", "text": "x"}),
+        _line(3, canvas, "b", "y = 2"),
+        _event(
+            4,
+            "handwriting.corrected",
+            {"canvas_id": str(canvas), "line_id": "b", "text": "y = 3"},
+        ),
+        _event(
+            5, "voice.transcribed", {"text": "so y", "started_at_ms": 3100, "ended_at_ms": 3400}
+        ),
+    ]
+    journal = read_journal(events, 5)
+    assert {k: v.text for k, v in journal.canvas_lines.items()} == {"L1": "x = 1", "L2": "y = 3"}
+    assert journal.canvas_lines["L2"].started_at_ms == 3000
+    assert [v.text for v in journal.voice] == ["so y"]
+
+
+async def test_target_levels_from_the_hubs() -> None:
+    """Т-§8.5: the skills of a goal topic take the levels its hub requires."""
+    reader = fx.FixedGraphReader()
+    hubs = await reader.domain_goals(fx.DOMAIN)
+    memory = await reader.topic_memory([fx.TOPIC_OPEN])
+    found = target_levels(hubs, memory)
+    assert found == {fx.SKILL_FAILED: [2, 3], fx.SKILL_QUIET: [2, 3]}

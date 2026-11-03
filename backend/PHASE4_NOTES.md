@@ -1290,6 +1290,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Решение: (а) Сводка — текст последнего `digest.written` домена ученика. Аналитик пишет её заново из структуры, поэтому чтение последней — не накопление выводов (закон 10). (б) Поручения сессии — `agent.requested` сессии и `agentRequests` её `turn.committed`. Все они получают метки `R…`, чтобы учитель мог их отменить. Готов тот, у которого есть `agent.completed` с `ok = true`: строка «<метка>: <вид> is ready». (в) Поправка — пара `(answer_seq, part)`, последний вердикт которой отличается от первого. Она держится, пока номер ответа не попадёт в `correctionsAcknowledged` какого-либо `turn.committed`. Строка: «part <часть> is now <исход>, was <исход>».
 - Почему: §0.4.3 п.2 (WP14.2), п.5.
 - Обратимость: один модуль.
+- Дополнение: (г) Целевой набор навыка — уровни, которые требуют хабы его темы (объединение, `Т-§8.5`), `target_levels`. (д) Инструменты получают строки канваса по номерам слота 5 (`L1…` в порядке сессии, стёртая строка сохраняет номер, `handwriting.corrected` заменяет текст) и сегменты голоса — для `voice_at_line` и `past_solution` (WP14.4).
 - Тесты: `tests/session/test_turn_source.py::test_journal_revisions_and_requests`, `::test_assemble_first_turn_freezes_slots`; мутация «признанная поправка остаётся» — тест падает.
 - Не решено \[ПРОВЕРИТЬ\]: нет.
 ### D-B-181. Источник контекста хода учителя (WP14, WP13.2 «assemble»)
@@ -1300,7 +1301,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (WP14, WP13.2), п.5.
 - Обратимость: один модуль; порт `TurnContextSource` не менялся.
 - Тесты: `tests/session/test_turn_source.py` (5); мутация «снимок пишется каждым ходом» — тест падает.
-- Не решено \[ПРОВЕРИТЬ\]: (1) Подключение: `get_turn_context_source` (`quack/session/router.py`, зона B) соберёт источник из `app.state.resources` процесса API, без правок C, после слияния #175 (`Neo4jGraphReader` с `session_factory`). До этого маршрут отвечает `503`, как и сейчас. (2) Пока не входят в картину: целевые уровни навыков из хабов; строки канваса и голос в `ToolContext`; ожидание быстрого вердикта (WP13.2); выборка `context_text` по `turn_context_sample_rate`. Это следующие шаги B.
+- Не решено \[ПРОВЕРИТЬ\]: (1) Подключение: `get_turn_context_source` (`quack/session/router.py`, зона B) соберёт источник из `app.state.resources` процесса API, без правок C, после слияния #175 (`Neo4jGraphReader` с `session_factory`). До этого маршрут отвечает `503`, как и сейчас. (2) Пока не сделаны: ожидание быстрого вердикта (WP13.2); выборка `context_text` по `turn_context_sample_rate`. Это следующие шаги B.
 ### D-B-180. Слоты 3–4 из памяти и их снимок на сессию (WP14.1)
 - Класс: B
 - WP / место: WP14.1, `Т-§10.1`, `Т-§9.5`, `Т-§8.5`, `Т-§4.5`, закон 8; `quack/session/turn_inputs.py` (`learner_state`, `learned_lines`, `load_snapshot`), `quack/session/teacher_context.py` (`snapshot_slots`, `frozen_slots`), `quack/session/turn_commit.py` (`TurnManifestRow.frozen_slots`)
