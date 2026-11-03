@@ -32,6 +32,7 @@ async def deliver(
     actor: str,
     task_ids: Sequence[UUID] = (),
     error: str | None = None,
+    result_ref: str | None = None,
     domain_id: UUID | None = None,
     session_id: UUID | None = None,
     causation_seq: int | None = None,
@@ -50,6 +51,7 @@ async def deliver(
         job_key=None if request_id else job_key,
         kind=kind,
         ok=ok,
+        result_ref=result_ref,
         error=error,
         task_ids=list(task_ids),
     )
