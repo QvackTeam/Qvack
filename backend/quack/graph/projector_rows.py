@@ -101,7 +101,8 @@ ROWS: tuple[ProjectorRow, ...] = (
          ("answer_seq", "part", "outcome", "method", "verification", "second_opinion",
           "confidence", "help_step", "solution_shown", "misconception_id",
           "misconception_hypothesis"),
-         "evidence per (skill, level) of the markup part; tier by Т-§7.8; ON_TASK; wrong "
+         "the task and part through the answer event answer_seq (read in the view, "
+         "D-A-133); evidence per (skill, level) of the markup part; tier by Т-§7.8; ON_TASK; wrong "
          "trap option -> manifestation T1 (MANIFESTS); gate-passing success on a trap task "
          "or targetsMisconception -> RESISTED; unclear -> no evidence",
          "Т-§7.8, Т-§9.1"),
@@ -140,7 +141,8 @@ ROWS: tuple[ProjectorRow, ...] = (
     _row("dispute.filed", "A", ("target_kind", "target_id"),
          "target -> disputed (with what DERIVED_FROM it)", "Т-§2.8"),
     _row("typo.declared", "A", ("answer_seq", "part"),
-         "evidence of the verdict -> disputed, gap type slip", "Т-§2.8, Т-§7.6"),
+         "evidence of the verdict of answer_seq and part -> disputed, gap type slip",
+         "Т-§2.8, Т-§7.6"),
     _row("known.claimed", "A", ("topic_id",),
          "Topic.knownClaimedAtMs; proposals of the topic hidden (visibility, WP6.1)",
          "Т-§4.11"),
