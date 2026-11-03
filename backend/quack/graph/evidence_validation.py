@@ -17,7 +17,11 @@ from quack.events.payloads import (
     NewSkillRef,
     SkillRef,
 )
-from quack.events.records import ExtractedElementRecord, RejectedElementRecord
+from quack.events.records import (
+    ExtractedElementRecord,
+    RejectedElementRecord,
+    RootCauseRecord,
+)
 from quack.events.values import GapType as P4GapType
 from quack.events.values import NewSkill
 
@@ -249,4 +253,87 @@ def check_extracted(
     elements: Sequence[ExtractorElementLike], ctx: EpisodeCheckContext
 ) -> CheckedElements:
     """The checks of `Т-§7.6` and WP15 п.4, п.8 for every element, in output order."""
-    raise NotImplementedError
+    accepted: list[ExtractedElementRecord] = []
+    rejected: list[RejectedElementRecord] = []
+    for index, element in enumerate(elements):
+        checked = _check_element(element, ctx)
+        if isinstance(checked, ExtractedElementRecord):
+            accepted.append(checked)
+        else:
+            rejected.append(RejectedElementRecord(index=index, reason=checked, quote=element.quote))
+    return CheckedElements(accepted, rejected)
+
+
+def _check_element(
+    element: ExtractorElementLike, ctx: EpisodeCheckContext
+) -> ExtractedElementRecord | RejectionReason:
+    """The element with ids, or the reason it is rejected — checks in the order of `Т-§7.6`."""
+    skill_id = misconception_id = root_cause = None
+    if element.skill is not None:
+        skill_id = ctx.skill_labels.get(element.skill)
+        if skill_id is None:
+            return "unknown_label"
+    if element.misconception is not None:
+        misconception_id = ctx.misconception_labels.get(element.misconception)
+        if misconception_id is None:
+            return "unknown_label"
+    if element.root_cause is not None:
+        root_skill_id = ctx.skill_labels.get(element.root_cause.skill)
+        if root_skill_id is None:
+            return "unknown_label"
+        root_cause = RootCauseRecord(
+            skill_id=root_skill_id, confidence=element.root_cause.confidence
+        )
+    if not _complete(element):
+        return "incomplete_element"
+    if not element.events or any(seq not in ctx.episode for seq in element.events):
+        return "source_outside_episode"
+    quote = element.quote.strip()
+    # A negative element, a misconception hypothesis (`Т-§7.6`) and a new skill (`Т-§4.4`)
+    # stand only on a quote.
+    needs_quote = (
+        element.kind == "misconception_hypothesis"
+        or element.outcome == "incorrect"
+        or element.new_skill is not None
+    )
+    if not quote:
+        if needs_quote:
+            return "missing_quote"
+    elif not any(quote in ctx.episode[seq].text for seq in element.events):
+        return "quote_not_in_source"
+    caps = [ctx.task_levels[seq] for seq in element.events if seq in ctx.task_levels]
+    if element.level is not None and caps and element.level > min(caps):
+        return "level_above_task"
+    if (
+        element.kind == "evidence"
+        and skill_id is not None
+        and element.level is not None
+        and (skill_id, element.level) in ctx.code_verdicts
+    ):
+        return "code_verdict_exists"
+    return ExtractedElementRecord(
+        kind=element.kind,
+        skill_id=skill_id,
+        new_skill=element.new_skill,
+        skill_unclear=element.skill_unclear,
+        level=element.level,
+        outcome=element.outcome,
+        help=element.help,
+        hint_step=element.hint_step,
+        gap_type=element.gap_type,
+        misconception_id=misconception_id,
+        new_misconception=element.new_misconception,
+        root_cause=root_cause,
+        quote=element.quote,
+        events=list(element.events),
+        at_ms=max(ctx.episode[seq].at_ms for seq in element.events),
+    )
+
+
+def _complete(element: ExtractorElementLike) -> bool:
+    """Evidence names exactly one of: a skill label, a new skill, «unclear» (`Т-§7.6`), and has
+    a level and an outcome; a hypothesis names a known misconception or a new wording."""
+    if element.kind == "misconception_hypothesis":
+        return element.misconception is not None or bool((element.new_misconception or "").strip())
+    named = [element.skill is not None, element.new_skill is not None, element.skill_unclear]
+    return named.count(True) == 1 and element.level is not None and element.outcome is not None
