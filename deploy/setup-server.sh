@@ -72,6 +72,12 @@ systemctl reload ssh
 systemctl enable --now fail2ban
 
 step "docker engine >= $DOCKER_MIN_VERSION"
+if command -v snap >/dev/null 2>&1 && snap list docker >/dev/null 2>&1; then
+  # A snap refreshes itself and restarts the daemon with every container (Д-§10), and its
+  # confinement hides /srv/quack. Remove it by hand, the script then installs docker-ce.
+  echo "Docker is installed as a snap. Run 'snap remove docker --purge', then start this script again." >&2
+  exit 1
+fi
 if ! command -v docker >/dev/null 2>&1; then
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
