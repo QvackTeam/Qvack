@@ -23,14 +23,20 @@ from quack.db.db import LockKeyspace
 from quack.events.log import StoredEvent
 from quack.graph.projection.misconception_fold import MisconceptionParams
 from quack.graph.projection.phase_a import EventFailed, apply_events, batch_need
-from quack.graph.projection.phase_b import fold_dirty_misconceptions, fold_dirty_skills
+from quack.graph.projection.phase_b import (
+    fold_dirty_misconceptions,
+    fold_dirty_skills,
+    fold_dirty_topics,
+)
 from quack.graph.projection.skill_fold import FoldParams
 from quack.graph.projection.store import (
     load_fold_inputs,
     load_slice,
+    load_topic_inputs,
     read_watermark,
     write_batch,
 )
+from quack.graph.projection.topic_fold import TopicParams
 from quack.graph.projection.types import NodeRef
 from quack.graph.projection.view import BatchSlice, Need, RulesParams
 
@@ -121,6 +127,15 @@ async def project_learner(
                 batch.extend(await load_fold_inputs(neo4j, str(learner_id), dirty, wrong))
                 fold_dirty_skills(batch, dirty, FoldParams.from_settings(settings), events[-1].seq)
                 fold_dirty_misconceptions(batch, wrong, MisconceptionParams.from_settings(settings))
+            # Phase C (WP6.1, WP6.2): the topics of what changed.
+            topics, skills, hubs = batch.topic_seeds()
+            if topics or skills or hubs:
+                loaded, topics = await load_topic_inputs(
+                    neo4j, str(learner_id), topics, skills, hubs
+                )
+                batch.extend(loaded)
+                levels = {k: list(v) for k, v in settings.control_type_levels.items()}
+                fold_dirty_topics(batch, topics, TopicParams(control_type_levels=levels))
         except EventFailed as failed:
             await db.execute(
                 _RECORD_FAILURE, params | {"seq": failed.seq, "error": repr(failed.cause)[:2000]}

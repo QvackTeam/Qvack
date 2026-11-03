@@ -161,6 +161,17 @@ async def test_materials_and_vectors_reach_neo4j(
         0,
     )
     assert state["asOfSeq"] == 6
+    async with neo4j.session() as session:
+        found = await session.run(
+            "MATCH (t:Topic {id: $t}) RETURN properties(t) AS t", t=str(topic)
+        )
+        shown = (await found.single() or {"t": {}})["t"]
+    # Phase C: an active topic with nothing tested (Т-§8.6 rule 8), shown (Т-§4.7).
+    assert (shown["displayState"], shown["visibility"], shown["nearestDueAtMs"]) == (
+        "not_tested",
+        "shown",
+        0,
+    )
     again = await project_learner(pg_db, neo4j, settings, learner)
     assert (again.status, again.applied_seq) == ("empty", 6)
 

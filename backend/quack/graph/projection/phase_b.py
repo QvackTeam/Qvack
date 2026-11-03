@@ -4,6 +4,8 @@ on the slice, and only the changed values reach Neo4j (the diff, `Т-§8.1` «о
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from quack.graph.projection.misconception_fold import (
     FoldSign,
     MisconceptionParams,
@@ -11,6 +13,7 @@ from quack.graph.projection.misconception_fold import (
 )
 from quack.graph.projection.mutations import SetProps
 from quack.graph.projection.skill_fold import FoldEvidence, FoldExposure, FoldParams, fold_skill
+from quack.graph.projection.topic_fold import TopicGoal, TopicParams, TopicSkill, fold_topic
 from quack.graph.projection.view import BatchSlice
 
 
@@ -117,3 +120,45 @@ def fold_dirty_misconceptions(
             targeted_session=_str(props.get("targetedInSessionId")),
         )
         batch.apply([SetProps("Misconception", misconception, state)])
+
+
+def _goals(batch: BatchSlice, topic: str, domain: str, params: TopicParams) -> list[TopicGoal]:
+    def levels(hub: Mapping[str, object], required: object) -> list[int]:
+        given = [v for v in required if isinstance(v, int)] if isinstance(required, list) else []
+        default = params.control_type_levels.get(_str(hub.get("controlType")), [])
+        return given or list(default)
+
+    goals: list[TopicGoal] = []
+    for r in batch.rels("Topic", topic, "INCLUDES", out=False):
+        hub = batch.node("Hub", r.from_id) or {}
+        goals.append(
+            TopicGoal(_int(hub.get("deadlineAtMs")), levels(hub, r.props.get("requiredLevels")))
+        )
+    for r in batch.rels("Domain", domain, "HAS_HUB", out=True):
+        hub = batch.node("Hub", r.to_id) or {}
+        if hub.get("kind") == "domain_all":
+            goals.append(TopicGoal(_int(hub.get("deadlineAtMs")), levels(hub, None)))
+    return goals
+
+
+def fold_dirty_topics(batch: BatchSlice, topics: set[str], params: TopicParams) -> None:
+    """Phase C (WP6.1, WP6.2): status, visibility, nearest review and the state in codes."""
+    for topic in sorted(topics):
+        props = batch.node("Topic", topic)
+        if props is None:
+            continue
+        skills: list[TopicSkill] = []
+        for r in batch.rels("Topic", topic, "COVERS", out=True):
+            skill = batch.node("Skill", r.to_id)
+            if skill is None:
+                continue
+            confirmed = [
+                (m.from_id, next(iter(o.to_id for o in batch.rels(
+                    "Misconception", m.from_id, "CONFUSED_WITH", out=True)), ""))
+                for m in batch.rels("Skill", r.to_id, "ABOUT", out=False)
+                if (batch.node("Misconception", m.from_id) or {}).get("status")
+                in ("confirmed", "in_work")
+            ]  # fmt: skip
+            skills.append(TopicSkill(r.to_id, skill, sorted(confirmed)))
+        goals = _goals(batch, topic, _str(props.get("domainId")), params)
+        batch.apply([SetProps("Topic", topic, fold_topic(props, skills, goals, params))])

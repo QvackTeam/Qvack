@@ -269,6 +269,25 @@ class BatchSlice:
                     dirty |= {r.to_id for r in self.rels(n.label, n.id, rel, out=True)}
         return {m for m in dirty if ("Misconception", m) in self._nodes}
 
+    def topic_seeds(self) -> tuple[set[str], set[str], set[str]]:
+        """Phase C (WP6): topics the batch touched directly, skills whose topics it touched (the
+        folded skills, the skills of folded misconceptions), hubs it changed."""
+        d = self.diff()
+        topics = {n.id for n in d.upsert_nodes if n.label == "Topic"}
+        skills = {n.id for n in d.upsert_nodes if n.label == "Skill"}
+        hubs = {n.id for n in d.upsert_nodes if n.label == "Hub"}
+        for r in [*d.upsert_rels, *d.delete_rels]:
+            if r.rel_type == "INCLUDES":
+                topics.add(r.to_id)
+            elif r.rel_type == "COVERS":
+                topics.add(r.from_id)
+        for n in d.upsert_nodes:
+            if n.label == "Misconception":
+                skills |= {r.to_id for r in self.rels(n.label, n.id, "ABOUT", out=True)}
+        for skill in skills:
+            topics |= {r.from_id for r in self.rels("Skill", skill, "COVERS", out=False)}
+        return topics, skills, hubs
+
     def snapshot(self) -> SubGraph:
         """Every node and relationship of the slice now (for tests and rebuild)."""
         return SubGraph(

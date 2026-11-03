@@ -133,3 +133,54 @@ def test_misconception_life_cycle() -> None:
     assert status(*watching, sign(7, "e", resists=True), sign(8, "f")) == "confirmed"
     assert status(shown[0], sign(2, "c", resists=True), sign(3, "d", resists=True)) == "dismissed"
     assert status(*shown, disputed=True) == "disputed"
+
+
+def test_display_state_priority() -> None:
+    """T-TH2 (WP6.2, `Т-§8.6`): the eight rules by priority with the parameters of `Т-§22.2`;
+    the target set from the hub with the nearest deadline; without a hub — level 3."""
+    from quack.graph.projection.topic_fold import (
+        TopicGoal,
+        TopicParams,
+        TopicSkill,
+        fold_topic,
+    )
+
+    tp = TopicParams(control_type_levels={"no_goal": [3], "tasks": [3, 4]})
+    active: dict[str, Any] = {"status": "active"}
+
+    def skill(sid: str, *confirmed: tuple[str, str], **levels: str) -> TopicSkill:
+        props: dict[str, Any] = {f"l{n}Status": "unknown" for n in range(1, 7)}
+        props |= {f"l{n}Basis": "none" for n in range(1, 7)}
+        for key, value in levels.items():
+            props[key] = value
+        props["retDueAtMs"] = 5 if sid == "a" else 0
+        return TopicSkill(sid, props, confirmed)
+
+    def state(*skills: TopicSkill, goals: list[TopicGoal] | None = None) -> tuple[Any, ...]:
+        out = fold_topic(active, skills, goals or [], tp)
+        return out["displayState"], out["displayReason"], out["displayLevel"]
+
+    proven = {"l3Status": "proven", "l3Basis": "direct"}
+    assert state(skill("a", ("m1", "x")), skill("b", ("m2", ""))) == ("confused_with", "m1", 0)
+    assert state(skill("a", ("m2", "")), skill("b", l3Status="failed")) == (
+        "persistent_error",
+        "m2",
+        0,
+    )
+    assert state(skill("a", l3Status="unstable"), skill("b", l3Status="failed")) == (
+        "struggling",
+        "b",
+        3,
+    )
+    assert state(skill("a", l3Status="unstable")) == ("inconsistent", "a", 3)
+    assert state(skill("a", **proven)) == ("solved_independently", "", 0)
+    goal = [TopicGoal(10, [3, 4]), TopicGoal(20, [2])]
+    assert state(skill("a", **proven), goals=goal) == ("in_progress", "", 0)  # 4 not tested
+    transfer = {"l3Status": "proven", "l3Basis": "transfer"}
+    assert state(skill("a", **transfer))[0] == "known_from_other_domain"
+    assert state(skill("a")) == ("not_tested", "", 0)
+    out = fold_topic({"status": "proposed"}, [skill("a")], [], tp)
+    assert (out["displayState"], out["visibility"], out["nearestDueAtMs"]) == ("none", "pale", 5)
+    touched = skill("a")
+    touched.props["expCount"] = 1
+    assert fold_topic({"status": "proposed"}, [touched], [], tp)["status"] == "active"

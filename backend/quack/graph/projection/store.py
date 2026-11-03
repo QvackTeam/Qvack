@@ -236,6 +236,91 @@ async def load_fold_inputs(
         return await session.execute_read(_read_fold, learner_id, skills, misconceptions)
 
 
+_TOPICS_OF = (
+    "MATCH (t:Topic)-[:COVERS]->(s:Skill) WHERE s.learnerId = $learner AND s.id IN $skills "
+    "RETURN t.id AS id UNION "
+    "MATCH (h:Hub)-[:INCLUDES]->(t:Topic) WHERE h.learnerId = $learner AND h.id IN $hubs "
+    "RETURN t.id AS id UNION "
+    "MATCH (d:Domain)-[:HAS_HUB]->(h:Hub {kind: 'domain_all'}), (d)-[:HAS_TOPIC]->(t:Topic) "
+    "WHERE h.learnerId = $learner AND h.id IN $hubs RETURN t.id AS id"
+)
+_TOPIC_SKILLS = (
+    "MATCH (t:Topic) WHERE t.learnerId = $learner AND t.id IN $topics "
+    "OPTIONAL MATCH (t)-[:COVERS]->(s:Skill) "
+    "OPTIONAL MATCH (d:Domain)-[:HAS_TOPIC]->(t) "
+    "RETURN t.id AS tid, properties(t) AS tp, s.id AS sid, properties(s) AS sp, "
+    "d.id AS did, properties(d) AS dp"
+)
+_TOPIC_MISCONCEPTIONS = (
+    "MATCH (m:Misconception)-[:ABOUT]->(s:Skill) WHERE m.learnerId = $learner AND s.id IN $skills "
+    "OPTIONAL MATCH (m)-[:CONFUSED_WITH]->(o:Skill) "
+    "RETURN m.id AS mid, properties(m) AS mp, s.id AS sid, o.id AS oid, properties(o) AS op"
+)
+_TOPIC_HUBS = (
+    "MATCH (h:Hub)-[i:INCLUDES]->(t:Topic) WHERE h.learnerId = $learner AND t.id IN $topics "
+    "RETURN h.id AS hid, properties(h) AS hp, properties(i) AS ip, t.id AS tid"
+)
+_DOMAIN_HUBS = (
+    "MATCH (d:Domain)-[:HAS_HUB]->(h:Hub {kind: 'domain_all'}) "
+    "WHERE d.learnerId = $learner AND d.id IN $domains "
+    "RETURN d.id AS did, h.id AS hid, properties(h) AS hp"
+)
+
+
+async def _read_topics(
+    tx: AsyncManagedTransaction,
+    learner: str,
+    topics: set[str],
+    skills: set[str],
+    hubs: set[str],
+) -> tuple[SubGraph, set[str]]:
+    """Phase C input (Т-§8.6): the topics, their skills with the confirmed misconceptions and
+    what they are confused with, the hubs that include them and the hub of the whole domain."""
+    out = _Collected()
+    found = await tx.run(
+        literal(_TOPICS_OF), learner=learner, skills=sorted(skills), hubs=sorted(hubs)
+    )
+    topics = topics | {row["id"] async for row in found}
+    rows = await tx.run(literal(_TOPIC_SKILLS), learner=learner, topics=sorted(topics))
+    skill_ids: set[str] = set()
+    domains: set[str] = set()
+    async for row in rows:
+        out.node("Topic", row["tid"], row["tp"])
+        if row["did"] is not None:
+            domains.add(row["did"])
+            out.node("Domain", row["did"], row["dp"])
+            out.rel(RelRecord("Domain", row["did"], "HAS_TOPIC", "Topic", row["tid"], {}))
+        if row["sid"] is not None:
+            skill_ids.add(row["sid"])
+            out.node("Skill", row["sid"], row["sp"])
+            out.rel(RelRecord("Topic", row["tid"], "COVERS", "Skill", row["sid"], {}))
+    rows = await tx.run(literal(_TOPIC_MISCONCEPTIONS), learner=learner, skills=sorted(skill_ids))
+    async for row in rows:
+        out.node("Misconception", row["mid"], row["mp"])
+        out.rel(RelRecord("Misconception", row["mid"], "ABOUT", "Skill", row["sid"], {}))
+        if row["oid"] is not None:
+            out.node("Skill", row["oid"], row["op"])
+            out.rel(
+                RelRecord("Misconception", row["mid"], "CONFUSED_WITH", "Skill", row["oid"], {})
+            )
+    rows = await tx.run(literal(_TOPIC_HUBS), learner=learner, topics=sorted(topics))
+    async for row in rows:
+        out.node("Hub", row["hid"], row["hp"])
+        out.rel(RelRecord("Hub", row["hid"], "INCLUDES", "Topic", row["tid"], row["ip"]))
+    rows = await tx.run(literal(_DOMAIN_HUBS), learner=learner, domains=sorted(domains))
+    async for row in rows:
+        out.node("Hub", row["hid"], row["hp"])
+        out.rel(RelRecord("Domain", row["did"], "HAS_HUB", "Hub", row["hid"], {}))
+    return out.subgraph(), topics
+
+
+async def load_topic_inputs(
+    driver: AsyncDriver, learner_id: str, topics: set[str], skills: set[str], hubs: set[str]
+) -> tuple[SubGraph, set[str]]:
+    async with read_session(driver) as session:
+        return await session.execute_read(_read_topics, learner_id, topics, skills, hubs)
+
+
 async def load_slice(
     driver: AsyncDriver, learner_id: str, need: Need, event_refs: Iterable[NodeRef] = ()
 ) -> SubGraph:
