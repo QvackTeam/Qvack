@@ -33,13 +33,16 @@ type ReviewReason = Literal[
 
 class EvidenceFact(_Fact):
     """One piece of evidence for a level (Т-§8.7): quote, task, tier by code, date, id for
-    the "disagree" action (Т-§2.8)."""
+    the "disagree" action (Т-§2.8). `assistance` / `hint_step` — the help given (Evidence
+    `assistance`, `hintStep`, `Т-§3.4.3`), `skill_history` shows it (`Т-§10.4`, D-A-127)."""
 
     evidence_id: UUID
     skill_id: UUID
     level: Level
     outcome: Literal["correct", "incorrect", "partial", "unclear"]
     source: EvidenceSource
+    assistance: Literal["none", "hint", "shown_solution"] = "none"
+    hint_step: int | None = Field(default=None, ge=1, le=3)
     quote: str | None = None
     task_id: UUID | None = None
     session_id: UUID | None = None
