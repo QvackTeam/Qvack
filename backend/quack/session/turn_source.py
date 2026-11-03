@@ -1,8 +1,8 @@
 """The context source of the teacher turn — `TurnContextSource` (ТЗ Ф4 WP14, WP13.2 «assemble»;
 Т-§10). D-B-181.
 
-- **The journal of the session** gives the goal (the last `message.sent` with an intent,
-  Т-§12.7), the active tasks (created in the session and not closed), the learner texts, the
+- **The journal of the session** gives the goal (`session.started`, then the last
+  `message.sent` with an intent, Т-§12.7), the active tasks (created in the session and not closed), the learner texts, the
   action the turn answers and its verdict, the effort (Т-§12.9).
 - **Memory** (S4, `quack.graph.read`): profile and goals now, the topics of the goal, the
   slice for the focus — the skills of the active tasks and of the goal topics (Т-§10.2). The
@@ -29,7 +29,7 @@ from neo4j.exceptions import ConnectionAcquisitionTimeoutError, ServiceUnavailab
 from quack.api.resources import AppResources
 from quack.config import Settings
 from quack.db.db import Db
-from quack.events.event_types import MessageSent, TaskClosed, TaskCreated
+from quack.events.event_types import MessageSent, SessionStarted, TaskClosed, TaskCreated
 from quack.events.log import StoredEvent
 from quack.events.values import AnswerSpec, Level, Verdict
 from quack.graph.read import GraphReader, HubGoal, MemorySlice, SliceFocus, TopicMemory
@@ -201,6 +201,11 @@ def read_journal(events: Sequence[StoredEvent], action_seq: int) -> SessionJourn
     texts: list[LearnerText] = []
     for event in ordered:
         match event.type:
+            case "session.started":
+                started = SessionStarted.model_validate(event.payload)
+                goal = SessionGoal(
+                    intent=started.intent, topic_id=started.topic_id, hub_id=started.hub_id
+                )
             case "message.sent":
                 message = MessageSent.model_validate(event.payload)
                 texts.append(LearnerText(seq=event.seq, text=message.text))

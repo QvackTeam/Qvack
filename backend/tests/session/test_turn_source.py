@@ -131,7 +131,18 @@ def test_journal_goal_tasks_and_answer() -> None:
         _answer(6, open_task),
         _verdict(7, 6, "correct"),
     ]
-    journal = read_journal(events, 6)
+    started = _event(
+        0,
+        "session.started",
+        {
+            "session_id": str(uuid4()),
+            "domain_id": str(fx.DOMAIN),
+            "intent": "exam",
+            "hub_id": str(fx.HUB),
+        },
+    )
+    assert read_journal([started], 6).goal.hub_id == fx.HUB
+    journal = read_journal([started, *events], 6)
     assert (journal.goal.intent, journal.goal.topic_id) == ("review", fx.TOPIC_OPEN)
     assert journal.open_tasks == [open_task] and journal.task_skills == [shared]
     assert [t.text for t in journal.learner_texts] == ["hi", "go on"]
