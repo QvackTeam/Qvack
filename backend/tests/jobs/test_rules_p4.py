@@ -59,7 +59,7 @@ def test_every_kind_of_the_spec_is_listed_once_and_removed_ones_are_gone() -> No
     assert not set(r.REMOVED_JOB_KINDS) & set(r.JOB_KINDS + r.PERIODIC_JOB_KINDS)
 
 
-def test_every_rule_row_names_known_kinds() -> None:
+def test_rule_table() -> None:
     known = set(r.KIND_SPEC)
     for row in r.RULES:
         assert set(row.job_kinds) <= known, row
@@ -250,10 +250,71 @@ def test_handwriting_known_claim_and_reextraction_rows() -> None:
     assert _one(_event("known.claimed")).kind == "check.known_claim"
     assert _one(_event("episode.reassigned")).kind == "extract.episode"
     # Т-§2.8: the episodes where the old skill has evidence are re-extracted, restricted to the
-    # parts — one job per episode, a row with data beyond the event (G2, D-A-135).
-    assert r.plan_jobs(_event("skill.split"), Settings()) == []
-    (split,) = [row for row in r.ROWS_NEED_FACTS if row.event_type == "skill.split"]
-    assert split.job_kinds == ("extract.episode",)
+    # parts — one job per episode, a row with data beyond the event (D-A-135, D-A-162).
+    split = _event("skill.split", seq=30)
+    assert r.plan_jobs(split, Settings()) == []
+    assert r.plan_with_facts(split, SETTINGS, r.RuleFacts()) == []  # no such episode: no job
+    first, second = r.plan_with_facts(split, SETTINGS, r.RuleFacts(episode_seqs=(4, 9)))
+    assert (first.kind, first.priority_class, first.required_seq) == ("extract.episode", "P2", 30)
+    assert first.job_key != second.job_key  # one job per episode
+    assert first.payload["episode_seq"] == 4 and second.payload["episode_seq"] == 9
+    parts = [part["skill_id"] for part in split.payload["into"]]
+    assert first.payload["restrict_skill_ids"] == parts
+    assert "skill.split" not in {row.event_type for row in r.ROWS_NEED_FACTS}
+
+
+def test_graph_hygiene_after_a_session_with_temporary_entities_and_every_n_topics() -> None:
+    """Т-§13.3, Т-§4.10: P3, `domain:{id}` / `hygiene:{domain}`, reads the graph."""
+    ended = _event("session.ended", seq=40)
+    domain = uid("domain")
+    plans = [
+        p
+        for p in r.plan_with_facts(ended, SETTINGS, r.RuleFacts(domain_id=UUID(domain)))
+        if p.kind == "graph.hygiene"
+    ]
+    assert plans == []  # no temporary entities
+    (plan,) = [
+        p
+        for p in r.plan_with_facts(
+            ended, SETTINGS, r.RuleFacts(domain_id=UUID(domain), temporary_entities=True)
+        )
+        if p.kind == "graph.hygiene"
+    ]
+    assert (plan.priority_class, plan.visible, plan.required_seq) == ("P3", False, 40)
+    assert plan.lock_key == f"domain:{domain}" and plan.coalesce_key == f"hygiene:{domain}"
+    assert plan.job_key == f"hygiene:{domain}:40"
+    # No domain known: nothing to clean.
+    assert not [
+        p
+        for p in r.plan_with_facts(ended, SETTINGS, r.RuleFacts(temporary_entities=True))
+        if p.kind == "graph.hygiene"
+    ]
+
+    created = _event("topic.created", seq=41)
+    assert r.plan_with_facts(created, SETTINGS, r.RuleFacts()) == []
+    (counted,) = r.plan_with_facts(created, SETTINGS, r.RuleFacts(hygiene_due=True))
+    assert counted.kind == "graph.hygiene" and counted.coalesce_key == f"hygiene:{domain}"
+    assert counted.payload["reason"] == "new_topics"
+
+
+def test_embedding_rows_carry_the_text_and_read_no_graph() -> None:
+    """D-A-117: the text rides in the job; the job reads only the log (`required_seq` empty)."""
+    chunk = _one(_event("chunk.indexed"))
+    assert chunk.kind == "embedding.compute" and chunk.required_seq is None
+    assert chunk.payload["nodes"] == [
+        {"node_kind": "chunk", "node_id": uid("chunk"), "text": "A limit is…"}
+    ]
+    (misconception,) = r.plan_jobs(_event("misconception.described"), SETTINGS)
+    assert misconception.payload["nodes"] == [
+        {
+            "node_kind": "misconception",
+            "node_id": uid("misconception"),
+            "text": "limit equals the value",
+        }
+    ]
+    # Topic, skill and evidence stay open: the text property is [ПРОВЕРИТЬ], evidence has no id.
+    (open_row,) = [row for row in r.ROWS_NEED_FACTS if row.job_kinds == ("embedding.compute",)]
+    assert open_row.event_type == "*"
 
 
 def test_visible_kinds_follow_t_13_8() -> None:
@@ -324,3 +385,18 @@ def test_hub_deadline_set_puts_one_cheatsheet_job_without_facts() -> None:
     assert plan.priority_class == "P2" and plan.required_seq == 50
     assert plan.payload == {"trigger_seq": 50, "hub_id": hub}
     assert "artifact.cheatsheet" not in {row.job_kinds[0] for row in r.ROWS_NEED_FACTS}
+
+
+def test_dispatcher_column_of_the_catalog_is_covered_by_rows_or_episodes() -> None:
+    """T-D1 (the catalog side): a type marked «Диспетчер» in §6.3 has a row, or is an episode
+    event (WP7.2), or is on the list of open marks below — nothing silently unhandled."""
+    from quack.events.registry import SPECS
+    from quack.jobs.episodes import EPISODE_TYPES
+
+    rows = {row.event_type for row in r.RULES}
+    marked = {key[0] for key, spec in SPECS.items() if spec.dispatcher}
+    unhandled = marked - rows - EPISODE_TYPES
+    # skill.created, topic.proposed — the open embedding row (the embedded property is
+    # [ПРОВЕРИТЬ]); skill.merged, material.parsed — a mark without a row in Т-§13.3 / WP7.1
+    # (D-A-162, question to the owner).
+    assert unhandled == {"skill.created", "topic.proposed", "skill.merged", "material.parsed"}
