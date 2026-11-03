@@ -1331,6 +1331,37 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 
 - Требует подтверждения владельцем: нет
 
+### D-B-185. Гигиена графа `graph.hygiene` (WP16.3)
+- Класс: B
+- WP / место: WP16.3, `Т-§4.10`, `Т-§22.10`, `T-AG4`; `quack/agents/hygiene.py`, `config.py` (блок B)
+- Решение: подграф домена — два Cypher-чтения (навыки `provisional`/`active` с векторами и соседями `REQUIRES`/`COVERS`; заблуждения этих навыков). Кандидат в дубли навыков — косинус + `hygiene_neighbour_weight` (0.1) × доля общих соседей (Жаккар), порог `hygiene_min_score` (0.9); заблуждения — косинус в пределах навыка, тот же порог. Один вызов `builder@1`, режим Hygiene. Дубль с временным навыком — `skill.merged` (временный в другой); два активных — `skill.merge_suggested`; заблуждения — `misconception.merged`. Цель слияния равных — меньший id; узел сливается раз за прогон. Нагрузка задачи — `domain_id`.
+- Почему: в ТЗ порога нет — свои параметры B (§0.4.3 п.5). `networkx` не в зависимостях: множества соседей — на Python; хабы Louvain — позже (`Т-§22.10`).
+- Тесты: `tests/agents/test_hygiene.py::test_hygiene_merges_only_provisional`; Cypher проверен на пустом Neo4j.
+- Не решено \[ПРОВЕРИТЬ\]: строка диспетчера `session.ended` ждёт фактов A (временные сущности, счётчики) — пока задачу никто не ставит; перенос проявлений и сопротивлений на цель (`Т-§9.3`) — проекция A по `misconception.merged`.
+### D-B-184. Подготовка «Сегодня» `today.prepare` (WP16.8)
+- Класс: B
+- WP / место: WP16.8, `Т-§14.4`, `T-RV2`; `quack/agents/today.py`
+- Решение: триггер `today.shown`. Для каждого пункта уровень — граница навыка по уровням хабов (все уровни без хаба), кандидаты банка — `select_tasks`, не больше `label_max_tasks // число пунктов`. Один вызов `today_planner`; метки вне кандидатов отбрасываются. Черновой план — `content.session_plans` со статусом `prepared` под id сессии `uuid5(learner, "today:{trigger}:{skill}")`; `generate` — `agent.requested {task_generation}`. План и запросы — одной транзакцией; повтор ничего не пишет.
+- Почему: §0.4.3 п.2, закон 5, закон 7.
+- Тесты: `tests/agents/test_today.py` (1).
+- Не решено \[ПРОВЕРИТЬ\]: маршруты сессий ещё на Фазе 3 — `POST /v1/sessions {today_item}` план пока не берёт (перенос — G3); карточки — `(none)`.
+### D-B-183. Задачи проверок: `check.symbolic`, `check.model`, `task.check`
+- Класс: B
+- WP / место: WP11.3, WP11.6, WP12.5, строки WP7.1; `quack/practice/jobs.py`
+- Решение: обработчики читают нагрузку строки (`answer_seq`, `part`; `task_ids`) и вызывают готовые тела (`insure_symbolic`, `check_with_model` + `record_verdict`, `check_teacher_task`). Для `check.model` известные заблуждения и состояния проверяемых уровней берутся из среза S4 для навыков разметки задачи; `failed` — есть ли `check.failed` этого ответа и части; уже записанный вердикт — выход (закон 5). Для `task.check` имена проверяемых навыков берутся из среза сессии хода. Виды — в реестре по процедуре (б) #173.
+- Почему: §0.4.3 п.2, п.5.
+- Тесты: тела покрыты своими тестами; T-Q7 зелёный.
+- Не решено \[ПРОВЕРИТЬ\]: `task.solution_space`, `agent.task_generation`, `agent.solution_space`, `check.known_claim` — после #144 и #148 (их тела там); `second_opinion.diagnosis` — следующий шаг B.
+### D-B-179. Описание заблуждения на фактах S4 (WP16.2)
+- Класс: B
+- WP / место: WP16.2, WP7.1, `Т-§9.3`, `T-AG2`; `quack/agents/misconception_describe.py` (`describe_misconception`, `render_manifestations`, `run_misconception_describe`)
+- Контекст: A выложила `MisconceptionDetail` и `ManifestationFact` (#170) и ответила, что `workers` получает читателя фабрикой `create_graph_reader(ctx.neo4j, ctx.settings)` (#155). Своя модель `DescriberInput` из D-B-175 (д) больше не нужна. Открытые места: у `ManifestationFact.quote` бывает `None`; порядок проявлений с одинаковым временем не задан.
+- Решение: (а) Модуль принимает `MisconceptionDetail | None` от A напрямую; `DescriberInput` и `Manifestation` удалены. Статус `unknown` (гипотеза до первого проявления) — выход без вызова, как и всё вне трёх подтверждённых. (б) Порядок — по `at_ms`, при равенстве по `source_seq`: вход детерминирован (закон 5). (в) Проявление без цитаты — строка «no quote», а не пустые кавычки. (г) `run_misconception_describe(job, ctx, reader)` берёт `misconception_id` и `trigger_seq` из нагрузки строки WP7.1, домен — из события-триггера. Читатель — параметр: тест подставляет `FixedGraphReader`, а регистрация с `create_graph_reader` — после выбора процедуры реестра видов в #173 (T-Q7: обработчик вида, которого нет в `JOB_KINDS`, роняет `test_all_job_kinds_have_handlers`).
+- Почему: §0.4.3 п.2 (WP16.2, `Т-§9.3`), п.5.
+- Обратимость: один модуль.
+- Тесты: `tests/agents/test_misconception_describe.py` (5); мутация «сортировка только по `at_ms`» — тест падает.
+- Регистрация (процедура (б) A в #173, сигнатура фабрики D-A-144): `misconception.describe` и `extract.episode` — в `JOB_KINDS`, `KIND_LLM_ROLES` (роли из `rules_p4.JOB_KIND_SPECS`) и `HANDLER_MODULES`. Обработчики строят читателя `create_graph_reader(ctx.neo4j, ctx.settings, learner_id=job.learner_id)`. Ревью строк реестра — за A.
+- Не решено \[ПРОВЕРИТЬ\]: до слияния #179 (`misconception_detail`, `extraction_candidates` на Neo4j) задачи этих видов падают на `NotImplementedError` и уходят в повторы.
 ### D-B-177. Строитель визуализаций: задача `agent.viz` (WP16.5)
 - Класс: B
 - WP / место: WP16.5, `Т-§13.6`, `Т-§22.10`, `Т-§13.7`, `Т-§13.9`, `T-AG6`, закон 5; `quack/agents/viz.py` (`build_viz`, `handle_viz`, `param_sets`, `libraries_block`), `quack/config.py` блок B (`viz_libraries`)
@@ -1348,7 +1379,8 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (WP16.1, `Т-§13.5`), п.5.
 - Обратимость: один модуль.
 - Тесты: `T-AG1` — `tests/agents/test_analyst.py` (2); мутации (`request_id` случайный, `needed_in_session`, без `prompt_role`, `as_of_seq`) — тесты падают.
-- Не решено \[ПРОВЕРИТЬ\]: обработчики `analyst.run`, `analyst.deep` и отрисовка блоков памяти — после PR A с чтениями S4 и ответа о `GraphReader` в `workers` (#155).
+- Задача (D-B-179 рег.): `analyst.run`/`analyst.deep` зарегистрированы. Триггер даёт домен и сессию; триггер вне сессии домена — ничего не пишет. Фокус — навыки из `observation.extracted` сессии. Блоки рисуются здесь же, коротко: `agents` не импортирует `session` (§4.1). Цели — из `domain_goals`, профиль — из `profile`, план — из `content.session_plans`.
+- Не решено \[ПРОВЕРИТЬ\]: строки триггеров без сессии (проявления заблуждения вне хода) аналитика не запускают.
 ### D-B-175. Описание заблуждения (WP16.2)
 - Класс: B
 - WP / место: WP16.2, `Т-§9.3`, `Т-§9.2`, `T-AG2`, законы 5 и 10; `quack/agents/misconception_describe.py` (`describe_misconception`, `render_manifestations`, `DescriberInput`); факты — `GraphReader.misconception_detail` A (ответ A в #155, сигнатура — в PR A)

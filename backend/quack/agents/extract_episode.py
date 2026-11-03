@@ -63,10 +63,10 @@ from quack.graph.evidence_validation import (
     EpisodeSource,
     check_extracted,
 )
-from quack.graph.read import CandidateSkill, GraphReader, MisconceptionFact
+from quack.graph.read import CandidateSkill, GraphReader, MisconceptionFact, create_graph_reader
 from quack.jobs.coverage import mark_covered
 from quack.jobs.queue import ClaimedJob
-from quack.jobs.runner import JobContext
+from quack.jobs.runner import JobContext, register_job_handler
 from quack.llm.gateway import LLMGateway
 from quack.llm.labels import LabelMap
 from quack.practice.repo import event_by_seq, session_events_up_to, task_events
@@ -599,3 +599,11 @@ async def run_extract_episode(job: ClaimedJob, ctx: JobContext, reader: GraphRea
         learner_id=job.learner_id,
         trigger=ExtractionTrigger.from_payload(job.payload),
     )
+
+
+@register_job_handler("extract.episode")
+async def handle_extract_episode(job: ClaimedJob, ctx: JobContext) -> None:
+    if job.learner_id is None:
+        raise ValueError("extract.episode needs learner_id")
+    reader = create_graph_reader(ctx.neo4j, ctx.settings, learner_id=job.learner_id)
+    await run_extract_episode(job, ctx, reader)

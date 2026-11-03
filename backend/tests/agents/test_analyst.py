@@ -237,3 +237,59 @@ async def test_analyst_no_previous_digest(pg_db: Db) -> None:
     assert gateway.calls[-1]["role"] == "analyst_deep"
     assert gateway.calls[-1]["prompt_role"] == "analyst"
     assert deep[0].seq != digest.seq
+
+
+async def test_analyst_job_reads_memory_for_the_session(pg_db: Db) -> None:
+    """The job: the trigger of a session gives domain and session; blocks come from S4 (the
+    goals, the profile, the slice); a trigger outside a session writes nothing."""
+    from types import SimpleNamespace
+
+    from quack.agents.analyst import analyst_job
+    from quack.events.log import NewEvent, append_events
+    from quack.jobs.queue import ClaimedJob
+    from quack.jobs.runner import JobContext
+    from tests.support import graph_read as fx
+
+    learner_id = await create_learner(pg_db)
+    session_id = uuid4()
+    with_session, without = await append_events(
+        pg_db,
+        learner_id,
+        [
+            NewEvent(
+                type=t,
+                payload={"session_id": str(session_id), "reason": "done"},
+                actor="learner",
+                idempotency_key=f"end:{uuid4()}",
+                domain_id=fx.DOMAIN,
+                session_id=s,
+            )
+            for t, s in (("session.ended", session_id), ("session.ended", None))
+        ],
+    )
+    gateway = _Gateway(_output())
+    ctx = cast(JobContext, SimpleNamespace(db=pg_db, llm=gateway, settings=SETTINGS))
+
+    def job(seq: int) -> ClaimedJob:
+        return ClaimedJob(
+            id=uuid4(),
+            kind="analyst.run",
+            learner_id=learner_id,
+            lock_key="a",
+            coalesce_key=None,
+            priority=0,
+            payload={"trigger_seq": seq},
+            attempt=1,
+            max_attempts=3,
+        )
+
+    reader = fx.FixedGraphReader()
+    assert await analyst_job(job(without.seq), ctx, reader, learner_id=learner_id, deep=False) == []
+    written = await analyst_job(
+        job(with_session.seq), ctx, reader, learner_id=learner_id, deep=True
+    )
+    assert written[0].type == "digest.written" and written[0].session_id == session_id
+    variables = gateway.calls[0]["variables"]
+    assert 'Hub "fractions exam"' in variables["goals"]
+    assert "Preference language: ru" in variables["profile"]
+    assert gateway.calls[0]["role"] == "analyst_deep"
