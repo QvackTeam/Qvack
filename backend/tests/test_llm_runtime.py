@@ -221,39 +221,50 @@ async def _rows(db: SessionFactory, sql: str, **params: Any) -> list[Any]:
         return list((await session.execute(text(sql), params)).all())
 
 
-class TimedProvider:
-    """Provider with a delay that records `(model, start, end)` of every call (T-L1)."""
+class CountingProvider:
+    """Provider that counts the calls running at once, per model and in all (T-L1). A call
+    holds until `together` calls run at once or `hold` seconds pass: overlap is waited for,
+    not hoped for from the scheduler, and a semaphore that keeps calls apart only costs `hold`."""
 
-    def __init__(self, delay: float) -> None:
-        self.delay = delay
-        self.spans: list[tuple[str, float, float]] = []
+    def __init__(self, together: int, hold: float = 2.0) -> None:
+        self.together = together
+        self.hold = hold
+        self.running: dict[str, int] = {}
+        self.peak: dict[str, int] = {}
+        self.peak_all = 0
+        self._all_in = asyncio.Event()
 
     async def complete_structured(self, request: ProviderRequest) -> ProviderResponse:
-        start = time.monotonic()
-        await asyncio.sleep(self.delay)
-        self.spans.append((request.model, start, time.monotonic()))
-        return ProviderResponse('{"label": "ok"}', 10, 5, 0, request.model)
+        model = request.model
+        self.running[model] = self.running.get(model, 0) + 1
+        self.peak[model] = max(self.peak.get(model, 0), self.running[model])
+        running_all = sum(self.running.values())
+        self.peak_all = max(self.peak_all, running_all)
+        if running_all >= self.together:
+            self._all_in.set()
+        try:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._all_in.wait(), self.hold)
+        finally:
+            self.running[model] -= 1
+        return ProviderResponse('{"label": "ok"}', 10, 5, 0, model)
 
 
 async def test_semaphores_are_per_model_and_role(
     db: SessionFactory, role_prompts: PromptRegistry
 ) -> None:
-    """T-L1."""
+    """T-L1: limits per model and process role — counted, not timed."""
     limits = {"workers": {SPARK: 1, WONDER: 1}, "api": {SPARK: 3, WONDER: 1}}
-    provider = TimedProvider(0.1)
+    provider = CountingProvider(together=3, hold=1.0)  # 3 only if a limit is broken
     gw = _gw(db, provider, role_prompts, process_role="workers", llm_concurrency=limits)
     await asyncio.gather(_ask(gw), _ask(gw), _ask(gw, "teacher"))
-    spark = sorted((s, e) for m, s, e in provider.spans if m == SPARK)
-    [(w_start, w_end)] = [(s, e) for m, s, e in provider.spans if m == WONDER]
-    assert spark[1][0] >= spark[0][1]  # the two spark calls ran one after the other
-    assert w_start < spark[0][1] and spark[0][0] < w_end  # wonder ran next to them
+    assert provider.peak == {SPARK: 1, WONDER: 1}  # the two spark calls one after the other
+    assert provider.peak_all == 2  # wonder ran next to a spark call
 
-    api = TimedProvider(0.1)
+    api = CountingProvider(together=3)
     gw_api = _gw(db, api, role_prompts, process_role="api", llm_concurrency=limits)
     await asyncio.gather(*(_ask(gw_api) for _ in range(3)))
-    starts = sorted(s for _, s, _ in api.spans)
-    ends = sorted(e for _, _, e in api.spans)
-    assert starts[-1] < ends[0]  # api: three spark calls at once
+    assert api.peak == {SPARK: 3}  # api: three spark calls at once
 
 
 async def test_hard_call_takes_the_hard_model(

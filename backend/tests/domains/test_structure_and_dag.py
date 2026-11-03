@@ -35,10 +35,11 @@ from quack.graph.neo4j_store import Neo4jGraphStore
 from quack.graph.worker import ProjectorWorker
 from quack.llm.errors import ProviderUnavailableError
 from tests.domains.conftest import FakeLLMProvider
+from tests.support.auth import session_cookie
 
 
 def _auth(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+    return session_cookie(token)
 
 
 async def _query_rows(db: SessionFactory, sql: str, **params: Any) -> list[dict[str, Any]]:

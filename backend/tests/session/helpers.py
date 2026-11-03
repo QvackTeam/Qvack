@@ -1,4 +1,4 @@
-"""Plain helpers of the session stream tests: JWT for a learner, an SSE body parser and the
+"""Plain helpers of the session stream tests: an SSE body parser and the
 labels the teacher sees (WP14.1)."""
 
 from __future__ import annotations
@@ -7,23 +7,10 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
-import jwt
 import orjson
 
-from quack.config import Settings
 from quack.db.postgres import SessionFactory
 from quack.session.turns import get_available_tasks
-
-DEV_JWT_SECRET = "quack-dev-jwt-secret"
-
-
-def jwt_secret(settings: Settings) -> str:
-    """The HS256 secret of ТЗ §2.1."""
-    return settings.jwt_secret.get_secret_value() or DEV_JWT_SECRET
-
-
-def make_token(settings: Settings, learner_id: UUID) -> str:
-    return jwt.encode({"sub": str(learner_id)}, jwt_secret(settings), algorithm="HS256")
 
 
 def parse_sse(body: str | bytes) -> list[tuple[str, dict[str, Any]]]:

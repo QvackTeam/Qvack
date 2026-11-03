@@ -377,46 +377,6 @@
         "title": "ArtifactView",
         "type": "object"
       },
-      "AuthResponse": {
-        "properties": {
-          "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
-          },
-          "email": {
-            "title": "Email",
-            "type": "string"
-          },
-          "learner_id": {
-            "format": "uuid",
-            "title": "Learner Id",
-            "type": "string"
-          },
-          "preferences": {
-            "additionalProperties": true,
-            "title": "Preferences",
-            "type": "object"
-          },
-          "token": {
-            "title": "Token",
-            "type": "string"
-          }
-        },
-        "required": [
-          "token",
-          "learner_id",
-          "email"
-        ],
-        "title": "AuthResponse",
-        "type": "object"
-      },
       "Block": {
         "additionalProperties": false,
         "description": "П-9.4: task (condition and room for the solution), visualization, hint, reference card.",
@@ -1721,47 +1681,6 @@
         "title": "LearnerLayer",
         "type": "object"
       },
-      "LearnerMeResponse": {
-        "properties": {
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
-          },
-          "email": {
-            "title": "Email",
-            "type": "string"
-          },
-          "learner_id": {
-            "format": "uuid",
-            "title": "Learner Id",
-            "type": "string"
-          },
-          "preferences": {
-            "additionalProperties": true,
-            "title": "Preferences",
-            "type": "object"
-          }
-        },
-        "required": [
-          "learner_id",
-          "email",
-          "created_at"
-        ],
-        "title": "LearnerMeResponse",
-        "type": "object"
-      },
       "LearnerSettings": {
         "properties": {
           "settings": {
@@ -1816,26 +1735,6 @@
           }
         },
         "title": "LinkSent",
-        "type": "object"
-      },
-      "LoginRequest": {
-        "properties": {
-          "email": {
-            "minLength": 1,
-            "title": "Email",
-            "type": "string"
-          },
-          "password": {
-            "minLength": 1,
-            "title": "Password",
-            "type": "string"
-          }
-        },
-        "required": [
-          "email",
-          "password"
-        ],
-        "title": "LoginRequest",
         "type": "object"
       },
       "Mark": {
@@ -2516,42 +2415,6 @@
           "skill_deps"
         ],
         "title": "ProposeStructureResponse",
-        "type": "object"
-      },
-      "RegisterRequest": {
-        "properties": {
-          "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name"
-          },
-          "email": {
-            "minLength": 1,
-            "title": "Email",
-            "type": "string"
-          },
-          "password": {
-            "minLength": 8,
-            "title": "Password",
-            "type": "string"
-          },
-          "preferences": {
-            "additionalProperties": true,
-            "title": "Preferences",
-            "type": "object"
-          }
-        },
-        "required": [
-          "email",
-          "password"
-        ],
-        "title": "RegisterRequest",
         "type": "object"
       },
       "Scaffold": {
@@ -4231,7 +4094,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "422": {
             "content": {
@@ -4292,7 +4155,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -4385,7 +4248,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -4486,7 +4349,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -4611,7 +4474,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "422": {
             "content": {
@@ -4637,189 +4500,6 @@
         "summary": "Search Artifacts",
         "tags": [
           "artifacts"
-        ]
-      }
-    },
-    "/v1/auth/login": {
-      "post": {
-        "operationId": "login_endpoint_v1_auth_login_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoginRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "VALIDATION_ERROR"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "RATE_LIMITED; details.retry_after_sec"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
-          }
-        },
-        "summary": "Login Endpoint",
-        "tags": [
-          "domains"
-        ]
-      }
-    },
-    "/v1/auth/me": {
-      "get": {
-        "operationId": "me_endpoint_v1_auth_me_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LearnerMeResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
-          }
-        },
-        "summary": "Me Endpoint",
-        "tags": [
-          "domains"
-        ]
-      }
-    },
-    "/v1/auth/register": {
-      "post": {
-        "operationId": "register_endpoint_v1_auth_register_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RegisterRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "VALIDATION_ERROR"
-          },
-          "429": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "RATE_LIMITED; details.retry_after_sec"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
-          }
-        },
-        "summary": "Register Endpoint",
-        "tags": [
-          "domains"
         ]
       }
     },
@@ -4857,7 +4537,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -4928,7 +4608,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -5009,7 +4689,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -5092,7 +4772,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "422": {
             "content": {
@@ -5151,7 +4831,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -5234,7 +4914,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5317,7 +4997,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5410,7 +5090,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5493,7 +5173,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5596,7 +5276,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5699,7 +5379,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5814,7 +5494,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5897,7 +5577,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -5970,7 +5650,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6051,7 +5731,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6154,7 +5834,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6257,7 +5937,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6360,7 +6040,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6463,7 +6143,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6556,7 +6236,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6637,7 +6317,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -6708,7 +6388,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -6789,7 +6469,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -6862,7 +6542,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "503": {
             "content": {
@@ -6915,7 +6595,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -6976,7 +6656,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "503": {
             "content": {
@@ -7062,7 +6742,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "422": {
             "content": {
@@ -7148,7 +6828,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "422": {
             "content": {
@@ -7204,7 +6884,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "409": {
             "content": {
@@ -7280,7 +6960,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "503": {
             "content": {
@@ -7330,7 +7010,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7410,7 +7090,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7504,7 +7184,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7584,7 +7264,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7674,7 +7354,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7764,7 +7444,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7877,7 +7557,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -7990,7 +7670,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -8094,7 +7774,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -8184,7 +7864,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -8265,7 +7945,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -8348,7 +8028,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {
@@ -8451,7 +8131,7 @@
                 }
               }
             },
-            "description": "UNAUTHORIZED: missing, invalid or revoked token"
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
           },
           "404": {
             "content": {

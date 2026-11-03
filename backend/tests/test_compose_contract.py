@@ -93,14 +93,7 @@ def test_compute_gets_no_secrets_and_projector_no_model_key(compose: dict[str, A
     compute = set(compose["services"]["compute"]["environment"])
     assert compute <= {"LOG_LEVEL"}
     projector = set(compose["services"]["projector"]["environment"])
-    assert not projector & {"META_API_KEY", "JWT_SECRET", "COMPUTE_URL"}
-
-
-def test_only_api_has_the_jwt_secret(compose: dict[str, Any]):
-    holders = {
-        n for n, s in compose["services"].items() if "JWT_SECRET" in s.get("environment", {})
-    }
-    assert holders == {"api"}
+    assert not projector & {"META_API_KEY", "COMPUTE_URL"}
 
 
 def test_backup_is_short_lived_and_never_started_by_up(compose: dict[str, Any]):

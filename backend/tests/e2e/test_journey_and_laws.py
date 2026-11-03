@@ -266,10 +266,9 @@ async def test_account_deletion_end_to_end(system: System) -> None:
     if system.redis is not None:
         assert await system.redis.get(f"presence:learner:{learner_id}") is None
 
-    login = await system.client.post(
-        "/v1/auth/login", json={"email": j.learner.email, "password": j.learner.password}
-    )
-    assert login.status_code == 401, login.text
+    # The session of the purged learner is refused (`/v1/auth/login` is removed, D-A-113).
+    after = await system.client.get("/v1/domains", headers=j.learner.headers)
+    assert after.status_code == 401, after.text
 
 
 async def _empty_snapshot(system: System) -> object:
