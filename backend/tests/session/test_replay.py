@@ -141,6 +141,7 @@ async def test_replay_builds_the_turn_offline_and_writes_no_event(
 
     report = await replay_session(
         pg_db,
+        learner_id=learner_id,
         session_id=session_id,
         teacher="teacher@2",
         llm=LLMGateway(db, provider, SETTINGS),

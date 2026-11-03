@@ -55,8 +55,11 @@ _MANIFESTS = (
     "e.seq AS turn_seq, e.domain_id, e.payload "
     "FROM ops.turn_manifests m JOIN core.events e ON e.learner_id = m.learner_id "
     "AND e.type = 'turn.committed' AND e.payload->>'manifest_id' = m.manifest_id::text "
-    "WHERE m.session_id = %(session_id)s ORDER BY e.seq"
+    "WHERE m.learner_id = %(learner_id)s AND m.session_id = %(session_id)s ORDER BY e.seq"
 )
+# The operator names only the session (`ops replay-session --session`): its learner is found by
+# the id, as auth finds the learner of a token (D-B-194, cross-learner by design).
+_SESSION_LEARNER = "SELECT learner_id FROM content.sessions WHERE session_id = %(session_id)s"
 # What the replay does not restore of the situation (law 8: said, not silently empty).
 NOT_RESTORED: tuple[str, ...] = (
     "misconceptions of the memory slice (state_at replays skills only)",
@@ -281,9 +284,16 @@ def _summary(turns: list[dict[str, Any]], total: int) -> dict[str, Any]:
     }
 
 
+async def session_learner(db: Db, session_id: UUID) -> UUID | None:
+    """The learner of a session for the operator command, which names only the session."""
+    row = await db.fetch_one(_SESSION_LEARNER, {"session_id": session_id})
+    return None if row is None else row["learner_id"]
+
+
 async def replay_session(
     db: Db,
     *,
+    learner_id: UUID,
     session_id: UUID,
     teacher: str,
     llm: LLMGateway,
@@ -296,13 +306,14 @@ async def replay_session(
     """Replay every teacher turn of `session_id` with the prompt `teacher` (`name@N`, the
     `teacher` role's template) and write the report to `out`; returns the report.
 
-    `reader(learner_id)` must be bound to `db` (`create_graph_reader(..., db=db)`: `state_at`
+    `learner_id` — the session's learner (`session_learner`). `reader(learner_id)` must be
+    bound to `db` (`create_graph_reader(..., db=db)`: `state_at`
     replays the log of Phase 4). A turn that fails (the model, the context) is in the report
     with its error and does not stop the rest. Nothing is written to `core.events`."""
     name, version = parse_prompt_ref(teacher)
     llm.prompts.load(name, version)  # an unknown prompt fails before any model call
     replayed = _with_teacher(settings, teacher)
-    rows = await db.fetch_all(_MANIFESTS, {"session_id": session_id})
+    rows = await db.fetch_all(_MANIFESTS, {"learner_id": learner_id, "session_id": session_id})
     turns: list[dict[str, Any]] = []
     for row in rows:
         try:
