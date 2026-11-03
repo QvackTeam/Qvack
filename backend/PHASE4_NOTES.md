@@ -1094,6 +1094,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `T-X1` — `tests/agents/test_extract_episode.py::test_extracted_elements_checked_on_the_episode`, `test_record_extraction`, `test_record_extraction_commits_nothing_on_failure`.
 - Не решено \[ПРОВЕРИТЬ\]: потолок уровня — по задаче целиком, не по части (`part`) ответа; задача `extract.episode` (сборка окна из журнала, кандидаты из S4, `task_tests` из `content.tasks`) — следующим шагом WP15.
 - Требует подтверждения владельцем: нет
+### D-B-168. Генерация задач (WP12.6)
+- Класс: B
+- WP / место: WP12.6, `Т-§5.4`, `Т-§5.6`, `Т-§11.1`; `quack/practice/task_generation.py` (`generate_tasks`, `GenerationRequest`); `markup_record` перенесён из `quack/session/turn_commit.py` в `quack/practice/markup.py` (generation в `practice` не может импортировать `session`, §4.1)
+- Контекст: WP12.6 — `task_generator` (Spark; `proof` и уровень 6 — Wonder), варианты одного шага — общий `familyId`; переиспользовать генерацию Фазы 3, новое — проверка `task_checker`/`task_arbiter`. Код Фазы 3 (`quack/practice/generation.py`, вызов в `quack/artifacts/practice.py` — зона C) пишет `core.task_bank` и уходит с WP1.3. Не названы: что делать с вариантом, чья разметка нарушает `Т-§5.3`; идентификаторы задач и семейства при повторе; что делать с частью вариантов, не прошедших проверку.
+- Решение: (а) новый модуль на `content.tasks` + `task.created` (WP12.1): вызов с `check` — нарушения `validate_markup` уходят модели один раз; вариант, неверный и после повтора, отбрасывается без проверки. (б) Каждый вариант — `verify_generated` (D-B-167) с ключом `{ключ запроса}:{номер}`; не прошёл — выброшен, остальные сохраняются. (в) `familyId` и `task_id` — `uuid5` от ключа запроса (и номера): повтор задачи пишет те же события (закон 5). (г) Сохранённое — `source: generated`, `verification: checked`, актор — `task_generator@1`. (д) Сложный вызов — `hard=True` при `proof` или уровне 6 (D-B-166). Переименование `task_gen` → `task_generator` в `quack/artifacts/practice.py` — зона C, не трогаю (код уходит с WP1.3).
+- Почему: §0.4.3 п.2 (WP12.6, `Т-§5.4`, `Т-§5.6`), п.5.
+- Обратимость: один модуль.
+- Тесты: `tests/practice/test_task_generation.py` (5).
+- Не решено \[ПРОВЕРИТЬ\]: потребители (подбор при пустом банке, поручения учителя `agent.task_generation`, пробники, «я это уже знаю», карточки C) подключаются своими WP; источник `course_context`, `excluded_families` — при сборке входов.
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -1423,6 +1434,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP12.6, генерация задач (D-B-168): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 7 подмен, каждая роняет тест. Зелёный: `tests/practice/test_task_generation.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 5 passed.
 - WP12.5, проверка задачи учителя (D-B-167): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 11 подмен, каждая роняет тест. Зелёный: `tests/practice/test_task_check.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 4 passed.
 - WP12.4, пространство решения (D-B-166): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 7 подмен (без `proof`, без уровня 6, метка вместо id, повторная постройка, без `IS NULL`, без LaTeX условия, `hard=False`), каждая роняет тест. Зелёный: `tests/test_llm_runtime.py`, `tests/practice`, `tests/llm`, `tests/test_settings_meta_api.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/e2e/test_llm_seams_e2e.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 272 passed.
 - WP15 п.4–5, проверка и запись (D-B-165): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 8 подмен (без транзакции, `causation_seq`, `observation_seq`, вердикт code, окно вместо эпизода, `min` вместо `max`, текст ответа, текст строки канваса), каждая роняет тест. Зелёный: `tests/agents`, `tests/graph/test_extracted_check.py`, `tests/jobs/test_coverage.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 34 passed.
