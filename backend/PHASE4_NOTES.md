@@ -1418,6 +1418,31 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: нет (п.3 — D-C-122 п.4).
 
+### D-C-127. WP20.4: предвыборка кусков по графу и векторный поиск по `chunk_emb`
+- Класс: B
+- WP / место: WP20.4; `quack/graph/read/materials.py`, `quack/config.py` (`vector_search_reserve`)
+- Контекст: WP20.4 называет `materials_prefetch(skills)` и `materials_search(vector, skills)`. `Т-§10.5` фильтрует поиск «по ученику и домену», WP20.4 — по `learnerId` и `searchable`. Имя материала у узла `Material` и порядок кусков в предвыборке не названы.
+- Решение:
+  1. Обе функции принимают `learner_id` (и `domain_id` у поиска) явно: изоляция (§4.3) — в запросе, сборка инструментов учителя привязывает их к ученику хода.
+  2. Фильтр внутри индекса — `learnerId`, `domainId`, `searchable` (все три объявлены у `chunk_emb`, `Т-§3.4.6`; только равенства через AND). Запасной путь не нужен: WP0 п.3а «работает».
+  3. Запас внутри `SEARCH` — параметр `vector_search_reserve = 30` (`Т-§3.4.6`, `Т-§10.5`; закон о числах в конфиге). `SEARCH` принимает предел литералом — подставляется целое из настроек, не ввод.
+  4. Порядок поиска: куски, учащие навыку в фокусе (`TEACHES`), выше любых других, внутри — по близости; итог — `k` (`materials_k`). Предвыборка: больше навыков фокуса — раньше, затем материал и страница.
+  5. Ответ — `ChunkHit {chunk_id, material_id, page, text, teaches_focus, score}`. Имени материала нет: у `Material` в `Т-§3.4` свойства не названы, в `content.materials` колонки имени нет. Закрыто D-B-171 (#153): `MaterialChunk.material_name` необязателен, источник — метка куска и страница.
+- Почему: WP20.4, `Т-§10.5`, `Т-§3.4.6`, WP0 п.3а.
+- Обратимость: один модуль чтения.
+- Тесты: `tests/materials/test_materials_search_wp20.py` (Neo4j).
+### D-C-128. WP22.1: привязка телефона — токен, обмен, область `companion`
+- Класс: B
+- WP / место: WP22.1, §6.4 «Вход» и «Канвас»; `quack/auth/pairing.py`, `quack/auth/router.py`, `quack/api/auth.py`, `quack/api/openapi.py`
+- Контекст: WP22.1, `Т-§16.1`, `T-CP1` («любой другой эндпоинт → 403»). Таблица — `core.pairing_tokens` (D-A-128, #142). Код ошибки для 403 и место проверки области не названы; §4.5 запрещает новые коды.
+- Решение:
+  1. `POST /v1/canvases/{id}/pairing` (сессия `full`): токен 128 бит (`new_token`), в базе хэш, срок `pairing_ttl_s`; сессия и задача — из канваса (`content.canvas_boards`, свой SQL пакета `quack.auth`, §4.1). Чужой канвас или канвас без сессии — 404. Ключа идемпотентности нет: каждый вызов выдаёт новый одноразовый токен, события нет (исключение `T-E2`).
+  2. `POST /companion/pair {token}` — публичный маршрут: погашение одним `UPDATE … SET used_at … WHERE used_at IS NULL AND expires_at > now RETURNING` и сессия `companion` этого канваса — одна транзакция; кука — как у обычного входа (`Т-§19.1`). Неизвестный, использованный или истёкший токен — `401 UNAUTHENTICATED`. Ключ погашения — в `CROSS_LEARNER_ALLOWED` (согласовано в #142).
+  3. Область: `get_current_session` пропускает только `full`; сессия `companion` на любом маршруте за ней — `403 UNAUTHORIZED` (код Фазы 3, §4.5 «остальные коды не меняются»). Сокет канваса проверяет область сам (`may_open`, D-C-121); загрузка снимков (WP22.2) получит свою зависимость «`full` или `companion` этого канваса».
+- Почему: WP22.1, `Т-§16.1`, `T-CP1`, §4.5.
+- Обратимость: одна зависимость, один модуль.
+- Тесты: `tests/auth/test_pairing_wp22.py` (`T-CP1`); маршруты — `T-A1`, исключение — `T-E2`.
+- Требует подтверждения владельцем: нет.
 ### D-C-133. Открытые вопросы C к владельцу, решённые по документам (владелец поручил C, 2026-11-03)
 - Класс: B (значения конфигурации и эксплуатации); решения приняты C по прямому поручению владельца («детально сверяешься с документацией и принимаешь решение сама»)
 - WP / место: §6.7, WP18, WP19, WP24; `compose.yaml`, `deploy/env.example`, `compute/quack_compute/tmp_sweeper.py`, `compute/quack_compute/settings.py`
@@ -1447,6 +1472,29 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Обратимость: если владелец решит иначе — новая версия схемы `observation.diagnosed` и правило WP5.1 (класс C, §0.4.4 п.2).
 - Тесты: в WP21.4 (C) — строка без ошибки не пишет `observation.diagnosed`; диагноз с ошибкой пишет `gap_type ≠ none`.
 - Требует подтверждения владельцем: нет (поручено решить C).
+
+### D-C-132. Слой 1 ролей C — черновики по тезисам документа (решение владельца передано C, 2026-11-03)
+- Класс: C (процесс §7.6 п.1, §0.4.4 п.13) — решение принято C по прямому поручению владельца («детально сверяешься с документацией и принимаешь решение сама», 2026-11-03)
+- WP / место: §7.6; `quack/prompts/recognizer/v1.md` (BLOCKED-C-202), `quack/prompts/artifact_writer/v1.md` (BLOCKED-C-203)
+- Контекст: слой 1 — «только из пакета владельца» (§7.6 п.1). Пакета для ролей C нет; владелец поручил C решить самой. Прецедент — D-B-132: слой 1 восьми ролей B — черновики стенда, написанные по тезисам документа.
+- Решение: слой 1 ролей C — черновик, каждая фраза которого — тезис первоисточника, без новых правил:
+  - `recognizer@1`: читать, а не решать и не исправлять (`Т-§15.3` «LaTeX или текст»); два поля для математики — LaTeX для показа и SymPy для проверки, SymPy — только если выражение действительно выражение (`Т-§22.7`); английский первым, другие письменности как есть (`Т-§22.2`); честная уверенность — ученик видит прочтение и исправляет одним касанием (П-9.7, `Т-§15.3` «Проверка распознавания»); зачёркнутое читается и помечается (П-9.8 «стёртое хранится», `Т-§15.1`).
+  - `artifact_writer@1` — в PR #139 (D-C-132, вторая часть).
+  - Заглушки сняты, `DOCTRINE_PENDING` пуст, проверка доктрины `T-M5` — обычный тест.
+- Почему: поручение владельца; §7.6 п.1 (тезисы — из документа), прецедент D-B-132.
+- Обратимость: текст слоя 1 одного файла; владелец может заменить своим пакетом — версия промпта до первой выкатки правится на месте (§7.6 п.3).
+- Тесты: `tests/llm/test_labels.py` (`T-M5`, доктрина).
+- Требует подтверждения владельцем: нет (решение передано C).
+
+### D-C-123. WP21.3: роль `recognizer@1` — схема выхода и слой 2 промпта
+- Класс: B (поля схемы); слой 1 — BLOCKED-C-202
+- WP / место: WP21.3, §7.2 S8, §7.3 п.2, §7.6; `quack/canvas/recognition.py`, `quack/prompts/recognizer/v1.md`, регистрация — `tests/llm/prompt_contracts.py` (B, по S8 «регистрирует B», правка — в этом PR с ревью B)
+- Контекст: WP21.3 и `Т-§15.3` называют, что даёт распознаватель строки: «LaTeX или текст, `sympy` (`Т-§22.7`), уверенность, признак зачёркнутого»; событие — `canvas.line_committed {…, text, sympy, kind, recognition_confidence, crossed_out}`. Имена полей выхода роли не названы.
+- Решение: `RecognizerOutput {kind: latex|text, text, sympy: str|null, confidence: 0..1, crossed_out: bool}` — поля один к одному с событием (§0.4.3, «поля, названные в `Т-§`, — с этими именами»): `kind` и `text` → те же поля, `confidence` → `recognition_confidence`, `crossed_out` → `crossed_out`. Перечень `kind` — замороженный S3 (Q-A-3, D-A-119). Режим листа фото (WP22.3: все строки листа за один вызов, с рамкой) — своей схемой в WP22.3, не здесь. Вход — одно изображение строки, текстовых блоков нет. Слой 1 — заглушка с маркером `DOCTRINE_PENDING_MARKER`; `test_prompt_has_owner_doctrine[recognizer@1]` — `xfail(strict=True, reason="BLOCKED-C-202: нет доктрины")` (§7.6 п.5).
+- Почему: §0.4.3 п.2, §7.6 п.1–5, ответ A (2026-11-03: слой 2 пишет C, версия `recognizer@1`).
+- Обратимость: одна модель, один файл промпта.
+- Тесты: `tests/llm/test_labels.py` (`T-M5`, файл контрактов, доктрина — xfail).
+- Требует подтверждения владельцем: нет; слой 1 — пакет владельца (BLOCKED-C-202).
 
 ### D-C-115. WP18: маршруты входа, слои, ответы
 - Класс: B
@@ -1567,11 +1615,15 @@ PR #77 (dbmate v2.36.0, sha256).
 ## Заблокировано
 
 - ~~BLOCKED-B-101…108~~ — сняты 2026-11-02: слой 1 восьми ролей — черновики стенда (D-B-132).
+- ~~BLOCKED-C-202~~ — снят 2026-11-03: слой 1 `recognizer@1` — черновик по тезисам документа (D-C-132).
 
 ## Красные прогоны
 
 - WP20.3, тело `embedding.compute` (C, `phase-4-c-wp20-modal`, коммит `5ff4812`): в Linux `pytest tests/embeddings/test_embedding_compute.py` — ошибка сбора (нет модуля); на неверной реализации (без пропуска готовых узлов) — 1 failed. Зелёный: с `tests/db/test_sql_static.py`, `tests/test_contracts.py` — 14 passed.
 - WP20.3, клиент Modal (C, `phase-4-c-wp20-modal`, коммит `92d406a`): `uv run pytest tests/embeddings` — ошибка сбора (нет `EMBEDDING_APP`, `EMBEDDER_CLASS`, параметра `query_instruction`). На неверной реализации (инструкция у документов; ошибки Modal не переводятся в `EmbeddingsUnavailable`) — по 1 failed. Зелёный: `tests/embeddings` (6, в Linux с `modal/` рядом), `tests/storage/test_s1_resources.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, `tests/test_app_assembly.py` — 46 passed. Правка теста красного коммита: `SecretStr("")` вместо `""` в `model_copy` (ошибка теста, не контракта).
+- WP20.4, поиск кусков (C, `phase-4-c-wp20-search`): красный прогон отдельно не снят (облегчённый TDD). Зелёный: `tests/materials/test_materials_search_wp20.py` + `tests/test_contracts.py` — 9 passed.
+- WP22.1, привязка (C, `phase-4-c-wp22-pairing`): красный прогон отдельно не снят (облегчённый TDD). Зелёный: `tests/auth`, `tests/canvas`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` — зелёные.
+- WP21.3, роль `recognizer@1` (C, `phase-4-c-recognizer`, коммит `bf2b46a`): `pytest tests/llm/test_labels.py -k "recognizer or contracts_file"` — 2 failed (файла промпта нет, `PROMPT_CONTRACTS.md` устарел), 1 xfailed. Зелёный: `tests/llm/test_labels.py` — 59 passed, 1 xfailed (BLOCKED-C-202).
 - Шов S12, изображение во входе (D-B-170): тест и код в одной итерации; 2 подмены (шлюз не передаёт изображения, клиент не строит части) — каждая роняет тест. Зелёный: `tests/test_llm_runtime.py`, `tests/llm`, `tests/test_meta_mock.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 184 passed.
 - WP14.1–WP14.3, слоты, картина памяти, разговор (D-B-157, D-B-158, D-B-159): `uv run pytest tests/session/test_teacher_context.py` — 9 failed (`NotImplementedError`), коммит `8778d96`; на неверной реализации — 30 подмен в трёх модулях, каждая роняет тест (после усиления тестов, см. «Правки тестов»). Зелёный: 10 passed; с `QUACK_TEST_REQUIRE_INFRA=1` вместе с `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/session/test_checkpoint_law10.py`, `tests/session/test_phase4_contracts.py` — зелёные.
 - WP13.10 по ревью C #124 (D-B-155 п.е, п.ж): `uv run pytest tests/session/test_sessions_db.py` — 2 failed (возврат без `resumed: true`; одновременный старт с одним ключом — `IdempotencyConflictError`), коммит `e8c8e77`. Зелёный: 11 passed (с `QUACK_TEST_REQUIRE_INFRA=1`).
@@ -1650,6 +1702,8 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Правки тестов
 
+- `tests/db/test_sql_static.py` (C, WP22.1): в `CROSS_LEARNER_ALLOWED` добавлен `quack/auth/pairing.py:_REDEEM_TOKEN` — согласовано A в #142 (D-A-128).
+- `tests/e2e/endpoints.py`, `tests/test_app_assembly.py` (C, WP22.1): маршруты привязки — в контракте `T-A1`, в `NO_IDEMPOTENCY_KEY` и `NO_BODY` (`T-E2`, `T-E3`).
 - `tests/jobs/test_rules_p4.py::test_handwriting_known_claim_and_reextraction_rows` (A, D-A-135): `skill.split` больше не ставит задачу только по событию. Тест проверяет, что строка — с данными сверх события (по эпизодам, `Т-§2.8`); прежнее утверждение (одна задача без эпизода) расходилось с `Т-§2.8` (§8.15 п.3).
 - `tests/session/test_teacher_context.py::test_conversation_*` (B, D-B-163): строки канваса в слоте 5 — «Canvas line L{N}» вместо «Canvas line N» (метки для `voice_at_line`). Проверка не ослаблена.
 - `tests/session/test_teacher_context.py` (B, D-B-157, D-B-158, до зелёного): четыре подмены прошли (implied и transfer как proven, навык без имени в картине, навык другого домена без доказанного уровня, нумерация строк канваса заново после свёртки). Добавлены `test_memory_picture_status_words`, навык другого домена с провалом в срезе и вторая строка канваса в несвёрнутом ходе. Тесты усилены, не ослаблены.

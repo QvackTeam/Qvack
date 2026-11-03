@@ -29,6 +29,7 @@ from quack.auth.links import (
     redeem_link,
     request_link,
 )
+from quack.auth.pairing import CanvasNotPairable, issue_pairing_token, redeem_pairing_token
 from quack.auth.sessions import cookie_params, open_session, revoke_session
 
 # D-C-115: the state of the Google flow lives in a short cookie of its own.
@@ -80,6 +81,23 @@ class SignedIn(BaseModel):
     """Without `auth_success_redirect_url` (D-C-105) sign-in answers 200 with the cookie."""
 
     learner_id: UUID
+
+
+class PairingIssued(BaseModel):
+    """WP22.1: the frontend builds the QR with a link carrying `token` (Т-§16.1)."""
+
+    token: str
+    expires_at: datetime
+
+
+class PairRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(min_length=1)
+
+
+class Paired(BaseModel):
+    canvas_id: UUID
 
 
 class SignedOut(BaseModel):
@@ -300,3 +318,33 @@ async def delete_research(
         redis=resources.redis,
     )
     return ConsentRecorded(kind="research", version=body.version, given=False)
+
+
+@router.post("/v1/canvases/{canvas_id}/pairing", status_code=201, response_model=PairingIssued)
+async def pairing(canvas_id: UUID, session: Session, resources: Resources) -> PairingIssued:
+    """WP22.1: a one-time pairing token of the learner's canvas (Т-§16.1)."""
+    try:
+        issued = await issue_pairing_token(
+            resources.db,
+            resources.settings,
+            learner_id=session.learner_id,
+            canvas_id=canvas_id,
+            now=_now(),
+        )
+    except CanvasNotPairable as exc:
+        raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
+    return PairingIssued(token=issued.token, expires_at=issued.expires_at)
+
+
+@router.post("/companion/pair", response_model=Paired)
+async def companion_pair(body: PairRequest, request: Request, resources: Resources) -> Response:
+    """WP22.1: the phone exchanges the token for a `companion` session of the canvas (cookie);
+    an unknown, used or expired token — 401."""
+    paired = await redeem_pairing_token(
+        resources.db, resources.settings, token=body.token, now=_now()
+    )
+    if paired is None:
+        return _unauthenticated(request, "pairing token is invalid, used or expired")
+    response = JSONResponse(Paired(canvas_id=paired.canvas_id).model_dump(mode="json"))
+    response.set_cookie(value=paired.token, **cookie_params(resources.settings))
+    return response
