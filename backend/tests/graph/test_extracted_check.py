@@ -138,7 +138,8 @@ def test_negative_elements_need_a_quote_from_their_sources() -> None:
     hypothesis = _el(kind="misconception_hypothesis", misconception="M1", quote="", level=None)
     assert _reasons(hypothesis) == ["missing_quote"]
     new_skill = NewSkill(name="roots", topic_hint="quadratics")
-    assert _reasons(_el(skill=None, new_skill=new_skill, outcome="correct", quote="")) == [
+    positive = {"outcome": "correct", "gap_type": "none"}
+    assert _reasons(_el(skill=None, new_skill=new_skill, quote="", **positive)) == [
         "missing_quote"
     ]  # `Т-§4.4`: a new skill only with a quote
     assert _reasons(_el(quote="x = 3")) == ["quote_not_in_source"]

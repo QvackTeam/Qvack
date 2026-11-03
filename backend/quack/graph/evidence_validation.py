@@ -332,7 +332,12 @@ def _check_element(
 
 def _complete(element: ExtractorElementLike) -> bool:
     """Evidence names exactly one of: a skill label, a new skill, «unclear» (`Т-§7.6`), and has
-    a level and an outcome; a hypothesis names a known misconception or a new wording."""
+    a level and an outcome; a hypothesis names a known misconception or a new wording. Help and
+    gap type agree (WP15 п.3, `Т-§7.6`): only a hint has a step, a positive element has `none`."""
+    if (element.help == "hint") != (element.hint_step is not None):
+        return False
+    if element.outcome == "correct" and element.gap_type != "none":
+        return False
     if element.kind == "misconception_hypothesis":
         return element.misconception is not None or bool((element.new_misconception or "").strip())
     named = [element.skill is not None, element.new_skill is not None, element.skill_unclear]
