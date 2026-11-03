@@ -23,6 +23,7 @@ from quack.graph.projection.mutations import (
     SetProps,
 )
 from quack.graph.projection.types import (
+    REL_IDENTITY,
     NodeRecord,
     NodeRef,
     Props,
@@ -148,6 +149,8 @@ class BatchSlice:
         self._events: dict[int, StoredEvent] = {e.seq: e for e in events}
         self._nodes: dict[NodeRef, Props] = {(n.label, n.id): dict(n.props) for n in loaded.nodes}
         self._rels: dict[RelKey, RelRecord] = {r.key: _copy(r) for r in loaded.rels}
+        self._loaded_nodes: dict[NodeRef, Props] = {k: dict(v) for k, v in self._nodes.items()}
+        self._loaded_rels: dict[RelKey, RelRecord] = {k: _copy(r) for k, r in self._rels.items()}
 
     def view(self, need: Need) -> SliceView:
         """The view of one handler: reads outside `need` raise `OutsideSliceError`."""
@@ -191,7 +194,28 @@ class BatchSlice:
 
     def diff(self) -> SliceDiff:
         """What the batch changed against the slice read before it (WP3.3, D-A-138)."""
-        raise NotImplementedError
+        upsert_nodes: list[NodeRecord] = []
+        for (label, node_id), props in sorted(self._nodes.items()):
+            before = self._loaded_nodes.get((label, node_id))
+            if before is None:
+                upsert_nodes.append(NodeRecord(label, node_id, dict(props)))
+                continue
+            changed = {k: v for k, v in props.items() if k not in before or before[k] != v}
+            if changed:
+                upsert_nodes.append(NodeRecord(label, node_id, changed))
+        delete_nodes = sorted(ref for ref in self._loaded_nodes if ref not in self._nodes)
+        ordered = sorted(self._rels.items(), key=lambda item: str(item[0]))
+        upsert_rels = [
+            _copy(r)
+            for key, r in ordered
+            if key not in self._loaded_rels or self._loaded_rels[key].props != r.props
+        ]
+        delete_rels = [
+            RelRecord(r.from_label, r.from_id, r.rel_type, r.to_label, r.to_id, _identity(r))
+            for key, r in sorted(self._loaded_rels.items(), key=lambda item: str(item[0]))
+            if key not in self._rels
+        ]
+        return SliceDiff(upsert_nodes, delete_nodes, upsert_rels, delete_rels)
 
     def snapshot(self) -> SubGraph:
         """Every node and relationship of the slice now (for tests and rebuild)."""
@@ -236,6 +260,10 @@ class BatchSlice:
         return {(r.to_label, r.to_id) for r in self._rels_of(label, node_id, out=True)} | {
             (r.from_label, r.from_id) for r in self._rels_of(label, node_id, out=False)
         }
+
+
+def _identity(r: RelRecord) -> Props:
+    return {name: r.props[name] for name in REL_IDENTITY.get(r.rel_type, ()) if name in r.props}
 
 
 def _copy(r: RelRecord) -> RelRecord:
