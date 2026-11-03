@@ -1446,6 +1446,37 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 
 - Требует подтверждения владельцем: нет
 
+### D-B-185. Гигиена графа `graph.hygiene` (WP16.3)
+- Класс: B
+- WP / место: WP16.3, `Т-§4.10`, `Т-§22.10`, `T-AG4`; `quack/agents/hygiene.py`, `config.py` (блок B)
+- Решение: подграф домена — два Cypher-чтения (навыки `provisional`/`active` с векторами и соседями `REQUIRES`/`COVERS`; заблуждения этих навыков). Кандидат в дубли навыков — косинус + `hygiene_neighbour_weight` (0.1) × доля общих соседей (Жаккар), порог `hygiene_min_score` (0.9); заблуждения — косинус в пределах навыка, тот же порог. Один вызов `builder@1`, режим Hygiene. Дубль с временным навыком — `skill.merged` (временный в другой); два активных — `skill.merge_suggested`; заблуждения — `misconception.merged`. Цель слияния равных — меньший id; узел сливается раз за прогон. Нагрузка задачи — `domain_id`.
+- Почему: в ТЗ порога нет — свои параметры B (§0.4.3 п.5). `networkx` не в зависимостях: множества соседей — на Python; хабы Louvain — позже (`Т-§22.10`).
+- Тесты: `tests/agents/test_hygiene.py::test_hygiene_merges_only_provisional`; Cypher проверен на пустом Neo4j.
+- Не решено \[ПРОВЕРИТЬ\]: строка диспетчера `session.ended` ждёт фактов A (временные сущности, счётчики) — пока задачу никто не ставит; перенос проявлений и сопротивлений на цель (`Т-§9.3`) — проекция A по `misconception.merged`.
+### D-B-184. Подготовка «Сегодня» `today.prepare` (WP16.8)
+- Класс: B
+- WP / место: WP16.8, `Т-§14.4`, `T-RV2`; `quack/agents/today.py`
+- Решение: триггер `today.shown`. Для каждого пункта уровень — граница навыка по уровням хабов (все уровни без хаба), кандидаты банка — `select_tasks`, не больше `label_max_tasks // число пунктов`. Один вызов `today_planner`; метки вне кандидатов отбрасываются. Черновой план — `content.session_plans` со статусом `prepared` под id сессии `uuid5(learner, "today:{trigger}:{skill}")`; `generate` — `agent.requested {task_generation}`. План и запросы — одной транзакцией; повтор ничего не пишет.
+- Почему: §0.4.3 п.2, закон 5, закон 7.
+- Тесты: `tests/agents/test_today.py` (1).
+- Не решено \[ПРОВЕРИТЬ\]: маршруты сессий ещё на Фазе 3 — `POST /v1/sessions {today_item}` план пока не берёт (перенос — G3); карточки — `(none)`.
+### D-B-183. Задачи проверок: `check.symbolic`, `check.model`, `task.check`
+- Класс: B
+- WP / место: WP11.3, WP11.6, WP12.5, строки WP7.1; `quack/practice/jobs.py`
+- Решение: обработчики читают нагрузку строки (`answer_seq`, `part`; `task_ids`) и вызывают готовые тела (`insure_symbolic`, `check_with_model` + `record_verdict`, `check_teacher_task`). Для `check.model` известные заблуждения и состояния проверяемых уровней берутся из среза S4 для навыков разметки задачи; `failed` — есть ли `check.failed` этого ответа и части; уже записанный вердикт — выход (закон 5). Для `task.check` имена проверяемых навыков берутся из среза сессии хода. Виды — в реестре по процедуре (б) #173.
+- Почему: §0.4.3 п.2, п.5.
+- Тесты: тела покрыты своими тестами; T-Q7 зелёный.
+- Не решено \[ПРОВЕРИТЬ\]: `task.solution_space`, `agent.task_generation`, `agent.solution_space`, `check.known_claim` — после #144 и #148 (их тела там); `second_opinion.diagnosis` — следующий шаг B.
+### D-B-179. Описание заблуждения на фактах S4 (WP16.2)
+- Класс: B
+- WP / место: WP16.2, WP7.1, `Т-§9.3`, `T-AG2`; `quack/agents/misconception_describe.py` (`describe_misconception`, `render_manifestations`, `run_misconception_describe`)
+- Контекст: A выложила `MisconceptionDetail` и `ManifestationFact` (#170) и ответила, что `workers` получает читателя фабрикой `create_graph_reader(ctx.neo4j, ctx.settings)` (#155). Своя модель `DescriberInput` из D-B-175 (д) больше не нужна. Открытые места: у `ManifestationFact.quote` бывает `None`; порядок проявлений с одинаковым временем не задан.
+- Решение: (а) Модуль принимает `MisconceptionDetail | None` от A напрямую; `DescriberInput` и `Manifestation` удалены. Статус `unknown` (гипотеза до первого проявления) — выход без вызова, как и всё вне трёх подтверждённых. (б) Порядок — по `at_ms`, при равенстве по `source_seq`: вход детерминирован (закон 5). (в) Проявление без цитаты — строка «no quote», а не пустые кавычки. (г) `run_misconception_describe(job, ctx, reader)` берёт `misconception_id` и `trigger_seq` из нагрузки строки WP7.1, домен — из события-триггера. Читатель — параметр: тест подставляет `FixedGraphReader`, а регистрация с `create_graph_reader` — после выбора процедуры реестра видов в #173 (T-Q7: обработчик вида, которого нет в `JOB_KINDS`, роняет `test_all_job_kinds_have_handlers`).
+- Почему: §0.4.3 п.2 (WP16.2, `Т-§9.3`), п.5.
+- Обратимость: один модуль.
+- Тесты: `tests/agents/test_misconception_describe.py` (5); мутация «сортировка только по `at_ms`» — тест падает.
+- Регистрация (процедура (б) A в #173, сигнатура фабрики D-A-144): `misconception.describe` и `extract.episode` — в `JOB_KINDS`, `KIND_LLM_ROLES` (роли из `rules_p4.JOB_KIND_SPECS`) и `HANDLER_MODULES`. Обработчики строят читателя `create_graph_reader(ctx.neo4j, ctx.settings, learner_id=job.learner_id)`. Ревью строк реестра — за A.
+- Не решено \[ПРОВЕРИТЬ\]: до слияния #179 (`misconception_detail`, `extraction_candidates` на Neo4j) задачи этих видов падают на `NotImplementedError` и уходят в повторы.
 ### D-B-177. Строитель визуализаций: задача `agent.viz` (WP16.5)
 - Класс: B
 - WP / место: WP16.5, `Т-§13.6`, `Т-§22.10`, `Т-§13.7`, `Т-§13.9`, `T-AG6`, закон 5; `quack/agents/viz.py` (`build_viz`, `handle_viz`, `param_sets`, `libraries_block`), `quack/config.py` блок B (`viz_libraries`)
@@ -1463,7 +1494,8 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (WP16.1, `Т-§13.5`), п.5.
 - Обратимость: один модуль.
 - Тесты: `T-AG1` — `tests/agents/test_analyst.py` (2); мутации (`request_id` случайный, `needed_in_session`, без `prompt_role`, `as_of_seq`) — тесты падают.
-- Не решено \[ПРОВЕРИТЬ\]: обработчики `analyst.run`, `analyst.deep` и отрисовка блоков памяти — после PR A с чтениями S4 и ответа о `GraphReader` в `workers` (#155).
+- Задача (D-B-179 рег.): `analyst.run`/`analyst.deep` зарегистрированы. Триггер даёт домен и сессию; триггер вне сессии домена — ничего не пишет. Фокус — навыки из `observation.extracted` сессии. Блоки рисуются здесь же, коротко: `agents` не импортирует `session` (§4.1). Цели — из `domain_goals`, профиль — из `profile`, план — из `content.session_plans`.
+- Не решено \[ПРОВЕРИТЬ\]: строки триггеров без сессии (проявления заблуждения вне хода) аналитика не запускают.
 ### D-B-175. Описание заблуждения (WP16.2)
 - Класс: B
 - WP / место: WP16.2, `Т-§9.3`, `Т-§9.2`, `T-AG2`, законы 5 и 10; `quack/agents/misconception_describe.py` (`describe_misconception`, `render_manifestations`, `DescriberInput`); факты — `GraphReader.misconception_detail` A (ответ A в #155, сигнатура — в PR A)
@@ -1759,6 +1791,55 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Обратимость: одна зависимость, один модуль.
 - Тесты: `tests/auth/test_pairing_wp22.py` (`T-CP1`); маршруты — `T-A1`, исключение — `T-E2`.
 - Требует подтверждения владельцем: нет.
+### D-C-139. WP23.2: обновление конспекта темы — вход `artifact_writer@1` по четырём слоям, проверка выхода
+- Класс: B (сборка входа и проверка выхода роли C)
+- WP / место: WP23.2, `Т-§17.3`, `Т-§17.7`; `quack/artifacts/topic_refresh.py`, задача `artifact.topic_refresh`
+- Решение:
+  1. **Слой 1** — шаблоны типов уже в слое 1 файла `artifact_writer@1` («Templates by type», D-C-132); вход называет тип (`notes`). Отдельных файлов шаблонов нет: «системные шаблоны — файлы промптов с версиями» (`Т-§17.8`) — это сам файл промпта.
+  2. **Слой 2** — скилла ученика нет до WP23.6 (`content.learner_skills`): `None.`.
+  3. **Слой 3**: тема и её навыки (`GraphReader.topic_memory`, D-A-137; метки `S`), куски материалов по навыкам темы (`materials_prefetch`, `materials_k`; метки `P`, страница). «Формулировки, которые сработали» — код по журналу (`Т-§17.3` п.3, подтверждено A в #154): успех — свидетельство `skill_history` с `source = code` (Т1), `correct`, без помощи; показ — последний `turn.committed`, где навык есть в `markup.exposures`, раньше этого успеха (по `seq`); формулировка — текст хода. Граф тем — `topic_requires(domain_id)` (`REQUIRES` между темами, `Т-§4.6`): имена тем, на которые опирается тема, и тем, которые опираются на неё (имена — тем же `topic_memory`).
+  4. **Слой 4**: заблуждения темы с цитатами (`MisconceptionFact.quotes`, метки `M`), навыки, где понадобились подсказки (`skill_history`, `assistance ≠ none`), прочно известные — с уровнем `proven`.
+  5. **Проверка выхода** (`Т-§17.3`): неизвестная метка куска или навыка и номер блока вне текущей версии — нарушение; тогда одна повторная генерация (ключ `…:retry`), затем такие элементы отбрасываются. Допустимые `kind` держит схема. Карточки (`cards`) — WP23.4, здесь не пишутся.
+  6. Блоки идут в `write_system_blocks` (D-C-125): блоки ученика не переписываются, повтор задачи (тот же ключ — тот же ответ из outbox) новой версии не даёт. Ключ вызова — id задачи очереди.
+  7. Читатель — `create_graph_reader(ctx.neo4j, ctx.settings)` (D-A-137); до G2 он поднимает `NotImplementedError`, тесты передают `FixedGraphReader`. Регистрация вида в `JOB_KINDS`/`HANDLER_MODULES` — зона A (T-Q7), как у `photo.pipeline` (#161).
+- Почему: ТЗ Ф4 WP23.2, `Т-§17.3`, `Т-§17.7`, `Т-§17.8`, `Т-§10.5`; D-A-137, D-C-125, D-C-132.
+- Обратимость: код C.
+- Тесты: `tests/artifacts/test_topic_refresh_wp23.py`.
+- Требует подтверждения владельцем: нет.
+
+### D-C-142. WP9.3: шаг squawk в CI — новые миграции, правила вне `Д-§5.2` п.2 исключены
+- Класс: B (C по §7.3: `.github/**`; конфиг — S16 A, D-A-187, #185)
+- WP / место: WP1.4, WP9.3, `Д-§5.2` п.2, `Д-§6.2`; `.github/workflows/ci.yml` (job `squawk`), `tests/test_ci_squawk.py`
+- Контекст: `Д-§5.2` п.2 — «squawk по новым миграциям: блокирующие ALTER и индексы без CONCURRENTLY». squawk 2.71.0 с настройками по умолчанию даёт ещё и предупреждения вне этой области. На текущих миграциях `phase-4` это `require-lock-timeout`, `require-statement-timeout` (вопрос A в #187), `ban-drop-schema` (откат базовой) и `ban-drop-column`; на новых файлах — ещё `prefer-robust-stmts`.
+- Решение:
+  1. Отдельный job `squawk`. Проверяются файлы `backend/db/migrations/*.sql`, добавленные или изменённые относительно базы PR (`--diff-filter=AM`); на push — относительно `before`. Без базы и без новых миграций проверять нечего.
+  2. squawk-cli закреплён: `SQUAWK_VERSION = 2.71.0` (≥ 2.51.0). Запуск — `--config backend/.squawk.toml` (`pg_version`, `assume_in_transaction`, `Д-§6.2`).
+  3. Исключены правила вне области п.2: тайм-ауты блокировки и оператора, повторяемость операторов, удаление колонок и схем. Правила индексов (`require-concurrent-index-creation`, `-deletion`, `ban-concurrent-index-creation-in-transaction`) и блокирующих `ALTER` остаются. Тест не даёт их исключить.
+  4. `publish` ждёт `squawk` (`Д-§5.2`: без всех проверок не сливается).
+- Проверено на squawk 2.71.0:
+  - четыре текущие миграции проходят;
+  - `CREATE INDEX CONCURRENTLY` без `-- migrate:up transaction:false` и `-- squawk-disable-assume-in-transaction` падает (`ban-concurrent-index-creation-in-transaction`);
+  - обычный `CREATE INDEX` падает (`require-concurrent-index-creation`);
+  - правильный файл с обеими строками проходит.
+- Почему: `Д-§5.2` п.2, `Д-§6.2`; ТЗ Ф4 WP1.4, WP9.3.
+- Обратимость: список исключений в одной строке job.
+- Тесты: `tests/test_ci_squawk.py`; у A — `tests/db/test_squawk_config.py` (T-DB7).
+- Требует подтверждения владельцем: нет.
+
+### D-C-141. §4.8: `jobs_changed` — канал `learner:{id}`, объект от очереди
+- Класс: B (C — потребитель канала; издатель — очередь A, D-A-165, #182)
+- WP / место: §4.8, WP7.4, T-D10; `quack/api/learner_stream.py`
+- Контекст: §4.8 называет сообщение `jobs_changed {session_id}` (плашка `Т-§13.8`), но не говорит, откуда канал его берёт. Это не событие журнала (вопрос A в #183, D-C-130 п.3).
+- Решение:
+  1. Канал — `learner:{learner_id}` (`learner_signal_channel`). `Т-§1.2` называет единственный канал ученика: «learner:{id} — новые события и изменения тем». `Т-§13.8`: изменения статуса приходят по каналу изменений.
+  2. Очередь A после коммита публикует JSON-объект `{"kind": "jobs_changed", "session_id"}` на каждую смену статуса задачи с `visible` и непустым `session_id`. Сбой публикации только пишется в лог (закон 9).
+  3. Канал отличает этот объект от сигнала `append_events` (голое число `seq`) и сразу шлёт SSE `jobs_changed {session_id}`, журнал при этом не читает. Данные плашки — `GET /v1/sessions/{id}/jobs`.
+  4. Без Redis сообщения нет. Плашку клиент читает тем же GET после переподключения (`Т-§1.6`: «после переподключения клиент делает один повторный запрос»).
+- Почему: §4.8; `Т-§1.2`, `Т-§1.6`, `Т-§13.8`; закон 9.
+- Обратимость: формат объекта — одна строка у издателя и одна у канала.
+- Тесты: `tests/test_learner_stream.py::test_learner_stream_forwards_jobs_changed`; у A — `tests/jobs/test_queue_p4.py::test_status_change_of_a_visible_job_publishes_jobs_changed`.
+- Требует подтверждения владельцем: нет.
+
 ### D-C-140. WP23.4: карточка — задача банка; хранение, правка и удаление
 - Класс: B (C по §7.3; швы — `quack.practice.task_store` B, строка проектора A D-A-125 п.1)
 - WP / место: WP23.4, §6.4 «Артефакты»; `quack/artifacts/cards.py`, `quack/artifacts/cards_routes.py`, `quack/artifacts/documents.py`
