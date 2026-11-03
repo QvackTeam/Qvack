@@ -11,10 +11,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request
 
 from quack.api.auth import get_current_learner_id
+from quack.api.errors import ApiError
 from quack.api.ratelimit import enforce_action_rate_limit
 from quack.api.resources import get_llm, get_resources
 from quack.config import Settings
-from quack.domains import diagnostic, graph_view, learner, service, structure, topics
+from quack.domains import diagnostic, disputes, graph_view, learner, service, structure, topics
 from quack.domains.schemas import (
     AnswerDiagnosticRequest,
     AnswerDiagnosticResponse,
@@ -327,3 +328,34 @@ async def update_topic_status_short_endpoint(
 
 router = APIRouter()
 router.include_router(_protected)
+
+
+# --- ТЗ Ф4 WP8.1: «не согласен» and «это была описка» (Т-§2.8, Т-§7.6) ---
+
+
+def _not_yours() -> ApiError:
+    return ApiError("NOT_FOUND", "no such target of this learner", status_code=404)
+
+
+@_protected.post("/disputes", response_model=disputes.EventAccepted, status_code=202)
+async def file_dispute_endpoint(
+    req: disputes.DisputeRequest, request: Request, learner_id: CurrentLearnerId
+) -> disputes.EventAccepted:
+    r = get_resources(request)
+    seq = await disputes.file_dispute(r.db, r.neo4j, r.redis, learner_id, req)
+    if seq is None:
+        raise _not_yours()
+    return disputes.EventAccepted(seq=seq)
+
+
+@_protected.post(
+    "/verdicts/{answer_seq}/typo", response_model=disputes.EventAccepted, status_code=202
+)
+async def declare_typo_endpoint(
+    answer_seq: int, req: disputes.TypoRequest, request: Request, learner_id: CurrentLearnerId
+) -> disputes.EventAccepted:
+    r = get_resources(request)
+    seq = await disputes.declare_typo(r.db, r.redis, learner_id, answer_seq, req.part)
+    if seq is None:
+        raise _not_yours()
+    return disputes.EventAccepted(seq=seq)

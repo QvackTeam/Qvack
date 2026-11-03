@@ -312,3 +312,30 @@ async def test_state_at_replays_the_log_with_rules3(
     after = await reader.state_at(learner, 12, [UUID(S1)])
     assert before.skills[0].levels[2].status == "not_tested"
     assert after.skills[0].levels[2].status == "proven"
+
+
+async def test_disputes_check_the_target_and_append_one_event(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings
+) -> None:
+    """WP8.1 (`Т-§2.8`, D-A-192): a dispute of the learner's evidence or verdict and a typo are
+    one event each; another learner's target is «not found»; a typo is keyed by its verdict."""
+    from quack.domains.disputes import DisputeRequest, declare_typo, file_dispute
+
+    mine, other = await create_learner(pg_db), await create_learner(pg_db)
+    evidence = str(uuid4())
+    async with neo4j.session() as session:
+        await session.run("CREATE (:Evidence {id: $e, learnerId: $l})", e=evidence, l=str(mine))
+    answer = _new("answer.submitted", {"task_id": str(uuid4()), "source": "chat",
+                  "answer": {"kind": "number", "value": "2"}}, "a")  # fmt: skip
+    await append_events(pg_db, mine, [answer])
+
+    def ask(kind: str, target: str) -> DisputeRequest:
+        return DisputeRequest(target_kind=kind, target_id=target, idempotency_key=target)  # type: ignore[arg-type]
+
+    assert await file_dispute(pg_db, neo4j, None, mine, ask("evidence", evidence)) == 2
+    assert await file_dispute(pg_db, neo4j, None, other, ask("evidence", evidence)) is None
+    assert await file_dispute(pg_db, neo4j, None, mine, ask("verdict", "1:main")) == 3
+    assert await file_dispute(pg_db, neo4j, None, other, ask("verdict", "1:main")) is None
+    assert await declare_typo(pg_db, None, mine, 1, "main") == 4
+    assert await declare_typo(pg_db, None, mine, 1, "main") == 4  # the same verdict, one event
+    assert await declare_typo(pg_db, None, other, 1, "main") is None

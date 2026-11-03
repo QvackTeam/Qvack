@@ -959,6 +959,17 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
 - Тесты: `tests/graph/test_projection_runner.py::test_state_at_replays_the_log_with_rules3` (до вердикта уровень 3 не проверен, после — доказан Т1 кода); прежние тесты `state_at` зелёные.
 - Требует подтверждения владельцем: нет.
 
+### D-A-192. WP8.1: `POST /v1/disputes` и `POST /v1/verdicts/{answer_seq}/typo`
+- Класс: B. WP8.1; `Т-§2.8`, `Т-§7.6`, ТЗ §6.4 («Граф и темы»); `quack/domains/disputes.py`, `quack/domains/router.py`
+- Решение:
+  1. **Проверка цели — до события** (закон 1). Свидетельство — узел `Evidence` с `learnerId` ученика. Заблуждение — узел `Misconception` или его `Alias`. Вердикт — ключ `"<answer_seq>:<part>"` (D-A-134), у ученика в журнале есть `answer.submitted` с этим `seq`. Чужое или несуществующее — `404 NOT_FOUND`.
+  2. **Событие.** `dispute.filed {target_kind, target_id}` (ключ `dispute:{idempotency_key}` из запроса) или `typo.declared {answer_seq, part}`. У описки ключ — по вердикту (`typo:{answer_seq}:{part}`): в запросе ТЗ ключа нет, повтор даёт то же событие (закон 5). `actor = learner`.
+  3. **Ответ** — `202 {seq}`, номер записанного события. Тело ответа ТЗ не задаёт; изменения клиент видит по каналу `learner/stream` и обычными GET (§4.8).
+  4. **Контракт маршрутов.** Оба маршрута добавлены в `EXPECTED_ROUTES` (T-A1). Снимок `backend/openapi.json` пересобран командой `ops openapi`.
+- Почему: §0.4.3 п.1–2.
+- Тесты: `tests/graph/test_projection_runner.py::test_disputes_check_the_target_and_append_one_event`; `tests/test_app_assembly.py` (маршруты, авторизация до валидации, снимок OpenAPI).
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
