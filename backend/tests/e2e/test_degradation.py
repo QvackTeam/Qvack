@@ -58,15 +58,19 @@ async def test_journey_without_redis(system_without_redis: System) -> None:
     )
     await system.settle()
 
-    # Local rate limiter: auth_requests_per_ip_per_min logins pass, the next one is 429.
-    limit = system.settings.auth_requests_per_ip_per_min
+    # Local rate limiter: learner_actions_per_min actions of a fresh learner pass, the next one
+    # is 429 (the `auth` limit went with `/v1/auth/login`, ТЗ Ф4 WP18.3; D-A-113).
+    limited = await system.register()
+    limit = system.settings.learner_actions_per_min
     statuses = [
         (
-            await system.client.post(
-                "/v1/auth/login", json={"email": learner.email, "password": learner.password}
+            await system.client.patch(
+                "/v1/learner/preferences",
+                json={"preferences": {"n": i}, "idempotency_key": f"te8:limit:{i}"},
+                headers=limited.headers,
             )
         ).status_code
-        for _ in range(limit + 1)
+        for i in range(limit + 1)
     ]
     assert 429 not in statuses[: limit - 1], statuses
     assert statuses[-1] == 429, statuses

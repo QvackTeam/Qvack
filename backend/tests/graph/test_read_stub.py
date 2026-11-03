@@ -101,3 +101,16 @@ def test_requires_carry_confidence_for_the_guard_rule() -> None:
         (0.9, True),
         (0.4, False),
     ]
+
+
+def test_memory_picture_facts_of_wp14_2() -> None:
+    """D-B-157 (D-A-126): gap type with its confidence (`Т-§8.4`), the last memory lapse —
+    «забыл» (`Т-§8.2` п.3), the conditions a misconception shows in (`Т-§9.3`)."""
+    sl = asyncio.run(_reader().slice_for_turn(fx.LEARNER, UUID(int=1), SliceFocus()))
+    failed = next(s for s in sl.skills if s.skill_id == fx.SKILL_FAILED)
+    assert failed.gap_type == "execution" and failed.gap_type_confidence == 0.8
+    assert failed.last_lapse_at_ms == fx.LAPSE_AT_MS
+    quiet = next(s for s in sl.skills if s.skill_id == fx.SKILL_QUIET)
+    assert quiet.gap_type_confidence is None and quiet.last_lapse_at_ms is None  # law 8
+    (misconception,) = sl.misconceptions
+    assert misconception.triggers == list(fx.MISCONCEPTION_TRIGGERS)

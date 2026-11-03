@@ -23,10 +23,8 @@ NOT_SCANNED = {"artifacts/practice.py", "artifacts/params.py", "api/ratelimit.py
 
 def test_stream_c_defaults_equal_phase_2_values() -> None:
     settings = Settings()
-    assert settings.auth_requests_per_ip_per_min == 10
     assert settings.learner_actions_per_min == 60
     assert settings.turns_per_min == 20
-    assert settings.jwt_ttl_days == 7
     assert settings.curation_defer_min == 10
     assert settings.curation_min_evidence_for_promotion == 2
     assert settings.health_check_timeout_s == 2.0
@@ -85,7 +83,7 @@ def test_no_numeric_threshold_constants_left_in_stream_c_modules() -> None:
 
 @pytest.mark.parametrize(
     "module",
-    ["domains/auth.py", "session/deps.py"],
+    ["session/deps.py"],
 )
 def test_rate_limit_constants_are_gone(module: str) -> None:
     source = (QUACK_DIR / module).read_text(encoding="utf-8")
