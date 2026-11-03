@@ -5,28 +5,33 @@ without a model call; the input is all manifestations and no earlier wording (la
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 
 from quack.agents.misconception_describe import (
+    NO_QUOTE,
     NONE_LINE,
-    DescriberInput,
-    Manifestation,
     describe_misconception,
     render_manifestations,
+    run_misconception_describe,
 )
 from quack.agents.schemas import MisconceptionDescription
 from quack.config import Settings
 from quack.db import Db
 from quack.events.records import TaskMarkupRecord, TestedLevelRecord
 from quack.events.values import AnswerSpec, MathValue
+from quack.graph.read import ManifestationFact, MisconceptionDetail
+from quack.jobs.queue import ClaimedJob
+from quack.jobs.runner import JobContext
 from quack.llm.gateway import LLMGateway, LLMResult
 from quack.practice.role_outputs import TaskCondition
 from quack.practice.task_store import create_task
 from quack.prompts.registry import PromptRegistry
 from tests.db.fixtures import create_learner
+from tests.support import graph_read as fx
 
 SETTINGS = Settings()
 DAY_MS = 86_400_000
@@ -57,10 +62,18 @@ class _Gateway:
         )
 
 
-def _facts(status: str, manifestations: list[Manifestation]) -> DescriberInput:
-    return DescriberInput(
+def _m(quote: str | None, task_id: UUID | None, at_ms: int, seq: int = 1) -> ManifestationFact:
+    return ManifestationFact(
+        evidence_id=uuid4(), quote=quote, task_id=task_id, source_seq=seq, at_ms=at_ms, tier="code"
+    )
+
+
+def _facts(status: Any, manifestations: list[ManifestationFact]) -> MisconceptionDetail:
+    return MisconceptionDetail(
         misconception_id=uuid4(),
         status=status,
+        statement="an earlier wording",
+        skill_id=uuid4(),
         skill_name="adding fractions",
         manifestations=manifestations,
     )
@@ -91,7 +104,11 @@ async def test_describer_exits_if_not_confirmed(pg_db: Db) -> None:
     """T-AG2: no misconception, `suspected` — no call, no event."""
     learner_id = await create_learner(pg_db)
     gateway = _Gateway(MisconceptionDescription(statement="s", triggers=[]))
-    for facts in (None, _facts("suspected", [Manifestation("q", None, AT_MS)])):
+    for facts in (
+        None,
+        _facts("suspected", [_m("q", None, AT_MS)]),
+        _facts("unknown", []),
+    ):
         found = await describe_misconception(
             pg_db,
             cast(LLMGateway, gateway),
@@ -113,9 +130,9 @@ async def test_describer_writes_from_all_manifestations(pg_db: Db) -> None:
     facts = _facts(
         "watching",
         [
-            Manifestation("the bottoms add up too", task_id, AT_MS + DAY_MS),
-            Manifestation("1/2 + 1/3 = 2/5", None, AT_MS),
-            Manifestation("same for 1/4 + 1/4", stranger_task, AT_MS + 2 * DAY_MS),
+            _m("the bottoms add up too", task_id, AT_MS + DAY_MS),
+            _m("1/2 + 1/3 = 2/5", None, AT_MS),
+            _m("same for 1/4 + 1/4", stranger_task, AT_MS + 2 * DAY_MS),
         ],
     )
     gateway = _Gateway(
@@ -143,6 +160,7 @@ async def test_describer_writes_from_all_manifestations(pg_db: Db) -> None:
         '2. 2023-11-04, problem: Add 1/2 and 1/3; the learner: "the bottoms add up too"',
         '3. 2023-11-05, in conversation, no problem; the learner: "same for 1/4 + 1/4"',
     ]
+    assert "an earlier wording" not in str(variables)  # law 10
     PromptRegistry().load("misconception_describer", 1).render(variables)
     assert first.type == "misconception.described"
     assert first.actor == "misconception_describer@1"
@@ -159,3 +177,44 @@ async def test_describer_writes_from_all_manifestations(pg_db: Db) -> None:
 
 def test_no_manifestations_is_named() -> None:
     assert render_manifestations([], {}) == NONE_LINE
+
+
+def test_same_time_by_source_seq_and_no_quote() -> None:
+    """D-B-179: the same moment goes by the source seq; a manifestation without a quote is
+    named so, not shown as empty quotes."""
+    lines = render_manifestations(
+        [_m("second", None, AT_MS, seq=9), _m(None, None, AT_MS, seq=3)], {}
+    ).splitlines()
+    assert lines == [
+        f"1. 2023-11-03, in conversation, no problem; {NO_QUOTE}",
+        '2. 2023-11-03, in conversation, no problem; the learner: "second"',
+    ]
+
+
+async def test_job_reads_the_detail_by_payload(pg_db: Db) -> None:
+    """The job of the WP7.1 row: `misconception_id` and `trigger_seq` from the payload, the
+    facts from `GraphReader.misconception_detail`; an unknown one ends without a call."""
+    learner_id = await create_learner(pg_db)
+    gateway = _Gateway(MisconceptionDescription(statement="Adds denominators.", triggers=[]))
+    ctx = cast(JobContext, SimpleNamespace(db=pg_db, llm=gateway, settings=SETTINGS))
+
+    def job(misconception_id: UUID) -> ClaimedJob:
+        payload = {"trigger_seq": 5, "misconception_id": str(misconception_id)}
+        return ClaimedJob(
+            id=uuid4(),
+            kind="misconception.describe",
+            learner_id=learner_id,
+            lock_key=f"misconception:{misconception_id}",
+            coalesce_key=None,
+            priority=0,
+            payload=payload,
+            attempt=1,
+            max_attempts=3,
+        )
+
+    reader = fx.FixedGraphReader()
+    assert await run_misconception_describe(job(uuid4()), ctx, reader) is None
+    done = await run_misconception_describe(job(fx.MISCONCEPTION), ctx, reader)
+    assert done is not None
+    assert done.idempotency_key == f"misconception.described:{fx.MISCONCEPTION}:5"
+    assert gateway.calls[0]["variables"]["skill"] == "common denominator"
