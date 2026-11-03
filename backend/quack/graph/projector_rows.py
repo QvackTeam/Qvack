@@ -152,7 +152,9 @@ ROWS: tuple[ProjectorRow, ...] = (
          "Т-§3.4"),
     _row("chunk.indexed", "C",
          ("chunk_id", "material_id", "page", "text", "notation", "teaches", "uses"),
-         "Chunk, HAS_CHUNK, TEACHES, USES", "Т-§3.4, Т-§4.3"),
+         "Chunk (page, text, notation; learnerId, domainId from the envelope and searchable "
+         "= has text: filter of chunk_emb), HAS_CHUNK, TEACHES, USES",
+         "Т-§3.4, Т-§3.4.6, Т-§4.3"),
     _row("embedding.ready", "C", ("node_kind", "node_id", "model", "dim", "vector"),
          "embedding on the node (through Alias; no target -> empty application)",
          "Т-§2.4, Т-§1.7"),
