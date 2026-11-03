@@ -21,6 +21,7 @@ from quack.graph.memory import InMemoryGraph
 from quack.graph.mutations import Mutation, UpsertNode, UpsertRel
 from quack.graph.overlay import SessionOverlay
 from quack.graph.read import SliceFocus, create_graph_reader
+from quack.graph.read.models import ProfileFacts
 from quack.graph.read.neo4j_reader import Neo4jGraphReader, level_is_ready_direct
 
 NOW = 1_700_000_000_000
@@ -477,5 +478,27 @@ async def test_factory_reader_is_bound_to_its_learner(
 async def test_factory_and_extras(settings: Settings, neo4j_driver: AsyncDriver) -> None:
     reader = create_graph_reader(neo4j_driver, settings, learner_id=uuid4())
     assert isinstance(reader, Neo4jGraphReader)
-    with pytest.raises(NotImplementedError):
-        await reader.profile(uuid4())
+    other = uuid4()
+    assert await reader.profile(other) == ProfileFacts(learner_id=other)  # bound: law 1
+
+
+async def test_factory_reader_does_not_leak_through_extra_reads(
+    settings: Settings, neo4j_driver: AsyncDriver, world: World
+) -> None:
+    """D-A-144 for the reads of `ExtraReads`: a reader of learner B, asked by ids and learner
+    ids of learner A, answers nothing."""
+    other = await _build(neo4j_driver, seq=4)
+    try:
+        mine = create_graph_reader(neo4j_driver, settings, learner_id=other.learner)
+        assert await mine.skill_history(UUID(world.s1)) == []
+        assert await mine.prerequisites(UUID(world.s1)) == []
+        assert await mine.misconception_detail(UUID(world.mis)) is None
+        assert await mine.review_candidates(world.learner, 1) == []
+        assert await mine.past_solution(world.learner) == []
+        assert (
+            await mine.extraction_candidates(world.learner, world.session, None, 5)
+        ).skills == []
+        own = create_graph_reader(neo4j_driver, settings, learner_id=world.learner)
+        assert await own.skill_history(UUID(world.s1)) != []
+    finally:
+        await _drop(neo4j_driver, other.learner)

@@ -21,7 +21,6 @@ from quack.db.redis import learner_signal_channel, projector_applied_channel
 from quack.events import append_events
 from quack.events.log import NewEvent as P4Event
 from quack.events.log import append_events as p4_append
-from quack.graph.worker import ProjectorWorker
 from tests.db.fixtures import create_learner
 from tests.factories import new_event
 from tests.support.auth import ensure_user, session_cookie, session_token
@@ -69,6 +68,47 @@ async def _wait_subscribers(redis: Redis, channel: str, expected: int) -> None:
             await asyncio.sleep(0.01)
 
 
+async def _p4_learner(
+    pg_db: Db, db: SessionFactory, settings: Settings
+) -> tuple[UUID, dict[str, str]]:
+    learner = await create_learner(pg_db)
+    await ensure_user(db, learner)
+    return learner, session_cookie(await session_token(pg_db, learner, settings))
+
+
+async def _p4_events(pg_db: Db, learner: UUID, n: int) -> None:
+    """Events of the Phase 4 log that are not §4.8 change kinds."""
+    domain = uuid4()
+    await p4_append(
+        pg_db,
+        learner,
+        [
+            P4Event(
+                type="topic.created",
+                payload={
+                    "topic_id": uuid4(),
+                    "domain_id": domain,
+                    "name": f"T{i}",
+                    "origin": "session",
+                },
+                actor="code",
+                idempotency_key=str(uuid4()),
+                domain_id=domain,
+            )
+            for i in range(n)
+        ],
+    )
+
+
+async def _applied(pg_db: Db, learner: UUID, seq: int) -> None:
+    """The projector's mark of the Phase 4 log (`ops.projector_offsets.seq`, D-A-181)."""
+    await pg_db.execute(
+        "INSERT INTO ops.projector_offsets (learner_id, seq) VALUES (%(learner_id)s, %(seq)s) "
+        "ON CONFLICT (learner_id) DO UPDATE SET seq = EXCLUDED.seq",
+        {"learner_id": learner, "seq": seq},
+    )
+
+
 async def test_learner_stream(
     stream_settings: Settings,
     pg_engine: AsyncEngine,
@@ -77,20 +117,20 @@ async def test_learner_stream(
     neo4j: AsyncDriver,
     redis: Redis,
 ) -> None:
-    """T-H4 (Redis): first `projection_advanced` with current `applied_seq` and `last_seq`;
-    an event projected by the projector → `projection_advanced` with the new `applied_seq`;
-    after the client disconnects there are no subscriptions on `projector:applied:{id}`."""
-    learner, headers = await _learner(db, pg_db, stream_settings)
-    await _append(db, learner, 2)
-    worker = ProjectorWorker(stream_settings, pg_engine, db, neo4j, redis)
-    await worker.run_once()
-    await _append(db, learner, 1)  # last_seq 3, applied 2
+    """T-H4 (Redis), ТЗ Ф4 §4.8 (#188): the first `projection_advanced` has the Phase 4 marks
+    (`ops.projector_offsets.seq`, `core.learners.seq`); the projector's `{"applied_seq",
+    "topics"}` → `projection_advanced {applied_seq, topics}`; after the client disconnects there
+    are no subscriptions on `projector:applied:{id}`."""
+    learner, headers = await _p4_learner(pg_db, db, stream_settings)
+    await _p4_events(pg_db, learner, 3)
+    await _applied(pg_db, learner, 2)  # last_seq 3, applied 2
 
     resources = build_app_resources(
         stream_settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db
     )
     app = create_app(stream_settings, resources=resources)
     channel = projector_applied_channel(learner)
+    topic = uuid4()
     async with (
         _client(app) as client,
         client.stream("GET", "/v1/learner/stream", headers=headers) as r,
@@ -103,8 +143,12 @@ async def test_learner_stream(
             {"applied_seq": 2, "last_seq": 3},
         )
         await _wait_subscribers(redis, channel, 1)
-        await worker.run_once()
-        assert await next_sse_event(lines) == ("projection_advanced", {"applied_seq": 3})
+        await _applied(pg_db, learner, 3)
+        await redis.publish(channel, orjson.dumps({"applied_seq": 3, "topics": [str(topic)]}))
+        assert await next_sse_event(lines) == (
+            "projection_advanced",
+            {"applied_seq": 3, "topics": [str(topic)]},
+        )
     await _wait_subscribers(redis, channel, 0)
 
 
@@ -114,16 +158,14 @@ async def test_learner_stream_polls_without_redis(
     db: SessionFactory,
     pg_db: Db,
     neo4j: AsyncDriver,
-    redis: Redis,
 ) -> None:
-    """T-H4 (broken Redis): the same events arrive by polling `ops.projector_offsets`, and only
-    when `applied_seq` grows."""
-    learner, headers = await _learner(db, pg_db, stream_settings)
+    """T-H4 (broken Redis): the mark is polled in `ops.projector_offsets.seq`; an event only
+    when `applied_seq` grows, without topics."""
+    learner, headers = await _p4_learner(pg_db, db, stream_settings)
     resources = build_app_resources(
         stream_settings, pg_engine, neo4j, BrokenRedis(), db=pg_db, session_factory=db
     )
     app = create_app(stream_settings, resources=resources)
-    worker = ProjectorWorker(stream_settings, pg_engine, db, neo4j, redis)
     async with (
         _client(app) as client,
         client.stream("GET", "/v1/learner/stream", headers=headers) as r,
@@ -133,8 +175,8 @@ async def test_learner_stream_polls_without_redis(
             "projection_advanced",
             {"applied_seq": 0, "last_seq": 0},
         )
-        await _append(db, learner, 2)
-        await worker.run_once()
+        await _p4_events(pg_db, learner, 2)
+        await _applied(pg_db, learner, 2)
         assert await next_sse_event(lines) == ("projection_advanced", {"applied_seq": 2})
         with pytest.raises(TimeoutError):  # no growth → no event
             await next_sse_event(lines, timeout_s=0.3)

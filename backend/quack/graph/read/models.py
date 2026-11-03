@@ -350,3 +350,29 @@ class MisconceptionDetail(_Fact):
     skill_id: UUID
     skill_name: str
     manifestations: list[ManifestationFact] = []
+
+
+type DisplayState = Literal[
+    "confused_with",
+    "persistent_error",
+    "struggling",
+    "inconsistent",
+    "solved_independently",
+    "known_from_other_domain",
+    "in_progress",
+    "not_tested",
+    "none",
+]
+
+
+class TopicDisplay(_Fact):
+    """The state of a topic in codes (ТЗ Ф4 WP6.2, `Т-§8.6`, `Т-§22.2`): one model for the
+    projector (phase C writes it as `displayState`, `displayReason`, `displayLevel`,
+    `displayDomainId`), the API and the context renderer. `displayReason` — the skill or the
+    misconception the rule fired on (`Т-§8.7`), "" — none; `displayLevel` 0, `displayDomainId`
+    "" — not given (law 8). Proposed, hidden and off-domain topics have `none`."""
+
+    display_state: DisplayState = "none"
+    display_reason: str = ""
+    display_level: int = 0
+    display_domain_id: str = ""

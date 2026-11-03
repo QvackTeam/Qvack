@@ -25,15 +25,32 @@ NO_IDEMPOTENCY_KEY: dict[tuple[str, str], str] = {
     ("POST", "/v1/canvases/{canvas_id}/photos"): "multipart; each photo is a new snapshot",
     # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
     ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): "no event; the job coalesces",
+    # ТЗ Ф4 WP8.1/WP8.2/WP6.3 (§6.4 tables): the requests carry no key. Each route appends one
+    # event whose key is the edit itself with the state it starts from (law 5, D-A-192, D-A-193),
+    # so a repeat gives the same event; the models forbid extra fields.
+    ("POST", "/v1/verdicts/{answer_seq}/typo"): "ТЗ §6.4 WP8.1: no key; keyed by the verdict",
+    ("PATCH", "/v1/topics/{topic_id}"): "ТЗ §6.4 WP8.2: no key; keyed by the name change",
+    ("POST", "/v1/topics/{topic_id}/merge"): "ТЗ §6.4 WP8.2: no key; keyed by the pair",
+    ("POST", "/v1/topics/{topic_id}/hide"): "ТЗ §6.4 WP8.2: no key; keyed by the topic",
+    ("POST", "/v1/topics/{topic_id}/known"): "ТЗ §6.4 WP8.2: no key; keyed by the topic state",
+    ("POST", "/v1/episodes/{episode_seq}/reassign"): "ТЗ §6.4 WP8.2: no key; keyed by the pair",
+    ("PATCH", "/v1/hubs/{hub_id}"): "ТЗ §6.4 WP6.3: no key; keyed by the scope and date change",
     # ТЗ Ф4 WP16.4: the body is `{text | material_id}` only; a direct model call, nothing is
     # written (D-B-173).
     ("POST", "/v1/domains/classify"): "no event; a direct classifier call that writes nothing",
 }
 
-# Routes without a body model: the key is not sent.
+# Routes whose body model has no `idempotency_key` (or no body at all): the key is not sent.
 NO_BODY = {
     ("POST", "/v1/sessions/{session_id}/heartbeat"),
     ("POST", "/v1/canvases/{canvas_id}/pairing"),
+    ("POST", "/v1/verdicts/{answer_seq}/typo"),
+    ("PATCH", "/v1/topics/{topic_id}"),
+    ("POST", "/v1/topics/{topic_id}/merge"),
+    ("POST", "/v1/topics/{topic_id}/hide"),
+    ("POST", "/v1/topics/{topic_id}/known"),
+    ("POST", "/v1/episodes/{episode_seq}/reassign"),
+    ("PATCH", "/v1/hubs/{hub_id}"),
 }
 
 # Phase 4 routes whose key is a UUID (ТЗ Ф4 WP13.1).
@@ -80,6 +97,11 @@ class Ids:
     card_id: UUID = NO_MATERIAL
     # WP21.3: a recognized line of the canvas the walk opens for the correction route.
     line_id: str = "none"
+    # WP8: a hub of the learner (Neo4j), a verdict (`answer.submitted`) and an `episode.closed`
+    # of the Phase 4 log; `0` is a number nobody has.
+    hub_id: UUID = NO_MATERIAL
+    answer_seq: int = 0
+    episode_seq: int = 0
     # WP13.1: a Phase 4 session for the action route while the session routes are Phase 3.
     action_session_id: UUID = NO_MATERIAL
 
@@ -96,6 +118,9 @@ def path_for(path: str, ids: Ids) -> str:
         block_id=ids.block_id,
         card_id=ids.card_id,
         line_id=ids.line_id,
+        hub_id=ids.hub_id,
+        answer_seq=ids.answer_seq,
+        episode_seq=ids.episode_seq,
     )
 
 
@@ -192,6 +217,17 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
             "sympy": None,
         },
         ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): {"domain_id": str(ids.domain_id)},
+        ("POST", "/v1/disputes"): {
+            "target_kind": "verdict",
+            "target_id": f"{ids.answer_seq}:{['main', 'other'][v]}",
+        },
+        ("POST", "/v1/verdicts/{answer_seq}/typo"): {"part": ["main", "other"][v]},
+        ("PATCH", "/v1/topics/{topic_id}"): {"name": ["Renamed", "Other"][v]},
+        ("POST", "/v1/topics/{topic_id}/merge"): {"into": str(UUID(int=1 + v))},
+        ("POST", "/v1/topics/{topic_id}/hide"): {},
+        ("POST", "/v1/topics/{topic_id}/known"): {},
+        ("POST", "/v1/episodes/{episode_seq}/reassign"): {"topic_id": str(ids.topic_id)},
+        ("PATCH", "/v1/hubs/{hub_id}"): {"deadline_at_ms": 1_000 + v},
     }
     body = dict(bodies[(method, path)])
     if (method, path) in UUID_KEY:

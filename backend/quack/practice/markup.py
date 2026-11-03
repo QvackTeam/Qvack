@@ -10,11 +10,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from quack.events import records
 from quack.events.values import NewSkill
+from quack.llm.labels import LabelMap
 from quack.practice.answer_spec import AnswerSpec
 from quack.practice.grammar import grammar_ok
 
@@ -181,3 +184,52 @@ def _check_answer(spec: AnswerSpec, where: str, add: Callable[[MarkupRule, str],
             add("expression_unparsed", f"{where}.value")
     if spec.type == "quantity" and not spec.unit:
         add("quantity_without_unit", f"{where}.unit")
+
+
+# --- markup with ids (Т-§5.2): labels of the call resolved -------------------------------
+
+
+def markup_record(markup: TaskMarkup, labels: LabelMap) -> records.TaskMarkupRecord:
+    """Т-§5.2 markup with ids: skills, misconceptions of the options, tasks of `variantOf` and
+    `pairTaskId`."""
+    return records.TaskMarkupRecord(
+        tests=[_tested(t, labels) for t in markup.tests],
+        method_named=markup.method_named,
+        variant_of=_resolved(labels, "task", markup.variant_of),
+        answer=markup.answer,
+        options=None
+        if markup.options is None
+        else [
+            records.OptionTrapRecord(
+                option_id=o.option_id,
+                misconception_id=_resolved(labels, "misconception", o.misconception),
+                hypothesis=o.hypothesis,
+                neighbor_idea=o.neighbor_idea,
+            )
+            for o in markup.options
+        ],
+        pair_task_id=_resolved(labels, "task", markup.pair_task_id),
+        form=markup.form,
+        parts=None
+        if markup.parts is None
+        else [
+            records.TaskPartRecord(
+                part=p.part,
+                answer=p.answer,
+                tests=None if p.tests is None else [_tested(t, labels) for t in p.tests],
+            )
+            for p in markup.parts
+        ],
+    )
+
+
+def _tested(tested: TestedLevel, labels: LabelMap) -> records.TestedLevelRecord:
+    return records.TestedLevelRecord(
+        skill_id=_resolved(labels, "skill", tested.skill),
+        new_skill=tested.new_skill,
+        level=tested.level,
+    )
+
+
+def _resolved(labels: LabelMap, kind: Any, label: str | None) -> UUID | None:
+    return None if label is None else labels.resolve(kind, label)

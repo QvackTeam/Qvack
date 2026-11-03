@@ -5,6 +5,11 @@ the client fetches data with ordinary GETs. Redis `projector:applied:{learner_id
 without Redis (or after the subscription breaks) `ops.projector_offsets` is polled every
 `learner_stream_poll_ms`. Silent periods send the `: ping` keepalive (WP6.3).
 
+ТЗ Ф4 §4.8, D-A-181/D-A-190 (#188): the projector `rules@3` publishes
+`{"applied_seq", "topics"}` after a batch, and `projection_advanced` carries the topics that
+changed (`Т-§2.4`); the marks are the Phase 4 ones — `ops.projector_offsets.seq` and
+`core.learners.seq`. Polling knows no topics and sends `applied_seq` only.
+
 ТЗ Ф4 §4.8 adds kinds read from the Phase 4 event log: `artifact_updated {artifact_id}` and
 `material_parsed {material_id}` — new `artifact.updated` / `material.parsed` after the stream
 opened — and `verdict_revised {answer_seq}` for the judged answers of a task whose key was
@@ -30,7 +35,6 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from redis.asyncio.client import PubSub
 from redis.exceptions import RedisError
-from sqlalchemy import text
 
 from quack.api.auth import get_current_learner_id
 from quack.api.resources import AppResources, get_resources
@@ -43,9 +47,9 @@ log = get_logger(__name__)
 EVENT = "projection_advanced"
 JOBS_CHANGED = "jobs_changed"
 
-_OFFSETS = text(
-    "SELECT (SELECT applied_seq FROM ops.projector_offsets WHERE learner_id = :l) AS applied, "
-    "(SELECT last_seq FROM core.learner_seq WHERE learner_id = :l) AS last"
+_OFFSETS = (
+    "SELECT (SELECT seq FROM ops.projector_offsets WHERE learner_id = %(learner_id)s) AS applied, "
+    "(SELECT seq FROM core.learners WHERE learner_id = %(learner_id)s) AS last"
 )
 
 # ТЗ Ф4 §4.8: event type → (message kind, the payload field it names).
@@ -73,11 +77,11 @@ router = APIRouter(prefix="/v1", tags=["learner"])
 
 
 async def _offsets(resources: AppResources, learner_id: UUID) -> tuple[int, int]:
-    """Current `applied_seq` and `last_seq`; 0 when there is no row. The connection is
-    released right after the query."""
-    async with resources.session_factory() as session:
-        row = (await session.execute(_OFFSETS, {"l": learner_id})).one()
-    return int(row.applied or 0), int(row.last or 0)
+    """Current `applied_seq` and `last_seq` of the Phase 4 log; 0 when there is no row."""
+    row = await resources.db.fetch_one(_OFFSETS, {"learner_id": learner_id})
+    if row is None:
+        return 0, 0
+    return int(row["applied"] or 0), int(row["last"] or 0)
 
 
 async def _last_seq(resources: AppResources, learner_id: UUID) -> int:
@@ -142,12 +146,21 @@ def _jobs_changed(message: dict[str, Any]) -> bytes | None:
     return format_sse(JOBS_CHANGED, {"session_id": data.get("session_id")})
 
 
-def _applied_of(message: dict[str, Any]) -> int | None:
+def _applied_of(message: dict[str, Any]) -> dict[str, Any] | None:
+    """`projection_advanced` data from the projector's message: `applied_seq` and, when the
+    projector names them, the `topics` that changed (D-A-190)."""
     try:
-        value = orjson.loads(message["data"])["applied_seq"]
+        data = orjson.loads(message["data"])
+        value = data["applied_seq"]
     except (ValueError, KeyError, TypeError):
         return None
-    return value if isinstance(value, int) else None
+    if not isinstance(value, int):
+        return None
+    advanced: dict[str, Any] = {"applied_seq": value}
+    topics = data.get("topics")
+    if isinstance(topics, list):
+        advanced["topics"] = [str(t) for t in topics]
+    return advanced
 
 
 async def learner_stream(resources: AppResources, learner_id: UUID) -> AsyncIterator[bytes]:
@@ -163,7 +176,7 @@ async def learner_stream(resources: AppResources, learner_id: UUID) -> AsyncIter
         sent_at = time.monotonic()
         while True:
             wait_s = max(0.0, min(poll_s, keepalive_s - (time.monotonic() - sent_at)))
-            advanced: int | None = None
+            advanced: dict[str, Any] | None = None
             changed = False
             if pubsub is not None:
                 try:
@@ -188,7 +201,7 @@ async def learner_stream(resources: AppResources, learner_id: UUID) -> AsyncIter
             else:
                 await asyncio.sleep(wait_s)
                 current, _ = await _offsets(resources, learner_id)
-                advanced = current if current > applied else None
+                advanced = {"applied_seq": current} if current > applied else None
                 changed = True
             if changed:
                 messages, cursor = await _changes(resources, learner_id, cursor)
@@ -197,8 +210,8 @@ async def learner_stream(resources: AppResources, learner_id: UUID) -> AsyncIter
                 if messages:
                     sent_at = time.monotonic()
             if advanced is not None:
-                applied = max(applied, advanced)
-                yield format_sse(EVENT, {"applied_seq": advanced})
+                applied = max(applied, int(advanced["applied_seq"]))
+                yield format_sse(EVENT, advanced)
                 sent_at = time.monotonic()
             elif time.monotonic() - sent_at >= keepalive_s:
                 yield KEEPALIVE_COMMENT

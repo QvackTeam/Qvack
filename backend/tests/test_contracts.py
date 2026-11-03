@@ -237,6 +237,7 @@ NEO4J_SESSION_CALLS = frozenset({"session", "execute_write", "begin_transaction"
 # only `verify_schema` and the implementation of `read_session`.
 NEO4J_WRITERS: dict[str, frozenset[str] | None] = {
     "quack.graph.neo4j_store": None,
+    "quack.graph.projection.store": frozenset({"write_batch", "replace_learner"}),
     "quack.graph.rebuild": None,
     "quack.db.neo4j": frozenset({"verify_schema", "read_session"}),
 }
