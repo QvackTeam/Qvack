@@ -48,7 +48,6 @@ log = get_logger(__name__)
 WRITER_ROLE = "artifact_writer"
 # Kinds that, taken from the materials, must name their chunk (Т-§17.3).
 SOURCED_KINDS = frozenset({"definition", "statement"})
-_MAX_FORMULA_CHARS = 2000  # `MathInput` limit
 _NOT_AN_EQUALITY = "<>!:"  # `<=`, `>=`, `!=`, `:=`
 
 type FormulaVerdict = Literal["passed", "failed", "unavailable"]
@@ -78,7 +77,7 @@ class Checked:
 # --- formulas -------------------------------------------------------------------------------
 
 
-def split_identity(formula: str) -> tuple[str, str] | None:
+def split_identity(formula: str, max_chars: int) -> tuple[str, str] | None:
     """`left = right` with exactly one `=` outside brackets and braces; `None` for anything
     else (an inequality, a chain `a = b = c`, no sign) — compute checks identities only."""
     depth, cut = 0, None
@@ -96,7 +95,7 @@ def split_identity(formula: str) -> tuple[str, str] | None:
     if cut is None:
         return None
     left, right = formula[:cut].strip(), formula[cut + 1 :].strip()
-    if not left or not right or max(len(left), len(right)) > _MAX_FORMULA_CHARS:
+    if not left or not right or max(len(left), len(right)) > max_chars:
         return None
     return left, right
 
@@ -104,7 +103,7 @@ def split_identity(formula: str) -> tuple[str, str] | None:
 def formula_request(formula: str, settings: Settings) -> MathCheckRequest | None:
     """The `/v1/math/check` request of an identity: both sides as LaTeX, mode `equal`, the
     budget of a background check; every threshold from `settings` (§0.3)."""
-    sides = split_identity(formula)
+    sides = split_identity(formula, settings.artifact_formula_chars_max)
     if sides is None:
         return None
     left, right = sides
