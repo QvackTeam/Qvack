@@ -24,7 +24,7 @@ from quack.events.records import PlanUpdateRecord
 from quack.events.values import Level
 from quack.llm.labels import LABEL_PREFIX, LabelMap
 from quack.session.memory_picture import LEVEL_NAMES
-from quack.session.tools import TOOLS
+from quack.session.tools import TOOLS, MaterialChunk, render_chunks
 
 # The slot variables of `teacher@2` in the order of Т-§10.1 (slot 1 is the prompt text), then
 # the tail and the guard feedback.
@@ -120,16 +120,6 @@ class SessionGoal:
 
 
 @dataclass(frozen=True)
-class MaterialChunk:
-    """A chunk of slot 8 (Т-§10.5): text with the reference to its page or slide."""
-
-    chunk_id: UUID
-    material_name: str
-    page: int | None
-    text: str
-
-
-@dataclass(frozen=True)
 class LearnerSkill:
     """A learner skill called with `/name` (`content.learner_skills`, Т-§17.8)."""
 
@@ -222,14 +212,7 @@ def render_session_plan(goal: SessionGoal, plan: PlanUpdateRecord | None, labels
 
 def render_materials(chunks: Sequence[MaterialChunk], labels: LabelMap) -> str:
     """Slot 8: each chunk as a quote from the material with its source (Т-§19.8)."""
-    out: list[str] = []
-    for chunk in chunks:
-        label = labels.label("chunk", chunk.chunk_id)
-        page = f", page {chunk.page}" if chunk.page is not None else ""
-        source = f'From the material "{chunk.material_name}"{page}'
-        out.append((f"{label}. " if label else "") + source + ":")
-        out.extend(f"> {line}" for line in chunk.text.splitlines())
-    return "\n".join(out)
+    return render_chunks(chunks, lambda chunk_id: labels.label("chunk", chunk_id))
 
 
 def render_labels(labels: LabelMap, names: Mapping[UUID, str]) -> str:
