@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from quack.events.log import StoredEvent
 from quack.graph.projection.mutations import (
     DeleteNode,
     DeleteRel,
@@ -37,18 +38,25 @@ class Need:
 
     `nodes` — the nodes themselves (through their aliases, Т-§2.8); `neighbourhoods` — the nodes,
     every relationship of theirs and the nodes at the other end; `domain_labels` — every node
-    of a label in a domain, `(domain_id, label)` (e.g. skills by normalized name, Т-§4.4).
+    of a label in a domain, `(domain_id, label)` (e.g. skills by normalized name, Т-§4.4);
+    `events` — events of the learner by `seq` (folds and handlers read events «через
+    представление», WP3.2); `event_refs` — `(seq, payload field, label)`: the node named by a
+    field of that event, with its neighbourhood (the task of an answer for its verdict).
     """
 
     nodes: frozenset[NodeRef] = frozenset()
     neighbourhoods: frozenset[NodeRef] = frozenset()
     domain_labels: frozenset[tuple[str, str]] = frozenset()
+    events: frozenset[int] = frozenset()
+    event_refs: frozenset[tuple[int, str, str]] = frozenset()
 
     def __or__(self, other: Need) -> Need:
         return Need(
             nodes=self.nodes | other.nodes,
             neighbourhoods=self.neighbourhoods | other.neighbourhoods,
             domain_labels=self.domain_labels | other.domain_labels,
+            events=self.events | other.events,
+            event_refs=self.event_refs | other.event_refs,
         )
 
 
@@ -78,6 +86,10 @@ class SliceView(Protocol):
 
     def domain_nodes(self, domain_id: str, label: str) -> list[NodeRecord]: ...
 
+    def event(self, seq: int) -> StoredEvent | None:
+        """An event of the learner by `seq`; `None` — no such event (deleted, Т-§2.9)."""
+        ...
+
 
 class BatchSlice:
     """The slice of one learner's batch: the store read plus the changes of the batch.
@@ -87,14 +99,21 @@ class BatchSlice:
     gone, Т-§2.4).
     """
 
-    def __init__(self, learner_id: str, loaded: SubGraph) -> None:
+    def __init__(
+        self, learner_id: str, loaded: SubGraph, events: Sequence[StoredEvent] = ()
+    ) -> None:
         self.learner_id = learner_id
+        self._events: dict[int, StoredEvent] = {e.seq: e for e in events}
         self._nodes: dict[NodeRef, Props] = {(n.label, n.id): dict(n.props) for n in loaded.nodes}
         self._rels: dict[RelKey, RelRecord] = {r.key: _copy(r) for r in loaded.rels}
 
     def view(self, need: Need) -> SliceView:
         """The view of one handler: reads outside `need` raise `OutsideSliceError`."""
         return _View(self, need)
+
+    def add_event(self, event: StoredEvent) -> None:
+        """An event of the batch, so the later events of the batch can read it."""
+        raise NotImplementedError
 
     def apply(self, mutations: Sequence[Mutation]) -> None:
         """Apply the changes of one event, so later events of the batch see them."""
@@ -210,6 +229,9 @@ class _View:
 
     def in_rels(self, label: str, node_id: str, rel_type: str | None = None) -> list[RelRecord]:
         return self._rels(label, node_id, rel_type, out=False)
+
+    def event(self, seq: int) -> StoredEvent | None:
+        raise NotImplementedError
 
     def domain_nodes(self, domain_id: str, label: str) -> list[NodeRecord]:
         if (domain_id, label) not in self._need.domain_labels:

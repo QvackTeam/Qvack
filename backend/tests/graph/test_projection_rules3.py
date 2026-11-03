@@ -695,9 +695,10 @@ def test_task_created_with_markup_options_and_new_skills() -> None:
         "learnerId": L, "domainId": DOMAIN, "name": "Simplification", "origin": "session",
         "status": "proposed", "knownClaimedAtMs": 0,
     }  # fmt: skip
-    tests = {(k[4], k[5]) for k in rels if k[2] == "TESTS"}
-    assert tests == {(SKILL, 3), (SKILL, 4), (cross, 2), (cross, 3), (lowest, 1), (SKILL_B, 2)}
-    assert rels[("Task", TASK, "TESTS", "Skill", SKILL, 4)] == {"level": 4}
+    tests = {(k[4], k[5], k[6]) for k in rels if k[2] == "TESTS"}
+    assert tests == {(SKILL, 3, "main"), (SKILL, 4, "main"), (cross, 2, "main"),
+                     (cross, 3, "main"), (lowest, 1, "main"), (SKILL_B, 2, "b")}  # fmt: skip
+    assert rels[("Task", TASK, "TESTS", "Skill", SKILL, 4, "main")] == {"level": 4, "part": "main"}
     assert ("Topic", TOPIC, "COVERS", "Skill", cross) in rels
     assert ("Topic", simplification, "COVERS", "Skill", lowest) in rels
     assert ("Domain", DOMAIN, "HAS_TOPIC", "Topic", simplification) in rels
@@ -722,7 +723,7 @@ def test_a_description_with_the_name_of_a_skill_of_the_domain_is_that_skill() ->
         [_event(61, "task.created", _TASK_CREATED | {"markup": markup}, domain_id=UUID(DOMAIN))],
         *_task_graph(),
     )
-    assert ("Task", TASK, "TESTS", "Skill", SKILL, 3) in rels
+    assert ("Task", TASK, "TESTS", "Skill", SKILL, 3, "main") in rels
     assert [key for key in nodes if key[0] == "Skill"] == [("Skill", SKILL), ("Skill", SKILL_B)]
 
 
@@ -741,6 +742,46 @@ def test_task_checks_set_verification_and_correct_the_markup() -> None:
         *_task_graph(),
     )
     assert nodes[("Task", TASK)]["verification"] == "disputed"
-    assert {(k[4], k[5]) for k in rels if k[2] == "TESTS"} == {(SKILL, 3)}
+    assert {(k[4], k[5], k[6]) for k in rels if k[2] == "TESTS"} == {(SKILL, 3, "main")}
     nodes, _ = _run([created, _event(65, "task.verified", {"task_id": TASK})], *_task_graph())
     assert nodes[("Task", TASK)]["verification"] == "checked"
+
+
+# --- events in the slice (T-P3; Т-§2.4: folds read events through the view) ------------------
+
+ANSWER_SEQ = 70
+
+
+def _answer(seq: int = ANSWER_SEQ, **payload: Any) -> StoredEvent:
+    body = {"task_id": TASK, "part": None, "answer": {"kind": "choice", "option_id": "A"},
+            "source": "chat"} | payload  # fmt: skip
+    return _event(seq, "answer.submitted", body, domain_id=UUID(DOMAIN), session_id=SESSION)
+
+
+def test_handler_reads_only_the_events_it_needs() -> None:
+    """An event of the learner read by a handler is declared in `needs()`; a node named in that
+    event's payload can be declared through it (`(seq, field, label)`), with its relations."""
+    task = _node("Task", TASK, domainId=DOMAIN)
+    answer = _answer()
+    batch = BatchSlice(L, SubGraph(nodes=[task, _SKILL], rels=[]), events=[answer])
+    need = Need(
+        events=frozenset({ANSWER_SEQ}), event_refs=frozenset({(ANSWER_SEQ, "task_id", "Task")})
+    )
+    view = batch.view(need)
+    assert view.event(ANSWER_SEQ) == answer
+    assert view.node("Task", TASK) == task.props
+    assert view.out_rels("Task", TASK) == []
+    with pytest.raises(OutsideSliceError):
+        view.event(ANSWER_SEQ + 1)
+    with pytest.raises(OutsideSliceError):
+        batch.view(Need()).event(ANSWER_SEQ)
+    with pytest.raises(OutsideSliceError):
+        batch.view(Need(events=frozenset({ANSWER_SEQ}))).node("Task", TASK)
+
+
+def test_events_of_the_batch_are_seen_by_later_events() -> None:
+    """An answer and its verdict in one batch: the verdict handler sees the answer event."""
+    batch = BatchSlice(L, SubGraph())
+    apply_events([_answer()], batch)
+    view = batch.view(Need(events=frozenset({ANSWER_SEQ})))
+    assert view.event(ANSWER_SEQ) is not None
