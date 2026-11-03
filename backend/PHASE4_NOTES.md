@@ -498,7 +498,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему не Redis: `Т-§19.1` держит сессии в Postgres, потому что в Redis нет ничего, что жалко потерять (`Т-§1.2`); без Redis (§4.2 — он необязателен) привязка не работала бы. §0.4.3 п.1 (одноразовость — атомарный `UPDATE` в Postgres), п.7 (как `core.auth_links`).
 - Тест `T-DB1` (§8.15 п.3): описание «таблицы §6.1 и только их» уточнено — базовая миграция даёт ровно §6.1, каждая расширяющая — только свои таблицы, `down` откатывает по одной. Сила проверки та же; `test_pairing_tokens_table` — колонки, ключ, индекс.
 - Удаление ученика (WP25, A) удаляет и его строки `core.pairing_tokens`.
-- Требует подтверждения владельцем: да.
+- Требует подтверждения владельцем: да. **Решено по документам по поручению человека A (2026-11-03):** вариант подтверждён. WP22.1 и `Т-§16.1` требуют хранить хэш одноразового токена. §6.1 для такого же случая — ссылки входа — уже приняла \[РЕШЕНИЕ Ф4\] «таблица в `Т-§3.1` не названа, полные списки — в миграциях» (`core.auth_links`). `Т-§19.1` держит сессии в Postgres, а не в Redis. Расширяющая миграция после G0 разрешена §0.4.4 п.4. Решение класса C закрыто.
 
 ### D-A-135. S4: кандидаты извлекателя; S6: переизвлечение после `skill.split` по эпизодам
 - Класс: B. WP6.4, WP15 п.2, п.6, WP7.1; `Т-§2.8`, `Т-§4.11`, `Т-§7.6`, `Т-§3.4.6`; вопрос B в #132; `quack/graph/read/`, `tests/support/graph_read.py`, `quack/jobs/rules_p4.py`
@@ -532,6 +532,41 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/graph/test_read_stub.py` (names, goals, profile, topic_memory, misconception_detail, factory); `tests/db/test_baseline_migration.py::test_turn_manifests_frozen_slots_column`.
 - Требует подтверждения владельцем: нет.
 
+### D-A-136. S6 G2: строки `artifact.topic_refresh` по `Т-§17.7`; cheat sheet — после согласия
+- Класс: B. WP7.1, WP23.2, WP23.5; `Т-§13.3`, `Т-§17.7`; приоритет C в #135; `quack/jobs/rules_p4.py`
+- Решение:
+  1. **Данные сверх события** — `RuleFacts`; `plan_with_facts(event, settings, facts)` = строки по событию + строки G2.
+     - Условие триггера (показы и свидетельства сессии, подсказки задачи) диспетчер читает из журнала (`Т-§13.3`: «диспетчер читает журнал, а не проекцию»).
+     - Домашняя тема навыка — структура графа (`COVERS`, `Т-§3.4.3`), а не состояние ученика. Её диспетчер читает в процессе проектора (WP7.1, `Т-§22.4`) после применения пачки. Сбор фактов — WP7 (диспетчер на `Db`).
+  2. **`session.ended`** — `artifact.topic_refresh` на каждую тему с показами или свидетельствами сессии:
+     - P2, `lock_key = coalesce_key = artifact:{topic}`, `required_seq` = событие (задача читает граф, WP7.1);
+     - ключ `artifact.topic_refresh:{topic}:session:{session_id}` — одно обновление темы за сессию: «дубли отсекает ключ задачи», `Т-§17.7`;
+     - нагрузка `{topic_id, reason: session}`.
+  3. **`task.closed`, где понадобились подсказки**, — блок «твои ловушки» по темам навыков задачи:
+     - ключ `artifact.topic_refresh:{topic}:task:{task_id}`;
+     - нагрузка `{topic_id, reason: hints, task_id}`;
+     - блокировка та же — `artifact:{topic}`.
+     
+     Свой ключ, чтобы не отсечь обновление по концу сессии.
+  4. **Cheat sheet** (`Т-§17.7`, WP23): «дедлайн ближе `cheatsheet_offer_days`» — это предложение учителя или «Сегодня», а «генерация — после согласия». Поэтому `hub.deadline_set` задачу генерации не ставит. `artifact.cheatsheet` (`artifact:{hub}`) ставится событием согласия; каким именно — вопрос C в #135. Строка остаётся в `ROWS_NEED_FACTS` до ответа C.
+- Почему: §0.4.3 п.2 (буква `Т-§17.7`, `Т-§13.3`), п.5.
+- Тесты: `tests/jobs/test_rules_p4.py::test_artifact_topic_refresh_after_the_session_and_after_hints`.
+- Требует подтверждения владельцем: нет.
+
+
+### D-A-138. S6: ключ склейки `artifact.topic_refresh` несёт ветку; блокировка прежняя
+- Класс: B. WP7.1, WP23.2; `Т-§17.7`, `Т-§11.3`; запрос C в #154; `quack/jobs/rules_p4.py`, `tests/jobs/test_rules_p4.py`
+- Решение: `lock_key = artifact:{topic}` (один писатель темы, по документу), `coalesce_key = artifact:{topic}:session:{session_id}` / `artifact:{topic}:task:{task_id}`.
+- Почему: при общем `coalesce_key` `enqueue_job` затирает нагрузку ждущей задачи (`ON CONFLICT (coalesce_key) WHERE status = 'queued'`): ветка подсказок теряла `reason: hints` и `task_id` (или наоборот), а `Т-§17.7` требует и «одно обновление на тему за сессию», и «блок ловушек по задаче». Блокировка не меняется, поэтому две ветки одной темы всё равно идут по очереди. Документ задаёт ключ блокировки и склейки одной строкой `artifact:{topic}`; склейка по ключу ветки сохраняет смысл (дубли одной ветки склеиваются), теряется только склейка разных веток — она и была ошибкой.
+- Тесты: `tests/jobs/test_rules_p4.py::test_artifact_topic_refresh_after_the_session_and_after_hints` (красный до правки: ключ ветки сессии).
+- Требует подтверждения владельцем: нет (мелкое уточнение ключа склейки, блокировка по документу).
+
+### D-A-139. S6: `hub.deadline_set` -> `artifact.cheatsheet` строкой по событию
+- Класс: B. WP7.1, WP23.5; `Т-§17.7`; ответ C D-C-138 в #154; `quack/jobs/rules_p4.py`
+- Решение: каждое `hub.deadline_set` ставит одну задачу `artifact.cheatsheet`: P2, `lock_key = coalesce_key = artifact:{hub}`, `required_seq` = событие, нагрузка `{hub_id}`. Строка убрана из `ROWS_NEED_FACTS`. Условие `cheatsheet_offer_days` и состояние предложения (нет `agent.requested` согласия и `artifact.updated` вида cheatsheet по хабу) проверяет сама задача по журналу (C, D-C-138); нового события нет, каталог S3 заморожен.
+- Почему: C отвечает за состояние предложения (`Т-§17.7`, WP23.5); фактов на этапе планирования строке не нужно.
+- Тесты: `tests/jobs/test_rules_p4.py::test_hub_deadline_set_puts_one_cheatsheet_job_without_facts`.
+- Требует подтверждения владельцем: нет.
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
@@ -1833,6 +1868,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - S4, помощь у свидетельства (A, D-A-127, `phase-4-a-s4-assistance`, коммит `a6f9ed8`): `uv run pytest tests/graph/test_read_stub.py` — 1 failed (у `EvidenceFact` нет `assistance`), 11 passed. Подмены: нет верхней границы ступени, умолчание `hint`, нет `shown_solution`, ступень по умолчанию 1 — 4/4 роняют тест. Зелёный: 12 passed.
 - WP15, помощь и тип пробела (A, D-A-124 п.3а, коммит `9a1a444`): `uv run pytest tests/graph/test_extracted_check.py` — 1 failed (подсказка без ступени проходит). Подмены: ступень без подсказки, подсказка без ступени, положительный с типом пробела, `partial` обязан `none` — 4/4. Зелёный: 13 passed.
 - S4 кандидаты, S6 `skill.split` (A, D-A-135, коммит `8c5181b`): `uv run pytest tests/graph/test_read_stub.py tests/jobs/test_rules_p4.py` — 2 failed (`NotImplementedError`; `skill.split` ставит задачу без эпизода). Подмены заглушки: тема, навыки, `k`, заблуждения не кандидатов — 4/4. Зелёный: 40 passed.
+- S6 G2 `artifact.topic_refresh` (A, D-A-136, коммит `5eb9b55`): `uv run pytest tests/jobs/test_rules_p4.py` — 1 failed (`NotImplementedError`). Подмены: ключ по склейке и `seq`, блокировка по ученику, нет причины, нет `required_seq`, факты не читаются, подсказки с ключом сессии — 6/6. Зелёный: `tests/jobs` — 35 passed.
 
 ## Правки тестов
 
