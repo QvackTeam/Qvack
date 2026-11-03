@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from uuid import UUID
 
 from neo4j import AsyncDriver
@@ -42,6 +42,7 @@ from quack.session.conversation import render_conversation
 from quack.session.memory_picture import (
     MEMORY_UNAVAILABLE,
     PictureInputs,
+    RevisedCheck,
     render_memory_picture,
 )
 from quack.session.spoiler_guard import answer_in_text, remove_answer_sentences
@@ -71,6 +72,14 @@ NEO4J_UNAVAILABLE: tuple[type[BaseException], ...] = (
 )
 
 _TIMEZONE = "SELECT settings->>'timezone' AS timezone FROM core.learners WHERE learner_id = %(l)s"
+_LATEST_DIGEST = (
+    "SELECT payload FROM core.events WHERE learner_id = %(l)s AND type = 'digest.written' "
+    "AND domain_id = %(d)s ORDER BY seq DESC LIMIT 1"
+)
+_COMPLETED = (
+    "SELECT payload FROM core.events WHERE learner_id = %(l)s AND type = 'agent.completed' "
+    "AND payload->>'request_id' = ANY(%(ids)s) ORDER BY seq"
+)
 _TASK_ACTIONS = {
     "hint.requested": "hint_request",
     "solution.requested": "solution_request",
@@ -88,6 +97,8 @@ class SessionJournal:
     learner_texts: list[LearnerText]
     first_turn: bool
     repeated_failure: bool
+    requests: dict[UUID, str] = field(default_factory=dict)
+    revised: list[RevisedCheck] = field(default_factory=list)
     skill_invocation: str | None = None
     answered: AnsweredAction | None = None
     answered_verdict: Verdict | None = None
@@ -115,6 +126,36 @@ def _repeated_failure(
         return False
     first, second = (skills.get(answer_tasks.get(seq, UUID(int=0)), set()) for seq in last)
     return bool(first & second)
+
+
+def _revised(events: Sequence[StoredEvent]) -> list[RevisedCheck]:
+    """Т-§5.6, Т-§6.3: a check whose outcome changed after it was given, not yet acknowledged
+    by a turn (`correctionsAcknowledged` of `turn.committed`)."""
+    history: dict[tuple[int, str], list[str]] = {}
+    acknowledged: set[int] = set()
+    for event in events:
+        if event.type == "verdict.recorded":
+            verdict = Verdict.model_validate(event.payload)
+            history.setdefault((verdict.answer_seq, verdict.part), []).append(verdict.outcome)
+        elif event.type == "turn.committed":
+            acknowledged.update(event.payload["markup"]["corrections_acknowledged"])
+    return [
+        RevisedCheck(answer_seq=seq, text=f"part {part} is now {seen[-1]}, was {seen[0]}")
+        for (seq, part), seen in sorted(history.items())
+        if seen[-1] != seen[0] and seq not in acknowledged
+    ]
+
+
+def _requests(events: Sequence[StoredEvent]) -> dict[UUID, str]:
+    """The agent requests of the session (Т-§13.2): id → kind."""
+    found: dict[UUID, str] = {}
+    for event in events:
+        if event.type == "agent.requested":
+            found[UUID(str(event.payload["request_id"]))] = str(event.payload["kind"])
+        elif event.type == "turn.committed":
+            for item in event.payload["markup"]["agent_requests"]:
+                found[UUID(str(item["request_id"]))] = str(item["kind"])
+    return found
 
 
 def read_journal(events: Sequence[StoredEvent], action_seq: int) -> SessionJournal:
@@ -156,6 +197,8 @@ def read_journal(events: Sequence[StoredEvent], action_seq: int) -> SessionJourn
         learner_texts=texts,
         first_turn=not any(e.type == "turn.committed" for e in ordered),
         repeated_failure=_repeated_failure(ordered, answer_tasks, skills),
+        requests=_requests(ordered),
+        revised=_revised(ordered),
     )
     action = next((e for e in ordered if e.seq == action_seq), None)
     if action is None:
@@ -249,6 +292,21 @@ class MemoryTurnContextSource:
             return []
         return [MaterialChunk(h.chunk_id, None, h.page, h.text) for h in hits]
 
+    async def _digest(self, learner_id: UUID, domain_id: UUID) -> str | None:
+        """The latest analyst summary of the domain (Т-§13.5): rebuilt by the analyst each
+        time from structure, so reading the latest one is no accumulation (law 10)."""
+        row = await self._db.fetch_one(_LATEST_DIGEST, {"l": learner_id, "d": domain_id})
+        return None if row is None else str(row["payload"]["text"])
+
+    async def _completed(self, learner_id: UUID, requests: dict[UUID, str]) -> set[UUID]:
+        """Requests of the session with a successful `agent.completed` (Т-§13.7)."""
+        if not requests:
+            return set()
+        rows = await self._db.fetch_all(
+            _COMPLETED, {"l": learner_id, "ids": [str(r) for r in requests]}
+        )
+        return {UUID(str(r["payload"]["request_id"])) for r in rows if r["payload"]["ok"]}
+
     async def _answers(self, learner_id: UUID, task_ids: Sequence[UUID]) -> list[str]:
         found: list[str] = []
         for task_id in task_ids:
@@ -284,10 +342,12 @@ class MemoryTurnContextSource:
             topic_ids=topics,
             domain_id=request.domain_id,
         )
-        (memory_slice, unavailable), chunks, answers = await asyncio.gather(
+        (memory_slice, unavailable), chunks, answers, digest, completed = await asyncio.gather(
             self._slice(reader, request, focus),
             self._chunks(learner_id, focus.skill_ids),
             self._answers(learner_id, journal.open_tasks),
+            self._digest(learner_id, request.domain_id),
+            self._completed(learner_id, journal.requests),
         )
 
         freeze = snapshot is None
@@ -304,6 +364,7 @@ class MemoryTurnContextSource:
             misconceptions=[m.misconception_id for m in memory_slice.misconceptions],
             hubs=[hub.hub_id for hub in hubs],
             chunks=[chunk.chunk_id for chunk in chunks],
+            requests=list(journal.requests),
         )
         names: dict[UUID, str] = {s.skill_id: s.name for s in memory_slice.skills if s.name}
         names.update({m.topic_id: m.name for m in memory})
@@ -313,7 +374,18 @@ class MemoryTurnContextSource:
             MEMORY_UNAVAILABLE
             if unavailable
             else render_memory_picture(
-                PictureInputs(slice=memory_slice, focus=focus, skill_names=names),
+                PictureInputs(
+                    slice=memory_slice,
+                    focus=focus,
+                    skill_names=names,
+                    analyst_summary=digest,
+                    agent_results=[
+                        f"{labels.label('request', r) or 'a request'}: {kind} is ready"
+                        for r, kind in journal.requests.items()
+                        if r in completed
+                    ],
+                    revised_checks=journal.revised,
+                ),
                 labels,
                 settings,
                 self._clock(),

@@ -11,9 +11,21 @@ from uuid import UUID, uuid4
 from quack.config import Settings
 from quack.db import Db
 from quack.db.postgres import SessionFactory
-from quack.events.event_types import AnswerSubmitted, MessageSent, TaskCreated
+from quack.events.event_types import (
+    AgentCompleted,
+    AgentRequested,
+    AnswerSubmitted,
+    DigestWritten,
+    MessageSent,
+    TaskCreated,
+)
 from quack.events.log import NewEvent, StoredEvent, append_events
-from quack.events.records import TaskMarkupRecord, TestedLevelRecord
+from quack.events.records import (
+    AgentParamsRecord,
+    DigestStructuredRecord,
+    TaskMarkupRecord,
+    TestedLevelRecord,
+)
 from quack.events.values import AnswerSpec, MathValue, Verdict
 from quack.llm.gateway import LLMGateway
 from quack.practice.role_outputs import TaskCondition
@@ -139,7 +151,7 @@ def test_effort_after_two_failures_on_one_skill() -> None:
     base = [
         _task(1, a, skill),
         _task(2, b, skill, uuid4()),
-        _event(3, "turn.committed", {"turn_id": str(uuid4())}),
+        _turn(3, [], []),
         _answer(4, a),
         _verdict(5, 4, "incorrect"),
         _answer(6, b),
@@ -214,6 +226,51 @@ async def test_assemble_first_turn_freezes_slots(pg_db: Db) -> None:
         session_id=session_id,
         domain_id=fx.DOMAIN,
     )
+    viz, pending = uuid4(), uuid4()
+    digest = DigestWritten(
+        domain_id=fx.DOMAIN,
+        text="the denominators are the gap",
+        as_of_seq=1,
+        structured=DigestStructuredRecord(
+            frontier=[], gap_hypotheses=[], uncertainty=None, moves=[], forecast=[]
+        ),
+        plan_divergence=False,
+        manner="short steps",
+    )
+    await append_events(
+        pg_db,
+        learner_id,
+        [
+            NewEvent(
+                type="digest.written",
+                payload=digest,
+                actor="analyst@1",
+                idempotency_key=f"digest:{uuid4()}",
+                domain_id=fx.DOMAIN,
+            ),
+            *(
+                NewEvent(
+                    type="agent.requested",
+                    payload=AgentRequested(
+                        request_id=r,
+                        kind="viz",
+                        params=AgentParamsRecord(description="a slider"),
+                        needed_in_session=True,
+                    ),
+                    actor="teacher@2",
+                    idempotency_key=f"req:{r}",
+                    session_id=session_id,
+                )
+                for r in (viz, pending)
+            ),
+            NewEvent(
+                type="agent.completed",
+                payload=AgentCompleted(request_id=viz, kind="viz", ok=True, result_ref="x"),
+                actor="agent:viz",
+                idempotency_key=f"agent.completed:{viz}",
+            ),
+        ],
+    )
     seq = await _message(
         pg_db, learner_id, session_id, text="teach me", intent="learn", topic_id=fx.TOPIC_OPEN
     )
@@ -241,6 +298,11 @@ async def test_assemble_first_turn_freezes_slots(pg_db: Db) -> None:
     assert setup.manifest.prompt_version == "teacher@2"
     assert setup.labels.label("task", task_id) == "K1"
     assert setup.labels.label("skill", fx.SKILL_FAILED) is not None
+    assert "Analyst summary: the denominators are the gap" in prompt
+    viz_label = setup.labels.label("request", viz)
+    assert f"Ready from agents: {viz_label}: viz is ready" in prompt
+    assert setup.labels.label("request", pending) is not None
+    assert prompt.count("is ready") == 1  # the pending request is not ready
     assert setup.assembled.guard.has_spoiler("the answer is 5/6.")
     assert setup.assembled.guard.remove_spoiler("Try it. It is 5/6.") == "Try it."
 
@@ -266,3 +328,34 @@ def test_verdict_payload_is_the_contract() -> None:
     """The test events above are valid `verdict.recorded` and `answer.submitted` payloads."""
     Verdict.model_validate(_verdict(1, 1, "correct").payload)
     AnswerSubmitted.model_validate(_answer(1, uuid4()).payload)
+
+
+def _turn(seq: int, acknowledged: list[int], requests: list[dict[str, Any]]) -> StoredEvent:
+    return _event(
+        seq,
+        "turn.committed",
+        {"markup": {"corrections_acknowledged": acknowledged, "agent_requests": requests}},
+    )
+
+
+def test_journal_revisions_and_requests() -> None:
+    """WP14.2: a revised check stays until a turn acknowledges it (Т-§5.6, Т-§6.3); the agent
+    requests of the session come from the turns and from `agent.requested`."""
+    task, viz, card = uuid4(), uuid4(), uuid4()
+    events = [
+        _task(1, task, uuid4()),
+        _answer(2, task),
+        _verdict(3, 2, "correct"),
+        _answer(4, task),
+        _verdict(5, 4, "incorrect"),
+        _turn(6, [], [{"request_id": str(viz), "kind": "viz"}]),
+        _verdict(7, 2, "incorrect"),  # re-check after a key dispute
+        _verdict(8, 4, "incorrect"),
+        _event(9, "agent.requested", {"request_id": str(card), "kind": "card"}),
+    ]
+    journal = read_journal(events, 9)
+    assert [(r.answer_seq, r.text) for r in journal.revised] == [
+        (2, "part a is now incorrect, was correct")
+    ]
+    assert journal.requests == {viz: "viz", card: "card"}
+    assert read_journal([*events, _turn(10, [2], [])], 10).revised == []
