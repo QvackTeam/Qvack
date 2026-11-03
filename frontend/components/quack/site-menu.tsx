@@ -9,9 +9,9 @@ import { LOCALES, LOCALE_NAME } from "@/lib/i18n/locale";
 import { EASE_OUT, usePrefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 import { MenuToggle } from "./menu-toggle";
+import type { AsciiField } from "./scanline/ascii";
+import { AsciiCanvas } from "./scanline/ascii-canvas";
 import { drawReeds } from "./scanline/reeds";
-import type { Scanline, ScanlineOptions } from "./scanline/scanline";
-import { ScanlineCanvas } from "./scanline/scanline-canvas";
 
 /** Пункты меню: ключ словаря t.menu.items и адрес */
 const ITEMS = [
@@ -29,7 +29,6 @@ const WIPE_OUT_MS = 600; // закрытие
 const SCATTER_MS = 900; // слова собираются из разброса
 const GROW_DELAY = 0.25; // камыши начинают расти, когда шторка уже идёт
 const GROW_TIME = 1.6;
-const REED_OPTIONS: Partial<ScanlineOptions> = { lineWidth: 0.5, glitch: 0.3 };
 
 /** Маленький детерминированный ГПСЧ (mulberry32): разброс букв одинаков при каждом открытии */
 function mulberry32(seed: number) {
@@ -76,17 +75,17 @@ function Letters({ text }: { text: string }) {
   ));
 }
 
-/** Камыши по бокам: рисуются яркостью в offscreen-canvas, штриховку делает движок */
+/** Камыши и кувшинки по бокам: рисуются яркостью в offscreen-canvas, в символы их превращает движок */
 function ReedsLayer() {
   const reduced = usePrefersReducedMotion();
   const off = useRef<HTMLCanvasElement | null>(null);
 
   const onFrame = useCallback(
-    (s: Scanline, t: number) => {
+    (s: AsciiField, t: number) => {
       const { width, height } = s.getSize();
       if (width < 2 || height < 2) return;
       const c = (off.current ??= document.createElement("canvas"));
-      // на больших экранах рисуем вдвое мельче: штрихи шагом 3px всё равно не различат
+      // на больших экранах рисуем вдвое мельче: ячейка символов всё равно крупнее
       const k = Math.min(1, 960 / width);
       const w = Math.round(width * k);
       const h = Math.round(height * k);
@@ -107,8 +106,8 @@ function ReedsLayer() {
     [reduced],
   );
 
-  // на телефоне растения не показываем: они закрыли бы пункты
-  return <ScanlineCanvas className="pointer-events-none absolute inset-0 hidden size-full md:block" options={REED_OPTIONS} onFrame={onFrame} />;
+  // на телефоне растения не показываем: они закрыли бы пункты. Снизу полоса под язык и подсказку остаётся чистой: символы не должны идти сквозь текст
+  return <AsciiCanvas className="pointer-events-none absolute inset-x-0 top-0 hidden h-[calc(100%-4rem)] w-full font-mono md:block" onFrame={onFrame} />;
 }
 
 type Props = {
@@ -120,7 +119,7 @@ type Props = {
   returnFocusRef?: React.RefObject<HTMLElement | null>;
 };
 
-/** Полноэкранное меню: шторка сверху вниз, слова собираются из разброса, по краям растут камыши */
+/** Полноэкранное меню: шторка сверху вниз, слова собираются из разброса, по краям растут камыши из символов */
 export function SiteMenu({ open, onClose, anchor, returnFocusRef }: Props) {
   // монтируемся при открытии, размонтируемся, когда закончится шторка закрытия
   const [mounted, setMounted] = useState(open);
@@ -294,8 +293,8 @@ function Overlay({ open, onClose, onGone, anchor, returnFocusRef }: Props & { on
         </nav>
 
         <div className="absolute inset-x-0 bottom-0 z-10 flex flex-col items-center gap-3 px-6 pb-5 md:flex-row md:items-end md:justify-between">
-          <div role="group" aria-label={t.menu.language} className="flex items-center gap-2">
-            <span aria-hidden className="caps mr-1 text-paper-dim">
+          <div role="group" aria-label={t.menu.language} className="flex items-center gap-1">
+            <span aria-hidden className="caps mr-2 text-paper-dim">
               {t.menu.language}
             </span>
             {LOCALES.map((l) => (
@@ -307,11 +306,13 @@ function Overlay({ open, onClose, onGone, anchor, returnFocusRef }: Props & { on
                 aria-label={LOCALE_NAME[l]}
                 onClick={() => l !== locale && setLocale(l)}
                 className={cn(
-                  "caps inline-flex min-h-10 min-w-12 items-center justify-center rounded-pill border px-3 transition-colors",
-                  locale === l ? "border-ribbon bg-ribbon text-on-ribbon" : "border-seam text-paper-dim hover:border-rule hover:text-paper",
+                  "caps inline-flex min-h-10 min-w-12 items-center justify-center whitespace-pre transition-colors duration-(--dur-s) ease-(--ease-out)",
+                  locale === l ? "text-ribbon" : "text-paper-dim hover:text-paper focus-visible:text-paper",
                 )}
               >
+                <span aria-hidden>{locale === l ? "[ " : "  "}</span>
                 {l}
+                <span aria-hidden>{locale === l ? " ]" : "  "}</span>
               </button>
             ))}
           </div>
