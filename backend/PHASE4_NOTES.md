@@ -1208,6 +1208,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/agents/test_extract_episode.py::test_extract_episode_job` (три триггера, Modal недоступен, повтор — то же наблюдение), `test_extract_episode_needs_an_episode`, `test_task_tests_from_the_stored_markup`; мутации (без разметки, без `topic_id`, без вектора, без `corrected_markup`) — тесты падают.
 - Не решено \[ПРОВЕРИТЬ\]: регистрация `extract.episode` в `JOB_HANDLERS` — после ответа A, где читатель памяти в `workers`.
 - Требует подтверждения владельцем: нет
+### D-B-170. Изображение во входе вызова роли (шов S12)
+- Класс: B
+- WP / место: WP21.3 (`recognizer`), WP11.6 (`verdict_free`), `Т-§11.1` «Spark с изображением»; `quack/llm/provider.py` (`ImageInput`, `ProviderRequest.images`), `quack/llm/responses_client.py` (`image_data_url`), `quack/llm/gateway.py` (`generate_structured(images=)`); вопрос-блокер C в #134
+- Контекст: роли «Spark с изображением» есть в таблице `Т-§11.1`, а у шва S12 вход только текст. Формат части с изображением техдок не называет; документация Meta для `POST /v1/responses` (прочитано 2 нояб. 2026, WP0 п.3д этих заметок): `input_image` с `image_url` — публичный URL или `data:image/png;base64,…`.
+- Решение: (а) `ImageInput(mime: image/png | image/webp, data: bytes)`; `ProviderRequest.images` — после текста промпта, по порядку. (б) `ResponsesClient`: с изображениями содержимое сообщения — части `input_text` и `input_image` (`image_url` — data URL); без них — строка, как прежде. (в) Шлюз: `generate_structured(..., images=())` передаёт их в запрос; в хэш запроса входят тип и sha256 каждого изображения (повтор с другим изображением — другой запрос). (г) Подменам `tests/support/llm.py` (каркас C) поле не нужно: они получают `ProviderRequest` целиком.
+- Почему: §0.4.3 п.2 (`Т-§11.1`, WP21.3, WP11.6), п.5.
+- Обратимость: необязательное поле; вызовы без изображений не меняются.
+- Тесты: `tests/test_llm_runtime.py::test_role_call_with_an_image`.
+- Не решено \[ПРОВЕРИТЬ\]: `input_image` проверен только по документации Meta, не живым вызовом Spark (DoD п.6a, стенд); WebP для `input_image` документация не называет — PNG надёжнее; лимиты размера не названы.
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -1537,6 +1548,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- Шов S12, изображение во входе (D-B-170): тест и код в одной итерации; 2 подмены (шлюз не передаёт изображения, клиент не строит части) — каждая роняет тест. Зелёный: `tests/test_llm_runtime.py`, `tests/llm`, `tests/test_meta_mock.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 184 passed.
 - WP14.1–WP14.3, слоты, картина памяти, разговор (D-B-157, D-B-158, D-B-159): `uv run pytest tests/session/test_teacher_context.py` — 9 failed (`NotImplementedError`), коммит `8778d96`; на неверной реализации — 30 подмен в трёх модулях, каждая роняет тест (после усиления тестов, см. «Правки тестов»). Зелёный: 10 passed; с `QUACK_TEST_REQUIRE_INFRA=1` вместе с `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/session/test_checkpoint_law10.py`, `tests/session/test_phase4_contracts.py` — зелёные.
 - WP13.10 по ревью C #124 (D-B-155 п.е, п.ж): `uv run pytest tests/session/test_sessions_db.py` — 2 failed (возврат без `resumed: true`; одновременный старт с одним ключом — `IdempotencyConflictError`), коммит `e8c8e77`. Зелёный: 11 passed (с `QUACK_TEST_REQUIRE_INFRA=1`).
 - WP13.10, жизненный цикл сессии на `Db` (D-B-155): `uv run pytest tests/session/test_sessions_db.py` — ошибка сбора (нет `quack.session.sessions`), коммит `28f32e3`; на неверной реализации — 6 из 7 подмен роняют тест. Зелёный: 10 passed.
