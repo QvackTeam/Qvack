@@ -27,6 +27,8 @@ const K_MIN = 0.04;
 const K_MAX = 2.4;
 const FIT_K_MAX = 1.2;
 const FIT_MARGIN = 56;
+/** How much of its brightness a node loses while a hub is in focus */
+const FOCUS_DIM = 0.86;
 const TWEEN_MS = 450;
 /** A topic leaving the column for its place on the graph travels slower: the learner should see where it went */
 const MOVE_MS = 900;
@@ -128,6 +130,10 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const halo = useRef(new Map<string, number>());
   const haloAt = useRef(new Map<string, Pt>());
   const lastHalo = useRef(0);
+  // Hub focus: which hub the graph is dimmed around and how far the fade has gone (0 none, 1 full)
+  const focusHub = useRef<string | null>(null);
+  const focusMix = useRef(0);
+  const lastFocus = useRef(0);
   const activeRef = useRef<ReadonlySet<IndicatorId>>(new Set());
   const before = useRef<View | null>(null);
   const prevActive = useRef<ReadonlySet<IndicatorId>>(new Set());
@@ -203,6 +209,23 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     const hoverHub = hovered?.startsWith("h:") ? hovered.slice(2) : null;
     const hoverTopic = hovered && !hovered.startsWith("h:") ? hovered : null;
     const litHubs = new Set(hoverTopic ? (links.hubsOf.get(hoverTopic) ?? []) : []);
+
+    // Focus: while a hub is under the pointer, only that hub and its topics stay lit, the rest of the graph sinks.
+    // The fade runs on its own clock, so moving off a hub lets the graph come back instead of snapping
+    const fnow = performance.now();
+    const fEase = 1 - Math.exp(-Math.min(100, fnow - lastFocus.current) / 110);
+    lastFocus.current = fnow;
+    if (hoverHub) focusHub.current = hoverHub;
+    const fTarget = hoverHub ? 1 : 0;
+    const f0 = focusMix.current;
+    const focus = Math.abs(fTarget - f0) < 0.01 ? fTarget : f0 + (fTarget - f0) * fEase;
+    focusMix.current = focus;
+    if (focus === 0) focusHub.current = null;
+    const focusId = focusHub.current;
+    const focusSet = focusId ? new Set([`h:${focusId}`, ...(links.byHub.get(focusId) ?? [])]) : null;
+    /** How much of its brightness a node keeps while a hub is in focus */
+    const bright = (key: string) => (focusSet && !focusSet.has(key) ? 1 - FOCUS_DIM * focus : 1);
+    for (const [id, el] of colEls.current) el.style.opacity = String(bright(id));
     const ringR = clamp(13 * Math.pow(k, 0.6), 5, 15);
     ctx.lineWidth = 1.2;
     for (const [hubId, members] of links.byHub) {
@@ -210,7 +233,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       if (!hp) continue;
       const hx = sx(hp.x), hy = sy(hp.y);
       const lit = hoverHub === hubId;
-      const mute = hoverHub !== null && !lit;
+      const mute = bright(`h:${hubId}`);
       // The foot of the stem sits below the hub on screen; the curves end there
       const sxp = hx, syp = hy + Math.max(ringR + 6, 0.5 * GAP_Y * k);
       let any = false;
@@ -226,7 +249,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
         let alpha = 0.06 + 0.24 * close;
         if (lit) alpha = 0.5 + 0.3 * close;
         else if (hoverTopic === topicId) alpha = 0.85;
-        if (mute) alpha *= 0.3;
+        alpha *= mute;
         const mid = (ay + syp) / 2;
         const g = ctx.createLinearGradient(0, ay, 0, syp);
         g.addColorStop(0, `rgba(${col.ribbonRgb},${(alpha * 0.3).toFixed(3)})`);
@@ -239,7 +262,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       }
       if (any) {
         ctx.strokeStyle = col.ribbon;
-        ctx.globalAlpha = (lit || litHubs.has(hubId) ? 0.9 : 0.38) * (mute ? 0.3 : 1);
+        ctx.globalAlpha = (lit || litHubs.has(hubId) ? 0.9 : 0.38) * mute;
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(hx, hy + ringR);
@@ -267,9 +290,17 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       ctx.stroke();
     };
     ctx.strokeStyle = col.dim;
-    ctx.globalAlpha = 0.6;
     ctx.lineWidth = 1.4;
-    line(() => true);
+    if (focusSet) {
+      // Links between the topics of the focused hub stay; every other link sinks
+      ctx.globalAlpha = 0.6 * (1 - FOCUS_DIM * focus);
+      line((a, b) => !(focusSet.has(a) && focusSet.has(b)));
+      ctx.globalAlpha = 0.6;
+      line((a, b) => focusSet.has(a) && focusSet.has(b));
+    } else {
+      ctx.globalAlpha = 0.6;
+      line(() => true);
+    }
     if (hovered && !hovered.startsWith("h:")) {
       ctx.strokeStyle = col.paper;
       ctx.globalAlpha = 0.95;
@@ -287,7 +318,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       if (!near(x, y, 20)) continue;
       const st = stateOf(t, m.nowMs);
       const hollow = st === "new";
-      ctx.globalAlpha = t.status === "proposed" ? 0.6 : 1;
+      ctx.globalAlpha = (t.status === "proposed" ? 0.6 : 1) * bright(n.key);
       ctx.beginPath();
       ctx.arc(x, y, n.key === hovered ? rT + 2 : rT, 0, Math.PI * 2);
       if (hollow) {
@@ -311,6 +342,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       const x = sx(p.x), y = sy(p.y);
       if (!near(x, y, 40)) continue;
       const r = n.key === hovered || litHubs.has(n.id) ? rH + 2 : rH;
+      ctx.globalAlpha = bright(n.key);
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fillStyle = col.cloth;
@@ -323,6 +355,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       ctx.fillStyle = col.ribbon;
       ctx.fill();
     }
+    ctx.globalAlpha = 1;
 
     // Indicator halos. Each indicator has its own colour and its own form, so colour is never the only clue.
     // A node under several indicators gets several rings, one outside the other, never a mixed colour.
@@ -552,7 +585,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       const vis = Math.abs(target - was) < 0.01 ? target : was + (target - was) * ease;
       if (vis !== target) settling = true;
       labelVis.current.set(lb.key, vis);
-      const alpha = lb.fade * vis;
+      const alpha = lb.fade * vis * bright(lb.key);
       if (alpha < 0.02) continue;
       ctx.font = lb.font;
       ctx.globalAlpha = alpha;
@@ -564,7 +597,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       ctx.fillText(lb.text, lb.x, lb.y);
     }
     ctx.globalAlpha = 1;
-    return settling || haloSettling || flash.current.size > 0;
+    return settling || haloSettling || flash.current.size > 0 || focus !== fTarget;
   }, []);
 
   const frame = useCallback(
