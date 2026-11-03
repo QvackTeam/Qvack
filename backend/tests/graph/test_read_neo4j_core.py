@@ -479,3 +479,25 @@ async def test_factory_and_extras(settings: Settings, neo4j_driver: AsyncDriver)
     assert isinstance(reader, Neo4jGraphReader)
     with pytest.raises(NotImplementedError):
         await reader.profile(uuid4())
+
+
+async def test_factory_reader_does_not_leak_through_extra_reads(
+    settings: Settings, neo4j_driver: AsyncDriver, world: World
+) -> None:
+    """D-A-144 for the reads of `ExtraReads`: a reader of learner B, asked by ids and learner
+    ids of learner A, answers nothing."""
+    other = await _build(neo4j_driver, seq=4)
+    try:
+        mine = create_graph_reader(neo4j_driver, settings, learner_id=other.learner)
+        assert await mine.skill_history(UUID(world.s1)) == []
+        assert await mine.prerequisites(UUID(world.s1)) == []
+        assert await mine.misconception_detail(UUID(world.mis)) is None
+        assert await mine.review_candidates(world.learner, 1) == []
+        assert await mine.past_solution(world.learner) == []
+        assert (
+            await mine.extraction_candidates(world.learner, world.session, None, 5)
+        ).skills == []
+        own = create_graph_reader(neo4j_driver, settings, learner_id=world.learner)
+        assert await own.skill_history(UUID(world.s1)) != []
+    finally:
+        await _drop(neo4j_driver, other.learner)
