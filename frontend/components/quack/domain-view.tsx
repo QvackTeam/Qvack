@@ -1,8 +1,9 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useGraphModel } from "@/lib/graph/use-graph-model";
+import type { TodayRec } from "@/lib/graph/types";
 import { useFmt, useLocale, useMocks, useT } from "@/lib/i18n/provider";
 import { scrollToId } from "@/lib/scroll";
 import { cn } from "@/lib/utils";
@@ -13,7 +14,7 @@ import { DomainGraph, type GraphHandle } from "./domain-graph";
 import { LayeredGraph } from "./graph/layered-graph";
 import { NumText } from "./num-text";
 import { EmptyDomain } from "./empty-domain";
-import { TodayList } from "./today-list";
+import { TodayCards } from "./today-cards";
 import { TopicList } from "./topic-list";
 import { TopicSearch } from "./topic-search";
 
@@ -124,6 +125,20 @@ export function DomainView() {
   const hasGraph = model ? model.topics.length > 0 : domain.topics.length > 0;
   const canvasCount = canvasesOf(domain.id).length;
 
+  // "Today": from the model on mocks; with the API on, from what the backend gave the older mapping.
+  // Only the fields that exist are carried over.
+  const recs = useMemo<TodayRec[]>(
+    () =>
+      model
+        ? model.today
+        : domain.today.map((it) => ({ id: it.id, kind: "item" as const, topicId: it.topicId, name: it.title, action: it.topicId ? ("review" as const) : undefined, minutes: it.minutes, href: it.href })),
+    [model, domain.today],
+  );
+  const nameOf = (r: TodayRec) => r.name ?? (r.topicId ? model?.topics.find((t) => t.id === r.topicId)?.name : r.hubId ? model?.hubs.find((h) => h.id === r.hubId)?.name : undefined);
+  // Hovering a card lights its topic (or hub) on the graph
+  const [hot, setHot] = useState<TodayRec | null>(null);
+  const highlight = useMemo(() => (hot ? { topicIds: hot.topicId ? [hot.topicId] : [], hubIds: hot.hubId ? [hot.hubId] : [] } : undefined), [hot]);
+
   const [seenDomain, setSeenDomain] = useState(domain.id);
   if (seenDomain !== domain.id) {
     setSeenDomain(domain.id);
@@ -187,20 +202,16 @@ export function DomainView() {
             <>
               <div className="hidden min-h-0 flex-1 md:flex">
                 {model ? (
-                  <LayeredGraph key={domain.id} ref={graph} model={model} domain={domain} />
+                  <LayeredGraph key={domain.id} ref={graph} model={model} domain={domain} highlight={highlight} />
                 ) : (
                   <DomainGraph key={domain.id} ref={graph} domain={domain} mode={graphMode} onModeChange={setGraphMode} />
                 )}
               </div>
-              <div className="md:hidden">
-                <TodayList items={domain.today} idPrefix="m" />
-              </div>
+              <TodayCards recs={recs} nameOf={nameOf} onHover={setHot} className="md:hidden" idPrefix="m" />
               <div className="md:hidden">
                 <TopicList domain={domain} openId={openTopic} />
               </div>
-              <div className="hidden md:block">
-                <TodayList items={domain.today} />
-              </div>
+              <TodayCards recs={recs} nameOf={nameOf} onHover={setHot} className="hidden md:grid" />
             </>
           ) : (
             <EmptyDomain titleDat={domain.titleDat} setupHref={domain.status === "onboarding" ? `/domains/${domain.id}/structure` : undefined} />
