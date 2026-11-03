@@ -24,7 +24,7 @@
    До закрытия сессии проверить из другого терминала `ssh admin@<сервер>`: вход под root и по паролю отключён.
 5. **GitHub Environment `production`:** секреты `DEPLOY_HOST`, `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS` (`ssh-keyscan -t ed25519 <сервер>`) и секреты из `env.example`. Job выкатки — отдельный пакет (WP9.3/9.4), он рендерит `/srv/quack/.env` с правами 600.
 6. **Файлы на сервере.** В `/srv/quack` должны лежать `compose.yaml`, `deploy/` и `.env`.
-7. **Образы** с тегом `<sha>` в GHCR; пакеты публичные, `docker pull` проверить без входа (Д-§5.1).
+7. **Образы.** CI (job `publish` в `ci.yml`) на каждый push в `main` и `phase-4` после зелёных проверок публикует `ghcr.io/<owner>/quack-backend` и `quack-compute` с тегами `<7 символов sha>` и `<ветка>`. После первой публикации пакеты приватные: в GitHub → Packages → каждый пакет → Package settings → Change visibility → Public, затем проверить `docker pull` на сервере без входа (Д-§5.1). В `deploy.sh` передаётся тот же короткий sha.
 8. **Первая выкатка** (баз ещё нет, дампить нечего):
    ```bash
    ALLOW_NO_DUMP=1 ./deploy/deploy.sh <sha>

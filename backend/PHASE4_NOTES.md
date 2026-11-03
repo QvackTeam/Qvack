@@ -518,6 +518,20 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/graph/test_read_stub.py::test_extraction_candidates_of_wp15`; `tests/jobs/test_rules_p4.py::test_handwriting_known_claim_and_reextraction_rows`.
 - Требует подтверждения владельцем: нет.
 
+### D-A-137. S4: чтения для контекста хода и описания заблуждения; `GraphReader` в `workers`; снимок слотов 3–4
+- Класс: B. WP6.4, WP14.1–14.2, WP16.2; `Т-§9.3`, `Т-§9.5`, `Т-§10.1`, `Т-§10.2`; вопросы B в #125 и #155; `quack/graph/read/`, `tests/support/graph_read.py`
+- Решение:
+  1. **`SkillFact.name`, `SkillFact.topic_name`** (оба `None`, пока не прочитаны) — срез и все чтения отдают названия сразу.
+  2. **`GraphReader.domain_goals(domain_id) -> list[HubGoal{hub_id, name, kind, control_type, deadline_at_ms, topics: [HubTopicGoal{topic_id, name, required_levels}]}]`** — по графу: слияния, разбиения и переименования тем уже учтены.
+  3. **`GraphReader.profile(learner_id) -> ProfileFacts{prefs, manner, learned_helpful_approach, learned_confidence_brier, learned_confidence_bias, learned_branch_rate, learned_reasoning_share}`** (`Т-§9.5`): `None` — «нет данных» (меньше `profile_min_samples`, для уверенности — `calibration_min_reports`), не ноль. Выученное считает свёртка профиля (WP5.3).
+  4. **`GraphReader.topic_memory(topic_ids) -> list[TopicMemory{topic_id, name, domain_id, skills, misconceptions}]`** — навыки тем цели сессии; их `skill_id` идут в `SliceFocus.skill_ids`. Неизвестная тема пропускается.
+  5. **`GraphReader.misconception_detail(misconception_id) -> MisconceptionDetail | None`** — id через `Alias` (после `misconception.merged` читается цель); поля `status` (включая `unknown` у гипотезы до первого проявления), `statement`, `triggers`, `skill_id`, `skill_name`, `manifestations: [ManifestationFact{evidence_id, quote, task_id, source_seq, at_ms, tier}]` — все по `MANIFESTS`, включая перенесённые слиянием.
+  6. **Как `workers` получает читателя:** поле в `JobContext` не добавляется — набор полей это контракт §4.2 без читателя. Обработчик строит `quack.graph.read.create_graph_reader(ctx.neo4j, ctx.settings)` там, где ему нужна память; тест подставляет `FixedGraphReader`. До G2 фабрика поднимает `NotImplementedError`.
+  7. **Снимок слотов 3–4 на сессию:** `Т-§10.1` требует заморозки на начало сессии, `state_at` для этого не нужен. Место хранения — зона B (контекст хода). Колонка `frozen_slots JSONB NULL` в `ops.turn_manifests` — миграция A, предложение B принято: `db/migrations/20261103000003_turn_manifests_frozen_slots.sql` (`ADD COLUMN frozen_slots JSONB NULL`, откат — `DROP COLUMN`). B пишет `{profile, domain_and_goals}` в манифест первого хода и читает снимок из самого раннего манифеста сессии с непустым `frozen_slots`; строки хвоста — из событий после `session.started`.
+- Почему: §0.4.3 п.2 (`Т-§9.5`, `Т-§10.1`), п.5; состав полей назван A в #125 и #155.
+- Тесты: `tests/graph/test_read_stub.py` (names, goals, profile, topic_memory, misconception_detail, factory); `tests/db/test_baseline_migration.py::test_turn_manifests_frozen_slots_column`.
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
@@ -1087,6 +1101,18 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Решено (2026-11-03): D-A-122 п.1 (#130) — `content.study_plans` строит код при старте сессии с целью-хабом (и при записи хода, если плана нет): порция — вершина графа `REQUIRES` тем хаба со сжатыми SCC (`graph.read.topic_requires`, S4), порядок — топологический; модель план хаба не пишет. Согласуется с WP13.6 и `Т-§4.6`. Реализация — B (WP13.6), отдельным пунктом.
 - Требует подтверждения владельцем: нет
 
+### D-B-167. Проверка задачи учителя после хода (WP12.5, строка «учитель на лету»)
+- Класс: B
+- WP / место: WP12.5, `Т-§5.6`, `T-TK6`; `quack/practice/task_check.py` (`check_teacher_task`)
+- Контекст: `Т-§5.6`: Spark решает задачу независимо и оценивает разметку (метод назван, вариант, уровень); ответ сравнивается тем же кодом, что ответы учеников; расхождение — `task.key_disputed` или `task.markup_disputed`, неверная разметка исправляется пересвёрткой. Не названы: что делать, если код не может решить ключ (медленный тип, compute недоступен, ответ не разобран); что идёт первым при обоих расхождениях; какой вид у исправленной разметки; ключ события.
+- Решение: (а) ответ проверяющего — `LearnerAnswer` в типе спецификации, `check()` с `symbolic_background_timeout_ms`; ключ оспорен только при вердикте `incorrect`; иной исход (`partial`, `unclear`, `NotYet`, `CheckFailed`, `NeedsModel`) ключ не оспаривает — судится только разметка. (б) Ключ первым: при обоих расхождениях — `task.key_disputed` с исправленной разметкой. (в) Исправление: `method_named` — по проверяющему, неподходящие уровни убираются, `variant_of` снимается, если «не вариант»; не подошёл ни один уровень — `tests` остаются (иначе разметка без пар). (г) Вход вслепую: условие, варианты без признака верного, заявленная разметка с именами навыков, условие исходной задачи для варианта. (д) Ключ события `task_check:{task_id}`, ключ вызова — с версией промпта; актор — `task_checker@1`; `causation_seq` — событие хода.
+- Почему: §0.4.3 п.2 (WP12.5, `Т-§5.6`), п.5.
+- Обратимость: один модуль.
+- Тесты: `T-TK6` — `tests/practice/test_task_check.py` (4).
+(е) Строка «сгенерированная» — `verify_generated`: та же слепая проверка до банка; расхождение → `task_arbiter` (Wonder) с решением генератора, ответом проверяющего и словами расхождения; арбитр снова расходится (ключ или разметка) — `False`, черновик выбрасывается; ключи вызовов — `{ключ черновика}:{промпт}`.
+- Не решено \[ПРОВЕРИТЬ\]: строка «семинар» — с разбором материала (C); обработчик задачи `task.check` (`{task_ids}` правила `turn.committed`) — при сборке входов (имена навыков из S4).
+- Требует подтверждения владельцем: нет
+
 ### D-B-157. Картина памяти `renderer@1` (WP14.2)
 - Класс: B
 - WP / место: WP14.2, `Т-§10.2`, `Т-§8.2`–`Т-§8.7`; `quack/session/memory_picture.py`
@@ -1197,6 +1223,26 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `T-X1` — `tests/agents/test_extract_episode.py::test_extracted_elements_checked_on_the_episode`, `test_record_extraction`, `test_record_extraction_commits_nothing_on_failure`.
 - Не решено \[ПРОВЕРИТЬ\]: потолок уровня — по задаче целиком, не по части (`part`) ответа; задача `extract.episode` (сборка окна из журнала, кандидаты из S4, `task_tests` из `content.tasks`) — следующим шагом WP15.
 - Требует подтверждения владельцем: нет
+### D-B-169. Подбор задач из банка (WP12.7)
+- Класс: B
+- WP / место: WP12.7, `Т-§5.7`; `quack/practice/select.py` (`select_tasks`), `quack/config.py` (`task_select_limit`)
+- Контекст: `Т-§5.7` даёт ориентир Cypher: навык, уровень, «семейство ещё не встречалось», «ловит заблуждение M», проверенные первыми, `LIMIT 5`; сессия Neo4j — только чтение. Не названы: изоляция узлов внутри запроса; порядок при равенстве; где число 5.
+- Решение: (а) запрос по ориентиру; каждый узел сопоставляется с `learnerId` ученика (навык, задача, задачи семейства; `Т-§3.5`). (б) Порядок — «ловит M», «проверена», затем `t.id` (повторяемость). (в) Число — параметр `task_select_limit = 5` (§0.4: числа — в конфиг). (г) Сессия — `read_session` (закон 3).
+- Почему: §0.4.3 п.2 (WP12.7, `Т-§5.7`), п.5.
+- Обратимость: один запрос.
+- Тесты: `tests/practice/test_select_tasks.py` (Neo4j).
+
+
+### D-B-172. Задача `extract.episode`: сборка из журнала и S4 (WP15 п.1–6)
+- Класс: B
+- WP / место: WP15 п.1–2, п.4–6, WP7.1, `Т-§2.1`, `Т-§7.5`, `Т-§7.6`, `Т-§2.8`, `Т-§4.11`; `quack/agents/extract_episode.py` (`ExtractionTrigger`, `extract_episode`, `run_extract_episode`, `task_tests`, `episode_vector`), `quack/practice/repo.py`; швы A: `GraphReader.extraction_candidates` (#147, D-A-135), правила диспетчера `rules_p4.py`
+- Контекст: правила A кладут в задачу `trigger_seq` и, при переизвлечении, `episode_seq` с `topic_id` или `restrict_skill_ids`; у `episode.closed` — `from_seq`, `to_seq`. Не названы: где брать границы эпизода при переизвлечении; из какого текста считать вектор эпизода; откуда разметка задач для потолка уровня; кто строит читателя памяти в процессе `workers`.
+- Решение: (а) эпизод — номер его `episode.closed` (`Т-§2.1`: «Идентичность эпизода — номер этого события»); без `episode_seq` в задаче эпизод — сам `trigger_seq`; границы и `session_id`/`domain_id` берутся из этого события. Номер, который не `episode.closed` сессии, — ошибка задачи. (б) Окно — события сессии до `to_seq` через `extraction_window` (D-B-162). (в) Вектор эпизода — `embed_query` от сырых слов событий эпизода (`source_text`, D-B-165) построчно; нет слов или `EmbeddingsUnavailable` — `None`, и A отдаёт только навыки сессии. (г) Кандидаты и известные заблуждения — `extraction_candidates(..., settings.candidate_skills_k, topic_id=..., skill_ids=...)` A; свои `CandidateSkill`, `KnownMisconception`, `candidate_skill_ids` удалены — отбор и ограничение делает A. (д) Разметка задач окна — из журнала (закон 1): `task.created` с частями, замещается более поздним `corrected_markup` у `task.verified`/`task.key_disputed`/`task.markup_disputed`; пары нового навыка без id не дают. Это уточняет п. (в) D-B-165 («из `content.tasks`»). (е) `run_extract_episode(job, ctx, reader)` принимает читателя аргументом: в `JobContext` (S1) читателя нет, а реализация `GraphReader` в G2 — у A. Обработчик в `JOB_HANDLERS` не регистрируется, пока A не назовёт, как процесс `workers` получает читателя.
+- Почему: §0.4.3 п.2 (WP15, `Т-§2.1`, `Т-§7.6`), п.5.
+- Обратимость: один модуль.
+- Тесты: `tests/agents/test_extract_episode.py::test_extract_episode_job` (три триггера, Modal недоступен, повтор — то же наблюдение), `test_extract_episode_needs_an_episode`, `test_task_tests_from_the_stored_markup`; мутации (без разметки, без `topic_id`, без вектора, без `corrected_markup`) — тесты падают.
+- Не решено \[ПРОВЕРИТЬ\]: регистрация `extract.episode` в `JOB_HANDLERS` — после ответа A, где читатель памяти в `workers`.
+- Требует подтверждения владельцем: нет
 ### D-B-170. Изображение во входе вызова роли (шов S12)
 - Класс: B
 - WP / место: WP21.3 (`recognizer`), WP11.6 (`verdict_free`), `Т-§11.1` «Spark с изображением»; `quack/llm/provider.py` (`ImageInput`, `ProviderRequest.images`), `quack/llm/responses_client.py` (`image_data_url`), `quack/llm/gateway.py` (`generate_structured(images=)`); вопрос-блокер C в #134
@@ -1227,6 +1273,33 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Обратимость: один модуль.
 - Тесты: `T-AG6` (часть «одна попытка исправления») — `tests/agents/test_viz.py` (4); мутации (лишняя попытка, без проверки «blank», без поиска готового события, без ошибок во входе) — тесты падают.
 - Не решено \[ПРОВЕРИТЬ\]: файлы и версии библиотек `deploy/static/viz/` (C, WP9.2) — заполнить `viz_libraries`; `GET /v1/viz/{id}` с CSP — отдельным PR (тело B, маршрут в `quack/artifacts/router.py`, §7.3 п.3); подключение `quack.agents.viz` в `HANDLER_MODULES` (`quack/runtime`, A).
+### D-B-176. Аналитик границы: вызов и запись (WP16.1)
+- Класс: B
+- WP / место: WP16.1, `Т-§13.5`, `Т-§13.2`, `Т-§9.5`, `T-AG1`, законы 5, 7, 10; `quack/agents/analyst.py` (`run_analyst`, `render_evidence`, `digest_structured`, `analyst_errors`)
+- Контекст: вход аналитика — «только структура»; прогноз — `agent.requested` от `agent:analyst`. Не названы: вид строк свидетельств; что делать с меткой, неверной и после повтора; ключи сводки и поручений; `needed_in_session` у прогноза; что такое `as_of_seq`.
+- Решение: (а) Блоки памяти (состояние навыков, заблуждения, план, цели, профиль) отрисовывает вызывающий из `quack.graph.read` (S4, ответ A в #125). Здесь из журнала строится только блок свидетельств: принятые `evidence` из `observation.extracted`, по строке — навык, уровень, исход, помощь, тип пробела, цитата. Навык без метки во вход не идёт. (б) Прошлой сводки и манеры во входе нет вовсе (`T-AG1`). (в) Метки рамки, гипотез и прогноза проверяются (`Т-§4.5`). Элемент, неверный и после повтора, отбрасывается. (г) Ключ сводки — `digest:{domain_id}:{trigger_seq}:{роль}` (у `analyst` и `analyst_deep` свои). Поручение — `{ключ}:request:{i}`, `request_id = uuid5(uuid5(domain_id, ключ), i)`. Повтор задачи даёт те же события и id. (д) `needed_in_session = false`: прогноз — подготовка на потом (класс P2, `Т-§13.3`). (е) `as_of_seq` — номер, по который собран вход; его даёт вызывающий. (ж) Сводка и поручения — одна транзакция (закон 7). `analyst_deep` рендерит `analyst@1` (`prompt_role`).
+- Почему: §0.4.3 п.2 (WP16.1, `Т-§13.5`), п.5.
+- Обратимость: один модуль.
+- Тесты: `T-AG1` — `tests/agents/test_analyst.py` (2); мутации (`request_id` случайный, `needed_in_session`, без `prompt_role`, `as_of_seq`) — тесты падают.
+- Не решено \[ПРОВЕРИТЬ\]: обработчики `analyst.run`, `analyst.deep` и отрисовка блоков памяти — после PR A с чтениями S4 и ответа о `GraphReader` в `workers` (#155).
+### D-B-175. Описание заблуждения (WP16.2)
+- Класс: B
+- WP / место: WP16.2, `Т-§9.3`, `Т-§9.2`, `T-AG2`, законы 5 и 10; `quack/agents/misconception_describe.py` (`describe_misconception`, `render_manifestations`, `DescriberInput`); факты — `GraphReader.misconception_detail` A (ответ A в #155, сигнатура — в PR A)
+- Контекст: «завершается, если заблуждение не подтверждено» (WP16.2), но статусов подтверждённого в `Т-§9.2` три. Не названы: вид строк проявлений во входе `{{ manifestations }}`; ключ события; что делать с пустыми условиями.
+- Решение: (а) «Подтверждено» — `confirmed`, `in_work` (подтверждено и учитель нацелен), `watching` (подтверждено и сопротивляется). Остальное и `None` — выход без вызова (`T-AG2`). (б) Строка проявления: порядковый номер, дата (UTC, `ГГГГ-ММ-ДД` — вход детерминирован), условие задачи из `content.tasks` или «в разговоре, без задачи», цитата. Строки идут по времени, все без отбора. Прошлой формулировки во входе нет (закон 10). (в) Ключ события и вызова — `misconception.described:{misconception_id}:{trigger_seq}`, `causation_seq = trigger_seq`, актор — версия промпта. Повтор задачи даёт то же событие (закон 5). (г) Формулировка и условия обрезаются по краям, пустые условия отбрасываются. (д) Модуль принимает `DescriberInput`, а не модель A: обработчик задачи переводит в него `MisconceptionDetail`, когда A выложит сигнатуру. Регистрация задачи — после ответа A, как `workers` получает `GraphReader` (#155).
+- Почему: §0.4.3 п.2 (WP16.2, `Т-§9.3`), п.5.
+- Обратимость: один модуль.
+- Тесты: `T-AG2` — `tests/agents/test_misconception_describe.py` (3); мутации (статус `suspected`, порядок, обрезка, `causation_seq`) — тесты падают.
+- Не решено \[ПРОВЕРИТЬ\]: обработчик и регистрация `misconception.describe` — после PR A с `misconception_detail` и ответа о `GraphReader` в `workers`.
+### D-B-174. Входы контекста учителя из данных B (WP14.1)
+- Класс: B
+- WP / место: WP14.1, `Т-§10.1`, `Т-§12.5`, `Т-§17.8`; `quack/session/turn_inputs.py` (`load_plan`, `load_learner_skill`)
+- Контекст: план и скилл ученика — данные B (`content.session_plans`, `content.learner_skills`). Профиль и цели домена для слотов 3 и 4 отдаёт память: A в #125 назвала `GraphReader.profile` (предпочтения, манера, выученное) и `domain_goals`. Снимок на начало сессии читается один раз на первом ходе и хранится; где именно — вопрос A в #125.
+- Решение: (а) План — документ `content.session_plans` сессии (WP13.6); чужой сессии нет. (б) `/имя` — инструкция последней версии скилла с этим именем; неизвестное имя ничего не даёт; читается своим SQL, без импорта `artifacts` (WP14.1). (в) Профиль из журнала B не сворачивает: два источника предпочтений разошлись бы. Строки изменений хвоста даёт `frozen_slots` — сравнение снимка с текущим чтением (D-B-159).
+- Почему: §0.4.3 п.2 (WP14.1), п.5.
+- Обратимость: один модуль.
+- Тесты: `tests/session/test_turn_inputs.py::test_plan_and_learner_skill`; мутация «первая версия скилла вместо последней» — тест падает.
+- Не решено \[ПРОВЕРИТЬ\]: место хранения снимка слотов 3 и 4 — ответ A в #125.
 - Требует подтверждения владельцем: нет
 
 ### Поток C
@@ -1494,6 +1567,20 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Обратимость: одна зависимость, один модуль.
 - Тесты: `tests/auth/test_pairing_wp22.py` (`T-CP1`); маршруты — `T-A1`, исключение — `T-E2`.
 - Требует подтверждения владельцем: нет.
+### D-C-136. WP21.4 п.3: роль `canvas_diagnoser@1` — схема выхода, промпт, перевод в диагноз
+- Класс: B (схема роли C, S8); слой 1 — черновик по тезисам документа, как D-C-132
+- WP / место: WP21.4 п.3, WP21.5, S8; `quack/canvas/diagnosis.py`, `quack/prompts/canvas_diagnoser/v1.md`
+- Решение:
+  1. `CanvasDiagnoserOutput {error: bool, gap_type, misconception: M-метка|null, misconception_hypothesis: str|null, root_cause: S-метка|null, confidence: 0..1}`. Поля — один к одному с `DiagnosisRecord` (`observation.diagnosed`, S3), кроме `kind`: `error`/`question` решает код по `mark_min_confidence` (`Т-§15.4`, WP21.5), а не модель. Перечень `gap_type` — `GapType` S3; `none` — нет ошибки.
+  2. Нет ошибки (`error = false`, или `gap_type = none`) — диагноза нет, события нет (D-C-120). Известное заблуждение важнее гипотезы: при обоих гипотеза отбрасывается («не больше одного», как у `second_opinion@1`).
+  3. Входные блоки: условие, пространство решения, навыки задачи (метки `S`), известные заблуждения (метки `M`), предыдущие строки, новая строка (`Т-§15.4` п.3: «условие, пространство решения, предыдущие строки»). Метки — `LABEL_FIELDS`: `misconception`, `root_cause`.
+  4. Слой 1 — черновик по тезисам `Т-§15.4`, П-9.7, `Т-§7.1`: «ничего» и другой путь — не ошибка; ложный диагноз хуже пропущенного; неуверенный диагноз — только вопрос.
+  5. Вызов роли (сборка блоков, символьная проверка, пространство решения, второе мнение) — следующий шаг WP21.4, когда в `phase-4` будет пространство решения B (#144).
+- Почему: ТЗ Ф4 WP21.4 п.3, S8, §7.3 п.2; `Т-§15.4`, `Т-§7.1`, `Т-§12.4`; D-C-120, D-C-132.
+- Обратимость: схема и промпт роли C; до первого вызова.
+- Тесты: `tests/canvas/test_diagnosis_wp21.py`; `tests/llm/test_labels.py`.
+- Требует подтверждения владельцем: нет.
+
 ### D-C-133. Открытые вопросы C к владельцу, решённые по документам (владелец поручил C, 2026-11-03)
 - Класс: B (значения конфигурации и эксплуатации); решения приняты C по прямому поручению владельца («детально сверяешься с документацией и принимаешь решение сама»)
 - WP / место: §6.7, WP18, WP19, WP24; `compose.yaml`, `deploy/env.example`, `compute/quack_compute/tmp_sweeper.py`, `compute/quack_compute/settings.py`
@@ -1700,6 +1787,8 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP12.7, подбор задач (D-B-169): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 5 подмен (без `learnerId` задачи, без уровня, без «семейство не встречалось», порядок, лимит), каждая роняет тест. Зелёный: `tests/practice/test_select_tasks.py` против Neo4j — 1 passed.
+- WP12.5, проверка задачи учителя (D-B-167): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 11 подмен, каждая роняет тест. Зелёный: `tests/practice/test_task_check.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 4 passed.
 - WP23.1, документы артефактов (C, `phase-4-c-wp23-artifacts`): красный прогон отдельно не снят (облегчённый TDD по указанию владельца, 2026-11-03). Зелёный: `tests/artifacts/test_documents_wp23.py` + `tests/test_app_assembly.py` — 25 passed; с ключами — `tests/e2e/test_isolation_and_idempotency.py` + `tests/artifacts/test_documents_wp23.py` — 9 passed.
 - WP20.3, тело `embedding.compute` (C, `phase-4-c-wp20-modal`, коммит `5ff4812`): в Linux `pytest tests/embeddings/test_embedding_compute.py` — ошибка сбора (нет модуля); на неверной реализации (без пропуска готовых узлов) — 1 failed. Зелёный: с `tests/db/test_sql_static.py`, `tests/test_contracts.py` — 14 passed.
 - WP20.3, клиент Modal (C, `phase-4-c-wp20-modal`, коммит `92d406a`): `uv run pytest tests/embeddings` — ошибка сбора (нет `EMBEDDING_APP`, `EMBEDDER_CLASS`, параметра `query_instruction`). На неверной реализации (инструкция у документов; ошибки Modal не переводятся в `EmbeddingsUnavailable`) — по 1 failed. Зелёный: `tests/embeddings` (6, в Linux с `modal/` рядом), `tests/storage/test_s1_resources.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, `tests/test_app_assembly.py` — 46 passed. Правка теста красного коммита: `SecretStr("")` вместо `""` в `model_copy` (ошибка теста, не контракта).
