@@ -36,6 +36,7 @@ from quack.ops.backup import run_backup
 from quack.ops.commands import migrate, purge_deleted, replay_dlq
 from quack.ops.db_roles import DbRolesRefused, RolePasswords, apply_db_roles
 from quack.ops.registry import can_rollback, seen_pairs, write_event_registry
+from quack.ops.restore_check import restore_check
 from quack.ops.seed import SeedRefusedError, seed_learners, write_learners
 from quack.ops.status import collect_status
 from quack.runtime import (
@@ -91,6 +92,9 @@ def build_parser() -> argparse.ArgumentParser:
     ops_sub.add_parser("purge-deleted", help="physically delete learners with tombstones")
     backup = ops_sub.add_parser("backup", help="encrypted Postgres dump to R2 and local copies")
     backup.add_argument("when", nargs="?", choices=["now"], help="an out-of-schedule dump")
+    ops_sub.add_parser(
+        "restore-check", help="Neo4j must not be ahead of the event log after a restore"
+    )
     ops_sub.add_parser("alerts", help="check the conditions of Д-§9.3 and announce them")
     ops_sub.add_parser("db-roles", help="create or update the Postgres roles and grants")
     ops_sub.add_parser("status", help="print the state of the system as one JSON object")
@@ -274,6 +278,20 @@ async def _seed_learners(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+async def _restore_check(engine, session_factory, driver, redis) -> int:
+    """Д-§8.3: prints the verdict as one JSON object; exit code 1 when Neo4j is ahead of the log."""
+    violations = await restore_check(session_factory, driver)
+    report = {
+        "ok": not violations,
+        "violations": [
+            {"learner_id": v.learner_id, "applied_seq": v.applied_seq, "log_seq": v.log_seq}
+            for v in violations
+        ],
+    }
+    print(json.dumps(report, sort_keys=True))
+    return 1 if violations else 0
+
+
 async def _alerts(settings: Settings) -> int:
     """Д-§9.3: Postgres and Redis only (the `alerts` container has no Neo4j secret, Д-§7)."""
     engine = create_engine(settings, pool_size=1)
@@ -317,6 +335,8 @@ async def _ops(settings: Settings, args: argparse.Namespace) -> int:
         return await run_backup(settings)
     if args.op == "db-roles":
         return await _db_roles(settings)
+    if args.op == "restore-check":
+        return await _with_resources(settings, _restore_check, redis=False)
     if args.op == "alerts":
         return await _alerts(settings)
     if args.op == "openapi":
