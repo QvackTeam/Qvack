@@ -61,6 +61,7 @@ def _journal(storage: object, chunk_seconds: int = 10, max_batches: int = 1000) 
         storage,  # type: ignore[arg-type]
         learner_id=uuid4(),
         session_id=uuid4(),
+        canvas_id=uuid4(),
         chunk_seconds=chunk_seconds,
         max_batches=max_batches,
     )

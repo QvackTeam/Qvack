@@ -101,3 +101,23 @@ def test_backup_is_short_lived_and_never_started_by_up(compose: dict[str, Any]):
     assert backup["restart"] == "no"
     assert backup["profiles"] == ["backup"]
     assert backup["command"] == ["ops", "backup"]
+
+
+def _holders(compose: dict[str, Any], name: str) -> set[str]:
+    return {n for n, s in compose["services"].items() if name in s.get("environment", {})}
+
+
+def test_secrets_reach_only_the_services_of_d_7(compose: dict[str, Any]):
+    """Д-§7: a service gets a variable only when its table row names it (T-OPS6)."""
+    assert _holders(compose, "EMAIL_API_KEY") == {"api"}
+    assert _holders(compose, "GOOGLE_OIDC_CLIENT_ID") == {"api"}
+    assert _holders(compose, "GOOGLE_OIDC_CLIENT_SECRET") == {"api"}
+    assert _holders(compose, "MODAL_TOKEN_ID") == {"workers"}
+    assert _holders(compose, "MODAL_TOKEN_SECRET") == {"workers"}
+    for name in ("S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"):
+        assert _holders(compose, name) == {"api", "workers"}, name
+    for name in ("DELETIONS_S3_ACCESS_KEY", "DELETIONS_S3_SECRET_KEY"):
+        assert _holders(compose, name) == {"api", "workers"}, name
+    assert _holders(compose, "META_API_KEY") == {"api", "workers"}
+    assert _holders(compose, "BACKUP_S3_ACCESS_KEY") == {"backup"}
+    assert _holders(compose, "NEO4J_PASSWORD") == {"api", "workers", "projector"}

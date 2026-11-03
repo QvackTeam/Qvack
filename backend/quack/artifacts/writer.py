@@ -16,16 +16,12 @@ registers it (D-C-126).
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from quack.artifacts.documents import BlockKind
+from quack.artifacts.documents import BlockKind, CardKind
 from quack.practice.markup import TaskMarkup
-
-# Т-§17.5: the kinds of cards (П-11.2) — definition or formula, sign → method, distinction,
-# against a misconception.
-type CardKind = Literal["definition", "sign_to_method", "distinction", "against_misconception"]
 
 
 class _Strict(BaseModel):

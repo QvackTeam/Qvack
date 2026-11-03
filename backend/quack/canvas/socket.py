@@ -150,6 +150,7 @@ async def serve_canvas(
         resources.storage,
         learner_id=session.learner_id,
         session_id=canvas.session_id,
+        canvas_id=canvas.canvas_id,
         chunk_seconds=resources.settings.stroke_chunk_seconds,
         max_batches=chunk_max_batches(resources.settings),
     )
