@@ -10,10 +10,15 @@ from uuid import UUID, uuid4
 import httpx
 from sqlalchemy import text
 
-from quack.artifacts.documents import SystemBlock, write_system_blocks
+from quack.artifacts.cards import write_system_cards
+from quack.artifacts.documents import Card, SystemBlock, write_system_blocks
 from quack.canvas.boards import open_canvas
 from quack.canvas.recognition import commit_typed
+from quack.events import records
 from quack.events.log import NewEvent, append_events
+from quack.events.values import AnswerSpec, MathValue
+from quack.practice.role_outputs import TaskCondition
+from quack.practice.task_store import create_task
 from tests.e2e.endpoints import (
     MULTIPART,
     NO_IDEMPOTENCY_KEY,
@@ -51,6 +56,8 @@ IDEMPOTENT_WALK: tuple[tuple[str, str], ...] = (
     ("PUT", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
     ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"),
     ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
+    ("PATCH", "/v1/cards/{card_id}"),
+    ("DELETE", "/v1/cards/{card_id}"),
     ("POST", "/v1/canvases/{canvas_id}/lines/{line_id}/correct"),
     ("POST", "/v1/sessions/{session_id}/finish"),
     ("POST", "/v1/domains/{domain_id}/archive"),
@@ -61,6 +68,7 @@ NO_OTHER_BODY = {
     ("DELETE", "/v1/artifacts/notes/{artifact_id}"),
     ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"),
     ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
+    ("DELETE", "/v1/cards/{card_id}"),
     ("POST", "/v1/sessions/{session_id}/finish"),
 }
 
@@ -183,7 +191,10 @@ async def _advance(
     if path.endswith("/accept"):
         return replace(ids, block_id=ids.learner_block_id)
     if (method, path) == ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"):
+        ids = replace(ids, card_id=await _card_of_topic(system, learner, ids))
         return await _canvas_with_a_line(system, learner, ids)
+    if (method, path) == ("PATCH", "/v1/cards/{card_id}"):
+        return replace(ids, card_id=UUID(payload["cards"][0]["card_id"]))
     return ids
 
 
@@ -237,6 +248,38 @@ async def _notes_of_phase4_topic(system: System, learner: Learner, ids: Ids) -> 
         learner_block_id=block_id,
         block_id=block_id,
     )
+
+
+async def _card_of_topic(system: System, learner: Learner, ids: Ids) -> UUID:
+    """WP23.4: a card of the walk's Phase 4 topic, as the writer leaves it — its task already in
+    the bank (D-C-140)."""
+    card_id = uuid4()
+    await create_task(
+        system.resources.db,
+        learner_id=learner.learner_id,
+        task_id=card_id,
+        family_id=card_id,
+        source="generated",
+        condition=TaskCondition(text="Ratio test when?", latex=None),
+        markup=records.TaskMarkupRecord(
+            tests=[records.TestedLevelRecord(skill_id=uuid4(), level=3)],
+            method_named=False,
+            answer=AnswerSpec(type="number", value=MathValue(latex="1", sympy="1")),
+        ),
+        verification="unchecked",
+        actor="artifact_writer@1",
+        idempotency_key=f"te2:card:{card_id}",
+    )
+    card = Card(card_id=card_id, kind="sign_to_method", prompt="Ratio test when?", owner="system")
+    await write_system_cards(
+        system.resources.db,
+        system.resources.settings,
+        learner_id=learner.learner_id,
+        topic_id=ids.topic_id,
+        cards=[card],
+        created_by="artifact_writer@1",
+    )
+    return card_id
 
 
 NOTE_WORD = "quokkasecret"

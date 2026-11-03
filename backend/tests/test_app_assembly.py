@@ -240,6 +240,10 @@ EXPECTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("PUT", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
         ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"),
         ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
+        # ТЗ Ф4 §6.4 «Артефакты», WP23.4: topic cards
+        ("GET", "/v1/topics/{topic_id}/cards"),
+        ("PATCH", "/v1/cards/{card_id}"),
+        ("DELETE", "/v1/cards/{card_id}"),
         # §6.4: new endpoints of Phase 3
         ("GET", "/v1/learner/stream"),
         ("GET", "/healthz"),
@@ -252,13 +256,14 @@ PENDING_ROUTES: dict[tuple[str, str], str] = {}
 
 def _declared_routes() -> list[tuple[str, str]]:
     """`(method, path)` of every route as the routers declare it, with duplicates kept."""
+    from quack.artifacts.cards_routes import router as cards_router
     from quack.artifacts.notes_routes import router as notes_router
     from quack.artifacts.router import router as artifacts_router
     from quack.domains.router import _protected
     from quack.session.router import router as session_router
 
     declared: list[tuple[str, str]] = []
-    for router in (_protected, session_router, artifacts_router, notes_router):
+    for router in (_protected, session_router, artifacts_router, notes_router, cards_router):
         for route in router.routes:
             assert isinstance(route, APIRoute), route
             declared.extend((method, route.path) for method in sorted(route.methods or ()))

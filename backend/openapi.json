@@ -629,6 +629,69 @@
         "title": "CanvasView",
         "type": "object"
       },
+      "CardEdit": {
+        "additionalProperties": false,
+        "properties": {
+          "idempotency_key": {
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "prompt": {
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotency_key",
+          "prompt"
+        ],
+        "title": "CardEdit",
+        "type": "object"
+      },
+      "CardsResponse": {
+        "description": "The topic's cards at the current version; `card_id` is the task to answer.",
+        "properties": {
+          "artifact_id": {
+            "format": "uuid",
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "cards": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Cards",
+            "type": "array"
+          },
+          "topic_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Id"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "topic_id",
+          "version",
+          "cards"
+        ],
+        "title": "CardsResponse",
+        "type": "object"
+      },
       "CheatsheetRefreshRequest": {
         "properties": {
           "domain_id": {
@@ -5607,6 +5670,210 @@
         ]
       }
     },
+    "/v1/cards/{card_id}": {
+      "delete": {
+        "operationId": "remove_card_v1_cards__card_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Remove Card",
+        "tags": [
+          "artifacts"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_card_v1_cards__card_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "card_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Card Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardEdit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Patch Card",
+        "tags": [
+          "artifacts"
+        ]
+      }
+    },
     "/v1/consents": {
       "post": {
         "operationId": "post_consent_v1_consents_post",
@@ -8931,6 +9198,79 @@
         "summary": "Get Topic Detail Short Endpoint",
         "tags": [
           "domains"
+        ]
+      }
+    },
+    "/v1/topics/{topic_id}/cards": {
+      "get": {
+        "operationId": "get_topic_cards_v1_topics__topic_id__cards_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "topic_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Topic Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Get Topic Cards",
+        "tags": [
+          "artifacts"
         ]
       }
     },
