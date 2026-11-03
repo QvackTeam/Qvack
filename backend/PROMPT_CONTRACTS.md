@@ -607,6 +607,19 @@ Output fields:
 
 Input blocks: `situation`, `turn_a`, `turn_b`, `criteria`
 
+## `recognizer@1` → `RecognizerOutput`
+
+Output fields:
+
+- `kind`: "latex" | "text"
+- `text`: string
+- `sympy`: string | null
+- `confidence`: number
+- `crossed_out`: boolean
+
+Input blocks: none
+Layer 1: stub, owner's doctrine pending (BLOCKED-C-202)
+
 ## Edit points after G1
 
 - teacher tool names, if tools appear (R9);

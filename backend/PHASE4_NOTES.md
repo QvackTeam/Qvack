@@ -1204,6 +1204,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: в WP21.4 (C) — строка без ошибки не пишет `observation.diagnosed`; диагноз с ошибкой пишет `gap_type ≠ none`.
 - Требует подтверждения владельцем: нет (поручено решить C).
 
+### D-C-123. WP21.3: роль `recognizer@1` — схема выхода и слой 2 промпта
+- Класс: B (поля схемы); слой 1 — BLOCKED-C-202
+- WP / место: WP21.3, §7.2 S8, §7.3 п.2, §7.6; `quack/canvas/recognition.py`, `quack/prompts/recognizer/v1.md`, регистрация — `tests/llm/prompt_contracts.py` (B, по S8 «регистрирует B», правка — в этом PR с ревью B)
+- Контекст: WP21.3 и `Т-§15.3` называют, что даёт распознаватель строки: «LaTeX или текст, `sympy` (`Т-§22.7`), уверенность, признак зачёркнутого»; событие — `canvas.line_committed {…, text, sympy, kind, recognition_confidence, crossed_out}`. Имена полей выхода роли не названы.
+- Решение: `RecognizerOutput {kind: latex|text, text, sympy: str|null, confidence: 0..1, crossed_out: bool}` — поля один к одному с событием (§0.4.3, «поля, названные в `Т-§`, — с этими именами»): `kind` и `text` → те же поля, `confidence` → `recognition_confidence`, `crossed_out` → `crossed_out`. Перечень `kind` — замороженный S3 (Q-A-3, D-A-119). Режим листа фото (WP22.3: все строки листа за один вызов, с рамкой) — своей схемой в WP22.3, не здесь. Вход — одно изображение строки, текстовых блоков нет. Слой 1 — заглушка с маркером `DOCTRINE_PENDING_MARKER`; `test_prompt_has_owner_doctrine[recognizer@1]` — `xfail(strict=True, reason="BLOCKED-C-202: нет доктрины")` (§7.6 п.5).
+- Почему: §0.4.3 п.2, §7.6 п.1–5, ответ A (2026-11-03: слой 2 пишет C, версия `recognizer@1`).
+- Обратимость: одна модель, один файл промпта.
+- Тесты: `tests/llm/test_labels.py` (`T-M5`, файл контрактов, доктрина — xfail).
+- Требует подтверждения владельцем: нет; слой 1 — пакет владельца (BLOCKED-C-202).
+
 ### D-C-115. WP18: маршруты входа, слои, ответы
 - Класс: B
 - WP / место: WP18; `quack/auth/router.py`, `quack/api/auth.py`, `quack/api/app.py`
@@ -1232,9 +1242,11 @@ PR #77 (dbmate v2.36.0, sha256).
 ## Заблокировано
 
 - ~~BLOCKED-B-101…108~~ — сняты 2026-11-02: слой 1 восьми ролей — черновики стенда (D-B-132).
+- **BLOCKED-C-202 (C): нет доктрины (слой 1) роли `recognizer@1`.** Слой 2 написан (D-C-123), роль работает на заглушке; `test_prompt_has_owner_doctrine[recognizer@1]` — `xfail(strict=True)`. Нужно от владельца: текст слоя 1 — как читать рукопись (кириллица и формулы, `Т-§22.2`), что считать зачёркнутым, как выражать неуверенность (§7.6 п.1, §0.4.4 п.13).
 
 ## Красные прогоны
 
+- WP21.3, роль `recognizer@1` (C, `phase-4-c-recognizer`, коммит `bf2b46a`): `pytest tests/llm/test_labels.py -k "recognizer or contracts_file"` — 2 failed (файла промпта нет, `PROMPT_CONTRACTS.md` устарел), 1 xfailed. Зелёный: `tests/llm/test_labels.py` — 59 passed, 1 xfailed (BLOCKED-C-202).
 - WP13.1, согласие на старте сессии (D-B-151): `uv run pytest tests/session/test_session_terms.py` — 2 failed (старт без согласия `201`, без cookie `201`), коммит `f5029a2`. Зелёный: 2 passed; `tests/session` и `tests/llm/test_labels.py` зелёные; `tests/e2e` — 13 failed (`403` на старте, правка у C).
 - WP11.3, WP11.6 на полях A #117 (D-B-145, D-B-146): `uv run pytest tests/practice/test_check_symbolic_job.py tests/practice/test_check_model.py` — 1 failed (`unsupported` ничего не писал) и ошибка сбора (нет `known_misconceptions`), коммит `72e96fb`. Зелёный: `tests/practice`, `tests/events`, `tests/graph/test_read_stub.py`, `tests/jobs/test_rules_p4.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` — 234 passed.
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
