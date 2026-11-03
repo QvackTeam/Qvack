@@ -424,3 +424,27 @@ def test_context_sample_by_manifest_id() -> None:
     assert not in_context_sample(UUID(int=0xFFFFFFFF << 96), 0.02)
     assert in_context_sample(UUID(int=0), 0.02)
     assert all(not in_context_sample(i, 0.0) for i in ids)
+
+
+def test_route_builds_the_source_from_the_resources() -> None:
+    """D-B-181: without a source set by the assembly the route builds one from the resources
+    of the process, once; without resources — `503`."""
+    from types import SimpleNamespace
+
+    import pytest
+
+    from quack.api.errors import ApiError
+    from quack.session.router import get_turn_context_source
+
+    resources = SimpleNamespace(
+        db=None, llm=None, settings=SETTINGS, neo4j=None, session_factory=None, redis=None
+    )
+    state = SimpleNamespace(resources=resources)
+    request = cast(Any, SimpleNamespace(app=SimpleNamespace(state=state)))
+    source = get_turn_context_source(request)
+    assert isinstance(source, MemoryTurnContextSource)
+    assert get_turn_context_source(request) is source
+    with pytest.raises(ApiError):
+        get_turn_context_source(
+            cast(Any, SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())))
+        )

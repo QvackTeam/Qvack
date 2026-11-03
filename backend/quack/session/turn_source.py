@@ -26,6 +26,7 @@ from uuid import UUID
 from neo4j import AsyncDriver
 from neo4j.exceptions import ConnectionAcquisitionTimeoutError, ServiceUnavailable, SessionExpired
 
+from quack.api.resources import AppResources
 from quack.config import Settings
 from quack.db.db import Db
 from quack.events.event_types import MessageSent, TaskClosed, TaskCreated
@@ -33,6 +34,7 @@ from quack.events.log import StoredEvent
 from quack.events.values import AnswerSpec, Level, Verdict
 from quack.graph.read import GraphReader, HubGoal, MemorySlice, SliceFocus, TopicMemory
 from quack.graph.read.materials import materials_prefetch
+from quack.graph.read.neo4j_reader import Neo4jGraphReader
 from quack.llm.gateway import LLMGateway
 from quack.llm.labels import LabelMap
 from quack.practice.repo import session_events_up_to
@@ -554,3 +556,26 @@ class MemoryTurnContextSource:
 
 async def _none() -> None:
     return None
+
+
+def source_of(resources: AppResources) -> MemoryTurnContextSource:
+    """The source of the API process: the reader of the teacher turn waits for the whole
+    journal of the learner (`session_factory`, Т-§2.6; A in #175) and is bound to the learner
+    of the turn (D-A-144)."""
+
+    def reader(learner_id: UUID) -> GraphReader:
+        return Neo4jGraphReader(
+            resources.neo4j,
+            resources.settings,
+            learner_id=learner_id,
+            session_factory=resources.session_factory,
+            redis=resources.redis,
+        )
+
+    return MemoryTurnContextSource(
+        db=resources.db,
+        gateway=resources.llm,
+        settings=resources.settings,
+        reader=reader,
+        neo4j=resources.neo4j,
+    )

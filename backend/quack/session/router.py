@@ -39,6 +39,7 @@ from quack.session.schemas import (
     TurnRequest,
 )
 from quack.session.turn_graph import TurnSlots
+from quack.session.turn_source import source_of
 
 router = APIRouter(prefix="/v1")
 
@@ -75,13 +76,20 @@ PROCESS_TURN_SLOTS = TurnSlots()
 
 
 def get_turn_context_source(request: Request) -> TurnContextSource:
-    """The context of the teacher turn (WP14): set by the assembly as
-    `app.state.turn_context_source`; without it the turn cannot run — `503`."""
-    source = getattr(request.app.state, "turn_context_source", None)
+    """The context of the teacher turn (WP14, D-B-181): `app.state.turn_context_source` if the
+    assembly set one, else built once from the resources of the process; without resources the
+    turn cannot run — `503`."""
+    state = request.app.state
+    source = getattr(state, "turn_context_source", None)
     if source is None:
-        raise ApiError(
-            "SERVICE_UNAVAILABLE", "the context of the teacher turn is not set up", status_code=503
-        )
+        resources = getattr(state, "resources", None)
+        if resources is None:
+            raise ApiError(
+                "SERVICE_UNAVAILABLE",
+                "the context of the teacher turn is not set up",
+                status_code=503,
+            )
+        source = state.turn_context_source = source_of(resources)
     return source
 
 
