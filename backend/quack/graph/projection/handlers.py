@@ -627,12 +627,19 @@ def _norm(name: str) -> str:
     return " ".join(name.casefold().split())
 
 
-def _all_tests(markup: TaskMarkupRecord) -> list[TestedLevelRecord]:
-    return [*markup.tests, *(t for part in markup.parts or [] for t in part.tests or [])]
+# The part of a task without parts (D-B-121).
+MAIN_PART = "main"
+
+
+def _all_tests(markup: TaskMarkupRecord) -> list[tuple[str, TestedLevelRecord]]:
+    """Pairs of the markup with their part: `main` and the parts by their own markup."""
+    return [(MAIN_PART, t) for t in markup.tests] + [
+        (part.part, t) for part in markup.parts or [] for t in part.tests or []
+    ]
 
 
 def _markup_need(markup: TaskMarkupRecord, domain: UUID | None) -> Need:
-    tests = _all_tests(markup)
+    tests = [t for _, t in _all_tests(markup)]
     nodes = {("Skill", str(t.skill_id)) for t in tests if t.skill_id is not None}
     nodes |= {("Misconception", str(o.misconception_id)) for o in markup.options or []
               if o.misconception_id is not None}  # fmt: skip
@@ -722,29 +729,29 @@ class _Markup:
         return skill
 
     def apply(self, markup: TaskMarkupRecord, *, replace: bool) -> list[Mutation]:
-        pairs: list[tuple[str, int]] = []
-        for t in _all_tests(markup):
+        pairs: list[tuple[str, int, str]] = []
+        for part, t in _all_tests(markup):
             if t.skill_id is not None:
                 skill = self.view.resolve("Skill", str(t.skill_id))
             elif t.new_skill is not None:
                 skill = self._skill_for(t.new_skill)
             else:
                 skill = None
-            if skill is not None and (skill, t.level) not in pairs:
-                pairs.append((skill, t.level))
+            if skill is not None and (skill, t.level, part) not in pairs:
+                pairs.append((skill, t.level, part))
         if replace:
             for r in self.view.out_rels("Task", self.task, "TESTS"):
-                level = r.props["level"]
-                if (r.to_id, level) not in pairs:
-                    key = {"level": level}
+                level, part = r.props["level"], r.props["part"]
+                if (r.to_id, level, part) not in pairs:
+                    key: Props = {"level": level, "part": part}
                     self.changes.append(
                         DeleteRel("Task", self.task, "TESTS", "Skill", r.to_id, key)
                     )
             options = self.view.out_rels("Task", self.task, "HAS_OPTION")
             self.changes += [DeleteNode("Option", r.to_id) for r in options]
         self.changes += [
-            MergeRel("Task", self.task, "TESTS", "Skill", skill, {"level": level})
-            for skill, level in pairs
+            MergeRel("Task", self.task, "TESTS", "Skill", skill, {"level": level, "part": part})
+            for skill, level, part in pairs
         ]
         self._options(markup, pairs[0][0] if pairs else None)
         return self.changes

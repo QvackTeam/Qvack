@@ -31,6 +31,7 @@ def apply_events(events: Sequence[StoredEvent], batch: BatchSlice) -> PhaseAResu
     result = PhaseAResult()
     for event in events:
         handler = handler_for(event)
+        batch.add_event(event)
         if handler is None:
             continue
         changes = handler.handle(event, batch.view(handler.needs(event)))

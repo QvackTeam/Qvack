@@ -16,8 +16,9 @@ type NodeRef = tuple[str, str]  # (label, id)
 type RelKey = tuple[object, ...]
 
 # Relationship types with more than one relationship between the same two nodes, told apart by
-# these props: a task tests a skill at several levels, `(Task)-[:TESTS {level}]->(Skill)`.
-REL_IDENTITY: dict[str, tuple[str, ...]] = {"TESTS": ("level",)}
+# these props: a task tests a skill at several levels and in its parts,
+# `(Task)-[:TESTS {level, part}]->(Skill)` (Т-§3.4.3, Т-§7.8 п.1; D-A-133).
+REL_IDENTITY: dict[str, tuple[str, ...]] = {"TESTS": ("level", "part")}
 
 
 def rel_key(

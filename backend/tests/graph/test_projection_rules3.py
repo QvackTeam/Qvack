@@ -780,8 +780,9 @@ def test_handler_reads_only_the_events_it_needs() -> None:
 
 
 def test_events_of_the_batch_are_seen_by_later_events() -> None:
-    """An answer and its verdict in one batch: the verdict handler sees the answer event."""
+    """E.g. an answer and its verdict in one batch: the verdict handler sees the answer event;
+    an event without a handler is seen too."""
     batch = BatchSlice(L, SubGraph())
-    apply_events([_answer()], batch)
+    apply_events([_event(ANSWER_SEQ, "message.sent", {"text": "is it 1/2?"})], batch)
     view = batch.view(Need(events=frozenset({ANSWER_SEQ})))
     assert view.event(ANSWER_SEQ) is not None

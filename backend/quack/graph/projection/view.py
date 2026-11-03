@@ -113,7 +113,7 @@ class BatchSlice:
 
     def add_event(self, event: StoredEvent) -> None:
         """An event of the batch, so the later events of the batch can read it."""
-        raise NotImplementedError
+        self._events[event.seq] = event
 
     def apply(self, mutations: Sequence[Mutation]) -> None:
         """Apply the changes of one event, so later events of the batch see them."""
@@ -193,12 +193,19 @@ class _View:
     def __init__(self, batch: BatchSlice, need: Need) -> None:
         self._batch = batch
         self._need = need
+        refs: set[NodeRef] = set()
+        for seq, field_name, label in need.event_refs:
+            event = batch._events.get(seq)
+            value = event.payload.get(field_name) if event is not None else None
+            if isinstance(value, str):
+                refs.add((label, value))
+        self._near: frozenset[NodeRef] = need.neighbourhoods | refs
 
     def _check_node(self, label: str, node_id: str) -> None:
         ref = (label, node_id)
-        if ref in self._need.nodes or ref in self._need.neighbourhoods:
+        if ref in self._need.nodes or ref in self._near:
             return
-        for near_label, near_id in self._need.neighbourhoods:
+        for near_label, near_id in self._near:
             live = self._batch._resolve(near_label, near_id)
             if live is not None and ref in self._batch._neighbours(near_label, live):
                 return
@@ -216,7 +223,7 @@ class _View:
     def _rels(
         self, label: str, node_id: str, rel_type: str | None, *, out: bool
     ) -> list[RelRecord]:
-        if (label, node_id) not in self._need.neighbourhoods:
+        if (label, node_id) not in self._near:
             raise OutsideSliceError(f"relationships of {label} {node_id} are not in needs()")
         live = self._batch._resolve(label, node_id)
         if live is None:
@@ -231,7 +238,9 @@ class _View:
         return self._rels(label, node_id, rel_type, out=False)
 
     def event(self, seq: int) -> StoredEvent | None:
-        raise NotImplementedError
+        if seq not in self._need.events:
+            raise OutsideSliceError(f"event {seq} is not in needs()")
+        return self._batch._events.get(seq)
 
     def domain_nodes(self, domain_id: str, label: str) -> list[NodeRecord]:
         if (domain_id, label) not in self._need.domain_labels:
