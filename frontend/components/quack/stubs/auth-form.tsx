@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { API_MODE, ApiError, post, setToken } from "@/lib/api/client";
 import { useT } from "@/lib/i18n/provider";
-import { Duck } from "../duck";
-import { FIELD, Field, PRIMARY_BTN, StubNote } from "./stub-parts";
+import { AuthScene } from "../auth/auth-scene";
+import { StubNote } from "./stub-parts";
 
-/** Поле входа — только линия снизу */
-const LINE_FIELD = `${FIELD} rounded-none border-0 border-b bg-transparent px-0`;
+/** Поле входа: тонкая рамка на тёмной подложке, фокус — оранжевая рамка и кольцо */
+const INPUT =
+  "h-12 w-full rounded-control border border-white/12 bg-white/[0.04] px-4 text-body text-[#f6eadc] transition-colors duration-(--dur-s) ease-out placeholder:text-[#bba995]/60 hover:border-white/25 focus-visible:border-[#ff8a2a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff8a2a]/30";
 
 /** Log in / sign up. With the backend it gets a JWT; on mocks submitting just opens the app. */
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
@@ -56,60 +57,94 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   };
 
   return (
-    <main className="grain flex h-full overflow-y-auto bg-cloth px-4 py-10">
-      <div className="m-auto w-full max-w-[420px]">
-        <Duck className="size-14" />
-        {/* крупный заголовок-«вывеска»: антиква капсом, штриховка, как логотип референса */}
-        <h1 className="display-caps text-striped mt-6 uppercase text-[clamp(2.75rem,12vw,4.5rem)] leading-[0.95] text-ribbon [--stripe-line:3px] [--stripe-step:4px]">
-          {signup ? t.signupTitle : t.loginTitle}
-        </h1>
-        <p className="mt-4 text-body text-paper-dim">{signup ? t.signupBody : t.loginBody}</p>
+    <main className="relative isolate h-full overflow-y-auto bg-[#080504] text-[#f6eadc]">
+      {/* тёплый тёмный фон с пятном света там, где стоит утка: как на лендинге */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(60%_60%_at_28%_58%,#2a1407_0%,#120a05_55%,#080504_100%)]"
+      />
+      <div className="mx-auto grid min-h-full max-w-[1400px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+        <section className="relative h-[34svh] min-h-56 lg:h-auto">
+          <AuthScene className="absolute inset-0" />
+          <p className="display-caps absolute left-6 top-6 text-[1.375rem] text-[#f6eadc] lg:left-10 lg:top-8">
+            Quack<span className="text-[#ff8a2a]">!</span>
+          </p>
+        </section>
 
-        <form
-          className="mt-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit(new FormData(e.currentTarget));
-          }}
-        >
-          {signup && (
-            <Field id={`${id}-name`} label={t.name}>
-              <input id={`${id}-name`} name="name" autoComplete="nickname" placeholder={t.namePh} className={LINE_FIELD} />
-            </Field>
-          )}
-          <Field id={`${id}-email`} label={t.email}>
-            <input id={`${id}-email`} name="email" type="email" required autoComplete="email" placeholder={t.emailPh} className={LINE_FIELD} />
-          </Field>
-          <Field id={`${id}-pw`} label={t.password} help={signup ? t.passwordHelp : undefined}>
-            <input
-              id={`${id}-pw`}
-              name="password"
-              type="password"
-              required
-              minLength={signup ? 8 : 1}
-              autoComplete={signup ? "new-password" : "current-password"}
-              className={LINE_FIELD}
-            />
-          </Field>
-          {error && (
-            <p role="alert" className="mt-4 text-small text-st-confused">
-              {error}
+        <section className="flex px-6 pb-12 pt-4 lg:px-14 lg:py-10">
+          <div className="m-auto w-full max-w-[400px]">
+            <h1 className="display-caps text-[clamp(2rem,4.2vw,3rem)] leading-[1.02] text-[#f6eadc] [text-shadow:0_0_40px_#ff7a1a40]">
+              {signup ? t.signupTitle : t.loginTitle}
+            </h1>
+            <p className="mt-3 text-body text-[#bba995]">{signup ? t.signupBody : t.loginBody}</p>
+
+            <form
+              className="mt-8 grid gap-5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void submit(new FormData(e.currentTarget));
+              }}
+            >
+              {signup && (
+                <AuthField id={`${id}-name`} label={t.name}>
+                  <input id={`${id}-name`} name="name" autoComplete="nickname" placeholder={t.namePh} className={INPUT} />
+                </AuthField>
+              )}
+              <AuthField id={`${id}-email`} label={t.email}>
+                <input id={`${id}-email`} name="email" type="email" required autoComplete="email" placeholder={t.emailPh} className={INPUT} />
+              </AuthField>
+              <AuthField id={`${id}-pw`} label={t.password} help={signup ? t.passwordHelp : undefined}>
+                <input
+                  id={`${id}-pw`}
+                  name="password"
+                  type="password"
+                  required
+                  minLength={signup ? 8 : 1}
+                  autoComplete={signup ? "new-password" : "current-password"}
+                  className={INPUT}
+                />
+              </AuthField>
+              {error && (
+                <p role="alert" className="text-small text-st-confused">
+                  {error}
+                </p>
+              )}
+              <button
+                type="submit"
+                disabled={busy}
+                className="mt-2 inline-flex h-12 w-full items-center justify-center rounded-pill bg-[#ff8a2a] text-body font-semibold text-[#1a0a02] shadow-[0_0_32px_#ff7a1a40] transition-colors duration-(--dur-s) ease-out hover:bg-[#ff9d4d] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#ff8a2a] disabled:opacity-50"
+              >
+                {signup ? t.signup : t.login}
+              </button>
+            </form>
+
+            <p className="mt-6 text-small text-[#bba995]">
+              {signup ? t.haveAccount : t.noAccount}{" "}
+              <Link
+                href={signup ? "/login" : "/signup"}
+                className="font-medium text-[#ff8a2a] underline decoration-[#ff8a2a]/40 underline-offset-4 transition-colors duration-(--dur-s) ease-out hover:decoration-[#ff8a2a]"
+              >
+                {signup ? t.toLogin : t.toSignup}
+              </Link>
             </p>
-          )}
-          <button type="submit" disabled={busy} className={`${PRIMARY_BTN} mt-8 h-12 w-full`}>
-            {signup ? t.signup : t.login}
-          </button>
-        </form>
 
-        <p className="caps mt-6 text-paper-dim">
-          {signup ? t.haveAccount : t.noAccount}{" "}
-          <Link href={signup ? "/login" : "/signup"} className="text-ribbon underline decoration-seam underline-offset-4 transition-colors duration-(--dur-s) ease-out hover:decoration-ribbon">
-            {signup ? t.toLogin : t.toSignup}
-          </Link>
-        </p>
-
-        {!API_MODE && <StubNote className="mt-8" endpoints={signup ? ["POST /v1/auth/register"] : ["POST /v1/auth/login", "GET /v1/auth/me"]} />}
+            {!API_MODE && <StubNote className="mt-8" endpoints={signup ? ["POST /v1/auth/register"] : ["POST /v1/auth/login", "GET /v1/auth/me"]} />}
+          </div>
+        </section>
       </div>
     </main>
+  );
+}
+
+/** Подпись над полем и необязательная подсказка под ним */
+function AuthField({ id, label, help, children }: { id: string; label: string; help?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label htmlFor={id} className="caps mb-2 block text-[#bba995]">
+        {label}
+      </label>
+      {children}
+      {help && <p className="mt-2 text-small text-[#bba995]">{help}</p>}
+    </div>
   );
 }
