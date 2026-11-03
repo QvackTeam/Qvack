@@ -636,3 +636,46 @@ async def test_reconcile_and_replay_deletions(
     await append_events(pg_db, learner, restored)  # the dump brought the domain back
     assert await replay_deletions(pg_db, neo4j, settings, journal, store, since) == 1
     assert await left() == 0
+
+
+async def test_delete_topic(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP25 (`Т-§19.5`, D-A-202): the events of the structure of the topic and of its skills, its
+    tasks with their answers and verdicts go; the turn of the teacher stays (a message of the
+    session); the graph is rebuilt without the topic, its skill and task; another topic stays."""
+    from datetime import UTC, datetime
+
+    from quack.deletion.topic import delete_topic
+    from tests.graph.test_projection_batches import S1, S2, SCRIPT, T1, T2, TASK
+    from tests.support.deletions import FakeDeletionJournal
+    from tests.support.storage import InMemoryObjectStore
+
+    learner = await create_learner(pg_db)
+    events = [
+        _new(e.type, e.payload, f"k{e.seq}", domain_id=e.domain_id, session_id=e.session_id)
+        for e in SCRIPT
+    ]
+    await append_events(pg_db, learner, events)
+    await _project_all(pg_db, neo4j, settings, learner)
+    journal = FakeDeletionJournal()
+    now = datetime(2026, 11, 3, tzinfo=UTC)
+    store = InMemoryObjectStore()
+    other = await create_learner(pg_db)  # law 1: a topic of another learner is «not found»
+    assert await delete_topic(pg_db, neo4j, settings, journal, store, other, UUID(T1), now) is None
+    assert journal.records == []
+    done = await delete_topic(pg_db, neo4j, settings, journal, store, learner, UUID(T1), now)
+    assert done is not None and [r.kind for r in journal.records] == ["topic"]
+    rows = await pg_db.fetch_all(
+        "SELECT type FROM core.events WHERE learner_id = %(l)s ORDER BY seq", {"l": learner}
+    )
+    left = [r["type"] for r in rows]
+    gone = {"skill.created", "task.created", "answer.submitted", "verdict.recorded"}
+    assert "turn.committed" in left and left.count("skill.created") == 1  # S2 stays
+    assert not gone - {"skill.created"} & set(left)
+    async with neo4j.session() as session:
+        result = await session.run(
+            "MATCH (n {learnerId: $l}) WHERE n.id IN $ids RETURN n.id AS id",
+            l=str(learner),
+            ids=[T1, T2, S1, S2, TASK],
+        )
+        found = {r["id"] async for r in result}
+    assert found == {T2, S2}

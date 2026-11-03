@@ -114,6 +114,19 @@ async def erase_domain(db: Db, store: ObjectStore, learner_id: UUID, domain_id: 
     return len(keys)
 
 
+async def rebuild_after(
+    db: Db, neo4j: AsyncDriver, settings: Settings, learner_id: UUID, *, redis: Redis | None
+) -> None:
+    """The graph forgets what was deleted (WP3.5); the projector may hold the lock a moment."""
+    for _ in range(_REBUILD_TRIES):
+        outcome = await rebuild_learner(
+            db, neo4j, settings, learner_id, redis=redis, respect_presence=False
+        )
+        if outcome.status != "busy":
+            return
+        await asyncio.sleep(0.2)
+
+
 async def apply_domain_record(
     db: Db,
     neo4j: AsyncDriver,
@@ -139,12 +152,7 @@ async def apply_domain_record(
             "deleted_at": record.deleted_at,
         }
         await db.execute(_LOG, log_row)
-    for _ in range(_REBUILD_TRIES):  # the projector may hold the lock for its batch
-        outcome = await rebuild_learner(db, neo4j, settings, learner_id, redis=redis,
-                                        respect_presence=False)  # fmt: skip
-        if outcome.status != "busy":
-            break
-        await asyncio.sleep(0.2)
+    await rebuild_after(db, neo4j, settings, learner_id, redis=redis)
 
 
 async def delete_domain(

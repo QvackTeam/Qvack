@@ -14,6 +14,7 @@ from quack.api.errors import ApiError
 from quack.api.ratelimit import enforce_action_rate_limit
 from quack.api.resources import get_resources
 from quack.deletion import domain as deletion
+from quack.deletion import topic as topic_deletion
 from quack.storage.deletions import DeletionJournalUnavailable
 
 router = APIRouter(
@@ -44,6 +45,25 @@ async def delete_domain_endpoint(
     try:
         done = await deletion.delete_domain(
             r.db, r.neo4j, r.settings, r.deletions, r.storage, learner_id, domain_id,
+            datetime.now(UTC), redis=r.redis,
+        )  # fmt: skip
+    except (DeletionJournalUnavailable, deletion.DeletionBusy) as exc:
+        raise ApiError("SERVICE_UNAVAILABLE", "deletion is not possible now, repeat later",
+                       status_code=503) from exc  # fmt: skip
+    if done is None:
+        raise _not_yours()
+    return DeletionResponse(deletion_id=done.deletion_id, copies_days=done.copies_days)
+
+
+@router.delete("/topics/{topic_id}", response_model=DeletionResponse, status_code=200)
+async def delete_topic_endpoint(
+    topic_id: UUID, request: Request, learner_id: CurrentLearnerId
+) -> DeletionResponse:
+    """WP25: the physical deletion of a topic (privacy); «убрать с графа» is `…/hide`."""
+    r = get_resources(request)
+    try:
+        done = await topic_deletion.delete_topic(
+            r.db, r.neo4j, r.settings, r.deletions, r.storage, learner_id, topic_id,
             datetime.now(UTC), redis=r.redis,
         )  # fmt: skip
     except (DeletionJournalUnavailable, deletion.DeletionBusy) as exc:

@@ -301,6 +301,13 @@ STREAM = Stream(
             body_key="none",
             body=lambda ids, v: {},
         ),
+        Route(
+            "DELETE",
+            "/v1/topics/{topic_id}",
+            no_key="ТЗ §6.4 WP25: physical deletion; a repeat is «not found»",
+            body_key="none",
+            body=lambda ids, v: {},
+        ),
     ),
     other_routes=frozenset(
         {

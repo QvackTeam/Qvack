@@ -17,6 +17,7 @@ from redis.asyncio import Redis
 from quack.config import Settings
 from quack.db import Db
 from quack.deletion.domain import apply_domain_record
+from quack.deletion.topic import apply_topic_record
 from quack.logging import get_logger
 from quack.storage.deletions import DeletionJournal, DeletionRecord
 from quack.storage.objects import ObjectStore
@@ -37,11 +38,18 @@ async def _apply(
     record: DeletionRecord,
     redis: Redis | None,
 ) -> bool:
-    if record.kind != "domain":  # topic and account deletions of Phase 4 come with WP25
-        log.warning("deletion_kind_not_replayed", kind=record.kind, id=str(record.deletion_id))
-        return False
-    await apply_domain_record(db, neo4j, settings, store, record.learner_id, record, redis=redis)
-    return True
+    if record.kind == "domain":
+        await apply_domain_record(
+            db, neo4j, settings, store, record.learner_id, record, redis=redis
+        )
+        return True
+    if record.kind == "topic":
+        return await apply_topic_record(
+            db, neo4j, settings, store, record.learner_id, record, redis=redis
+        )
+    # the account deletion of Phase 4 comes with the switch of `DELETE /v1/learner` (WP1.3)
+    log.warning("deletion_kind_not_replayed", kind=record.kind, id=str(record.deletion_id))
+    return False
 
 
 async def _logged(db: Db, learner_id: object, deletion_id: object) -> bool:
