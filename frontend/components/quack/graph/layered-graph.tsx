@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { GAP_X, GAP_Y, layoutGraph, loadPositions, savePositions } from "@/lib/graph/layout";
 import { onGraph, type GraphModel, type GraphTopic } from "@/lib/graph/types";
+import { enterDomain, LEARNER, leaveDomain, saveAllVisits, updateDomain } from "@/lib/graph/visit-store";
+import { loadCamera, restoreCenter, saveCamera, type SavedCamera } from "@/lib/graph/visit";
 import { useT } from "@/lib/i18n/provider";
 import type { Domain, TopicState } from "@/lib/mock/types";
 import { IconButton } from "../icon-button";
@@ -27,8 +29,8 @@ const MOVE_MS = 900;
 /** Width of the left column. It is fixed on screen, so the labels stay readable at any zoom */
 const COL_W = 208;
 const CARD_W = 320;
-/** The learner id is unknown on mocks; the key only has to be stable on this device */
-const LEARNER = "local";
+/** How long a changed node pulses */
+const FLASH_MS = 1800;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 4);
@@ -105,6 +107,8 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const labelVis = useRef(new Map<string, number>());
   const textW = useRef(new Map<string, number>());
   const lastDraw = useRef(0);
+  const flash = useRef(new Map<string, number>());
+  const camTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const colY = useRef(new Map<string, number>());
   const colEls = useRef(new Map<string, HTMLElement>());
   const colScroll = useRef<HTMLElement | null>(null);
@@ -295,6 +299,28 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       ctx.fill();
     }
 
+    // Nodes that changed while the learner was looking: a pulse that fades out. The camera does not move for them
+    if (flash.current.size) {
+      const t0 = performance.now();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = col.ribbon;
+      for (const [key, start] of flash.current) {
+        const age = (t0 - start) / FLASH_MS;
+        if (age >= 1) {
+          flash.current.delete(key);
+          continue;
+        }
+        const p = pos(key);
+        if (!p) continue;
+        const phase = (age * 2) % 1;
+        ctx.globalAlpha = 0.9 * (1 - age) * (1 - phase);
+        ctx.beginPath();
+        ctx.arc(sx(p.x), sy(p.y), (key.startsWith("h:") ? rH : rT) + 4 + 14 * phase, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
     // Labels. A topic label fades with the size of a slot on screen, a hub label later: on the far view the hubs are
     // what the eye holds on to. Labels never overlap: the more important one stays (hub, then hovered, then busier topic).
     const now = performance.now();
@@ -372,7 +398,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       ctx.fillText(lb.text, lb.x, lb.y);
     }
     ctx.globalAlpha = 1;
-    return settling;
+    return settling || flash.current.size > 0;
   }, []);
 
   const frame = useCallback(
@@ -411,6 +437,30 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     if (!raf.current) raf.current = requestAnimationFrame(loop.current);
   }, []);
 
+  // Where the camera stands, kept per domain on this device: the world point at the centre of the graph area, the zoom,
+  // and the topic nearest to the centre (with a few neighbours) in case that topic is gone next time
+  const saveNow = useCallback(() => {
+    clearTimeout(camTimer.current);
+    const { w, h } = sizeRef.current;
+    if (!w || !h) return;
+    const cw = scene.current.colW;
+    const v = view.current;
+    const cx = (cw + (w - cw) / 2 - v.tx) / v.k;
+    const cy = (h / 2 - v.ty) / v.k;
+    const near = [...target.current]
+      .filter(([key]) => !key.startsWith("h:"))
+      .map(([id, p]) => ({ id, x: p.x, y: p.y, d: Math.hypot(p.x - cx, p.y - cy) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 4)
+      .map(({ id, x, y }) => ({ id, x, y }));
+    const cam: SavedCamera = { k: v.k, cx, cy, anchor: near[0], near: near.slice(1) };
+    saveCamera(LEARNER, scene.current.model.domainId, cam);
+  }, []);
+  const queueSave = useCallback(() => {
+    clearTimeout(camTimer.current);
+    camTimer.current = setTimeout(saveNow, 500);
+  }, [saveNow]);
+
   const moveView = useCallback(
     (to: View, animate: boolean) => {
       if (animate && !reducedMotion()) viewTween.current = { start: performance.now(), from: view.current, to };
@@ -419,8 +469,9 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
         view.current = to;
       }
       schedule();
+      queueSave();
     },
-    [schedule],
+    [schedule, queueSave],
   );
 
   const fitView = useCallback((w: number, h: number): View => {
@@ -430,6 +481,19 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     const k = clamp(Math.min((w - cw - FIT_MARGIN * 2) / Math.max(1, x1 - x0), (h - FIT_MARGIN * 2) / Math.max(1, y1 - y0)), K_MIN, FIT_K_MAX);
     return { k, tx: cw + (w - cw) / 2 - ((x0 + x1) / 2) * k, ty: h / 2 - ((y0 + y1) / 2) * k };
   }, []);
+
+  // First view of a domain: where the learner stood last time, else the whole graph
+  const initialView = useCallback(
+    (w: number, h: number): View => {
+      const saved = loadCamera(LEARNER, scene.current.model.domainId);
+      if (!saved) return fitView(w, h);
+      const k = clamp(saved.k, K_MIN, K_MAX);
+      const c = restoreCenter(saved, (id) => target.current.get(id));
+      const cw = scene.current.colW;
+      return { k, tx: cw + (w - cw) / 2 - c.x * k, ty: h / 2 - c.y * k };
+    },
+    [fitView],
+  );
 
   const zoomAt = useCallback(
     (cx: number, cy: number, factor: number) => {
@@ -463,16 +527,15 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       const dpr = window.devicePixelRatio || 1;
       c.width = Math.round(size.w * dpr);
       c.height = Math.round(size.h * dpr);
-      // Until stage 5 stores the camera, the first view is the whole graph
       if (!fitted.current) {
         fitted.current = true;
-        view.current = fitView(size.w, size.h);
+        view.current = initialView(size.w, size.h);
       }
       // Resizing clears the canvas: paint at once so there is no blank frame
       draw();
     }
     schedule();
-  }, [size, fitView, schedule, draw]);
+  }, [size, initialView, schedule, draw]);
 
   // A new layout: known nodes stay, whatever moved glides to its place
   useEffect(() => {
@@ -523,6 +586,31 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     },
     [],
   );
+
+  // What the learner has seen: the camera is saved when it settles and when they leave
+  useEffect(() => {
+    const domainId = model.domainId;
+    enterDomain(domainId, scene.current.model);
+    const onHide = () => {
+      saveNow();
+      saveAllVisits();
+    };
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      saveNow();
+      leaveDomain(domainId);
+    };
+  }, [model.domainId, saveNow]);
+
+  // The graph changed while it is on screen: what changed pulses, and counts as new. The camera stays where it is
+  useEffect(() => {
+    const fresh = updateDomain(model.domainId, model);
+    const t0 = performance.now();
+    for (const id of fresh.topics) flash.current.set(id, t0);
+    for (const id of fresh.hubs) flash.current.set(`h:${id}`, t0);
+    if (fresh.topics.size || fresh.hubs.size) schedule();
+  }, [model, schedule]);
 
   // A wheel handler must be non-passive to stop the page from scrolling
   useEffect(() => {
@@ -603,6 +691,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     const d = drag.current;
     drag.current = null;
     if (canvas.current?.hasPointerCapture(e.pointerId)) canvas.current.releasePointerCapture(e.pointerId);
+    if (d?.moved) queueSave();
     if (!d || d.moved) return;
     const p = local(e);
     const key = hitTest(p.x, p.y);
