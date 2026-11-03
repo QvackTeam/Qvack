@@ -436,3 +436,188 @@ def test_misconception_described_and_session_ended() -> None:
         "triggers": ["unlike denominators"],
         "targetedInSessionId": "",  # law 8: «not targeted» is an explicit value
     }
+
+
+# --- merges and splits (T-P4, group 3; Т-§2.8) ----------------------------------------------
+
+EVIDENCE = str(UUID(int=0xE1))
+OPTION = str(UUID(int=0x0B))
+TOPIC_NEW = str(UUID(int=0x73))
+SKILL_P1 = str(UUID(int=0x54))
+SKILL_P2 = str(UUID(int=0x55))
+ALIAS_EARLIER = str(UUID(int=0x5A))
+_SKILL_OLD = _node("Skill", SKILL_OLD, domainId=DOMAIN, name="add fractions 2", summary="s",
+                   status="provisional", origin="material")  # fmt: skip
+_EVIDENCE = _node("Evidence", EVIDENCE, domainId=DOMAIN, status="active")
+
+
+def test_skill_merged_moves_relations_and_leaves_an_alias() -> None:
+    """Relations and evidence go to the target, the old node is deleted, its id becomes an
+    alias; earlier aliases of the old node now lead to the target. The old home topic is not
+    moved (a skill has exactly one, `Т-§3.4.3`); a relation to the target itself disappears."""
+    nodes, rels = _run(
+        [_event(50, "skill.merged", {"from_id": SKILL_OLD, "into_id": SKILL})],
+        [
+            _TOPIC,
+            _TOPIC_B,
+            _SKILL,
+            _SKILL_B,
+            _SKILL_OLD,
+            _EVIDENCE,
+            NodeRecord("Alias", ALIAS_EARLIER, {"learnerId": L}),
+        ],
+        [
+            _rel(("Topic", TOPIC), "COVERS", ("Skill", SKILL)),
+            _rel(("Topic", TOPIC_B), "COVERS", ("Skill", SKILL_OLD)),
+            _rel(
+                ("Skill", SKILL_OLD), "REQUIRES", ("Skill", SKILL_B), origin="model", confidence=0.7
+            ),
+            _rel(
+                ("Skill", SKILL), "REQUIRES", ("Skill", SKILL_OLD), origin="model", confidence=0.9
+            ),
+            _rel(("Evidence", EVIDENCE), "ON", ("Skill", SKILL_OLD)),
+            _rel(("Alias", ALIAS_EARLIER), "ALIAS_OF", ("Skill", SKILL_OLD)),
+        ],
+    )
+    assert ("Skill", SKILL_OLD) not in nodes
+    assert nodes[("Alias", SKILL_OLD)] == {"learnerId": L}
+    assert set(rels) == {
+        ("Topic", TOPIC, "COVERS", "Skill", SKILL),
+        ("Skill", SKILL, "REQUIRES", "Skill", SKILL_B),
+        ("Evidence", EVIDENCE, "ON", "Skill", SKILL),
+        ("Alias", SKILL_OLD, "ALIAS_OF", "Skill", SKILL),
+        ("Alias", ALIAS_EARLIER, "ALIAS_OF", "Skill", SKILL),
+    }
+    assert rels[("Skill", SKILL, "REQUIRES", "Skill", SKILL_B)] == {
+        "origin": "model",
+        "confidence": 0.7,
+    }
+
+
+def test_merge_into_a_missing_or_the_same_node_changes_nothing() -> None:
+    graph = ([_SKILL, _ALIAS], [_ALIAS_OF])
+    before = _run([], *graph)
+    assert (
+        _run([_event(51, "skill.merged", {"from_id": SKILL_OLD, "into_id": SKILL})], *graph)
+        == before
+    )
+    assert (
+        _run([_event(52, "skill.merged", {"from_id": SKILL, "into_id": SKILL_B})], *graph) == before
+    )
+
+
+def test_topic_merged_moves_skills_and_hub_membership() -> None:
+    """The target keeps its own place in the domain and its own levels in a hub it is in."""
+    nodes, rels = _run(
+        [_event(53, "topic.merged", {"from_id": TOPIC_B, "into_id": TOPIC})],
+        [_DOMAIN, _TOPIC, _TOPIC_B, _SKILL, _SKILL_B, _HUB],
+        [
+            _rel(("Domain", DOMAIN), "HAS_TOPIC", ("Topic", TOPIC)),
+            _rel(("Domain", DOMAIN), "HAS_TOPIC", ("Topic", TOPIC_B)),
+            _rel(("Topic", TOPIC), "COVERS", ("Skill", SKILL)),
+            _rel(("Topic", TOPIC_B), "COVERS", ("Skill", SKILL_B)),
+            _rel(("Hub", HUB), "INCLUDES", ("Topic", TOPIC), requiredLevels=[3]),
+            _rel(("Hub", HUB), "INCLUDES", ("Topic", TOPIC_B), requiredLevels=[2]),
+        ],
+    )
+    assert ("Topic", TOPIC_B) not in nodes
+    assert set(rels) == {
+        ("Domain", DOMAIN, "HAS_TOPIC", "Topic", TOPIC),
+        ("Topic", TOPIC, "COVERS", "Skill", SKILL),
+        ("Topic", TOPIC, "COVERS", "Skill", SKILL_B),
+        ("Hub", HUB, "INCLUDES", "Topic", TOPIC),
+        ("Alias", TOPIC_B, "ALIAS_OF", "Topic", TOPIC),
+    }
+    assert rels[("Hub", HUB, "INCLUDES", "Topic", TOPIC)] == {"requiredLevels": [3]}
+
+
+def test_misconception_merged_moves_manifestations_and_traps() -> None:
+    target = _node("Misconception", OTHER, domainId=DOMAIN, statement="o", triggers=[],
+                   targetedInSessionId="")  # fmt: skip
+    nodes, rels = _run(
+        [_event(54, "misconception.merged", {"from_id": MISCONCEPTION, "into_id": OTHER})],
+        [
+            _SKILL,
+            _SKILL_B,
+            _MISCONCEPTION,
+            target,
+            _EVIDENCE,
+            NodeRecord("Option", OPTION, {"learnerId": L, "label": "B", "isCorrect": False}),
+        ],
+        [
+            _rel(("Misconception", OTHER), "ABOUT", ("Skill", SKILL)),
+            _rel(("Misconception", MISCONCEPTION), "ABOUT", ("Skill", SKILL_B)),
+            _rel(("Evidence", EVIDENCE), "MANIFESTS", ("Misconception", MISCONCEPTION)),
+            _rel(("Option", OPTION), "TRAPS", ("Misconception", MISCONCEPTION)),
+        ],
+    )
+    assert ("Misconception", MISCONCEPTION) not in nodes
+    assert set(rels) == {
+        ("Misconception", OTHER, "ABOUT", "Skill", SKILL),
+        ("Evidence", EVIDENCE, "MANIFESTS", "Misconception", OTHER),
+        ("Option", OPTION, "TRAPS", "Misconception", OTHER),
+        ("Alias", MISCONCEPTION, "ALIAS_OF", "Misconception", OTHER),
+    }
+
+
+def test_topic_split_distributes_skills() -> None:
+    """A new part is a topic of the same domain with the origin and status of the split one; a
+    part with the old id keeps the topic and takes the part's name (Т-§2.8)."""
+    split = {"topic_id": TOPIC, "into": [
+        {"topic_id": TOPIC, "name": "Fraction sums", "skill_ids": [SKILL]},
+        {"topic_id": TOPIC_NEW, "name": "Common denominators", "skill_ids": [SKILL_B]},
+    ]}  # fmt: skip
+    nodes, rels = _run(
+        [_event(55, "topic.split", split)],
+        [_DOMAIN, _TOPIC, _SKILL, _SKILL_B],
+        [
+            _rel(("Domain", DOMAIN), "HAS_TOPIC", ("Topic", TOPIC)),
+            _rel(("Topic", TOPIC), "COVERS", ("Skill", SKILL)),
+            _rel(("Topic", TOPIC), "COVERS", ("Skill", SKILL_B)),
+        ],
+    )
+    assert nodes[("Topic", TOPIC)] == _TOPIC.props | {"name": "Fraction sums"}
+    assert nodes[("Topic", TOPIC_NEW)] == _TOPIC.props | {"name": "Common denominators"}
+    assert set(rels) == {
+        ("Domain", DOMAIN, "HAS_TOPIC", "Topic", TOPIC),
+        ("Domain", DOMAIN, "HAS_TOPIC", "Topic", TOPIC_NEW),
+        ("Topic", TOPIC, "COVERS", "Skill", SKILL),
+        ("Topic", TOPIC_NEW, "COVERS", "Skill", SKILL_B),
+    }
+
+
+def test_topic_split_into_new_topics_hides_the_old_one() -> None:
+    """The split topic is left without skills: hidden, not deleted (D-A-131)."""
+    split = {"topic_id": TOPIC, "into": [
+        {"topic_id": TOPIC_B, "name": "a", "skill_ids": [SKILL]},
+        {"topic_id": TOPIC_NEW, "name": "b", "skill_ids": [SKILL_B]},
+    ]}  # fmt: skip
+    nodes, _ = _run([_event(56, "topic.split", split)], [_DOMAIN, _TOPIC, _SKILL, _SKILL_B],
+                    [_rel(("Topic", TOPIC), "COVERS", ("Skill", SKILL)),
+                     _rel(("Topic", TOPIC), "COVERS", ("Skill", SKILL_B))])  # fmt: skip
+    assert nodes[("Topic", TOPIC)]["status"] == "hidden"
+
+
+def test_skill_split_creates_the_parts_and_keeps_the_old_skill() -> None:
+    """Old evidence stays on the old skill; the dispatcher re-extracts the episodes (Т-§2.8).
+    A part takes the domain, status and origin of the split skill; no summary yet — `''`."""
+    split = {"skill_id": SKILL, "into": [
+        {"skill_id": SKILL_P1, "name": "same denominators", "topic_id": TOPIC},
+        {"skill_id": SKILL_P2, "name": "unlike denominators", "topic_id": TOPIC_B},
+    ]}  # fmt: skip
+    nodes, rels = _run(
+        [_event(57, "skill.split", split)],
+        [_TOPIC, _TOPIC_B, _SKILL, _EVIDENCE],
+        [
+            _rel(("Topic", TOPIC), "COVERS", ("Skill", SKILL)),
+            _rel(("Evidence", EVIDENCE), "ON", ("Skill", SKILL)),
+        ],
+    )
+    assert nodes[("Skill", SKILL)] == _SKILL.props
+    part = {"learnerId": L, "domainId": DOMAIN, "summary": "", "status": "active",
+            "origin": "session"}  # fmt: skip
+    assert nodes[("Skill", SKILL_P1)] == part | {"name": "same denominators"}
+    assert nodes[("Skill", SKILL_P2)] == part | {"name": "unlike denominators"}
+    assert ("Topic", TOPIC, "COVERS", "Skill", SKILL_P1) in rels
+    assert ("Topic", TOPIC_B, "COVERS", "Skill", SKILL_P2) in rels
+    assert ("Evidence", EVIDENCE, "ON", "Skill", SKILL) in rels
