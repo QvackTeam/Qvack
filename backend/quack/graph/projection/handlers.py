@@ -207,7 +207,10 @@ _EDGE_TYPES = {"requires": "REQUIRES", "same_idea": "SAME_IDEA"}
 
 
 def _edge_needs(event: StoredEvent) -> Need:
-    return _nodes(("Skill", str(event.payload["from_id"])), ("Skill", str(event.payload["to_id"])))
+    """The two skills with their evidence: a removed relation supersedes what was derived over
+    it (WP4.6)."""
+    ends = {("Skill", str(event.payload["from_id"])), ("Skill", str(event.payload["to_id"]))}
+    return Need(nodes=frozenset(ends), neighbourhoods=frozenset(ends))
 
 
 def _edge(event: StoredEvent, view: SliceView) -> list[Mutation]:
@@ -220,11 +223,37 @@ def _edge(event: StoredEvent, view: SliceView) -> list[Mutation]:
         return []
     rel_type = _EDGE_TYPES[p.kind]
     if not isinstance(p, EdgeAdded):
-        return [DeleteRel("Skill", a, rel_type, "Skill", b)]
+        return [
+            DeleteRel("Skill", a, rel_type, "Skill", b),
+            *_supersede_derived(event, view, p.kind, a, b),
+        ]
     props: Props = {"confidence": p.confidence}
     if p.kind == "requires":
         props["origin"] = p.origin
     return [MergeRel("Skill", a, rel_type, "Skill", b, props)]
+
+
+def _supersede_derived(
+    event: StoredEvent, view: SliceView, kind: str, a: str, b: str
+) -> list[Mutation]:
+    """WP4.6 [РЕШЕНИЕ Ф4]: a removed relation makes the evidence derived over it `superseded` —
+    `indirect` from the evidence of `a` to `b` over `REQUIRES`, `transfer` either way over
+    `SAME_IDEA`. The id of a derived evidence names its source, kind and target (D-A-185)."""
+    derived = "indirect" if kind == "requires" else "transfer"
+    pairs = [(a, b)] if kind == "requires" else [(a, b), (b, a)]
+    changes: list[Mutation] = []
+    for source_skill, target in pairs:
+        on_target = {r.from_id for r in view.in_rels("Skill", target, "ON")}
+        for r in view.in_rels("Skill", source_skill, "ON"):
+            node = _derived_id(event, r.from_id, derived, target)
+            props = view.node("Evidence", node) if node in on_target else None
+            if props is not None and props.get("status") == "active":
+                changes.append(SetProps("Evidence", node, {"status": "superseded"}))
+    return changes
+
+
+def _derived_id(event: StoredEvent, source: str, kind: str, target: str) -> str:
+    return deterministic_id(event.learner_id, 0, f"derived:{source}:{kind}:{target}")
 
 
 def _hub_created(event: StoredEvent, view: SliceView) -> list[Mutation]:
@@ -1041,7 +1070,7 @@ def _derived(
         if target == skill or key in done or view.node("Skill", target) is None:
             continue
         done.add(key)
-        node = deterministic_id(event.learner_id, event.seq, f"derived:{source_id}:{kind}:{target}")
+        node = _derived_id(event, source_id, kind, target)
         props = source_props | {"level": min(3, level), "derivedKind": kind, "quote": "",
                                 "searchable": False}  # fmt: skip
         changes += [

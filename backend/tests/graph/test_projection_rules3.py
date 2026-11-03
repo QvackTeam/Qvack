@@ -1217,3 +1217,11 @@ def test_derived_evidence() -> None:
     assert all(p["tier"] == 1 and p["outcome"] == "correct" for p in derived.values())
     _, links = _run([_answer(), _verdict(outcome="incorrect")], nodes, rels)
     assert not [k for k in links if k[2] == "DERIVED_FROM"]
+    removed = _event(80, "edge.removed", {"kind": "requires", "from_id": SKILL, "to_id": SKILL_B})
+    graph, links = _run([_answer(), _verdict(outcome="correct"), removed], nodes, rels)
+    status = {
+        str(graph[("Evidence", str(k[1]))]["derivedKind"]): graph[("Evidence", str(k[1]))]["status"]
+        for k in links
+        if k[2] == "DERIVED_FROM"
+    }
+    assert status == {"indirect": "superseded", "transfer": "active"}  # [РЕШЕНИЕ Ф4] WP4.6
