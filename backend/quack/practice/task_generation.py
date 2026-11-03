@@ -2,7 +2,9 @@
 `proof` answer or level 6 — a hard call on Wonder, `Т-§11.1`) writes variants of one step;
 code checks the form of each markup (`Т-§5.3`), then the truth (`verify_generated`, WP12.5);
 what passes goes to the bank as `task.created {source: generated, verification: checked}` with
-one `familyId` per call (`Т-§5.4`). A variant that fails is dropped, the others stay. D-B-168.
+one `familyId` per call (`Т-§5.4`); a variant of the given source task, and every retest variant,
+takes the family of the source (`Т-§5.4`, `Т-§5.7`). A variant that fails is dropped, the others
+stay. D-B-168, D-B-186.
 
 Ids come from the call key, so a retry writes the same tasks (law 5).
 """
@@ -26,6 +28,10 @@ from quack.practice.task_check import verify_generated
 from quack.practice.task_store import TaskDocument, create_task
 
 GENERATOR_ROLE = "task_generator"
+_SELECT_FAMILY = (
+    "SELECT payload->>'family_id' AS family_id FROM core.events "
+    "WHERE learner_id = %(learner_id)s AND seq = %(seq)s AND type = 'task.created'"
+)
 NONE_LINE = "(none)"
 # Т-§5.5, Т-§11.1 «для сложных — Wonder»: the same rule as the solution space (WP12.4).
 HARD_LEVEL = 6
@@ -105,6 +111,23 @@ def generated_task_id(key: str, index: int) -> UUID:
     return uuid5(NAMESPACE_URL, f"task:{key}:{index}")
 
 
+async def source_family(db: Db, source: TaskDocument) -> UUID:
+    """The `familyId` of the source task, from its `task.created`."""
+    row = await db.fetch_one(
+        _SELECT_FAMILY, {"learner_id": source.learner_id, "seq": source.created_seq}
+    )
+    if row is None:
+        raise LookupError(f"task {source.task_id} has no task.created at seq {source.created_seq}")
+    return UUID(row["family_id"])
+
+
+def is_variant_of_source(request: GenerationRequest, variant_of: UUID | None) -> bool:
+    """`Т-§5.4`: a task that says it is a variant of the source shares its family; `Т-§5.7`:
+    so does every retest variant (it proves retention, never level 4)."""
+    source = request.source
+    return source is not None and (request.purpose == "retest" or variant_of == source.task_id)
+
+
 async def generate_tasks(
     db: Db,
     gateway: LLMGateway,
@@ -137,6 +160,7 @@ async def generate_tasks(
         hard=request.kind == "proof" or request.level == HARD_LEVEL,
     )
     names = {request.skill_id: request.skill_name}
+    inherited = await source_family(db, request.source) if request.source else None
     stored: list[UUID] = []
     for index, draft in enumerate(result.value.tasks):
         if markup_errors(TaskGeneratorOutput(tasks=[draft]), labels) is not None:
@@ -162,7 +186,9 @@ async def generate_tasks(
             db,
             learner_id=learner_id,
             task_id=task_id,
-            family_id=family_id(request.key),
+            family_id=inherited
+            if inherited is not None and is_variant_of_source(request, markup.variant_of)
+            else family_id(request.key),
             source="generated",
             condition=draft.condition,
             markup=markup,

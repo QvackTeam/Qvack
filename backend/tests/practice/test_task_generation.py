@@ -6,22 +6,24 @@ throws away is not stored; a retry stores nothing new (D-B-168)."""
 from __future__ import annotations
 
 from typing import Any, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from quack.config import Settings
 from quack.db.db import Db
+from quack.events import records
+from quack.events.values import AnswerSpec
 from quack.llm.gateway import LLMGateway, LLMResult
 from quack.llm.labels import LabelMap
-from quack.practice.role_outputs import TaskCheckOutput, TaskGeneratorOutput
+from quack.practice.role_outputs import TaskCheckOutput, TaskCondition, TaskGeneratorOutput
 from quack.practice.task_generation import (
     GenerationRequest,
     family_id,
     generate_tasks,
     generator_variables,
 )
-from quack.practice.task_store import get_task
+from quack.practice.task_store import create_task, get_task
 from quack.prompts.registry import PromptRegistry
 from tests.db.fixtures import create_learner
 
@@ -175,3 +177,68 @@ def test_generator_input() -> None:
     assert variables["source_problem"] == "(none)"
     assert str(SKILL) not in "".join(variables.values())
     PromptRegistry().load("task_generator", 1).render(variables)
+
+
+async def _source_task(db: Db, learner_id: UUID, family: UUID) -> UUID:
+    task_id = uuid4()
+    answer = AnswerSpec.model_validate({"type": "number", "value": {"latex": "5", "sympy": "5"}})
+    await create_task(
+        db,
+        learner_id=learner_id,
+        task_id=task_id,
+        family_id=family,
+        source="seminar",
+        condition=TaskCondition(text="Compute 2 + 5 - 2", latex=None),
+        markup=records.TaskMarkupRecord(
+            tests=[records.TestedLevelRecord(skill_id=SKILL, level=3)],
+            method_named=False,
+            answer=answer,
+        ),
+        verification="checked",
+        actor="seminar",
+        idempotency_key=f"task:{task_id}",
+    )
+    return task_id
+
+
+@pytest.mark.parametrize(
+    ("purpose", "variant_of", "shares"),
+    [
+        ("retest", None, True),  # Т-§5.7: a retest variant has the family of the source
+        ("practice", "K1", True),  # Т-§5.4: a task that says it is a variant of the source
+        ("practice", None, False),  # no variant of the source: its own family
+    ],
+)
+async def test_variant_of_the_source_takes_its_family(
+    pg_db: Db, purpose: str, variant_of: str | None, shares: bool
+) -> None:
+    """D-B-186: the family of a retest variant or of a declared variant is the source's; so the
+    projector counts it `same` and it never proves level 4 (`Т-§5.4`)."""
+    learner_id = await create_learner(pg_db)
+    source_family = uuid4()
+    source = await get_task(
+        pg_db,
+        learner_id=learner_id,
+        task_id=await _source_task(pg_db, learner_id, source_family),
+    )
+    assert source is not None
+    draft = _draft("5")
+    draft["markup"]["variantOf"] = variant_of
+    roles = _Roles([draft], {"task_checker:gen:req1:0": "5"})
+    stored = await generate_tasks(
+        pg_db,
+        cast(LLMGateway, roles),
+        SETTINGS,
+        _request(purpose=purpose, source=source),
+        learner_id=learner_id,
+    )
+    assert len(stored) == 1
+    generated = await pg_db.fetch_one(
+        "SELECT payload FROM core.events WHERE learner_id = %(l)s AND type = 'task.created' "
+        "AND payload->>'task_id' = %(t)s",
+        {"l": learner_id, "t": str(stored[0])},
+    )
+    assert generated is not None
+    expected = source_family if shares else family_id("gen:req1")
+    assert generated["payload"]["family_id"] == str(expected)
+    assert "K1" in roles.calls[0]["variables"]["source_problem"]
