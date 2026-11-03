@@ -527,6 +527,9 @@ class Settings(BaseSettings):
     )
     # WP10.3 (Т-§11.8 п.1): fallback two-step teacher turn, off until the live run says so.
     teacher_two_step: bool = False
+    # WP16.7 (Т-§18.2): attempts of Т1 (the latest) the Brier score of `ops metrics` replays the
+    # memory for; each one replays the learner's log. Phase 4 decision D-B-195.
+    metrics_brier_max_attempts: int = 200
 
     # --- stream C ---
     # WP8.3: probe timeout of /health/ready and /healthz (was HEALTH_CHECK_TIMEOUT_SEC).
