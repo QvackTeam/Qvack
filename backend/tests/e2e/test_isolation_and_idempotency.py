@@ -12,6 +12,8 @@ from sqlalchemy import text
 
 from quack.artifacts.cards import write_system_cards
 from quack.artifacts.documents import Card, SystemBlock, write_system_blocks
+from quack.canvas.boards import open_canvas
+from quack.canvas.recognition import commit_typed
 from quack.events import records
 from quack.events.log import NewEvent, append_events
 from quack.events.values import AnswerSpec, MathValue
@@ -56,6 +58,7 @@ IDEMPOTENT_WALK: tuple[tuple[str, str], ...] = (
     ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
     ("PATCH", "/v1/cards/{card_id}"),
     ("DELETE", "/v1/cards/{card_id}"),
+    ("POST", "/v1/canvases/{canvas_id}/lines/{line_id}/correct"),
     ("POST", "/v1/sessions/{session_id}/finish"),
     ("POST", "/v1/domains/{domain_id}/archive"),
 )
@@ -188,10 +191,30 @@ async def _advance(
     if path.endswith("/accept"):
         return replace(ids, block_id=ids.learner_block_id)
     if (method, path) == ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"):
-        return replace(ids, card_id=await _card_of_topic(system, learner, ids))
+        ids = replace(ids, card_id=await _card_of_topic(system, learner, ids))
+        return await _canvas_with_a_line(system, learner, ids)
     if (method, path) == ("PATCH", "/v1/cards/{card_id}"):
         return replace(ids, card_id=UUID(payload["cards"][0]["card_id"]))
     return ids
+
+
+async def _canvas_with_a_line(system: System, learner: Learner, ids: Ids) -> Ids:
+    """WP21.3: a canvas of a Phase 4 session with one typed line for the correction route."""
+    db = system.resources.db
+    session_id = uuid4()
+    started = NewEvent(
+        type="session.started",
+        payload={"session_id": str(session_id), "domain_id": str(uuid4()), "intent": "learn"},
+        actor="learner",
+        idempotency_key=f"te2:session:{session_id}",
+    )
+    await append_events(db, learner.learner_id, [started])
+    canvas = await open_canvas(db, learner_id=learner.learner_id, session_id=session_id)
+    await commit_typed(
+        db, learner_id=learner.learner_id, session_id=session_id, canvas_id=canvas.canvas_id,
+        block_id="t1", latex="x=1", at_ms=0,
+    )  # fmt: skip
+    return replace(ids, canvas_id=canvas.canvas_id, line_id="t1")
 
 
 async def _notes_of_phase4_topic(system: System, learner: Learner, ids: Ids) -> Ids:

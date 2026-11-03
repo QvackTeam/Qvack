@@ -72,6 +72,8 @@ class Ids:
     block_id: UUID = NO_MATERIAL
     # WP23.4: a card of the topic (the task behind it).
     card_id: UUID = NO_MATERIAL
+    # WP21.3: a recognized line of the canvas the walk opens for the correction route.
+    line_id: str = "none"
 
 
 def path_for(path: str, ids: Ids) -> str:
@@ -85,6 +87,7 @@ def path_for(path: str, ids: Ids) -> str:
         canvas_id=ids.canvas_id,
         block_id=ids.block_id,
         card_id=ids.card_id,
+        line_id=ids.line_id,
     )
 
 
@@ -170,6 +173,10 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
         ("PATCH", "/v1/cards/{card_id}"): {"prompt": ["When the ratio test?", "Other"][v]},
         ("DELETE", "/v1/cards/{card_id}"): {},
         ("POST", "/v1/canvases/{canvas_id}/pairing"): {},
+        ("POST", "/v1/canvases/{canvas_id}/lines/{line_id}/correct"): {
+            "text": ["x=2", "x=3"][v],
+            "sympy": None,
+        },
         ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): {"domain_id": str(ids.domain_id)},
     }
     body = dict(bodies[(method, path)])

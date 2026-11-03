@@ -121,9 +121,13 @@ class GraphReader(Protocol):
         ...
 
 
-def create_graph_reader(neo4j: AsyncDriver, settings: Settings) -> GraphReader:
-    """The reader of a process: built from the resources of `JobContext` (`ctx.neo4j`,
-    `ctx.settings`), not a field of it (the field set is a contract, ТЗ Ф4 §4.2). Handlers of
-    `workers` call it where they need memory. The implementation is WP6.4 (G2); until then
-    it raises, and tests pass `FixedGraphReader` to the code that takes a reader."""
-    raise NotImplementedError("GraphReader implementation is WP6.4 (G2)")
+def create_graph_reader(neo4j: AsyncDriver, settings: Settings, *, learner_id: UUID) -> GraphReader:
+    """The reader of a process, **bound to one learner**: built from the resources of
+    `JobContext` (`ctx.neo4j`, `ctx.settings`), not a field of it (the field set is a contract,
+    ТЗ Ф4 §4.2), with `learner_id=job.learner_id`. A reader without a learner does not exist:
+    methods that take only an id of a node (`topic_memory`, `topic_requires`, ...) would take the
+    owner from the node and read another learner's data (law 1, Т-§3.4; D-A-144). The
+    implementation is `Neo4jGraphReader` (WP6.4, G2); tests pass `FixedGraphReader`."""
+    from quack.graph.read.neo4j_reader import Neo4jGraphReader
+
+    return Neo4jGraphReader(neo4j, settings, learner_id=learner_id)
