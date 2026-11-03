@@ -9,8 +9,7 @@
 #
 # Safe to run again: every step checks its own result first.
 #
-# Not done here (they need the `ops backup` and `ops alerts` commands, WP9.5): the systemd timers
-# of `backup` and `alerts`. Not done and never stored here: the provider panel firewall (22, 80,
+# Not done here (needs `ops alerts`, WP9.5): the systemd timer of `alerts`. Not done and never stored here: the provider panel firewall (22, 80,
 # 443 — set it by hand), DNS (deploy/README.md), secrets (the deploy job renders /srv/quack/.env).
 set -euo pipefail
 
@@ -115,7 +114,8 @@ systemctl restart systemd-journald
 
 step "directories (Д-§4.2)"
 install -d -m 755 -o deploy -g deploy "$SRV" "$SRV/data" "$SRV/tmp"
-install -d -m 700 -o deploy -g deploy "$SRV/backups"
+# Owned by the user of the `backup` container (uid 10001), mode 700 (Д-§8.1).
+install -d -m 700 -o 10001 -g 10001 "$SRV/backups"
 
 step "steal time once a minute (Д-§9.1)"
 cat > /usr/local/sbin/quack-steal <<'EOF'
@@ -146,6 +146,34 @@ WantedBy=timers.target
 EOF
 systemctl daemon-reload
 systemctl enable --now quack-steal.timer
+
+step "backup timer (Д-§8.1)"
+# Every 6 hours = backup_interval_hours (starting value); change both together. The unit is
+# skipped until the first rollout has put .env and compose.yaml into $SRV.
+cat > /etc/systemd/system/quack-backup.service <<EOF
+[Unit]
+Description=Quack Postgres dump to R2 (docker compose run --rm backup)
+ConditionPathExists=$SRV/.env
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=$SRV
+ExecStart=/usr/bin/docker compose --env-file .env --env-file release.env run --rm backup
+EOF
+cat > /etc/systemd/system/quack-backup.timer <<'EOF'
+[Unit]
+Description=Quack Postgres dump every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now quack-backup.timer
 
 step "done"
 echo "Check from ANOTHER terminal that 'ssh admin@<this host>' works before closing this session."

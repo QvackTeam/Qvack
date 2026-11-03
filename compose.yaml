@@ -9,7 +9,7 @@
 # NEO4J_MEM_LIMIT=1536m NEO4J_MEMSWAP_LIMIT=1920m.
 #
 # Test learners: `docker compose exec api python -m quack.cli ops seed-learners --count N --out
-# /tmp/learners.json` — in `api`, the only service with JWT_SECRET (tokens are signed with it).
+# /tmp/learners.json` — each learner gets a session token (ТЗ Ф4 WP18.3).
 #
 # Load stand: `docker compose --profile loadtest up` adds `meta-mock`; point api and workers to it
 # with META_API_BASE_URL=http://meta-mock:8080 (no /v1 suffix).
@@ -134,6 +134,10 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       QUACK_VERSION: ${QUACK_VERSION:-dev}
       POSTGRES_DSN: postgresql://quack:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/quack
+      # `ops db-roles` runs in this service too (superuser DSN); `ops migrate` ignores them.
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-}
+      READER_DB_PASSWORD: ${READER_DB_PASSWORD:-}
+      MIGRATOR_DB_PASSWORD: ${MIGRATOR_DB_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -166,7 +170,6 @@ services:
       API_WORKERS: "2"
       API_GRACEFUL_SHUTDOWN_S: "30"
       COMPUTE_URL: http://compute:8001
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       META_API_KEY: ${META_API_KEY:-}
       META_API_BASE_URL: ${META_API_BASE_URL:-}
     networks: [backend, egress]
@@ -247,6 +250,40 @@ services:
     logging: *default-logging
     memswap_limit: 2560m
     cpus: 3.0
+
+  backup:
+    # Д-§8.1: run by the host timer (`docker compose run --rm backup`) and by deploy.sh before a
+    # migration (`... backup ops backup now`); never started by `up`.
+    <<: *backend-image
+    profiles: [backup]
+    restart: "no"
+    command: ["ops", "backup"]
+    # Д-§7: the dump reads as `quack_reader`, created by `ops db-roles` (deploy.sh runs it).
+    environment:
+      ENV: ${ENV:-prod}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      QUACK_VERSION: ${QUACK_VERSION:-dev}
+      POSTGRES_DSN: postgresql://quack_reader:${READER_DB_PASSWORD:-}@postgres:5432/quack
+      BACKUP_LOCAL_DIR: /backups
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY:-}
+      BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY:-}
+      BACKUP_AGE_PUBLIC_KEY: ${BACKUP_AGE_PUBLIC_KEY:-}
+      HEARTBEAT_BACKUP_URL: ${HEARTBEAT_BACKUP_URL:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_FORMAT: ${ALERT_WEBHOOK_FORMAT:-slack}
+      ALERT_WEBHOOK_CHAT_ID: ${ALERT_WEBHOOK_CHAT_ID:-}
+    volumes:
+      # Directory 700, owned by the container user (uid 10001), see setup-server.sh.
+      - ${QUACK_BACKUPS_DIR:-/srv/quack/backups}:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend, egress]
+    mem_limit: 256m
+    memswap_limit: 320m
+    cpus: 0.5
+    logging: *default-logging
 
   caddy:
     # Д-§3, Д-§3.1: the only service that publishes ports (Д-§10). Config comes from deploy/.

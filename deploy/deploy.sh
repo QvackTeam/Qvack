@@ -126,7 +126,11 @@ if ((ROLLBACK)); then
     restore_release
     die "rollback not safe, fix forward (ops can-rollback refused)"
   fi
-elif ((NEW_MIGRATIONS)); then
+else
+  # Roles before the dump (the dump reads as quack_reader) and before the migration (Д-§7).
+  dc run --rm migrate ops db-roles || { restore_release; die "ops db-roles failed; nothing was changed"; }
+fi
+if ((!ROLLBACK && NEW_MIGRATIONS)); then
   # 3. Dump before the migration (Д-§8.1). Needs `ops backup now` (WP9.5). The very first
   # rollout has no data to lose and may skip it with ALLOW_NO_DUMP=1.
   if [[ -z "$PREVIOUS" && "${ALLOW_NO_DUMP:-0}" == 1 ]]; then

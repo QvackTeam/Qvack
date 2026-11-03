@@ -40,6 +40,8 @@ from quack.auth.sessions import open_session
 from quack.config import Settings
 from quack.db import Db
 from quack.db.postgres import SessionFactory
+from quack.events.append import append_events
+from quack.events.models import NewEvent
 from quack.graph.worker import ProjectorWorker
 from quack.jobs.dispatcher import Dispatcher
 from quack.jobs.periodic import PeriodicScheduler
@@ -106,12 +108,16 @@ def job_context(resources: AppResources) -> JobContext:
     """The `workers` resources of §4.2 over the stand's ones: one process, one set (WP2.1)."""
     return JobContext(
         settings=resources.settings,
+        db=resources.db,
         session_factory=resources.session_factory,
         engine=resources.engine,
         neo4j=resources.neo4j,
         redis=resources.redis,
         llm=resources.llm,
         compute=resources.compute,
+        storage=resources.storage,
+        embeddings=resources.embeddings,
+        deletions=resources.deletions,
     )
 
 
@@ -227,16 +233,33 @@ class System:
 
     # --- HTTP helpers -------------------------------------------------------------------
 
-    async def register(self, *, password: str = "correct-horse-battery") -> Learner:
-        email = f"e2e-{uuid4().hex[:12]}@example.com"
-        response = await self.client.post(
-            "/v1/auth/register", json={"email": email, "password": password}
-        )
-        assert response.status_code == 201, response.text
-        body = response.json()
-        learner_id = UUID(body["learner_id"])
-        # Routes of WP18 read the session cookie from the Phase 4 database (D-C-115); until the
-        # whole API moves to sessions (D-C-112) the learner has both the token and the cookie.
+    async def register(self) -> Learner:
+        """A new learner signed in with a Phase 4 session (ТЗ Ф4 WP18.3, D-A-113).
+        `/v1/auth/register` is removed; until the Phase 3 routes move to `Db` (WP1.3) the
+        account is the rows the removed route wrote: `auth.users` and `learner.registered` in
+        the Phase 3 log, plus `core.learners` of Phase 4."""
+        learner_id = uuid4()
+        email = f"e2e-{learner_id.hex[:12]}@example.com"
+        async with self.session_factory() as session, session.begin():
+            await session.execute(
+                text(
+                    "INSERT INTO auth.users (id, email, password_hash) VALUES (:id, :email, '!e2e')"
+                ),
+                {"id": learner_id, "email": email},
+            )
+            await append_events(
+                session,
+                learner_id,
+                [
+                    NewEvent(
+                        type="learner.registered",
+                        actor="learner",
+                        idempotency_key=f"register:{learner_id}",
+                        payload={"email": email, "display_name": None, "preferences": {}},
+                    )
+                ],
+                publish_wakeup=False,
+            )
         await self.resources.db.execute(
             "INSERT INTO core.learners (learner_id, email) VALUES (%(learner_id)s, %(email)s)",
             {"learner_id": learner_id, "email": email},
@@ -244,10 +267,7 @@ class System:
         cookie = await open_session(
             self.resources.db, self.settings, learner_id=learner_id, now=datetime.now(UTC)
         )
-        headers = {
-            "Authorization": f"Bearer {body['token']}",
-            "Cookie": f"{SESSION_COOKIE}={cookie}",
-        }
+        headers = {"Cookie": f"{SESSION_COOKIE}={cookie}"}
         # WP18.4: a session starts only after `consent.given {kind: terms}` of the current
         # `terms_version`; the learner of the stand accepts it as the client would.
         consent = await self.client.post(
@@ -260,7 +280,7 @@ class System:
             headers=headers,
         )
         assert consent.status_code == 200, consent.text
-        return Learner(learner_id, email, password, headers)
+        return Learner(learner_id, email, headers)
 
 
 # A test value of `terms_version` (the real one is the owner's, D-C-105).
@@ -271,7 +291,6 @@ E2E_TERMS_VERSION = "e2e-terms"
 class Learner:
     learner_id: UUID
     email: str
-    password: str
     headers: dict[str, str]
 
 

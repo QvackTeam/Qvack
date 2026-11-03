@@ -14,6 +14,7 @@ from quack.config import Settings
 from quack.db.db import Db
 from quack.events.event_types import DomainCreated
 from quack.events.log import NewEvent, append_events
+from quack.session import sessions
 from quack.session.sessions import (
     SessionConflictError,
     StartSession,
@@ -78,6 +79,7 @@ async def test_start_writes_the_event_and_the_row(pg_db: Db) -> None:
         "intent": "practice",
         "topic_id": str(topic_id),
         "hub_id": None,
+        "resumed": False,
     }
     row = await get_session(pg_db, learner_id=learner_id, session_id=started.session_id)
     assert (row.status, row.intent, row.topic_id, row.domain_id) == (
@@ -101,6 +103,37 @@ async def test_repeat_of_the_start_returns_the_same_session(pg_db: Db) -> None:
     assert len(await _events(pg_db, learner_id, first.session_id)) == 1
     with pytest.raises(SessionConflictError):
         changed = body.model_copy(update={"intent": "review"})
+        await start_session(pg_db, learner_id=learner_id, body=changed)
+
+
+async def test_concurrent_start_with_one_key_returns_the_same_session(
+    pg_db: Db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review C #124 п.2 (law 5): two starts with one key at once — the second read the key
+    before the first committed and its `append_events` meets the key with another payload; it
+    reads the key again and returns the same session, not an error (D-B-155 п.ж)."""
+    learner_id = await create_learner(pg_db)
+    domain_id = await _domain(pg_db, learner_id)
+    body = _body(domain_id)
+    first = await start_session(pg_db, learner_id=learner_id, body=body)
+
+    real = sessions._started_by_key
+    reads: list[int] = []
+
+    async def missed_once(*args: Any, **kwargs: Any) -> Any:
+        reads.append(1)
+        if len(reads) == 1:
+            return None  # the read of the second start, before the first one committed
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(sessions, "_started_by_key", missed_once)
+    second = await start_session(pg_db, learner_id=learner_id, body=body)
+
+    assert second.session_id == first.session_id
+    assert len(await _events(pg_db, learner_id, first.session_id)) == 1
+    changed = body.model_copy(update={"intent": "review"})
+    reads.clear()
+    with pytest.raises(SessionConflictError):
         await start_session(pg_db, learner_id=learner_id, body=changed)
 
 
@@ -192,6 +225,11 @@ async def test_inactive_session_is_ended_and_returns_on_action(pg_db: Db) -> Non
         ("session.started", None),
     ]
     assert events[2]["payload"]["session_id"] == str(started.session_id)
+    # WP13.10, D-A-121: the return is `session.started {resumed: true}`; the start is not
+    assert [e["payload"].get("resumed") for e in events if e["type"] == "session.started"] == [
+        False,
+        True,
+    ]
     row = await get_session(pg_db, learner_id=learner_id, session_id=started.session_id)
     assert row.status == "active" and row.ended_at is None
 
