@@ -102,10 +102,19 @@ class RevisedCheck:
 
 
 @dataclass(frozen=True)
+class ReviewTask:
+    """A bank task of a family the learner has not met on the skill (WP12.7, WP17.6)."""
+
+    task_id: UUID
+    text: str
+
+
+@dataclass(frozen=True)
 class PictureInputs:
     """What slot 7 is rendered from. `target_levels` — the target set of each skill (Т-§8.5);
     a skill without one shows the levels it has data on. `evidence` — the deciding evidence by
-    id."""
+    id. `review` — the skills to repeat now by priority (`review_candidates`, WP17.6), each with
+    its bank tasks in `review_tasks`."""
 
     slice: MemorySlice
     focus: SliceFocus
@@ -115,6 +124,8 @@ class PictureInputs:
     analyst_summary: str | None = None
     agent_results: Sequence[str] = ()
     revised_checks: Sequence[RevisedCheck] = ()
+    review: Sequence[UUID] = ()
+    review_tasks: Mapping[UUID, Sequence[ReviewTask]] = field(default_factory=dict)
 
 
 def _reached(level: LevelFact) -> bool:
@@ -158,6 +169,8 @@ def picture_skills(inputs: PictureInputs, settings: Settings) -> list[SkillFact]
         if skill.topic_id is not None and skill.topic_id in topics:
             take(skill)
     goal = list(chosen.values())
+    for skill_id in inputs.review:  # to repeat now, by priority (WP17.6)
+        take(by_id.get(skill_id))
     step_one = [by_id.get(link.skill_id) for skill in goal for link in skill.requires]
     step_two = [by_id.get(link.skill_id) for skill in step_one if skill for link in skill.requires]
     for skill in [*step_one, *step_two]:
@@ -233,7 +246,9 @@ def _misconception_part(item: MisconceptionFact, inputs: PictureInputs, labels: 
     return text + "."
 
 
-def _retention(skill: SkillFact, settings: Settings, now_ms: int) -> str | None:
+def _retention(
+    skill: SkillFact, settings: Settings, now_ms: int, *, to_review: bool = False
+) -> str | None:
     notes: list[str] = []
     last_shown = max((e.occurred_at_ms for e in skill.exposures), default=None)
     if last_shown is not None and now_ms - last_shown <= settings.hot_window_min * _MINUTE_MS:
@@ -242,7 +257,7 @@ def _retention(skill: SkillFact, settings: Settings, now_ms: int) -> str | None:
         notes.append(f"forgot after a delay {_when(skill.last_lapse_at_ms, now_ms)}")
     if skill.due_at_ms is None:
         notes.append("no checks after a delay yet")
-    elif skill.due_at_ms <= now_ms:
+    if to_review or (skill.due_at_ms is not None and skill.due_at_ms <= now_ms):
         notes.append("due for review")
     return "Retention: " + "; ".join(notes) + "." if notes else None
 
@@ -278,9 +293,13 @@ def _skill_line(
         parts.append(f"Gap: {_GAP_WORDS[gap]}.")
     if skill.consolidation_flag:
         parts.append("Needs consolidation after a shown solution.")
-    retention = _retention(skill, settings, now_ms)
+    retention = _retention(skill, settings, now_ms, to_review=skill.skill_id in inputs.review)
     if retention:
         parts.append(retention)
+    for task in inputs.review_tasks.get(skill.skill_id, ()):
+        label = labels.label("task", task.task_id)
+        if label:
+            parts.append(f'Repeat with a new family, bank task {label}: "{task.text}".')
     return " ".join(parts)
 
 
