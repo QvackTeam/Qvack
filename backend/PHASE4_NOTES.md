@@ -468,6 +468,24 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/graph/test_read_stub.py::test_memory_picture_facts_of_wp14_2`.
 - Требует подтверждения владельцем: нет.
 
+### D-A-135. S4: кандидаты извлекателя; S6: переизвлечение после `skill.split` по эпизодам
+- Класс: B. WP6.4, WP15 п.2, п.6, WP7.1; `Т-§2.8`, `Т-§4.11`, `Т-§7.6`, `Т-§3.4.6`; вопрос B в #132; `quack/graph/read/`, `tests/support/graph_read.py`, `quack/jobs/rules_p4.py`
+- Решение:
+  1. **`GraphReader.extraction_candidates(learner_id, session_id, episode_vector, k, *, topic_id=None, skill_ids=None) -> ExtractionCandidates{skills: [CandidateSkill{skill_id, name, topic_id}], misconceptions: [MisconceptionFact]}`** — вход `extractor@3` из памяти (WP15 п.2):
+     - навыки тем, активных в сессии, плюс ближайшие к вектору эпизода по `skill_emb`, всего не больше `k` (`candidate_skills_k`);
+     - вектора нет (Modal недоступен) — только навыки сессии;
+     - `topic_id` или `skill_ids` ограничивают кандидатов при переизвлечении (`episode.reassigned` — тема, `skill.split` — части; WP15 п.6);
+     - известные заблуждения — заблуждения навыков-кандидатов.
+     
+     Один метод вместо трёх, о которых спрашивал B: ограничение темой (п.3) — параметр того же чтения. Реализация — G2 (WP6.4), заглушка `FixedGraphReader` — сейчас.
+  2. **`skill.split`** (`Т-§2.8`: «диспетчер ставит переизвлечение эпизодов, где они есть», то есть где есть свидетельства старого навыка):
+     - по одной задаче `extract.episode` на эпизод действующего наблюдения со свидетельствами старого навыка;
+     - нагрузка — `{episode_seq, restrict_skill_ids}`, кандидаты ограничены частями;
+     - это строка S6 с данными сверх события (G2, D-A-110), поэтому прежняя строка «одна задача без эпизода» убрана.
+- Почему: §0.4.3 п.2 (буква `Т-§2.8`), п.5.
+- Тесты: `tests/graph/test_read_stub.py::test_extraction_candidates_of_wp15`; `tests/jobs/test_rules_p4.py::test_handwriting_known_claim_and_reextraction_rows`.
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
@@ -1429,9 +1447,11 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.9, запись хода (D-B-149): `cd backend && uv run pytest tests/session/test_turn_commit.py` — ошибка сбора (нет `quack.session.turn_commit`), коммит `d7972cc`; на неверной реализации (6 подмен) — каждая роняет 1–2 теста. Зелёный: 6 passed.
 - WP13.9, дедлайн из разговора, подсказки, закрытие задачи (D-B-149 п. г, д): тот же файл — ошибка сбора (нет `AnsweredAction`, `LearnerText`), коммит `6e39af5`; на неверной реализации — 8 подмен, каждая роняет 1–3 теста. Зелёный: 16 passed.
 - WP15, помощь и тип пробела (A, D-A-124 п.3а, коммит `9a1a444`): `uv run pytest tests/graph/test_extracted_check.py` — 1 failed (подсказка без ступени проходит). Подмены: ступень без подсказки, подсказка без ступени, положительный с типом пробела, `partial` обязан `none` — 4/4. Зелёный: 13 passed.
+- S4 кандидаты, S6 `skill.split` (A, D-A-135, коммит `8c5181b`): `uv run pytest tests/graph/test_read_stub.py tests/jobs/test_rules_p4.py` — 2 failed (`NotImplementedError`; `skill.split` ставит задачу без эпизода). Подмены заглушки: тема, навыки, `k`, заблуждения не кандидатов — 4/4. Зелёный: 40 passed.
 
 ## Правки тестов
 
+- `tests/jobs/test_rules_p4.py::test_handwriting_known_claim_and_reextraction_rows` (A, D-A-135): `skill.split` больше не ставит задачу только по событию. Тест проверяет, что строка — с данными сверх события (по эпизодам, `Т-§2.8`); прежнее утверждение (одна задача без эпизода) расходилось с `Т-§2.8` (§8.15 п.3).
 - `tests/graph/test_extracted_check.py::test_negative_elements_need_a_quote_from_their_sources` (A, D-A-124 п.3а, до слияния #133): положительный элемент с новым навыком получил `gap_type = none` — прежние данные нарушали контракт выхода (WP15 п.3). Проверяемое утверждение (`missing_quote`) то же.
 - `tests/test_compose_contract.py` (C, D-C-119): удалён `test_only_api_has_the_jwt_secret` из #122 — `JWT_SECRET` удаляется вместе с JWT (§2.3 строка 3, §8.15 п.1); из проверки `projector` убрано несуществующее имя `JWT_SECRET`.
 - `tests/session/test_head_guards.py::test_boundary_names_the_missing_prerequisites_once` (D-B-153, до зелёного): проверка «id не в тексте» смотрела на id предпосылки с меткой и не ловила утечку id предпосылки без метки (подмена прошла); теперь проверяются оба id и точный текст. Тест усилен, не ослаблен.
