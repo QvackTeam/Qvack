@@ -350,6 +350,12 @@ _SUPERSEDE = (
 )
 
 
+_CANCEL_SUPERSEDED = (
+    "UPDATE ops.jobs SET status = 'cancelled', last_error = %(error)s, "
+    "attempts = %(attempts)s WHERE job_key = %(job_key)s"
+)
+
+
 async def _requeue(
     db: Db, job: ClaimedJob, *, attempts: int, delay_s: float, error: str | None
 ) -> RetryDecision:
@@ -371,8 +377,7 @@ async def _requeue(
                 },
             )
             await db.execute(
-                "UPDATE ops.jobs SET status = 'cancelled', last_error = %(error)s, "
-                "attempts = %(attempts)s WHERE job_key = %(job_key)s",
+                _CANCEL_SUPERSEDED,
                 {**params, "error": "superseded by a waiting job with the same coalesce_key"},
             )
             return RetryDecision("cancelled", attempts, None)
@@ -470,18 +475,20 @@ async def release(db: Db, job: ClaimedJob) -> RetryDecision | None:
     return await defer(db, job, 0.0, "released on shutdown")
 
 
+_STALE = (
+    f"SELECT {_JOB_COLUMNS}, status FROM ops.jobs "
+    "WHERE status IN ('running', 'cancel_requested') "
+    "AND heartbeat_at < now() - make_interval(secs => %(stale)s) "
+    "ORDER BY job_key FOR UPDATE SKIP LOCKED"
+)
+
+
 async def reap_stale(db: Db, settings: Settings) -> int:
     """The cleaner (Т-§13.1): a job in work without a pulse for `job_stale_after_sec` returns to
     the queue — or is `failed` when its attempts are out; a stale `cancel_requested` is
     `cancelled`. Returns the number of jobs touched."""
     async with db.transaction():
-        rows = await db.fetch_all(
-            f"SELECT {_JOB_COLUMNS}, status FROM ops.jobs "
-            "WHERE status IN ('running', 'cancel_requested') "
-            "AND heartbeat_at < now() - make_interval(secs => %(stale)s) "
-            "ORDER BY job_key FOR UPDATE SKIP LOCKED",
-            {"stale": settings.job_stale_after_sec},
-        )
+        rows = await db.fetch_all(_STALE, {"stale": settings.job_stale_after_sec})
         for row in rows:
             job = _claimed(row)
             if row["status"] == "cancel_requested":

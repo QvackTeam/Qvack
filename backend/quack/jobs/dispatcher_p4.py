@@ -106,6 +106,25 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+# The dispatcher walks every learner (Т-§13.3); these three statements are its cross-learner
+# scans (D-A-164).
+_PENDING_LEARNERS = (
+    "SELECT l.learner_id FROM core.learners l LEFT JOIN ops.dispatcher_offsets d "
+    "ON d.learner_id = l.learner_id WHERE l.seq > COALESCE(d.last_dispatched_seq, 0) "
+    "ORDER BY l.learner_id LIMIT %(limit)s"
+)
+_LAG = (
+    "SELECT count(*) AS n, COALESCE(max(l.seq - COALESCE(d.last_dispatched_seq, 0)), 0) "
+    "AS behind FROM core.learners l LEFT JOIN ops.dispatcher_offsets d "
+    "ON d.learner_id = l.learner_id WHERE l.seq > COALESCE(d.last_dispatched_seq, 0)"
+)
+_IDLE_LEARNERS = (
+    "SELECT DISTINCT d.learner_id FROM ops.dispatcher_offsets d, "
+    "jsonb_each(COALESCE(d.counters->'episodes', '{}'::jsonb)) e "
+    "WHERE (e.value->>'last_at')::timestamptz <= %(cutoff)s"
+)
+
+
 @dataclass
 class DispatcherP4:
     settings: Settings
@@ -117,21 +136,12 @@ class DispatcherP4:
 
     async def pending_learners(self, limit: int = 100) -> list[UUID]:
         """Learners whose event counter is ahead of their mark (no mark row = 0)."""
-        rows = await self.db.fetch_all(
-            "SELECT l.learner_id FROM core.learners l LEFT JOIN ops.dispatcher_offsets d "
-            "ON d.learner_id = l.learner_id WHERE l.seq > COALESCE(d.last_dispatched_seq, 0) "
-            "ORDER BY l.learner_id LIMIT %(limit)s",
-            {"limit": limit},
-        )
+        rows = await self.db.fetch_all(_PENDING_LEARNERS, {"limit": limit})
         return [r["learner_id"] for r in rows]
 
     async def lag(self) -> tuple[int, int]:
         """(learners behind, the largest number of events behind) — for `ops status`."""
-        row = await self.db.fetch_one(
-            "SELECT count(*) AS n, COALESCE(max(l.seq - COALESCE(d.last_dispatched_seq, 0)), 0) "
-            "AS behind FROM core.learners l LEFT JOIN ops.dispatcher_offsets d "
-            "ON d.learner_id = l.learner_id WHERE l.seq > COALESCE(d.last_dispatched_seq, 0)"
-        )
+        row = await self.db.fetch_one(_LAG)
         assert row is not None
         return int(row["n"]), int(row["behind"])
 
@@ -253,12 +263,7 @@ class DispatcherP4:
         with events the dispatcher has not read yet is left alone: those events say more."""
         now = self.clock()
         cutoff = now - timedelta(minutes=self.settings.episode_idle_min)
-        rows = await self.db.fetch_all(
-            "SELECT DISTINCT d.learner_id FROM ops.dispatcher_offsets d, "
-            "jsonb_each(COALESCE(d.counters->'episodes', '{}'::jsonb)) e "
-            "WHERE (e.value->>'last_at')::timestamptz <= %(cutoff)s",
-            {"cutoff": cutoff},
-        )
+        rows = await self.db.fetch_all(_IDLE_LEARNERS, {"cutoff": cutoff})
         closed_total = 0
         for row in rows:
             closed_total += await self._close_idle_of(row["learner_id"], now)
