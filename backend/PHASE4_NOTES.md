@@ -1218,6 +1218,17 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
 - Тесты: `tests/graph/test_projection_runner.py` — `test_projector_process_walks_the_lagging_learners`, `test_workers_adapter_runs_a_registered_handler`, `test_projector_process_starts_and_stops`; межученический обход — в `CROSS_LEARNER_ALLOWED` (T-DB4).
 - Требует подтверждения владельцем: нет.
 
+### D-A-201. WP25 п.5: сверка и повтор удалений; задача `deletions.reconcile`
+- Класс: B. WP25 п.5, WP7.5; `Т-§19.5`, `Д-§8.5`, `Д-§8.7`; `quack/deletion/journal.py`, `quack/deletion/jobs.py`, `quack/deletion/domain.py`
+- Решение:
+  1. **Общий шаг** `apply_domain_record(…, learner_id, record)`: под блокировкой ученика — удаление по записи, строка `ops.deletion_log` (`ON CONFLICT DO NOTHING`), пересборка. Его вызывают и `delete_domain` после записи в журнал, и сверка с повтором. Второй запуск ничего не находит, строка уже есть.
+  2. **`reconcile_deletions(since)`** — записи журнала R2 без своей строки `ops.deletion_log` выполняются заново. **`replay_deletions(since)`** — все записи с `since` (после восстановления Postgres, `ops replay-deletions` — команда WP9.6 у C).
+  3. **`deletions.reconcile`** (периодическая WP7.5, ключ `deletions-reconcile:{дата}`, D-A-166) сверяет весь журнал: WP25 п.5 говорит «объекты R2 без строки», без окна. Вид добавлен в `JOB_KINDS`/`KIND_LLM_ROLES` (без ролей), модуль — в `HANDLER_MODULES` (процедура (б) #173).
+  4. **Записи `topic` и `account`** пока пропускаются с предупреждением: их удаление Фазы 4 — следующий шаг WP25.
+- Почему: §0.4.3 п.1–2; закон 5 (повтор не дублирует).
+- Тесты: `tests/graph/test_projection_runner.py::test_reconcile_and_replay_deletions`.
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.

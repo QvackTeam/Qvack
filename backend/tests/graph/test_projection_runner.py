@@ -599,3 +599,40 @@ async def test_projector_process_starts_and_stops(neo4j: AsyncDriver, settings: 
     stop = asyncio.Event()
     stop.set()
     assert await asyncio.wait_for(projector_process(settings, stop), timeout=30) == 0
+
+
+async def test_reconcile_and_replay_deletions(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings
+) -> None:
+    """WP25 п.5 (D-A-201): a record of the journal without its row of `ops.deletion_log` runs
+    again; a second reconcile finds nothing; a replay after a «restore» deletes again."""
+    from datetime import UTC, datetime
+
+    from quack.deletion.journal import reconcile_deletions, replay_deletions
+    from quack.storage.deletions import DeletionRecord
+    from tests.support.deletions import FakeDeletionJournal
+    from tests.support.storage import InMemoryObjectStore
+
+    learner, domain = await create_learner(pg_db), uuid4()
+    events = _materials(domain, *[uuid4() for _ in range(4)])
+    await append_events(pg_db, learner, events)
+    await _project_all(pg_db, neo4j, settings, learner)
+    journal, store = FakeDeletionJournal(), InMemoryObjectStore()
+    since = datetime(2026, 11, 1, tzinfo=UTC)
+    journal.records.append(
+        DeletionRecord(uuid4(), learner, "domain", domain, datetime(2026, 11, 3, tzinfo=UTC))
+    )  # written, but the deletion did not run (a crash before `ops.deletion_log`)
+
+    async def left() -> int:
+        row = await pg_db.fetch_one(
+            "SELECT count(*) AS n FROM core.events WHERE learner_id = %(l)s", {"l": learner}
+        )
+        return -1 if row is None else int(row["n"])
+
+    assert await reconcile_deletions(pg_db, neo4j, settings, journal, store, since) == 1
+    assert await left() == 0
+    assert await reconcile_deletions(pg_db, neo4j, settings, journal, store, since) == 0
+    restored = [e.model_copy(update={"idempotency_key": f"r:{e.idempotency_key}"}) for e in events]
+    await append_events(pg_db, learner, restored)  # the dump brought the domain back
+    assert await replay_deletions(pg_db, neo4j, settings, journal, store, since) == 1
+    assert await left() == 0

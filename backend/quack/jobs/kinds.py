@@ -43,6 +43,7 @@ JOB_KINDS: tuple[str, ...] = (
     "check.model",
     "today.prepare",
     "graph.hygiene",
+    "deletions.reconcile",
 )
 
 # WP5.3/T-Q10: the roles whose models a kind calls; a kind waits while any of them is pressured.
@@ -67,6 +68,7 @@ KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
     "check.model": ("verdict_proof", "verdict_free"),
     "today.prepare": ("today_planner",),
     "graph.hygiene": ("builder",),
+    "deletions.reconcile": (),
 }
 
 

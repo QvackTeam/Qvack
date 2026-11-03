@@ -114,6 +114,39 @@ async def erase_domain(db: Db, store: ObjectStore, learner_id: UUID, domain_id: 
     return len(keys)
 
 
+async def apply_domain_record(
+    db: Db,
+    neo4j: AsyncDriver,
+    settings: Settings,
+    store: ObjectStore,
+    learner_id: UUID,
+    record: DeletionRecord,
+    *,
+    redis: Redis | None = None,
+) -> None:
+    """The deletion the record names, under the learner's lock, then its row of
+    `ops.deletion_log` and the rebuild. Repeatable: a second run finds nothing to delete and
+    the log row exists (WP25 п.5)."""
+    domain_id = record.target_id
+    async with db.advisory_lock(LockKeyspace.LEARNER_PROJECTION, learner_id) as acquired:
+        if not acquired:
+            raise DeletionBusy(str(learner_id))
+        await erase_domain(db, store, learner_id, domain_id)
+        log_row = {
+            "deletion_id": record.deletion_id,
+            "learner_id": learner_id,
+            "target_id": domain_id,
+            "deleted_at": record.deleted_at,
+        }
+        await db.execute(_LOG, log_row)
+    for _ in range(_REBUILD_TRIES):  # the projector may hold the lock for its batch
+        outcome = await rebuild_learner(db, neo4j, settings, learner_id, redis=redis,
+                                        respect_presence=False)  # fmt: skip
+        if outcome.status != "busy":
+            break
+        await asyncio.sleep(0.2)
+
+
 async def delete_domain(
     db: Db,
     neo4j: AsyncDriver,
@@ -132,16 +165,5 @@ async def delete_domain(
         return None
     record = DeletionRecord(uuid4(), learner_id, "domain", domain_id, now)
     await journal.write(record)
-    async with db.advisory_lock(LockKeyspace.LEARNER_PROJECTION, learner_id) as acquired:
-        if not acquired:
-            raise DeletionBusy(str(learner_id))
-        await erase_domain(db, store, learner_id, domain_id)
-        await db.execute(_LOG, {"deletion_id": record.deletion_id, "learner_id": learner_id,
-                                "target_id": domain_id, "deleted_at": now})  # fmt: skip
-    for _ in range(_REBUILD_TRIES):  # the projector may hold the lock for its batch
-        outcome = await rebuild_learner(db, neo4j, settings, learner_id, redis=redis,
-                                        respect_presence=False)  # fmt: skip
-        if outcome.status != "busy":
-            break
-        await asyncio.sleep(0.2)
+    await apply_domain_record(db, neo4j, settings, store, learner_id, record, redis=redis)
     return DeletionDone(record.deletion_id)
