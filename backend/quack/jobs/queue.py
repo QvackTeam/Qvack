@@ -70,6 +70,9 @@ class ClaimedJob:
     attempt: int
     max_attempts: int
     required_seq: int | None = None
+    # WP1.3 (D-A-200, #210): the key and the session of a job of the Phase 4 queue.
+    job_key: str | None = None
+    session_id: UUID | None = None
 
 
 @dataclass(frozen=True)

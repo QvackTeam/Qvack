@@ -576,8 +576,8 @@ async def test_workers_adapter_runs_a_registered_handler(pg_db: Db, settings: Se
                        admission=lambda: _allowed(["check.model"]))  # fmt: skip
     while seen == [] and await worker.run_one():
         pass
-    assert [(j.kind, j.learner_id, j.payload, j.attempt) for j in seen] == [
-        ("check.model", learner, {"answer_seq": 3}, 1)
+    assert [(j.kind, j.learner_id, j.payload, j.attempt, j.job_key) for j in seen] == [
+        ("check.model", learner, {"answer_seq": 3}, 1, f"adapter:{learner}")
     ]
     row = await pg_db.fetch_one(
         "SELECT status FROM ops.jobs WHERE job_key = %(k)s", {"k": f"adapter:{learner}"}

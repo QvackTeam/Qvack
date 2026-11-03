@@ -51,6 +51,8 @@ def as_phase3_job(job: queue_p4.ClaimedJob, settings: Settings) -> Phase3Job:
         attempt=job.attempts,
         max_attempts=settings.job_max_attempts,
         required_seq=job.required_seq,
+        job_key=job.job_key,
+        session_id=job.session_id,
     )
 
 
