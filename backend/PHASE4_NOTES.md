@@ -532,6 +532,38 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/graph/test_read_stub.py` (names, goals, profile, topic_memory, misconception_detail, factory); `tests/db/test_baseline_migration.py::test_turn_manifests_frozen_slots_column`.
 - Требует подтверждения владельцем: нет.
 
+### D-A-140. WP6.4: ядро `quack.graph.read` на Neo4j — привязка к ученику, отметка, ожидание
+- Класс: A. WP6.4, `Т-§2.6`, `Т-§3.4.2`; `quack/graph/read/neo4j_reader.py`, `tests/graph/test_read_neo4j_core.py`
+- Решение:
+  1. `Neo4jGraphReader(neo4j, settings, *, learner_id=None, session_factory=None, redis=None, clock=None)`; фабрика `create_graph_reader(neo4j, settings)` возвращает его.
+  2. Методы без `learner_id` в сигнатуре (`frontier`, `topic_readiness`, `why`, `topic_requires`, `recall_probability`, `domain_goals`, `topic_memory`) находят владельца узла по его `id` (уникален) и дальше читают только в пределах этого ученика (каждый запрос с `learnerId`, закон 1). `for_learner(id)` даёт читателя, который не видит узлы других учеников.
+  3. Отметка — `Learner.projectedSeq` (`Т-§2.6`), запасной вариант `appliedSeq` Фазы 3, пока не слит проектор `rules@3`. Чтение — `read_consistent_slice`: до и после среза, `snapshot_read_retries` повторов, `stable=False` при нестабильности.
+  4. `slice_for_turn`: цель ожидания проектора — хвост наложения (`overlay_seq`), без наложения — последний `seq` ученика из Postgres, если читателю дана `session_factory`; иначе без ожидания. Не дождались за `projector_lag_timeout_ms` — `lag_degraded=True`.
+- Почему: в `GraphReader` (S4) у семи методов нет `learner_id`; менять сигнатуры после G1 нельзя.
+- Требует подтверждения владельцем: нет.
+
+### D-A-141. WP6.4: срез навыков — что читается и как отображается
+- Класс: A. `Т-§3.4.4`, `Т-§8.2`–`Т-§8.4`, `Т-§9.2`, `Т-§10.2`
+- Решение: в `SkillFact.levels` все шесть уровней (`unknown` → `not_tested`; база `direct`/`transfer`, прочие — `None`); `proven_by_direct` — `proven` с базой `direct`; `last_t1_failed` — последнее по `atMs` действующее свидетельство яруса 1 уровня с исходом `incorrect`; `evidence_count` — действующие свидетельства уровня. Ярус словами: 1 → `code`, 2 → `model`, 3–4 → `conversation`. Заблуждения навыков среза со статусами `suspected`/`confirmed`/`in_work`/`watching`; `confirmed` с `targetedInSessionId`, равным сессии, читается как `in_work`. Корни ошибок — предпосылки, на которые указывают не меньше двух гипотез (`ROOT_CAUSE`). Показов на навык — последние 3, цитат — до 2 (число показов в документах не названо: константа `RECENT_EXPOSURES`). Фокус: `skill_ids` плюс навыки `topic_ids`; `domain_id` не используется.
+- Требует подтверждения владельцем: да (число показов).
+
+### D-A-142. WP6.4: готовность хаба, граница, вероятность вспомнить, «почему»
+- Класс: A. `Т-§8.2`, `Т-§8.3`, `Т-§8.5`, `Т-§8.7`, `Т-§14.5`, `Т-§4.6`
+- Решение: тема готова, если у неё есть навыки и у всех навыков все требуемые уровни `proven` с базой `direct` либо `implied`, следующие (по `level_implications`) из уровня, доказанного с базой `direct` (у `implied` база сама `implied`, `Т-§8.2` п.5). Хаб `domain_all` — все темы домена со статусом `active`/`proposed`, уровни по `control_type_levels`. Граница — наименьший уровень набора не `proven`/`implied`; неизвестный навык — наименьший уровень набора (закон 8). Вероятность вспомнить — `quack.graph.folds.retrievability(retStability, now − retLastRecallAtMs)` (py-fsrs в зависимостях нет); `None` без карточки удержания. `why`: без уровня берётся `Topic.displayLevel`; решающее — по `lNDecisiveEvidenceId` навыков темы (при `displayReason` — навыка), последние `why_recent_n` — действующие свидетельства уровня. `topic_requires` — агрегат `REQUIRES` между навыками разных тем домена, вес — число связей.
+- Требует подтверждения владельцем: нет.
+
+### D-A-143. WP6.4: наложение сессии
+- Класс: A. `Т-§2.6`, `Т-§5.5`
+- Решение: наложение применяется, пока `overlay_seq` больше отметки проектора. Свойства состояния (`l*`, `ret*`, `exp*`, `gap*`, закрепление) навыков и `statement`/`status`/`triggers` заблуждений берутся из `overlay.graph`; свидетельства и показы наложения (связи `ON`/`OF`/`MANIFESTS`, форма `rules@3`), которых нет в Neo4j, добавляются в счётчики, показы и цитаты. Граф наложения в форме Фазы 3 (`EVIDENCE_FOR` и др.) ничего не меняет, пока `overlay.py` не переведён на проектор `rules@3`.
+- Требует подтверждения владельцем: нет.
+
+
+### D-A-144. S4: читатель памяти всегда привязан к ученику
+- Класс: B. WP6.4, §4.1, §4.2; `Т-§3.4` (закон `learnerId`); блокер C в #175; `quack/graph/read/reader.py`
+- Решение: вариант (а) C — `create_graph_reader(neo4j, settings, *, learner_id)`; читатель без ученика не создаётся, `_anchor` отвергает узел чужого ученика. Обработчик `workers` вызывает его с `job.learner_id`.
+- Почему: методы, получающие только id узла (`topic_memory`, `topic_requires`, `topic_readiness`, `recall_probability`, `domain_goals`), брали владельца из узла и отдали бы данные другого ученика. Протокол не меняется, B и C правят только вызов фабрики.
+- Тесты: `tests/graph/test_read_neo4j_core.py::test_factory_reader_is_bound_to_its_learner`.
+- Требует подтверждения владельцем: нет.
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
