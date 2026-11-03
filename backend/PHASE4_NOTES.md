@@ -1207,6 +1207,17 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
 - Тесты: `tests/jobs/test_rules_p4.py::test_cheatsheet_consent_is_the_job_of_its_hub`.
 - Требует подтверждения владельцем: нет.
 
+### D-A-200. WP1.3, шаг 1: процессы `projector` и `workers` Фазы 4 и переключатель
+- Класс: B. WP1.3, WP3.3, WP7; `Т-§2.4`, `Т-§13.1`–`Т-§13.3`, `Т-§22.4`, `Д-§6.1`; `quack/graph/projection/process.py`, `quack/runtime/phase4.py`, `quack/cli.py`, `quack/config.py`
+- Контекст: модули Фазы 4 влиты (#185, #182), но процессы работают на коде Фазы 3. Обе стороны смотрят в одну базу (`postgres_dsn`), поэтому полный переход — это переключение схемы развёртывания на dbmate (WP9, C) и перенос 41 модуля Фазы 3 (WP1.3, G4). Без процессов Фазы 4 не пишется `T-E1`, и обработчики задач B и C не запускаются.
+- Решение:
+  1. **`ProjectorP4`.** Каждые `consumer_poll_ms` — ученики, у которых `core.learners.seq` больше копии отметки, а поток не остановлен (`ops.projector_failures`), по одной пачке (`project_learner`, с Redis — публикация тем). Сбой одного ученика (временная ошибка Neo4j) пишется в лог, следующий проход повторяет его пачку. Пустая пачка подтягивает отставшую копию отметки: иначе ученик, у которого упала копия после фиксации, находился бы снова и снова.
+  2. **`projector_process`** — схема Neo4j, затем `ProjectorP4` и `DispatcherP4`: две задачи под надзором (`supervise`, как в WP11.1). **`workers_process`** — `JobWorker` на очереди Фазы 4 и тик периодических задач WP7.5 (`scheduler_tick_s`) на ресурсах `JobContext`. Обработчики регистрируются по-прежнему (`@register_job_handler`, D-A-116); переходник `bind_handlers` даёт каждому задачу в форме Фазы 3: id — от `job_key`, `priority` — номер класса, `attempt` — номер выбора.
+  3. **Переключатель** `phase4_processes` (по умолчанию выключен): `quack.cli` запускает `projector`/`workers` Фазы 4 вместо Фазы 3. Включают его вместе с переходом схемы (WP9). Код Фазы 3 и флаг уходят с остатком WP1.3. Имени в §6.7 нет — это механизм перехода, не порог.
+- Почему: §0.4.3 п.1–2; разрешённое пересечение 1 §7.3 (WP1.3 — A, `cli.py` — сборка).
+- Тесты: `tests/graph/test_projection_runner.py` — `test_projector_process_walks_the_lagging_learners`, `test_workers_adapter_runs_a_registered_handler`, `test_projector_process_starts_and_stops`; межученический обход — в `CROSS_LEARNER_ALLOWED` (T-DB4).
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.

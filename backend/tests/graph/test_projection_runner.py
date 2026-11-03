@@ -518,3 +518,84 @@ async def test_delete_domain(pg_db: Db, neo4j: AsyncDriver, settings: Settings) 
             d=str(gone_domain),
         )
         assert (await result.single() or {"n": -1})["n"] == 0
+
+
+async def test_projector_process_walks_the_lagging_learners(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings
+) -> None:
+    """WP1.3 (D-A-200): one pass projects every lagging learner and skips a stopped stream; the
+    next pass finds nothing (the copy of the watermark is level)."""
+    from quack.graph.projection.process import ProjectorP4
+
+    first, second, stopped = [await create_learner(pg_db) for _ in range(3)]
+    for learner in (first, second, stopped):
+        await append_events(pg_db, learner, _materials(*[uuid4() for _ in range(5)]))
+    await pg_db.execute(
+        "INSERT INTO ops.projector_failures (learner_id, seq, error) "
+        "VALUES (%(learner_id)s, 1, 'test')",
+        {"learner_id": stopped},
+    )
+    projector = ProjectorP4(settings, pg_db, neo4j)
+    mine = {first, second, stopped}
+    assert mine & set(await projector.pending_learners(10_000)) == {first, second}
+    await projector.run_once()
+    assert mine & set(await projector.pending_learners(10_000)) == set()  # level now
+    async with neo4j.session() as session:
+        result = await session.run(
+            "MATCH (l:Learner) WHERE l.id IN $ids RETURN l.id AS id, l.projectedSeq AS seq",
+            ids=[str(first), str(second), str(stopped)],
+        )
+        seqs = {r["id"]: r["seq"] async for r in result}
+    assert seqs == {str(first): 6, str(second): 6}
+
+
+async def test_workers_adapter_runs_a_registered_handler(pg_db: Db, settings: Settings) -> None:
+    """WP1.3 (D-A-116, D-A-200): a handler registered as in Phase 3 gets the job of the Phase 4
+    queue in its shape, with the context of the process; the job succeeds."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from quack.jobs import queue_p4
+    from quack.jobs.executor_p4 import JobWorker
+    from quack.jobs.queue import ClaimedJob as Phase3Job
+    from quack.jobs.rules_p4 import JobPlan
+    from quack.jobs.runner import JobContext
+    from quack.runtime.phase4 import bind_handlers
+
+    learner = await create_learner(pg_db)
+    seen: list[Phase3Job] = []
+
+    async def handler(job: Phase3Job, ctx: JobContext) -> None:
+        seen.append(job)
+
+    ctx = cast(JobContext, SimpleNamespace(settings=settings, db=pg_db))
+    plan = JobPlan(kind="check.model", job_key=f"adapter:{learner}", priority_class="P1",
+                   learner_id=learner, payload={"answer_seq": 3})  # fmt: skip
+    assert await queue_p4.enqueue(pg_db, plan) == "inserted"
+    worker = JobWorker(settings, pg_db, bind_handlers({"check.model": handler}, ctx),
+                       admission=lambda: _allowed(["check.model"]))  # fmt: skip
+    while seen == [] and await worker.run_one():
+        pass
+    assert [(j.kind, j.learner_id, j.payload, j.attempt) for j in seen] == [
+        ("check.model", learner, {"answer_seq": 3}, 1)
+    ]
+    row = await pg_db.fetch_one(
+        "SELECT status FROM ops.jobs WHERE job_key = %(k)s", {"k": f"adapter:{learner}"}
+    )
+    assert row is not None and row["status"] == "succeeded"
+
+
+async def _allowed(kinds: list[str]) -> list[str]:
+    return kinds
+
+
+async def test_projector_process_starts_and_stops(neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP1.3 (D-A-200): `projector` of Phase 4 checks the Neo4j schema and its two supervised
+    tasks end on `stop` (Д-§6.1)."""
+    import asyncio
+
+    from quack.runtime.phase4 import projector_process
+
+    stop = asyncio.Event()
+    stop.set()
+    assert await asyncio.wait_for(projector_process(settings, stop), timeout=30) == 0

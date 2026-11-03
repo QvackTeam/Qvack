@@ -150,6 +150,10 @@ def _stop_event() -> asyncio.Event:
 async def _projector_tasks(settings: Settings, stop: asyncio.Event) -> int:
     """WP8.1: Neo4j schema check, then projector and dispatcher as two supervised tasks
     (WP11.1). On stop each finishes its current batch and starts no new one (Д-§6.1)."""
+    if settings.phase4_processes:  # WP1.3, D-A-200: rules@3 and the dispatcher on Db
+        from quack.runtime.phase4 import projector_process
+
+        return await projector_process(settings, stop)
     context = create_projector_context(settings)
     try:
         missing = await verify_schema(context.neo4j)
@@ -182,6 +186,10 @@ async def _workers_tasks(settings: Settings, stop: asyncio.Event) -> int:
         return 1
     context = await create_job_context(settings)
     try:
+        if settings.phase4_processes:  # WP1.3, D-A-200: the queue and executor on Db
+            from quack.runtime.phase4 import workers_process
+
+            return await workers_process(settings, stop, handlers=handlers, ctx=context)
         worker_id = f"{socket.gethostname()}:{os.getpid()}:{id(stop)}"
         runner = JobRunner(
             settings, context.session_factory, worker_id, handlers=handlers, context=context
