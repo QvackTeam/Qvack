@@ -17,6 +17,7 @@ last `message` without that phase. The order of JSON keys is never relied on.
 
 from __future__ import annotations
 
+import base64
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
@@ -31,7 +32,7 @@ from quack.llm.errors import (
     ProviderRateLimitedError,
     ProviderUnavailableError,
 )
-from quack.llm.provider import RATE_LIMIT_HEADERS, ProviderRequest, ProviderResponse
+from quack.llm.provider import RATE_LIMIT_HEADERS, ImageInput, ProviderRequest, ProviderResponse
 from quack.llm.streaming import (
     OutputItemDone,
     StreamCompleted,
@@ -75,6 +76,11 @@ def _message_text(item: Mapping[str, Any]) -> str:
     )
 
 
+def image_data_url(image: ImageInput) -> str:
+    """`data:{mime};base64,…` — the `image_url` of an `input_image` part (D-B-170)."""
+    return f"data:{image.mime};base64,{base64.b64encode(image.data).decode('ascii')}"
+
+
 class ResponsesClient:
     """`LLMProvider` over `POST {base_url}/responses`; `http_client` lets tests pass a
     `MockTransport` (`T-L8`). The SDK (openai 3.x) runs on `httpx2`, so the client is an
@@ -96,7 +102,18 @@ class ResponsesClient:
         )
 
     def _body(self, request: ProviderRequest) -> dict[str, Any]:
-        messages: list[dict[str, str]] = [{"role": "user", "content": request.prompt}]
+        content: str | list[dict[str, str]] = request.prompt
+        if request.images:
+            # The Responses API content parts of Meta (B notes, WP0 п.3д): `input_text`, then
+            # `input_image` with a data URL; D-B-170.
+            content = [
+                {"type": "input_text", "text": request.prompt},
+                *(
+                    {"type": "input_image", "image_url": image_data_url(image)}
+                    for image in request.images
+                ),
+            ]
+        messages: list[dict[str, Any]] = [{"role": "user", "content": content}]
         if request.repair_hint:
             messages.append(
                 {"role": "user", "content": REPAIR_TEMPLATE.format(error=request.repair_hint)}

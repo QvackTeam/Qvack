@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import time
 from datetime import UTC, datetime, timedelta
@@ -34,7 +35,7 @@ from quack.llm.errors import (
 )
 from quack.llm.gateway import LLMGateway
 from quack.llm.pressure import pressured_models, set_pressure_flag
-from quack.llm.provider import ProviderRequest, ProviderResponse
+from quack.llm.provider import ImageInput, ProviderRequest, ProviderResponse
 from quack.llm.responses_client import ResponsesClient
 from quack.llm.strict_schema import StrictSchemaError, to_strict_json_schema
 from quack.practice.schemas import EvaluatorOutput, TaskGenOutput
@@ -789,3 +790,39 @@ async def test_output_items_parsing(db: SessionFactory, settings: Settings) -> N
     )
     assert result.value.reply_text == "Hi."
     assert len(only_commentary.requests) == 2  # the answer and one repair
+
+
+async def test_role_call_with_an_image(db: SessionFactory, settings: Settings) -> None:
+    """Т-§11.1 «Spark с изображением» (WP21.3 `recognizer`, WP11.6 `verdict_free`; D-B-170): the
+    images go after the prompt as `input_image` parts with a data URL; text-only calls keep a
+    plain string content."""
+    handler = _MockResponses(
+        httpx2.Response(200, json=_responses_body(_minimal_answer(GatewayAnswer))),
+        httpx2.Response(200, json=_responses_body(_minimal_answer(GatewayAnswer))),
+    )
+    gateway = LLMGateway(db, _client(handler), settings, _OneTemplateRegistry())
+    png = ImageInput("image/png", b"\x89PNG-line")
+
+    async def call(*images: ImageInput) -> None:
+        await gateway.generate_structured(
+            role="extractor",
+            prompt_version=1,
+            response_model=GatewayAnswer,
+            variables={"role": "extractor"},
+            learner_id=uuid4(),
+            session_id=None,
+            turn_id=None,
+            idempotency_key=f"img:{uuid4()}",
+            images=images,
+        )
+
+    await call(png)
+    await call()
+    with_image, text_only = handler.bodies()
+    content = with_image["input"][0]["content"]
+    assert content[0]["type"] == "input_text" and isinstance(content[0]["text"], str)
+    assert content[1] == {
+        "type": "input_image",
+        "image_url": "data:image/png;base64," + base64.b64encode(b"\x89PNG-line").decode(),
+    }
+    assert isinstance(text_only["input"][0]["content"], str)

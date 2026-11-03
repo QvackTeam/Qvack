@@ -449,7 +449,7 @@ Output fields:
 - `tasks.solution`: string
 
 Input blocks: `topic_name`, `target_skill`, `target_level`, `kind`, `purpose`, `known_misconceptions`, `course_context`, `excluded_families`, `source_problem`
-Label fields: `tasks.markup.tests.skill`, `tasks.markup.variantOf`, `tasks.markup.options.misconception`
+Label fields: `tasks.markup.tests.skill`, `tasks.markup.variantOf`, `tasks.markup.options.misconception`, `tasks.markup.pairTaskId`, `tasks.markup.parts.tests.skill`
 
 ## `task_checker@1` → `TaskCheckOutput`
 

@@ -6,8 +6,10 @@ response models; the implementation arrives at G2 (WP6.4). The test double with 
 """
 
 from quack.graph.read.models import (
+    CandidateSkill,
     EvidenceFact,
     ExposureFact,
+    ExtractionCandidates,
     Frontier,
     HubReadiness,
     LevelFact,
@@ -31,8 +33,10 @@ from quack.graph.read.models import (
 from quack.graph.read.reader import GraphReader
 
 __all__ = [
+    "CandidateSkill",
     "EvidenceFact",
     "ExposureFact",
+    "ExtractionCandidates",
     "Frontier",
     "GraphReader",
     "HubReadiness",

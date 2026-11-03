@@ -116,6 +116,8 @@ LABEL_FIELDS: dict[str, list[str]] = {
         "tasks.markup.tests.skill",
         "tasks.markup.variantOf",
         "tasks.markup.options.misconception",
+        "tasks.markup.pairTaskId",
+        "tasks.markup.parts.tests.skill",
     ],
     "artifact_writer@1": [
         "blocks.sources",
