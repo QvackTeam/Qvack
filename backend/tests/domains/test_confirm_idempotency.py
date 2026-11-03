@@ -21,6 +21,7 @@ from quack.domains.schemas import StructurerOutput, StructurerSkill, StructurerT
 from tests.domains.conftest import FakeLLMProvider
 from tests.domains.test_structure_actor_and_delete import _seed_domain
 from tests.domains.test_structure_and_dag import _drain_projector
+from tests.support.auth import session_cookie
 
 
 async def _event_count(db: SessionFactory, learner_id: UUID) -> int:
@@ -38,7 +39,7 @@ async def test_confirm_same_key_other_version_is_conflict(
     db: SessionFactory,
 ) -> None:
     learner_id, token = seeded_learner
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = session_cookie(token)
     domain_id = await _seed_domain(db, learner_id)
     fake_llm_provider.enqueue(
         StructurerOutput(
@@ -92,7 +93,7 @@ async def test_edit_repeat_after_apply_returns_recorded_result(
     redis: Redis,
 ) -> None:
     learner_id, token = seeded_learner
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = session_cookie(token)
     domain_id = await _seed_domain(db, learner_id)
     fake_llm_provider.enqueue(
         StructurerOutput(

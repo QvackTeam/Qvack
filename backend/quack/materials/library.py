@@ -96,11 +96,7 @@ async def upload_material(
     """Store a PDF or an image (type by content, `upload_max_mb`) and record it.
     `UploadRejected`, `MaterialNotFound` (unknown domain), `StorageUnavailable`."""
     upload = detect_upload(data, max_mb=settings.upload_max_mb)
-    found = await db.fetch_one(
-        _DOMAIN_OF_LEARNER, {"learner_id": learner_id, "domain_id": str(domain_id)}
-    )
-    if found is None:
-        raise MaterialNotFound(f"domain {domain_id} not found")
+    await _check_domain(db, learner_id, domain_id)
     material_id = uuid4()
     object_key = material_original_key(learner_id, material_id, upload.extension)
     # The object first: a failed write leaves no row and no event (Т-§20.7).
@@ -137,7 +133,9 @@ async def upload_material(
 
 
 async def list_materials(db: Db, *, learner_id: UUID, domain_id: UUID) -> list[Material]:
-    """`GET /v1/domains/{id}/materials`, newest first."""
+    """`GET /v1/domains/{id}/materials`, newest first; `MaterialNotFound` for a domain that is
+    not the learner's (T-E3: 404, not an empty list)."""
+    await _check_domain(db, learner_id, domain_id)
     rows = await db.fetch_all(
         _MATERIALS_OF_DOMAIN, {"learner_id": learner_id, "domain_id": domain_id}
     )
@@ -168,6 +166,14 @@ async def get_material(
         file_url=await storage.presigned_get_url(row["object_key"], ttl),
         pages=pages,
     )
+
+
+async def _check_domain(db: Db, learner_id: UUID, domain_id: UUID) -> None:
+    found = await db.fetch_one(
+        _DOMAIN_OF_LEARNER, {"learner_id": learner_id, "domain_id": str(domain_id)}
+    )
+    if found is None:
+        raise MaterialNotFound(f"domain {domain_id} not found")
 
 
 def _material(row: dict[str, Any]) -> Material:

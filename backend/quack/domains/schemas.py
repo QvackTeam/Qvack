@@ -29,7 +29,6 @@ __all__ = [
     "ArchiveDomainRequest",
     "ArchiveDomainResponse",
     "ArtifactRefView",
-    "AuthResponse",
     "ConfirmStructureRequest",
     "ConfirmStructureResponse",
     "CreateDomainRequest",
@@ -48,14 +47,11 @@ __all__ = [
     "EditStructureResponse",
     "FinishDiagnosticRequest",
     "FinishDiagnosticResponse",
-    "LearnerMeResponse",
-    "LoginRequest",
     "MisconceptionDraft",
     "MisconceptionNodeView",
     "PrereqEdge",
     "ProposeStructureRequest",
     "ProposeStructureResponse",
-    "RegisterRequest",
     "SkillDepEdge",
     "SkillDraft",
     "SkillNodeView",
@@ -81,35 +77,7 @@ __all__ = [
 ]
 
 
-# --- 1. Auth & Learner Profile (Т-§16.3, Т-§19, Т-§22.2) ---
-
-
-class RegisterRequest(BaseModel):
-    email: Annotated[str, Field(min_length=1)]
-    password: Annotated[str, Field(min_length=8)]
-    display_name: str | None = None
-    preferences: dict[str, Any] = Field(default_factory=dict)
-
-
-class LoginRequest(BaseModel):
-    email: Annotated[str, Field(min_length=1)]
-    password: Annotated[str, Field(min_length=1)]
-
-
-class AuthResponse(BaseModel):
-    token: str
-    learner_id: UUID
-    email: str
-    display_name: str | None = None
-    preferences: dict[str, Any] = Field(default_factory=dict)
-
-
-class LearnerMeResponse(BaseModel):
-    learner_id: UUID
-    email: str
-    display_name: str | None = None
-    preferences: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime
+# --- 1. Learner Profile (Т-§16.3, Т-§19, Т-§22.2) ---
 
 
 class UpdatePreferencesRequest(BaseModel):
