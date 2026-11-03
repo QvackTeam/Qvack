@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from typing import Any
 from uuid import UUID
 
@@ -129,12 +130,15 @@ async def _project(events: Sequence[StoredEvent], cuts: Sequence[bool]) -> SubGr
     return store
 
 
-WHOLE = asyncio.run(_project(SCRIPT, [False] * (len(SCRIPT) - 1)))
+@cache
+def _whole() -> SubGraph:
+    """The script applied at once (computed on first use, not at import)."""
+    return asyncio.run(_project(SCRIPT, [False] * (len(SCRIPT) - 1)))
 
 
 def test_script_reaches_every_phase() -> None:
     """The script is not empty work: evidence, a fold of a skill, a misconception, topics."""
-    nodes, rels = _graph(WHOLE)
+    nodes, rels = _graph(_whole())
     labels = {label for label, _ in nodes}
     assert {"Evidence", "Exposure", "Misconception", "Hub", "Task"} <= labels
     # the first success is in the hot window of the exposure (×0.5): the level is not proven,
@@ -153,18 +157,18 @@ def test_batches_equal_rebuild_hypothesis(cuts: list[bool]) -> None:
     """T-P1: any split into batches gives the graph of applying at once; applying a batch again
     on its result changes nothing."""
     batched = asyncio.run(_project(SCRIPT, cuts))
-    assert _graph(batched) == _graph(WHOLE)
+    assert _graph(batched) == _graph(_whole())
 
 
 def test_applying_a_batch_again_changes_nothing() -> None:
     async def again() -> SubGraph:
         settings = Settings()
-        batch = BatchSlice(str(LEARNER), WHOLE, SCRIPT, RulesParams.from_settings(settings))
+        batch = BatchSlice(str(LEARNER), _whole(), SCRIPT, RulesParams.from_settings(settings))
         apply_events(SCRIPT[-6:], batch)
         await run_folds(batch, settings, WholeSlice(SCRIPT), SCRIPT[-6:])
         return batch.snapshot()
 
-    assert _graph(asyncio.run(again())) == _graph(WHOLE)
+    assert _graph(asyncio.run(again())) == _graph(_whole())
 
 
 _LEVEL = ("Status", "Basis", "DecisiveEvidenceId", "SuccessW", "FailW", "ProvenAtMs", "FailedAtMs")
@@ -194,7 +198,7 @@ REQUIRED: dict[str, set[str]] = {
 def test_no_missing_properties() -> None:
     """T-P2 (`Т-§3.4.2`, `Т-§3.4.4`, law 8): after phases A–C every node of the script has every
     property of its label — explicit values, never absent (`null` deletes in Neo4j)."""
-    nodes, _ = _graph(WHOLE)
+    nodes, _ = _graph(_whole())
     missing = {
         (label, node_id): sorted(REQUIRED[label] - set(props) - {"learnerId"})
         for (label, node_id), props in nodes.items()
@@ -213,7 +217,7 @@ def test_profile_learned() -> None:
     from quack.graph.projection.types import NodeRecord
 
     profile = profile_id(LEARNER)
-    nodes, rels = _graph(WHOLE)
+    nodes, rels = _graph(_whole())
     assert not [k for k in nodes[("Profile", profile)] if k.startswith("learned")]
     assert ("Learner", str(LEARNER), "HAS_PROFILE", "Profile", profile) in rels
     stale = NodeRecord("Profile", profile, {"learnerId": str(LEARNER), "learnedBranchRate": 0.5})

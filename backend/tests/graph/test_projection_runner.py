@@ -286,3 +286,29 @@ async def test_changed_topics_are_published_after_commit(
         assert orjson.loads(message["data"]) == {"applied_seq": 6, "topics": [str(topic)]}
     finally:
         await pubsub.aclose()
+
+
+async def test_state_at_replays_the_log_with_rules3(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings
+) -> None:
+    """WP8.3 (`Т-§2.6`, D-A-191): `state_at` replays the learner's events up to N with the
+    handlers and folds of `rules@3` — before the verdict level 3 is not tested, after it is
+    proven by a T1 of code."""
+    from quack.graph.read.neo4j_reader import Neo4jGraphReader
+    from tests.graph.test_projection_batches import S1, SCRIPT
+
+    learner = await create_learner(pg_db)
+
+    def new(e: Any, seq: int, **payload: Any) -> NewEvent:
+        return _new(e.type, e.payload | payload, f"k{seq}", domain_id=e.domain_id,
+                    session_id=e.session_id)  # fmt: skip
+
+    answer, verdict = SCRIPT[11], SCRIPT[12]  # seq 12 and 13 of the script
+    events = [new(e, e.seq) for e in SCRIPT[:10]]
+    events += [new(answer, 11), new(verdict, 12, answer_seq=11)]
+    await append_events(pg_db, learner, events)
+    reader = Neo4jGraphReader(neo4j, settings, learner_id=learner, db=pg_db)
+    before = await reader.state_at(learner, 11, [UUID(S1)])
+    after = await reader.state_at(learner, 12, [UUID(S1)])
+    assert before.skills[0].levels[2].status == "not_tested"
+    assert after.skills[0].levels[2].status == "proven"

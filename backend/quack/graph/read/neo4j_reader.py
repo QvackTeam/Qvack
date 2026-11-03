@@ -23,6 +23,7 @@ from neo4j import AsyncDriver
 from redis.asyncio import Redis
 
 from quack.config import Settings
+from quack.db import Db
 from quack.db.neo4j import cypher, read_session
 from quack.db.postgres import SessionFactory
 from quack.embeddings.client import EmbeddingClient
@@ -220,7 +221,9 @@ class Neo4jGraphReader(ExtraReads):
         redis: Redis | None = None,
         embedder: EmbeddingClient | None = None,
         clock: Callable[[], int] | None = None,
+        db: Db | None = None,
     ) -> None:
+        self._db = db
         self._neo4j = neo4j
         self._settings = settings
         self._bound = learner_id
@@ -238,6 +241,7 @@ class Neo4jGraphReader(ExtraReads):
             session_factory=self._session_factory,
             redis=self._redis,
             clock=self._clock,
+            db=self._db,
         )
 
     # --- plumbing -------------------------------------------------------------------------

@@ -16,6 +16,7 @@ from neo4j import AsyncDriver
 
 from quack.config import Settings
 from quack.embeddings.client import EmbeddingsUnavailable
+from quack.events.log import StoredEvent as LogEvent
 from quack.events.models import StoredEvent
 from quack.graph.memory import InMemoryGraph
 from quack.graph.read.models import ReviewScope
@@ -426,7 +427,9 @@ async def test_state_at_replays_events_up_to_n_not_a_fold_by_seq(
         async def _events_up_to(self, learner_id: UUID, seq_n: int) -> list[StoredEvent]:
             return [e for e in log if e.seq <= seq_n]
 
-        async def _replay(self, learner_id: UUID, events: Sequence[StoredEvent]) -> InMemoryGraph:
+        async def _replay(
+            self, learner_id: UUID, events: Sequence[StoredEvent | LogEvent]
+        ) -> InMemoryGraph:
             graph = InMemoryGraph()
             for e in events:  # a stand-in with the handlers' order: events decide, not seq
                 if e.type == "t.skill":

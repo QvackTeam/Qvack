@@ -21,9 +21,11 @@ from uuid import UUID
 from neo4j import AsyncDriver, Record
 
 from quack.config import Settings
+from quack.db import Db
 from quack.db.neo4j import cypher
 from quack.db.postgres import SessionFactory
 from quack.embeddings.client import EmbeddingClient, EmbeddingsUnavailable
+from quack.events.log import StoredEvent as LogEvent
 from quack.events.models import StoredEvent
 from quack.events.reader import read_learner_events
 from quack.events.values import Level
@@ -61,6 +63,12 @@ _DETAIL_STATUSES = (*_PROPER_STATUSES, "unknown")
 _OUTCOMES = frozenset({"correct", "incorrect", "partial", "unclear"})
 _ASSISTANCE = frozenset({"none", "hint", "shown_solution"})
 _READ_CHUNK = 1000
+_EVENTS_UP_TO = (
+    "SELECT learner_id, seq, id, type, schema_version, actor, domain_id, session_id, "
+    "causation_seq, correlation_id, idempotency_key, payload_hash, occurred_at, payload, "
+    "source_refs FROM core.events WHERE learner_id = %(learner_id)s AND seq <= %(seq)s "
+    "ORDER BY seq"
+)
 
 
 def _uuid(value: object) -> UUID | None:
@@ -129,6 +137,7 @@ class ExtraReads:
     # Optional resources; the class that inherits sets them when it has them.
     _embedder: EmbeddingClient | None = None
     _session_factory: SessionFactory | None = None
+    _db: Db | None = None  # the log of Phase 4: `state_at` replays it with `rules@3` (WP8.3)
     _bound: UUID | None = None  # the learner of a bound reader (D-A-144)
 
     # --- plumbing -----------------------------------------------------------------------
@@ -763,7 +772,10 @@ class ExtraReads:
                 facts.append(_replayed_skill(graph, skill_id, dict(props), as_of))
         return StateAt(learner_id=learner_id, seq=seq_n, skills=facts)
 
-    async def _events_up_to(self, learner_id: UUID, seq_n: int) -> list[StoredEvent]:
+    async def _events_up_to(self, learner_id: UUID, seq_n: int) -> Sequence[StoredEvent | LogEvent]:
+        if self._db is not None:  # the log of Phase 4 (WP8.3)
+            params = {"learner_id": learner_id, "seq": seq_n}
+            return await self._db.fetch_all(_EVENTS_UP_TO, params, row=LogEvent)
         if self._session_factory is None:
             raise RuntimeError("state_at reads the event log: the reader has no session factory")
         events: list[StoredEvent] = []
@@ -780,11 +792,19 @@ class ExtraReads:
                     break
         return [e for e in events if e.seq <= seq_n]
 
-    async def _replay(self, learner_id: UUID, events: Sequence[StoredEvent]) -> InMemoryGraph:
-        """The seam of the projector: the same code as the rebuild (Т-§2.5, Т-§2.7)."""
+    async def _replay(
+        self, learner_id: UUID, events: Sequence[StoredEvent | LogEvent]
+    ) -> InMemoryGraph:
+        """The seam of the projector: the same code as the rebuild (Т-§2.5, Т-§2.7) — `rules@3`
+        over the log of Phase 4 when the reader has `Db` (WP8.3, D-A-191)."""
+        if self._db is not None:
+            from quack.graph.projection.rebuild import project_all  # no import cycle: read ← A
+
+            log_events = [e for e in events if isinstance(e, LogEvent)]
+            return _memory(await project_all(learner_id, log_events, self._settings))
         return await project_in_memory(
             learner_id,
-            events,
+            [e for e in events if isinstance(e, StoredEvent)],
             self._settings.fold,
             batch_size=self._settings.projector_batch_max_events,
         )
@@ -806,6 +826,16 @@ def _topic_ready(topic_id: str, levels: Sequence[int], skills: dict[str, _SkillR
         for p in members
         for n in levels
     )
+
+
+def _memory(graph: Any) -> InMemoryGraph:
+    """The replayed subgraph of `rules@3` in the shape `state_at` reads."""
+    memory = InMemoryGraph()
+    for n in graph.nodes:
+        memory.nodes[(n.label, n.id)] = {"id": n.id, **n.props}
+    for r in graph.rels:
+        memory.rels[(r.from_label, r.from_id, r.rel_type, r.to_label, r.to_id)] = dict(r.props)
+    return memory
 
 
 def _replayed_skill(graph: InMemoryGraph, skill_id: str, props: dict[str, Any], as_of: int):

@@ -15,6 +15,7 @@ from uuid import UUID
 from neo4j import AsyncDriver
 
 from quack.config import Settings
+from quack.db import Db
 from quack.events.values import Level
 from quack.graph.overlay import SessionOverlay
 from quack.graph.read.models import (
@@ -121,13 +122,16 @@ class GraphReader(Protocol):
         ...
 
 
-def create_graph_reader(neo4j: AsyncDriver, settings: Settings, *, learner_id: UUID) -> GraphReader:
+def create_graph_reader(
+    neo4j: AsyncDriver, settings: Settings, *, learner_id: UUID, db: Db | None = None
+) -> GraphReader:
     """The reader of a process, **bound to one learner**: built from the resources of
     `JobContext` (`ctx.neo4j`, `ctx.settings`), not a field of it (the field set is a contract,
     ТЗ Ф4 §4.2), with `learner_id=job.learner_id`. A reader without a learner does not exist:
     methods that take only an id of a node (`topic_memory`, `topic_requires`, ...) would take the
     owner from the node and read another learner's data (law 1, Т-§3.4; D-A-144). The
-    implementation is `Neo4jGraphReader` (WP6.4, G2); tests pass `FixedGraphReader`."""
+    implementation is `Neo4jGraphReader` (WP6.4, G2); tests pass `FixedGraphReader`. `db`
+    (`ctx.db`) lets `state_at` replay the log of Phase 4 with `rules@3` (WP8.3, D-A-191)."""
     from quack.graph.read.neo4j_reader import Neo4jGraphReader
 
-    return Neo4jGraphReader(neo4j, settings, learner_id=learner_id)
+    return Neo4jGraphReader(neo4j, settings, learner_id=learner_id, db=db)
