@@ -443,6 +443,13 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 ### D-A-123. Вопросы C к владельцу — решены C в D-C-122, A согласен
 - Класс: B. C решил свои четыре вопроса по поручению владельца в D-C-122 (`phase-4-c-wp21-ws`), раньше этой записи. A сверил с документами и согласен со всеми пунктами: (1) блок набора формул — инструмент слоя ученика, не вид блока (`П-9.4`, `Т-§15.3`); (2) поправка §0.4.7/§7.4 снята — как D-A-120; (3) расхождения по `JWT_SECRET` в `Д-§7` нет; (4) переполнение куска — `chunk_max_batches = ceil(stroke_chunk_seconds · 1000 / stroke_batch_ms)` из двух параметров `Т-§15.2`, без новых чисел. Отдельных решений A по этим вопросам нет.
 
+### D-A-126. S4: факты картины памяти WP14.2 — уверенность типа пробела, «забыл», условия проявления
+- Класс: B. WP6.4, WP14.2; вопрос B в D-B-157 (#131); `quack/graph/read/models.py`, `tests/support/graph_read.py`
+- Решение: в ответные модели среза добавлены поля, названные техдоком: `SkillFact.gap_type_confidence` (`gapTypeConfidence`, `Т-§3.4.4`, `Т-§8.4`: доля голосов за победивший тип), `SkillFact.last_lapse_at_ms` (`retLastLapseAtMs`; «забыл», `Т-§8.2` п.3), `MisconceptionFact.triggers` (`Т-§3.4.2`, `Т-§9.3`). Нет значения — `None` / пустой список (закон 8: «не было» — явное значение). Поля необязательные: читающий код B и C не меняется. Каталог событий не затронут (S3 заморожен, D-A-119). Заглушка `FixedGraphReader` даёт их у «проваленного» навыка и у заблуждения.
+- Почему: §0.4.3 п.2 (поля названы `Т-§3.4`); S4 — интерфейс A, реализация — G2.
+- Тесты: `tests/graph/test_read_stub.py::test_memory_picture_facts_of_wp14_2`.
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
@@ -1294,6 +1301,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - D-B-144 (грамматика API, отношения): `cd backend && uv run pytest tests/practice/test_grammar_relations.py` — 5 failed, 4 passed (отказы и так отказы), коммит `b2d0309`. Зелёный: 9 passed; с затронутыми (`tests/practice`, `tests/session/test_phase4_contracts.py`, `tests/test_contracts.py`) — 116 passed.
 
 - S3, заморозка (A, `phase-4-a-s3-freeze`, коммит `dc04d39`): `pytest tests/events/test_catalog.py -k frozen_kinds` — 5 failed (другие значения `kind` и чужая привязка `topic_id`/`hub_id` принимаются), 1 passed. Зелёный: `tests/events`, `tests/jobs` — 111 passed.
+- S4, поля картины памяти (A, `phase-4-a-s4-fields`, коммит `9ccd3eb`, D-A-126): `pytest tests/graph/test_read_stub.py -k wp14` — 1 failed (у навыка нет типа пробела с уверенностью и времени провала памяти). Зелёный — в описании PR.
 - S3, `session.started.resumed` (A, `phase-4-a-session-resumed`, коммит `5b2f6f4`, D-A-121): `pytest tests/events/test_catalog.py -k resumed` — 1 failed (`resumed` нет у модели). Зелёный — в описании PR.
 - S6, `known_check` без темы (A, `phase-4-a-g1`, ревью B #117): `pytest tests/jobs/test_rules_p4.py -k without_topic` — 1 failed (ставится `check.known_claim` с `topic_id = "None"`). Зелёный — в описании #117.
 - G1 потока A (`phase-4-a-g1`, коммит `692f4f3`): `pytest tests/jobs tests/graph/test_read_stub.py tests/events/test_catalog.py` — 7 failed (`JobContext` без полей §4.2 и порядок закрытия; `known_check` без задачи; нет `cancelled_requests`; `MisconceptionFact` без `statement` — 2; `check.failed {reason: unsupported}` отклонён), 104 passed. Зелёный — в описании PR.
