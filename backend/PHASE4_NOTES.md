@@ -718,6 +718,58 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/graph/test_read_stub.py` (names, goals, profile, topic_memory, misconception_detail, factory); `tests/db/test_baseline_migration.py::test_turn_manifests_frozen_slots_column`.
 - Требует подтверждения владельцем: нет.
 
+### D-A-170. WP5.3: свёртка `learned*` профиля — входы, пороги, "нет данных"
+- Класс: B. WP5.3; `Т-§9.5`, `Т-§12.3`, `Т-§12.6`, `Т-§2.5`; `quack/graph/profile_fold.py`
+- Решение: чистая свёртка без ввода-вывода и без текущего времени. Вход — выборки (`TurnSample`, `AnswerSample`, `ConfidenceSample`, `EvidenceSample`), порядок поступления не важен (всё упорядочено по `seq`).
+  1. **Что помогает** (`learnedHelpfulApproach`): выборка — пара (ход `turn.committed`, навык из `head.target_skill_ids`) с Т1-попыткой этого навыка после хода и до следующего хода с тем же навыком; считается **первая** такая попытка, успех — `outcome = correct` и `assistance = none`. Подход `none` не считается. Подход оценивается, когда у него самого не меньше `profile_min_samples` выборок; побеждает большая доля успехов, при равенстве — больше выборок, затем имя по алфавиту. Нет такого подхода — «нет данных». `Т-§9.5` говорит «пока данных меньше `profile_min_samples`» и не уточняет, на подход или на всё; выбрано на подход, потому что долю нельзя сравнивать по двум-трём попыткам.
+  2. **Надёжность уверенности** (`learnedConfidenceBrier`, `learnedConfidenceBias`): самооценка 1–4 → 0.25/0.5/0.75/0.95; пара — самооценка и исход свидетельств её действия (`sourceSeq` = `seq` действия), проходящих ворота (флаг ворот приходит от свёртки навыка, здесь не пересчитывается), только `correct`/`incorrect` (`partial` ворот не открывает, `Т-§7.3`); успех, если все такие свидетельства успешны. Источники самооценки: `answer.submitted.confidence`, `element.responded.confidence`, `confidence.reported {target_seq, value}`; на одно действие берётся самая поздняя по `seq`. Последние `calibration_window` пар по `seq` действия; меньше `calibration_min_reports` — «нет данных». Оценка Брайера — среднее `(p - исход)^2`, 6 знаков. Знак перекоса — знак среднего `p - исход`: `over` (> 0), `under` (< 0), `calibrated` — только при нуле (допуск 1e-9): порога «в пределах нормы» в `Т-§9.5` нет, я его не выдумываю.
+  3. **Корректирующие ответвления** (`learnedBranchRate`): доля `turn.committed` с `head.branch_type = corrective` среди всех `turn.committed` ученика; не меньше `profile_min_samples` ходов.
+  4. **Ход мысли** (`learnedReasoningShare`): доля `answer.submitted` и `element.responded` с непустым `text` среди всех таких; не меньше `profile_min_samples` ответов.
+  5. **«Нет данных»** — свойство **не пишется** (на узле его нет; запись удаляет прежнее): в Neo4j нет `null`-значения свойства, ноль — это данные (закон 8). Читатель отдаёт `None`.
+  6. **Профиль целиком** (`profile_node_props`): `pref*` — `preference.set`, последнее по `seq` на ключ (ключ `answer_length` → `prefAnswerLength`, как в D-A-130); `learnedManner` — `manner` последнего `digest.written`; плюс `learned*`. Узел `Profile` — UUIDv5 ученика (D-A-130).
+- Почему: `Т-§9.5` («выученное — код и одинаково при пересборке», пороги), WP5.3, `Т-§2.5`.
+- Тесты: `tests/graph/test_profile_fold.py` (Брайер и знак, окно, ворота, самооценка по позднейшему сообщению, подход с подсказкой, пороги, повтор в любом порядке и пачками); проверено мутациями (знак, ворота, окно, «подсказка — успех»).
+- Требует подтверждения владельцем: нет.
+
+### D-A-171. WP5.3: проектор считает профиль, когда готов проектор Фазы 4 (WP3.3); чтение — `read_profile`
+- Класс: B. WP5.3, WP6.4; `quack/graph/read/neo4j_profile.py`
+- Решение: (а) в `phase-4` на этот момент нет проектора Фазы 4 с фазой Б (он в `phase-4-a-wp3-projector`, WP3.3 не закончен), поэтому свёртка отдана как `profile_node_props(collect_profile_inputs(events, evidence), ProfileParams.from_settings(settings))` → `(props, unset_keys)`; фаза Б вызывает её на каждом событии из `PROFILE_EVENT_TYPES` и на изменении свидетельств ученика, пишет `props` в `Profile` и удаляет `unset_keys` (`REMOVE`). `evidence` — прямые действующие `Evidence` ученика с флагом ворот от свёртки навыка. Подключение к фазе Б — задача WP3.3 после слияния. (б) `read_profile(driver, learner_id) -> ProfileFacts`: один READ-запрос по `Profile.learnerId`; `pref*` → ключи (`prefAnswerLength` → `answer_length`); нет узла — пустой профиль; проверку отметки (`Т-§2.6`) делает вызывающий читатель. (в) `ProfileFacts` не менялась.
+- Почему: закон 3 (чтение через `read_session`), закон 1 (запрос по `learnerId`).
+- Тесты: `tests/graph/test_profile_read.py` (запись-чтение, «нет данных» после очистки, ноль — данные, изоляция учеников, нет узла).
+- Подключение (после #179): `Neo4jGraphReader.profile` вызывает `read_profile`; на чужого ученика привязанный читатель отвечает пустым профилем (D-A-144). Проверка — `test_no_profile_is_an_empty_profile_and_learners_are_isolated`, `test_factory_and_extras`.
+### D-A-150. WP6.4: чтения `ExtraReads` — схема, изоляция, контроль отметки
+- Класс: B. WP6.4, `Т-§2.6`, `Т-§3.4`, закон 1; `quack/graph/read/neo4j_extras.py`, `skill_state.py`
+- Решение: (1) схема графа — по `Т-§3.4` (узлы `Skill` со свойствами `lNStatus`, `lNBasis`, `lNDecisiveEvidenceId`, `ret*`, `needsConsolidation`, `gapType`; связи `COVERS`, `ON`, `ON_TASK`, `OF`, `MANIFESTS`, `ABOUT`, `REQUIRES`, `INCLUDES`, `ALIAS_OF`) и по обработчикам `rules@3` (ветка `phase-4-a-wp3-projector`); свёртка навыка WP4 пишет `lN*`/`ret*` — чтения готовы под неё. (2) Подпись `skill_history(skill_id)`, `prerequisites(skill_id)`, `prep_context(hub_id)`, `misconception_detail(id)` не несёт `learner_id`: владелец читается с узла-якоря, остальные узлы привязаны к его `learnerId`. (3) Чтения среза идут с проверкой `Learner.projectedSeq` до и после, `1 + snapshot_read_retries` попыток; кончились — возвращается последнее чтение (закон 9). (4) Уровень: `unknown` -> `not_tested`; база `indirect`/`implied`/`none` -> `None`; `proven_by_direct` = `proven` с базой `direct`; `last_t1_failed` — последнее активное Т1 уровня с исходом `incorrect`; ярус: Т1 `code`, Т2 `model`, Т3–Т4 `conversation`. Учитываются только свидетельства `status = active`, уровень >= 1.
+- Почему: §0.4.3 п.2 (буква `Т-§3.4`, `Т-§8.2`, `Т-§8.7`).
+- Тесты: `tests/graph/test_read_neo4j_extras.py`.
+- Требует подтверждения владельцем: нет.
+
+### D-A-151. WP17.1: приоритет кандидатов на повторение
+- Класс: B. WP17.1, `Т-§14.1`
+- Решение: причины — `retention` (R < `review_trigger_retention` или `retDueAtMs` <= сейчас), `consolidation`, `misconception_recheck` (`watching` и `watchSinceMs + watch_days` <= сейчас), `hub_requirement` (хаб с дедлайном в будущем, требуемый уровень навыка не `proven`/`implied`). Приоритет = `w_need`·нужность + `w_deadline`·`1/(1 + дней до ближайшего дедлайна)` + `w_forgetting`·`(1 − R)` + `w_consolidation`·(флаг или перепроверка); нужность = 1, если навык — предпосылка (`REQUIRES`, 1–2 шага, `confidence >= requires_min_confidence`) одного из `goal_skill_ids`. Вид убывания веса дедлайна в документах не назван — взят без параметров. «Разрешённое забывание»: нет нужности и нет дедлайна, а последняя практика домена (максимум `lastPracticeAtMs` его навыков — «открытие домена» в графе не проецируется) старше `forgetting_domain_idle_days`. Вместо запроса по индексу `(learnerId, retDueAtMs)` читаются все навыки ученика (сотни, `Т-§3.4.5`): R считается в Python. `domain_all` без `INCLUDES` — все не скрытые темы домена. Снятие веса дедлайна после `grade.reported` не реализовано: оценка в графе не хранится.
+- Тесты: `test_review_candidates_reasons_scope_and_isolation`.
+- Требует подтверждения владельцем: нет.
+
+### D-A-152. WP17.4: `prep_context`
+- Класс: B. WP17.4, `Т-§14.7`
+- Решение: `ready_count`/`total_count` — темы охвата (`Т-§14.5`: все навыки, все требуемые уровни `proven`/`implied` с базой `direct`; тема без навыков не готова); `days_to_deadline` — округление вверх, не меньше 0; `candidates` — `review_candidates` с `hub_id`. **`control_materials` пусто:** в графе нет вида материала (пробник, прошлый вариант, список вопросов, критерии) — ни в `Т-§3.4.2`, ни в `chunk.indexed`/`material.parsed`; вопрос в PR. Упорядочение «разрыв до требуемых уровней, надёжность источника охвата» не реализовано: источник охвата в `INCLUDES` не хранится.
+- Требует подтверждения владельцем: да (вид материала контроля).
+
+### D-A-153. `similar_mistakes`, `past_solution`
+- Класс: B. `Т-§10.4`, `Т-§3.4.6`
+- Решение: `similar_mistakes` — `SEARCH` по `evidence_emb` (фильтр `learnerId`, `searchable`; запас `vector_search_reserve`), ошибки `outcome <> correct` всех доменов, без самого свидетельства; по тексту нужен `_embedder`, иначе `EmbeddingsUnavailable`. `past_solution` — реплики (`quote`) активных свидетельств по задаче и навыку, последние первыми, не больше `memory_tool_limits.past_solution`: строки канваса лежат в Postgres, не в графе (`Т-§3.4.1`).
+- Требует подтверждения владельцем: нет.
+
+### D-A-154. WP8.3: `state_at`
+- Класс: B. WP8.3, `Т-§2.6`
+- Решение: события ученика `seq <= N` из `core.events` (`read_learner_events`) проигрываются `project_in_memory` — теми же обработчиками, что пересборка; поздние события (оспаривание после N) в проигрывание не входят. Удержание считается на момент последнего события <= N. Нужен `_session_factory`, иначе `RuntimeError`. Шов `_replay` переопределяется в тестах; на текущей базе проигрывание даёт узлы `rules@2` (без `lN*`), полноценно заработает с проектором `rules@3` и свёрткой WP4.
+- Требует подтверждения владельцем: нет.
+
+### D-A-155. WP15 п.2: `extraction_candidates`; WP16.2: `misconception_detail`
+- Класс: B. D-A-135, D-A-137, `Т-§9.2`, `Т-§9.3`
+- Решение: кандидаты — три яруса до `k`: (1) навыки с активным свидетельством этой сессии (`sourceSessionId`) или заблуждением, на которое нацелена сессия; (2) ближайшие по `skill_emb` (если есть вектор); (3) остальные навыки тем яруса 1. `Exposure` не хранит сессию, поэтому показы «темы сессии» не определяют. `topic_id` — только навыки темы (до `k`); `skill_ids` — перечисленные, без обрезки. Заблуждения кандидатов — статусы `suspected`, `confirmed`, `in_work`, `watching` (модель не умеет другие). `misconception_detail`: id через `Alias` (`ALIAS_OF*1..5`); статус `unknown` отдаётся; `dismissed`/`fixed`/`disputed` -> `None` (модель статуса их не содержит; описывать нечего); проявления — активные свидетельства `MANIFESTS` (перенесённые слиянием входят).
+- Требует подтверждения владельцем: нет.
+
 ### D-A-140. WP6.4: ядро `quack.graph.read` на Neo4j — привязка к ученику, отметка, ожидание
 - Класс: A. WP6.4, `Т-§2.6`, `Т-§3.4.2`; `quack/graph/read/neo4j_reader.py`, `tests/graph/test_read_neo4j_core.py`
 - Решение:
@@ -831,6 +883,12 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/db/test_squawk_config.py::test_squawk_config_and_concurrent_marker` (T-DB7).
 - Требует подтверждения владельцем: нет.
 
+
+### D-A-145. S4: `ExtraReads` в `Neo4jGraphReader`, привязка к ученику у всех чтений
+- Класс: B. WP6.4; `Т-§3.4`; D-A-144; `quack/graph/read/neo4j_reader.py`, `neo4j_extras.py`
+- Решение: `Neo4jGraphReader(ExtraReads)`; закрытые помощники `ExtraReads` переименованы (`_xrun`, `_xstable`, `_xevidence_rows`, `_xowner`) — прежние имена совпадали с ядром и расходились по смыслу. Читатель, привязанный к ученику, на чужой `learner_id` или чужой узел по id отвечает пустым (`review_candidates`, `similar_mistakes`, `past_solution`, `state_at`, `extraction_candidates`, `skill_history`, `prerequisites`, `prep_context`, `misconception_detail`). `profile` — после PR #176 (`read_profile`).
+- Тесты: `tests/graph/test_read_neo4j_core.py::test_factory_reader_does_not_leak_through_extra_reads` (до привязки `misconception_detail` читал чужое заблуждение).
+- Требует подтверждения владельцем: нет.
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
@@ -2283,6 +2341,7 @@ PR #77 (dbmate v2.36.0, sha256).
   (`test_equation_roots_and_matrix` и ещё один); три следующих прогона — 5 passed. Похоже на
   таймаут проверки под нагрузкой (`multiprocessing` с таймаутом). WP24 переводит пул на
   `pebble` — проверить там; до этого не трогаю.
+- **Q-A-4 (A → B, WP5.3).** Для свёртки профиля нужны входы, которых нет в событиях Фазы 4 в нужном виде: (1) `confidence.reported {target_seq, value}` — на какое событие указывает `target_seq`: на `answer.submitted`/`element.responded` (я так читаю: сопоставление с `Evidence.sourceSeq`) или на `turn.committed`? Если второе, самооценку нельзя сопоставить со свидетельством, и калибровка по ней не считается. (2) `element.responded` у свидетельств извлекателя: `Evidence.sourceSeq` = `seq` ответа на элемент? Иначе самооценка элемента не найдёт свои свидетельства. (3) `Т-§9.5` не задаёт порог для `calibrated` — оставил точный ноль (D-A-170 п.2); если нужен допуск — нужно значение от владельца.
 
 ## Для фронтенда
 
