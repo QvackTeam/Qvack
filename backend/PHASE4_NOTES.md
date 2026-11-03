@@ -1418,6 +1418,19 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: нет (п.3 — D-C-122 п.4).
 
+### D-C-127. WP20.4: предвыборка кусков по графу и векторный поиск по `chunk_emb`
+- Класс: B
+- WP / место: WP20.4; `quack/graph/read/materials.py`, `quack/config.py` (`vector_search_reserve`)
+- Контекст: WP20.4 называет `materials_prefetch(skills)` и `materials_search(vector, skills)`. `Т-§10.5` фильтрует поиск «по ученику и домену», WP20.4 — по `learnerId` и `searchable`. Имя материала у узла `Material` и порядок кусков в предвыборке не названы.
+- Решение:
+  1. Обе функции принимают `learner_id` (и `domain_id` у поиска) явно: изоляция (§4.3) — в запросе, сборка инструментов учителя привязывает их к ученику хода.
+  2. Фильтр внутри индекса — `learnerId`, `domainId`, `searchable` (все три объявлены у `chunk_emb`, `Т-§3.4.6`; только равенства через AND). Запасной путь не нужен: WP0 п.3а «работает».
+  3. Запас внутри `SEARCH` — параметр `vector_search_reserve = 30` (`Т-§3.4.6`, `Т-§10.5`; закон о числах в конфиге). `SEARCH` принимает предел литералом — подставляется целое из настроек, не ввод.
+  4. Порядок поиска: куски, учащие навыку в фокусе (`TEACHES`), выше любых других, внутри — по близости; итог — `k` (`materials_k`). Предвыборка: больше навыков фокуса — раньше, затем материал и страница.
+  5. Ответ — `ChunkHit {chunk_id, material_id, page, text, teaches_focus, score}`. Имени материала нет: у `Material` в `Т-§3.4` свойства не названы, в `content.materials` колонки имени нет. Закрыто D-B-171 (#153): `MaterialChunk.material_name` необязателен, источник — метка куска и страница.
+- Почему: WP20.4, `Т-§10.5`, `Т-§3.4.6`, WP0 п.3а.
+- Обратимость: один модуль чтения.
+- Тесты: `tests/materials/test_materials_search_wp20.py` (Neo4j).
 ### D-C-128. WP22.1: привязка телефона — токен, обмен, область `companion`
 - Класс: B
 - WP / место: WP22.1, §6.4 «Вход» и «Канвас»; `quack/auth/pairing.py`, `quack/auth/router.py`, `quack/api/auth.py`, `quack/api/openapi.py`
@@ -1596,6 +1609,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP20.4, поиск кусков (C, `phase-4-c-wp20-search`): красный прогон отдельно не снят (облегчённый TDD). Зелёный: `tests/materials/test_materials_search_wp20.py` + `tests/test_contracts.py` — 9 passed.
 - WP22.1, привязка (C, `phase-4-c-wp22-pairing`): красный прогон отдельно не снят (облегчённый TDD). Зелёный: `tests/auth`, `tests/canvas`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` — зелёные.
 - WP21.3, роль `recognizer@1` (C, `phase-4-c-recognizer`, коммит `bf2b46a`): `pytest tests/llm/test_labels.py -k "recognizer or contracts_file"` — 2 failed (файла промпта нет, `PROMPT_CONTRACTS.md` устарел), 1 xfailed. Зелёный: `tests/llm/test_labels.py` — 59 passed, 1 xfailed (BLOCKED-C-202).
 - Шов S12, изображение во входе (D-B-170): тест и код в одной итерации; 2 подмены (шлюз не передаёт изображения, клиент не строит части) — каждая роняет тест. Зелёный: `tests/test_llm_runtime.py`, `tests/llm`, `tests/test_meta_mock.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 184 passed.

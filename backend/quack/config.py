@@ -569,6 +569,8 @@ class Settings(BaseSettings):
     deletions_s3_secret_key: SecretStr = SecretStr("")
     # WP20 (Т-§10.5, ТЗ §2.3 п.17)
     materials_k: int = 5
+    # Т-§3.4.6, Т-§10.5: the reserve taken inside SEARCH before post-filters and the final k.
+    vector_search_reserve: int = 30
     embedding_dim: int = 768
     modal_token_id: SecretStr = SecretStr("")
     modal_token_secret: SecretStr = SecretStr("")
