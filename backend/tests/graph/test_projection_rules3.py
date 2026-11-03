@@ -622,3 +622,125 @@ def test_skill_split_creates_the_parts_and_keeps_the_old_skill() -> None:
     assert ("Topic", TOPIC, "COVERS", "Skill", SKILL_P1) in rels
     assert ("Topic", TOPIC_B, "COVERS", "Skill", SKILL_P2) in rels
     assert ("Evidence", EVIDENCE, "ON", "Skill", SKILL) in rels
+
+
+# --- tasks (T-P4, group 4; Т-§4.4, Т-§5.1, Т-§5.2, Т-§5.6) -----------------------------------
+
+TASK = str(UUID(int=0x7A))
+FAMILY = str(UUID(int=0xFA))
+
+
+def _tests(*pairs: tuple[object, int]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for skill, level in pairs:
+        ref = {"new_skill": skill} if isinstance(skill, dict) else {"skill_id": skill}
+        out.append(ref | {"level": level})
+    return out
+
+
+_CHOICE = {"type": "choice", "options": [
+    {"option_id": "A", "text": "1/2", "correct": True},
+    {"option_id": "B", "text": "2/4", "correct": False},
+    {"option_id": "C", "text": "1/4", "correct": False},
+]}  # fmt: skip
+_MARKUP = {
+    "tests": _tests(
+        (SKILL, 3),
+        (SKILL, 4),
+        ({"name": "Cross multiply", "topic_hint": " fractions"}, 2),
+        ({"name": "cross  multiply ", "topic_hint": "fractions"}, 3),
+        ({"name": "Lowest terms", "topic_hint": "Simplification"}, 1),
+    ),
+    "method_named": False,
+    "answer": _CHOICE,
+    "options": [
+        {"option_id": "B", "misconception_id": MISCONCEPTION},
+        {"option_id": "C", "hypothesis": "multiplies the denominators", "neighbor_idea": True},
+    ],
+    "parts": [{"part": "b", "answer": {"type": "number"}, "tests": _tests((SKILL_B, 2))}],
+}
+_TASK_CREATED = {"task_id": TASK, "family_id": FAMILY, "source": "teacher", "markup": _MARKUP,
+                 "verification": "unchecked"}  # fmt: skip
+
+
+def _task_graph() -> tuple[list[NodeRecord], list[RelRecord]]:
+    return [_DOMAIN, _TOPIC, _SKILL, _SKILL_B, _MISCONCEPTION], [
+        _rel(("Domain", DOMAIN), "HAS_TOPIC", ("Topic", TOPIC))
+    ]
+
+
+def test_task_created_with_markup_options_and_new_skills() -> None:
+    """Т-§5.2 markup: `TESTS {level}` per pair (parts too); descriptions of new skills with one
+    normalized name in a domain are one provisional skill; a hint without a topic of that name
+    makes a temporary topic (Т-§4.4); a trap on a hypothesis is a misconception with status
+    `unknown` until it shows (WP3.2)."""
+    seq = 60
+    nodes, rels = _run(
+        [_event(seq, "task.created", _TASK_CREATED, domain_id=UUID(DOMAIN))], *_task_graph()
+    )
+    cross = deterministic_id(LEARNER, seq, "skill:cross multiply")
+    lowest = deterministic_id(LEARNER, seq, "skill:lowest terms")
+    simplification = deterministic_id(LEARNER, seq, "topic:simplification")
+    hypothesis = deterministic_id(LEARNER, seq, "misconception:C")
+    options = {o: deterministic_id(LEARNER, seq, f"option:{o}") for o in "ABC"}
+    assert nodes[("Task", TASK)] == {
+        "learnerId": L, "domainId": DOMAIN, "familyId": FAMILY, "source": "teacher",
+        "verification": "unchecked", "methodNamed": False,
+    }  # fmt: skip
+    provisional = {"learnerId": L, "domainId": DOMAIN, "summary": "", "status": "provisional",
+                   "origin": "session"}  # fmt: skip
+    assert nodes[("Skill", cross)] == provisional | {"name": "Cross multiply"}
+    assert nodes[("Skill", lowest)] == provisional | {"name": "Lowest terms"}
+    assert nodes[("Topic", simplification)] == {
+        "learnerId": L, "domainId": DOMAIN, "name": "Simplification", "origin": "session",
+        "status": "proposed", "knownClaimedAtMs": 0,
+    }  # fmt: skip
+    tests = {(k[4], k[5]) for k in rels if k[2] == "TESTS"}
+    assert tests == {(SKILL, 3), (SKILL, 4), (cross, 2), (cross, 3), (lowest, 1), (SKILL_B, 2)}
+    assert rels[("Task", TASK, "TESTS", "Skill", SKILL, 4)] == {"level": 4}
+    assert ("Topic", TOPIC, "COVERS", "Skill", cross) in rels
+    assert ("Topic", simplification, "COVERS", "Skill", lowest) in rels
+    assert ("Domain", DOMAIN, "HAS_TOPIC", "Topic", simplification) in rels
+    assert [nodes[("Option", options[o])]["label"] for o in "ABC"] == ["A", "B", "C"]
+    assert nodes[("Option", options["A"])] == {"learnerId": L, "label": "A", "isCorrect": True,
+                                               "neighborIdea": False}  # fmt: skip
+    assert nodes[("Option", options["C"])]["neighborIdea"] is True
+    assert all(("Task", TASK, "HAS_OPTION", "Option", options[o]) in rels for o in "ABC")
+    assert ("Option", options["B"], "TRAPS", "Misconception", MISCONCEPTION) in rels
+    assert nodes[("Misconception", hypothesis)] == {
+        "learnerId": L, "domainId": DOMAIN, "statement": "multiplies the denominators",
+        "status": "unknown", "triggers": [], "targetedInSessionId": "", "searchable": True,
+    }  # fmt: skip
+    assert ("Option", options["C"], "TRAPS", "Misconception", hypothesis) in rels
+    assert ("Misconception", hypothesis, "ABOUT", "Skill", SKILL) in rels  # first tested skill
+
+
+def test_a_description_with_the_name_of_a_skill_of_the_domain_is_that_skill() -> None:
+    markup = _MARKUP | {"tests": _tests(({"name": " ADD fractions", "topic_hint": "x"}, 3)),
+                        "options": None, "parts": None, "answer": {"type": "number"}}  # fmt: skip
+    nodes, rels = _run(
+        [_event(61, "task.created", _TASK_CREATED | {"markup": markup}, domain_id=UUID(DOMAIN))],
+        *_task_graph(),
+    )
+    assert ("Task", TASK, "TESTS", "Skill", SKILL, 3) in rels
+    assert [key for key in nodes if key[0] == "Skill"] == [("Skill", SKILL), ("Skill", SKILL_B)]
+
+
+def test_task_checks_set_verification_and_correct_the_markup() -> None:
+    """Т-§5.6: `task.verified` — checked; `task.markup_disputed` / `task.key_disputed` —
+    disputed, the corrected markup replaces the old one (the verdicts are lowered to class
+    model with the evidence handlers)."""
+    created = _event(62, "task.created", _TASK_CREATED, domain_id=UUID(DOMAIN))
+    corrected = _MARKUP | {"tests": _tests((SKILL, 3)), "parts": None}
+    nodes, rels = _run(
+        [
+            created,
+            _event(63, "task.verified", {"task_id": TASK}),
+            _event(64, "task.markup_disputed", {"task_id": TASK, "corrected_markup": corrected}),
+        ],
+        *_task_graph(),
+    )
+    assert nodes[("Task", TASK)]["verification"] == "disputed"
+    assert {(k[4], k[5]) for k in rels if k[2] == "TESTS"} == {(SKILL, 3)}
+    nodes, _ = _run([created, _event(65, "task.verified", {"task_id": TASK})], *_task_graph())
+    assert nodes[("Task", TASK)]["verification"] == "checked"
