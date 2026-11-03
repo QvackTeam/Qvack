@@ -189,11 +189,15 @@ def default_llm_roles() -> dict[str, RoleConfig]:
 
 
 class ModelPrice(BaseModel):
-    """Т-§11.4: dollars per 1M tokens of one model (ТЗ Ф4 WP10.4)."""
+    """Т-§11.4: dollars per 1M tokens of one model (ТЗ Ф4 WP10.4). `per_minute` — dollars per
+    minute of audio and `per_image` — dollars per picture, for the calls that report no tokens
+    (`voice`, `illustrator`; D-B-198). Every field is 0 unless the owner sets it."""
 
-    input: float
-    cached_input: float
-    output: float
+    input: float = 0.0
+    cached_input: float = 0.0
+    output: float = 0.0
+    per_minute: float = 0.0
+    per_image: float = 0.0
 
 
 class Settings(BaseSettings):
@@ -365,13 +369,11 @@ class Settings(BaseSettings):
         }
     )
     llm_concurrency_default: int = 4
-    # WP5.7 (Т-§11.1): reasoning effort, output limit and timeout by role; roles without an
-    # entry in llm_role_timeout_s use llm_timeout_sec. Teacher "high" is chosen per turn (WP6.5).
+    # WP5.7 (Т-§11.1): reasoning effort, output limit and timeout of the Phase 3 roles outside
+    # `llm_roles`, and overrides of its rows (D-B-208); the rest use llm_timeout_sec. Teacher
+    # "high" is chosen per turn (WP6.5).
     llm_role_reasoning: dict[str, Literal["low", "high"]] = Field(
         default_factory=lambda: {
-            "teacher": "low",
-            "teacher_fallback": "low",
-            "extractor": "high",
             "evaluator": "high",
             "diagnostic": "high",
             "task_gen": "high",
@@ -382,9 +384,6 @@ class Settings(BaseSettings):
     )
     llm_role_max_output_tokens: dict[str, int] = Field(
         default_factory=lambda: {
-            "teacher": 8192,
-            "teacher_fallback": 4096,
-            "extractor": 4096,
             "evaluator": 4096,
             "diagnostic": 4096,
             "task_gen": 4096,
@@ -394,9 +393,7 @@ class Settings(BaseSettings):
         }
     )
     max_output_tokens_cap: int = 16384
-    llm_role_timeout_s: dict[str, float] = Field(
-        default_factory=lambda: {"teacher": 45.0, "teacher_fallback": 30.0}
-    )
+    llm_role_timeout_s: dict[str, float] = Field(default_factory=dict)
     # WP5.2 (Т-§11.2): retries on failure and on 429; base_ms and max_wait_s are Phase 3
     # decisions (ТЗ §6.2).
     llm_retry_attempts: int = 2
@@ -480,8 +477,15 @@ class Settings(BaseSettings):
             "prerequisites": 10,
         }
     )
-    # WP16.3 (Т-§4.3).
+    # WP16.3 (Т-§4.3, Т-§4.2, Т-§4.6; D-B-205): candidates per subject; the confidence of
+    # `same_idea` by the category of the model; of `REQUIRES` by origin (material > model).
     candidate_k: int = 15
+    same_idea_confidence: dict[str, float] = Field(
+        default_factory=lambda: {"low": 0.4, "medium": 0.75, "high": 0.9}
+    )
+    reconcile_requires_confidence: dict[str, float] = Field(
+        default_factory=lambda: {"material": 0.85, "model": 0.65}
+    )
     # WP16.3 (Т-§4.10; D-B-185): a duplicate candidate scores cosine + weight × shared neighbours.
     hygiene_min_score: float = 0.9
     hygiene_neighbour_weight: float = 0.1
@@ -518,15 +522,30 @@ class Settings(BaseSettings):
     # WP16.5 (Т-§13.6 п.1): the allowed libraries, name → path under `viz_static_base_url`; the
     # documents name D3, Plotly, KaTeX but no files or versions (D-B-177 [ПРОВЕРИТЬ], C: WP9.2).
     viz_libraries: dict[str, str] = Field(default_factory=dict)
+    # WP8.2 (WP16.6): the short check of «я это уже знаю» — at most this many tasks, one per
+    # skill of the topic (the document says «1–3»). D-B-193.
+    known_check_max_tasks: int = 3
     # WP10.6 (ТЗ Ф4 §2.3 строка 20): UUIDv5 namespace of the learner pseudonym in traces.
     # Phase 4 decision D-B-105: a fixed namespace, never changed after the first trace.
     langsmith_pseudonym_ns: str = "6f1c2a9e-4b7d-5e3a-9c21-0d8e7f6a5b43"
+    # WP10.6 (Д-§7: the key only in `api` and `workers`; Д-§11: off in tests and `loadtest`).
+    # An empty key means tracing off. D-B-201, D-B-202.
+    langsmith_api_key: SecretStr = SecretStr("")
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_project: str = "quack"
+    langsmith_timeout_s: float = 5.0
+    # Days after which LangSmith drops a trace (a setting of the LangSmith project, set by the
+    # owner; the number is the one the owner sets there, [ПРОВЕРИТЬ] the plan's value).
+    langsmith_retention_days: int = 14
     # WP15 (Т-§9.4): root-cause confidence category of extractor@3 → number. D-B-106.
     root_cause_confidence_map: dict[Literal["low", "medium", "high"], float] = Field(
         default_factory=lambda: {"low": 0.3, "medium": 0.6, "high": 0.9}
     )
     # WP10.3 (Т-§11.8 п.1): fallback two-step teacher turn, off until the live run says so.
     teacher_two_step: bool = False
+    # WP16.7 (Т-§18.2): attempts of Т1 (the latest) the Brier score of `ops metrics` replays the
+    # memory for; each one replays the learner's log. Phase 4 decision D-B-195.
+    metrics_brier_max_attempts: int = 200
 
     # --- stream C ---
     # WP8.3: probe timeout of /health/ready and /healthz (was HEALTH_CHECK_TIMEOUT_SEC).
@@ -635,6 +654,20 @@ class Settings(BaseSettings):
     # Д-§14.3: the chat is not chosen yet, the body shape follows the setting (ops/notify.py).
     alert_webhook_format: Literal["slack", "discord", "telegram"] = "slack"
     alert_webhook_chat_id: str = ""
+    # `ops alerts` (Д-§9.3): starting values of the table; every run is a fresh container, the
+    # hold times are measured in Redis.
+    heartbeat_alerts_url: SecretStr = SecretStr("")
+    healthz_url: str = "http://api:8000/healthz"
+    host_state_path: str = "/host-state/state.json"
+    alert_healthz_hold_s: int = 300
+    alert_backup_grace_min: int = 30
+    alert_projector_lag_hold_s: int = 600
+    alert_queue_age_s: int = 600
+    alert_failed_share: float = 0.10
+    alert_pressure_hold_s: int = 300
+    alert_renotify_s: int = 3600
+    alert_restart_loop_delta: int = 3
+    alert_host_state_max_age_s: int = 900
     cors_origins: list[str] = Field(
         default_factory=lambda: ["https://app.qvack.online", "https://preview.qvack.online"]
     )
@@ -675,6 +708,14 @@ class Settings(BaseSettings):
                 raise ValueError(f"missing required secrets for ENV=prod: {', '.join(missing)}")
         return self
 
+    @model_validator(mode="after")
+    def _require_prices_in_prod(self) -> Settings:
+        """ТЗ Ф4 §2.3 row 9, WP10.4: the processes that call models (`api`, `workers`) do not
+        start in prod without the price table; `dev`/`test` run with zero prices (D-B-198)."""
+        if self.env == "prod" and self.process_role in ("api", "workers") and not self.llm_prices:
+            raise ValueError("LLM_PRICES is required for ENV=prod (price table of Т-§11.4)")
+        return self
+
     @property
     def sqlalchemy_dsn(self) -> str:
         """POSTGRES_DSN rewritten for the SQLAlchemy asyncpg dialect."""
@@ -695,11 +736,36 @@ class Settings(BaseSettings):
         return self.meta_api_base_url
 
     def model_for_role(self, role: str, *, hard: bool = False) -> str:
-        """`hard` — a hard call of a role with `hard_model` (Т-§11.1, D-B-166)."""
+        """An explicit `llm_role_models` entry, else the role row of `llm_roles` (Т-§11.1,
+        D-B-188), else the default model; `hard` — a hard call of a role with `hard_model`
+        (D-B-166)."""
         hard_model = self.llm_roles[role].hard_model if role in self.llm_roles else None
         if hard and hard_model is not None:
             return hard_model
-        return self.llm_role_models.get(role, self.llm_default_model)
+        if role in self.llm_role_models:
+            return self.llm_role_models[role]
+        if role in self.llm_roles:
+            return self.llm_roles[role].model
+        return self.llm_default_model
+
+    def effort_for_role(self, role: str) -> Literal["low", "high"] | None:
+        """An `llm_role_reasoning` entry, else the role row of `llm_roles` (D-B-208)."""
+        if role in self.llm_role_reasoning:
+            return self.llm_role_reasoning[role]
+        return self.llm_roles[role].effort if role in self.llm_roles else None
+
+    def max_output_tokens_for_role(self, role: str) -> int | None:
+        """An `llm_role_max_output_tokens` entry, else the role row of `llm_roles` (D-B-208)."""
+        if role in self.llm_role_max_output_tokens:
+            return self.llm_role_max_output_tokens[role]
+        return self.llm_roles[role].max_output_tokens if role in self.llm_roles else None
+
+    def timeout_for_role(self, role: str) -> float:
+        """An `llm_role_timeout_s` entry, else the role row of `llm_roles`, else
+        `llm_timeout_sec` (D-B-208)."""
+        if role in self.llm_role_timeout_s:
+            return self.llm_role_timeout_s[role]
+        return self.llm_roles[role].timeout_s if role in self.llm_roles else self.llm_timeout_sec
 
     def secret_values(self) -> list[str]:
         """Values the logger must mask (Д-§7)."""
@@ -710,6 +776,7 @@ class Settings(BaseSettings):
                 secret.get_secret_value()
                 for secret in (
                     self.email_api_key,
+                    self.langsmith_api_key,
                     self.google_oidc_client_id,
                     self.google_oidc_client_secret,
                     self.s3_endpoint,
@@ -722,6 +789,7 @@ class Settings(BaseSettings):
                     self.backup_s3_secret_key,
                     self.heartbeat_backup_url,
                     self.alert_webhook_url,
+                    self.heartbeat_alerts_url,
                     self.app_db_password,
                     self.reader_db_password,
                     self.migrator_db_password,

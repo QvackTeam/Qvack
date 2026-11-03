@@ -22,3 +22,216 @@
 Номера продолжают архив: следующий свободный номер — по `grep -h "^### D-B-" backend/PHASE4_NOTES.md backend/notes/B.md`.
 
 <!-- записи ниже, новые сверху -->
+
+### D-B-207. `GET /v1/sessions/{id}/jobs`: модель ответа и проверка владения (WP7.4, issue #212)
+- Класс: B
+- WP / место: WP7.4, §4.8, Т-§13.8; `quack/session/router.py::session_jobs`, `schemas.SessionJobsResponse`
+- Контекст: §4.8/Т-§13.8 задают состав плашки (visible, `queued`/`running`), но не форму ответа и не способ проверки сессии
+- Решение: ответ `{jobs: [{job_key, kind, status, created_at}]}` (как `VisibleJob`, обёртка как у `SessionListResponse`); владение — `sessions.get_session` (`content.sessions`, как у `/actions`), `LookupError` → `404 NOT_FOUND`; задачи — `queue_p4.visible_jobs`
+- Почему: Т-§13.8, issue #212, §7.3 п.3
+- Обратимость: да
+- Тесты: `tests/session/test_session_jobs_route.py`, реестр `tests/e2e/routes/b.py`
+### D-B-208. `effort`, лимит выхода и таймаут роли — из строки `llm_roles` (WP10.1 п.1)
+- Класс: A (исправление ошибки)
+- WP / место: WP10.1 п.1; `quack/config.py` (`effort_for_role`, `max_output_tokens_for_role`, `timeout_for_role`), `quack/llm/gateway.py`, `scripts/meta_smoke.py`
+- Контекст: шлюз брал `effort`, `max_output_tokens` и таймаут только из словарей Фазы 3 (`llm_role_reasoning`, `llm_role_max_output_tokens`, `llm_role_timeout_s`): роли таблицы Фазы 4 уходили без `effort` и без лимита, замер D-B-134 не применялся (находка WP10.7)
+- Решение: запись словаря Фазы 3 — переопределение, иначе строка `llm_roles`, иначе (таймаут) `llm_timeout_sec`; из словарей Фазы 3 убраны `teacher`, `teacher_fallback`, `extractor` — их значения теперь из таблицы (`extractor` 16 384, `teacher_fallback` 8192 по D-B-134)
+- Почему: Т-§11.1, ТЗ Ф4 WP10.1 п.1 «ровно таблицы»; та же ошибка, что D-B-188
+- Обратимость: три функции
+- Тесты: `tests/test_llm_runtime.py` (T-L8: тело запроса), `tests/llm/test_meta_smoke.py`
+- Требует подтверждения владельцем: нет
+
+### D-B-204. Без ключа — «Не проверено», код 1; в отчёте — что ушло в запросе (WP10.7)
+- Класс: B
+- WP / место: WP10.7, DoD п.6a; `backend/scripts/meta_smoke.py` (`run`, `render_report`, `exit_code`)
+- Контекст: ТЗ: «без ключа — „Не проверено“ с командой», «код выхода как в Фазе 3» (0 — все роли прошли, 1 — иначе); как отметить пропущенную роль и что писать в отчёт, не сказано
+- Решение: пустой `META_API_KEY` — сеть и база не трогаются, в stdout (и `--out`) текст «Не проверено» с точной командой, код 1 (ничего не проверено — не зелёный). Роль без файла промпта в реестре (`material_parser`, `viz_checker`) — строка `skipped:no_prompt`, код выхода её не считает ошибкой, но отчёт перечисляет такие роли под «Не проверено». Отчёт: таблица «роль → статус, модель, задержка» и по строке JSON на роль; к полям Фазы 3 добавлены `sent_effort`, `sent_max_output_tokens` — что реально ушло в запросе (`effort` — строка таблицы ролей). Повод: шлюз берёт `effort` и лимит выхода из старых `llm_role_reasoning`/`llm_role_max_output_tokens` (только роли Фазы 3), а не из `llm_roles`, поэтому у ролей Фазы 4 живой прогон покажет `sent_* = null`; правка шлюза — отдельным пакетом (см. отчёт диспетчеру)
+- Почему: ТЗ Ф4 WP10.7, ТЗ Ф3 DoD п.6a; Т-§11.1 (таблица ролей — источник `effort` и лимита)
+- Обратимость: да, только скрипт
+- Тесты: `tests/llm/test_meta_smoke.py` — прогон без ключа, строка с ошибкой схемы даёт код 1
+- Требует подтверждения владельцем: нет
+
+### D-B-203. Состав живого прогона: 26 ролей таблицы, промпты Ф3 вне таблицы, проба стрима с инструментом (WP10.7)
+- Класс: B
+- WP / место: WP10.7, `Т-§11.8` п.1; `backend/scripts/meta_smoke.py`
+- Контекст: ТЗ: «все роли и стриминг с инструментом»; какой вход, какая схема у роли с двумя схемами, на какой модели стрим и как гарантировать вызов инструмента (Meta принимает только `tool_choice: auto`), не сказано
+- Решение: (1) строка на каждую из 26 ролей `Settings.llm_roles` в порядке таблицы: текстовая — один `generate_structured` по промпту её строки таблицы (`teacher@2`, `analyst@1` для `analyst_deep`) и первой схеме из `ROLE_SCHEMAS` (`builder` — `BuilderOutput`, режим `Reconcile`; `recognizer` — `RecognizerOutput`, режим `line`); недостающие переменные промпта — «none», как в Фазе 3; `recognizer`, `verdict_free` получают встроенный PNG; `segmenter` — `gateway.segment(png, concept="circle")`, `voice` — `transcribe` на 0,5 с тона WAV 16 кГц, `illustrator` — `illustrate`. (2) Шесть промптов Фазы 3 вне таблицы (`evaluator`, `task_gen`, `structurer`, `curator`, `diagnostic`, `artifacts`) остаются; `teacher@1`, `extractor@2`, `teacher_fallback@1` сняты — заменены `teacher@2`, `extractor@3`. (3) Строка `stream_tool`: `LLMGateway.streaming` + `run_tool_loop` на модели `teacher` (Wonder, как в `Т-§11.8`): свой инструмент `smoke_lookup` и короткая инструкция в коде скрипта (вход пробы, не промпт роли) «вызови функцию, затем ответь `{value}` по её результату»; успех — инструмент вызван, шагов ≥ 2, `value` = результату, ответ прошёл строгую схему. Вызов инструмента модель делает сама (`auto`): `NoToolCall` в статусе — результат прогона, не сбой скрипта
+- Почему: ТЗ Ф4 WP10.7, Т-§11.8 п.1, Т-§11.1; D-B-187 (не текстовые роли идут через `segment/transcribe/illustrate`)
+- Обратимость: да, только скрипт и его тест
+- Тесты: `tests/llm/test_meta_smoke.py` — все роли таблицы и стрим на подменном провайдере (ответ каждой текстовой роли строится из её строгой схемы), набор вызовов совпадает с `ALL_PROMPT_SCHEMAS` кроме снятых версий
+### D-B-206. Сверка: ответы модели в события, повтор и встречные связи (WP16.3)
+- Класс: B
+- WP / место: WP16.3; `quack/agents/reconcile.py`, `Settings.same_idea_confidence`, `Settings.reconcile_requires_confidence`
+- Контекст: ТЗ даёт варианты `link`/`create`/`suggest_merge`/«та же идея», но не говорит, чему они равны в событиях, как повтор не плодит узлы и откуда уверенность связей
+- Решение: id создаваемых узлов — `uuid5` нормализованного имени в домене (повтор пишет те же события под теми же ключами; одно имя — один узел, `Т-§4.4`); `create` с именем существующего кандидата — `link`. `suggest_merge` у навыка: навык создаётся и пишется `skill.merge_suggested {from = новый, into = цель}`; у темы события нет — тема создаётся. `link` на навык другого домена — предмет пропущен (`outcome = skipped`, правило 6 слоя 1). «Та же идея» — `edge.added {same_idea}` от нового навыка к навыку другого домена; уверенность по категории `same_idea_confidence` (low 0.4, medium 0.75, high 0.9; перенос от `same_idea_min_confidence` = 0.7). `REQUIRES` — из `Subject.requires` (явный порядок материала), `origin = material` при `origin = material`, уверенность `reconcile_requires_confidence` (material 0.85 > model 0.65 ≥ `requires_min_confidence`); встречная пара `A→B`/`B→A` отбрасывается и против записанных в графе (чтение Cypher), и внутри пачки (первая побеждает). Тема нового навыка — метка `T…` модели, иначе имя (в пачке или новая), иначе `Subject.topic`, иначе предмет пропущен. Предмет без ответа модели пропущен. Неизвестная метка — один возврат модели через `check` (`Т-§4.5`). Embeddings недоступны — исключение идёт вверх, задача ждёт (`Т-§20.7`): без кандидатов модель создавала бы дубли. Статус создаваемого навыка — `active` (предложенность темы — статус проектора, `Т-§4.7`)
+- Почему: Т-§4.2, Т-§4.3, Т-§4.4, Т-§4.5, Т-§4.6, ТЗ Ф4 WP16.3, T-AG3
+- Обратимость: да
+- Тесты: `tests/agents/test_reconcile.py`
+- Требует подтверждения владельцем: нет
+
+### D-B-205. Кандидаты сверки — Cypher модуля B, не `GraphReader` (WP16.3)
+- Класс: B
+- WP / место: WP16.3; `quack/agents/reconcile.py::find_candidates/read_requires`
+- Контекст: в `GraphReader` нет поиска кандидатов для сверки по тексту предмета (`extraction_candidates` — под эпизод и сессию); сигнатуры `GraphReader` — контракт A
+- Решение: `find_candidates` — векторный поиск `topic_emb`/`skill_emb` по `embed_query(имя + текст)` в домене, соседи трёх ближайших навыков (`REQUIRES`, та же тема), ближайшие навыки других доменов (поиск по `learnerId`, фильтр домена после поиска), до `candidate_k` на предмет: по трети — другой вид и чужие домены, остальное — свой вид и соседи. Метки общие на вызов: порядок важности — по кругу по предметам; сверх `candidate_skills_k`/`label_max_topics` метки не выдаются. Сверка временных сущностей после сессии (`Т-§4.4`) — уже `graph.hygiene` по `session.ended` (D-B-185): нового вида и правила не нужно. Если A захочет метод в `GraphReader` — заменить тело `find_candidates`
+- Почему: Т-§4.3, Т-§3.4.6, ТЗ Ф4 WP16.3
+- Обратимость: да
+- Тесты: `tests/agents/test_reconcile.py::test_candidates_vector_neighbours_and_other_domains`
+- Требует подтверждения владельцем: нет
+
+### D-B-202. Удаление трасс: нет подтверждённого API, срок хранения (WP10.6)
+- Класс: B
+- WP / место: WP10.6, WP25; `quack/llm/tracing.py::Tracer.delete_learner`, `Settings.langsmith_retention_days`
+- Контекст: ТЗ: удаление трасс по псевдониму — [ПРОВЕРИТЬ] `Т-§19.5`; REST-метод удаления запусков по значению метаданных в документах не назван и не проверен (документация недоступна из сессии)
+- Решение: `Tracer.delete_learner(pseudonym) -> bool` есть в интерфейсе; `LangSmithTracer` вызова не делает и возвращает `False` (лог `langsmith_delete_unsupported`); подмена возвращает `True` и пишет журнал. Удаление аккаунта (WP25, A) вызывает `tracer.delete_learner(learner_pseudonym(settings.langsmith_pseudonym_ns, learner_id))` и при `False` ничего не делает: трассы уходят по сроку `langsmith_retention_days` (14, настройка проекта LangSmith — действие владельца). Когда API подтвердят — заменить тело метода
+- Почему: ТЗ Ф4 WP10.6, §2.3 стр. 20, Т-§19.5
+- Обратимость: да
+- Тесты: `tests/llm/test_tracing.py`
+- Требует подтверждения владельцем: да (срок хранения в проекте LangSmith; [ПРОВЕРИТЬ] API удаления)
+
+### D-B-201. Отправка в LangSmith — `httpx` по REST, без пакета `langsmith` (WP10.6)
+- Класс: B
+- WP / место: WP10.6; `quack/llm/tracing.py`, `Settings.langsmith_*`
+- Контекст: §4.6 разрешает `langsmith`, но его нет в `pyproject.toml`, а новые зависимости в этой работе запрещены; `httpx` уже есть
+- Решение: `LangSmithTracer` шлёт `POST {langsmith_endpoint}/runs` (заголовок `x-api-key`) фоновой задачей с таймаутом `langsmith_timeout_s`; вызов шлюза не ждёт и не падает от сбоя. Ключ `LANGSMITH_API_KEY` (`Settings.langsmith_api_key`, замаскирован в логах) — пустой ключ = трассировка выключена; `create_tracer` даёт `NullTracer` при `env == test`, вне процессов `api`/`workers` и без ключа. Профиль `loadtest` ключ не получает (compose — C). Формат запуска (поля `POST /runs`) — [ПРОВЕРИТЬ] на живой проверке; позже можно заменить пакетом `langsmith` без смены интерфейса `Tracer`
+- Почему: ТЗ Ф4 WP10.6, §4.6, Д-§7, Д-§11
+- Обратимость: да
+- Тесты: `tests/llm/test_tracing.py`
+
+### D-B-200. Что попадает в трассу и на каком шаге (WP10.6)
+- Класс: B
+- WP / место: WP10.6; `quack/llm/gateway.py::_ledger/_trace`
+- Контекст: «каждый вызов шлюза — трасса»; у вызова несколько попыток и путей (текст, стрим с инструментами, `segment`/`transcribe`/`illustrate`)
+- Решение: одна трасса на попытку — рядом с каждой строкой журнала (`_ledger`), поэтому покрыты все пути, включая шаги стрима и цикл с инструментами. Поля: роль, `роль@N` (`роль@0` у медиа-ролей), псевдоним `uuid5(langsmith_pseudonym_ns, learner_id)`, модель, токены (вход, выход, кэш, рассуждение), задержка, статус, код ошибки. Текст промпта и ответа, `learner_id`, id сессии и хода в трассу не уходят. Без трассы: ответ из outbox, отказ по бюджету, разомкнутая цепь (нет строки журнала и нет обращения к модели). Сбой трассировщика — строка лога, вызов идёт дальше (закон 7 по смыслу)
+- Почему: Т-§11.7, ТЗ Ф4 WP10.6, §2.3 стр. 20, T-AI8
+- Обратимость: да
+- Тесты: `tests/llm/test_tracing.py`
+
+### D-B-196. Иллюстрация: ключ, ответ только с `url`, подсказка (WP16.6)
+- Класс: B
+- WP / место: `agent.illustration`; `quack/agents/illustration.py`, `quack/agents/delivery.py` (`result_ref`)
+- Контекст: в `quack/storage/keys.py` (C) нет ключа иллюстрации; `Illustration` может прийти только с `url`; промпта у роли нет.
+- Решение: ключ `learners/{learner}/illustrations/{request_id}-{ULID}.{png|jpg|webp|bin}` собирается в модуле B из `learner_prefix` и `new_ulid` (C не правим; если C заведёт `illustration_key`, заменить). Ответ только с `url` — `agent.completed {ok: false, error: image_url_only}`: скачивать с чужого хоста без правила нельзя, внешняя ссылка не есть ключ хранилища [ПРОВЕРИТЬ на стенде: какую форму отдаёт `muse-image-1.0`]. Нет `params.description` — `ok: false, error: no_description`, без вызова модели. Подсказка модели — `description` с фиксированным префиксом «концептуальная иллюстрация, без формул, графиков и математических схем» (П-4.5). Актор события — `agent:illustration` (у роли нет версии промпта, формат `<role>@<N>` не подходит).
+- Почему: ТЗ Ф4 WP16.6, П-4.5, Т-§3.3, Т-§13.9, D-B-187
+- Обратимость: да
+- Тесты: `tests/agents/test_illustration.py`
+### D-B-199. Бюджеты в долларах: какие роли считаются и что останавливается (WP10.4)
+- Класс: B
+- WP / место: WP10.4; `quack/llm/usage.py::check_usd_budgets`, `errors.py`
+- Контекст: Т-§11.4 не называет роли дневного бюджета; очередь A (`queue_p4.budget_roles`) уже считает сессионный бюджет по ролям P2/P3 без `extractor`, аналитика и `session_budget_exempt_roles`
+- Решение: перед вызовом роли из этого же набора шлюз проверяет (а) расход сессии по тем же ролям `> session_agent_budget_usd` → `LLMBudgetExceededError("session", …, "usd")`; (б) расход ученика за UTC-сутки по всем ролям P2/P3 `>= learner_daily_budget_usd` → `"daily"`. Учитель, P0/P1, извлечение и аналитик не останавливаются, но попадают в строки. Без `llm_prices` проверки пропускаются (стоимость 0). Наборы ролей продублированы (llm не импортирует jobs, цикл), оба читают `ops.llm_usage`; изменить правило — в обоих местах
+- Почему: Т-§11.4, ТЗ Ф4 WP10.4, §2.3 стр. 9; согласовано с `queue_p4`
+- Обратимость: одна функция
+- Тесты: `tests/llm/test_usage_usd.py::test_budgets_in_dollars`
+- Требует подтверждения владельцем: нет
+
+### D-B-198. Цена голоса и картинки, отказ старта в prod без цен (WP10.4)
+- Класс: B (цены — значения владельца, §1.3)
+- WP / место: WP10.4; `quack/config.py::ModelPrice`, `Settings._require_prices_in_prod`
+- Контекст: у `voice` токенов нет (только `audio_duration_ms`, D-B-187), у `illustrator` токены не отдаются; в таблице цен ТЗ только вход/кэш/выход. Отказа старта без цен в коде не было
+- Решение: `ModelPrice` получил `per_minute` (доллары за минуту звука) и `per_image` (за картинку); все пять полей по умолчанию 0. Стоимость = токены (вход без кэша, кэш, выход; рассуждение уже в выходе) + минуты·`per_minute` + картинки·`per_image`. Модель без цены — стоимость 0 и лог `llm_prices_missing` (раз на модель за процесс). `ENV=prod` и `process_role` `api`/`workers` без `llm_prices` — ошибка проверки Settings (`projector`, `ops` не вызывают модели)
+- Почему: ТЗ Ф4 §2.3 стр. 9, WP10.4, Т-§11.4
+- Обратимость: поля с нулями; проверку убрать одной функцией
+- Тесты: `tests/test_settings_meta_api.py::test_prod_requires_the_price_table`, `tests/llm/test_usage_usd.py`
+- Требует подтверждения владельцем: да (значения цен; compose prod должен передавать `LLM_PRICES` JSON — C/DevOps)
+
+### D-B-197. Шлюз пишет `ops.llm_usage` через `Db`; переходный период (WP10.4)
+- Класс: B
+- WP / место: WP10.4; `quack/llm/gateway.py` (`LLMGateway(..., db=)`, `_usage`), `quack/llm/usage.py`
+- Контекст: шлюз получал только `SessionFactory` и писал `ops.llm_ledger` (Alembic-схема); `Db` в шлюз не передавался, а в схеме Фазы 4 (dbmate) нет `llm_ledger`, `llm_outbox` и `sessions.tokens_used`
+- Решение: новый необязательный `db: Db | None`. С `db` — каждая попытка вызова (текст, стрим, `segment`/`transcribe`/`illustrate`) пишет одну строку `ops.llm_usage` со стоимостью по `llm_prices`, `retried` = не первая строка вызова, `incomplete` по статусу; бюджеты в долларах (D-B-199). Без `db` — прежний путь: `llm_ledger` и токеновые бюджеты. Две таблицы разом не пишутся: схемы разные (одна база — одна из них). «Заменяет ledger» (ТЗ) выполняется на WP1.3: A/C при снятии SQLAlchemy передают `db=` в `LLMGateway` (`quack/runtime/__init__.py`, `quack/api/resources.py`, `tests/support/resources.py`), убирают `session_factory`; B тогда удаляет ветку ledger, токеновые бюджеты и outbox (`core.llm_outbox` в baseline нет)
+- Почему: ТЗ Ф4 WP10.4 «Заменяет ops.llm_ledger», Т-§11.4; WP1.3
+- Обратимость: ветка по `db is None`
+- Тесты: `tests/llm/test_usage_usd.py`
+- Требует подтверждения владельцем: нет
+
+### D-B-193. «Я это уже знаю»: уровень, число задач, ключ ответа (WP8.2, WP16.6)
+- Класс: B
+- WP / место: `check.known_claim`; `quack/agents/task_generation.py`, `Settings.known_check_max_tasks`
+- Контекст: ТЗ WP8.2 — «1–3 задачи по навыкам темы на целевых уровнях»; какой уровень и как набрать три — не сказано.
+- Решение: по одной задаче на навык темы (первая сохранённая из вызова), в порядке навыков, не больше `known_check_max_tasks = 3`; уровень — рубеж навыка (`frontier`) среди уровней, которые требуют хабы темы (иначе 1–6); навык с доказанными целевыми уровнями пропускается. Ответ `agent.completed {kind: known_check, task_ids}` — по `request_id`, для `known.claimed` — по `job_key = check.known_claim:{learner}:{seq}` (собирается по правилу WP7.1, у `ClaimedJob` Ф3 поля `job_key` нет). `ok: false`, если проверить было что, но ни одна задача не прошла проверку, или темы нет в памяти.
+- Почему: ТЗ Ф4 WP8.2, WP12.6, Т-§13.9
+- Обратимость: да
+- Тесты: `tests/agents/test_task_agents.py`
+- Требует подтверждения владельцем: нет
+
+### D-B-192. Тип ответа и цель поручения `agent.task_generation` (WP12.6, WP16.6)
+- Класс: B
+- WP / место: `quack/agents/task_generation.py`
+- Контекст: `agent.requested` не несёт тип ответа и цель (практика/ретест), а `generate_tasks` требует `kind` и `purpose`.
+- Решение: тип ответа по уровню — 1 `choice`, 2 `short_text`, 3–5 `number`, 6 `proof`; есть `params.task_id` — это исходная задача, цель `retest` (варианты в её семье, Т-§5.4, Т-§5.7), иначе `practice`; `params.description` идёт в контекст курса, `misconception_id` сужает известные заблуждения. Нет `skill_id`/`level` — `JobFailedPermanently`; ни один вариант не прошёл проверку — `agent.completed {ok: false}`. `task_arbiter` отдельного обработчика не имеет: арбитр внутри `generate_tasks` (WP12.5).
+- Почему: ТЗ Ф4 WP12.6, WP16.6; Т-§5.5, Т-§13.9
+- Обратимость: да
+- Тесты: `tests/agents/test_task_agents.py`
+- Требует подтверждения владельцем: нет
+
+### D-B-191. Обработчики `task.solution_space`, `agent.solution_space`, `agent.task_generation`, `check.known_claim` (WP16.6)
+- Класс: B
+- WP / место: `quack/agents/{delivery,solution_space,task_generation}.py`; регистрация (б) #173 в `kinds.py`, `runtime/__init__.py`
+- Контекст: образец — `agents/viz.py`; исчерпавшую попытки задачу закрывает очередь (`agent.completed {ok:false}`, WP7.4), обработчик пишет только исход по существу.
+- Решение: `agent.completed` пишется ключом `agent.completed:{request_id | job_key}` с проверкой существующего (повтор не дублирует); пространство решения читает заблуждения навыков задачи из памяти (`slice_for_turn` с пустой сессией `NO_SESSION`), `agent.solution_space` возвращает `task_ids=[task]`, чужая задача — `ok:false task_not_found`; новый параметр `known_check_max_tasks`; в `practice/repo.py` — `agent_request`.
+- Почему: ТЗ Ф4 WP12.4, WP16.6, Т-§13.9, закон 5
+- Обратимость: да
+- Тесты: `tests/agents/test_task_agents.py`
+- Требует подтверждения владельцем: нет
+
+### D-B-195. Метрики `ops metrics`: определения там, где `Т-§18.2–18.3` оставляют свободу (WP16.7)
+- Класс: B
+- WP / место: WP16.7; `quack/agents/metrics.py`, `Settings.metrics_brier_max_attempts` (200)
+- Контекст: документ называет метрики без знаменателей и окон; каталог событий не хранит предсказанных вероятностей
+- Решение: у каждой метрики `status: measured | not_measured` (пустое окно или нет входа — «не измерено», закон 8). Знаменатели: ветвления и `teacher_fallback` — на `turn.committed`; `unclear`/`numericOnly` — на `verdict.recorded`; `check.failed` — на вердикты + `check.failed`; оспаривания — на 1000 вердиктов (по `target_kind`); снятые пометки — `observation.second_opinion` с `agreed=false` из всех вторых мнений; отказы извлекателя — `rejected` из элементов + `rejected`; объединённые временные навыки — `skill.created {provisional}` с `skill.merged` по `from_id`; стоимость в час — `ops.llm_usage` с учеником ÷ различные (ученик, час) с действием ученика. Самостоятельный успех потом: на (ученик, навык) первая позднейшая попытка Т1 в другой сессии на задаче другого семейства, верно и без подсказок, обе в окне. Брайер: `state_at(seq ответа − 1)` и правило `Т-§18.2` (`p_*` × `R`); нужен `reader` — без него «не измерено»; не больше `metrics_brier_max_attempts` последних попыток (каждая — переигрыш журнала). Точность и кривая калибровки по корзинам 0.1
+- Почему: `Т-§18.2`, `Т-§18.3`, `Т-§22.10` (JSON без дашбордов)
+- Обратимость: полная (определения в одном модуле)
+- Тесты: `tests/agents/test_metrics.py`
+- Требует подтверждения владельцем: нет
+
+### D-B-194. Проигрывание сессии и судья релиза (WP16.7)
+- Класс: B
+- WP / место: WP16.7; `quack/session/replay.py` (`replay_session`), `quack/agents/judge.py` (`release_judge`)
+- Контекст: `Т-§12.8`: «восстанавливает ситуацию каждого хода по манифесту»; слои `§4.1` запрещают `session` ↔ `agents`
+- Решение: ситуация хода — тот же `MemoryTurnContextSource` и `run_turn`, что на живом ходу, поверх офлайн-портов (коммит держит ход в памяти, кадры никуда, `core.events` не пишется); память — `AsOfReader`: `slice_for_turn` = `state_at(projected_seq манифеста)` по навыкам фокуса и таблице меток манифеста, остальные чтения — живые; слоты 3–4 — снимок сессии. Судья — вызываемый объект `PairJudge`, который передаёт вызывающий (`release_judge(gateway)`): оба порядка, победа только если совпала в обоих, иначе tie. Нарушение хода: старый — `guard_retries > 0`, новый — `guard_retries > 0` или остаточные нарушения `Т-§12.4` (метки, граница, спойлер); «доля не выросла» — `new ≤ old`, «судья не хуже» — побед нового ≥ побед старого. Не восстанавливается и записано в отчёте: заблуждения среза, куски материалов, сводка аналитика и результаты агентов (читаются на сейчас), версия отрисовщика (в коде только `renderer@1`: другая версия — пометка в отчёте). Эталонные наборы LangSmith и фильтр `research` — не сделаны (в ТЗ — «тот же инструмент на наборе», вход набора — данные C)
+- Почему: `Т-§12.8`, `Т-§18.4`, ТЗ Ф4 WP16.7
+- Обратимость: полная
+- Тесты: `tests/session/test_replay.py`, `tests/agents/test_judge.py`
+- Требует подтверждения владельцем: нет
+
+### D-B-189. «Давай 5 минут» — лимит из текста ученика (WP17.6)
+- Класс: B
+- WP / место: WP17.6, WP14.2; `quack/session/review_turn.py` (`time_limit_minutes`, `review_item_cap`)
+- Контекст: `Т-§14.2` — «ограничение в цели сессии», но `session.started` / `message.sent` не имеют поля времени; события — контракт A, менять нельзя.
+- Решение: код берёт последнее «N мин…»/«N min…» из реплик ученика сессии; пунктов = max(1, N // `review_item_minutes`), отбор по приоритету. Без числа — без ограничения. Когда у клиента/событий появится явное поле лимита, `time_limit_minutes` заменить на него.
+- Почему: Т-§14.2, WP17.6; закон 2 не нарушен — число считает код по тексту, без модели.
+- Обратимость: легко.
+- Тесты: `tests/session/test_review_turn.py`
+- Требует подтверждения владельцем: нет
+
+### D-B-190. Кандидаты повторения в картине памяти и подбор из банка (WP17.6)
+- Класс: B
+- WP / место: WP17.6, WP14.2, WP12.7; `review_turn.py`, `memory_picture.py`, `turn_source.py`
+- Контекст: ТЗ не говорит, какие кандидаты показываются вне намерения `review`, на каком уровне брать задачу банка и как её показать учителю.
+- Решение: вне `review` — только `is_goal_prerequisite` (цель — навыки тем цели); при `review` с темой/хабом — все кандидаты области (`ReviewScope.topic_id|hub_id`). Они идут в картине сразу после навыков цели и с пометкой «due for review» (пометка по `retDueAtMs` из WP14.2 остаётся). Для первых `label_max_tasks` кандидатов — одна задача `select_tasks` («семейство не встречалось») на уровне `frontier` (все уровни, если цель их не задаёт); строка «Repeat with a new family, bank task K…: "<условие>"» (K — метка, учитель использует как `variantOf`). `max_items` отбора — в коде, после фильтра по цели.
+- Почему: Т-§14.2, Т-§5.7, Т-§10.2; ближайшее правило — `today.prepare` (D-B-184).
+- Обратимость: легко.
+- Тесты: `tests/session/test_review_turn.py`
+- Требует подтверждения владельцем: нет
+
+
+### D-B-188. `model_for_role` читает строку `llm_roles` (WP10.1 п.1)
+- Класс: A (исправление ошибки)
+- WP / место: WP10.1 п.1; `quack/config.py::Settings.model_for_role`, `quack/llm/gateway.py`
+- Контекст: метод брал `llm_role_models` или `llm_default_model` (Spark) и не читал таблицу ролей D-B-101: `verdict_proof`, `second_opinion`, `analyst_deep`, `task_arbiter`, `viz_builder`, `release_judge` шли на Spark вместо Wonder, нетекстовые роли — тоже на Spark
+- Решение: порядок — явная запись `llm_role_models` (переопределение окружения) → модель строки `llm_roles` → `llm_default_model`; `hard_model` как прежде. Обходной `_media_model` D-B-187 снят
+- Почему: Т-§11.1 (модель роли — по таблице), ТЗ Ф4 WP10.1 п.1 «ровно таблицы»
+- Обратимость: одна функция
+- Тесты: `tests/test_settings_meta_api.py::test_default_models_are_the_live_ids`
+- Требует подтверждения владельцем: нет
+
+### D-B-187. Адаптеры нетекстовых ролей шлюза: `segmenter`, `voice`, `illustrator` (WP10.1)
+- Класс: B
+- WP / место: WP10.1 третий пункт; `quack/llm/media.py`, `gateway.py` (`segment`, `transcribe`, `illustrate`), `responses_client.py`, `provider.py`; `tests/llm/test_phase4_media_roles.py`
+- Контекст: по WP0 п.3д форма `sam-3.1` и голоса известна (документация Meta, без вызова); для `muse-image-1.0` документов нет; формат спецтокенов описан не полностью (запись «id, рамка, маска», w/h рамки, префикс base85, `|>` внутри данных)
+- Решение: (1) три публичных метода шлюза возвращают `LLMResult[Segmentation | Transcription | Illustration]`; путь вызова общий с текстовыми ролями (бюджеты, слот модели, повторы, 429 и флаг давления, 400, размыкатель, строка учёта на попытку). Без аутбокса и без промпта: версия 0, `prompt_hash` — хеш `роль@media`; повтор вызова — повторная плата. (2) `segmenter` — `POST /responses`, `input_text` (имя предмета ИЛИ `<0f>1<|box;x1=..;y1=..;x2=..;y2=..;w=..;h=..|>`) + `input_image` (data URL), `metadata.mask_encoding`/`include_confidence`, без `text.format`; ответ разбирает `parse_segmentation` (рамка начинает объект, маска за ней — его; до 16; маску не декодируем: `data` — base85 как пришло, `marker` `~`/`!`). (3) `voice` — `POST {base}/asr/transcribe`, multipart `request`+`audio`; токенов нет, длительность в `audio_duration_ms`. (4) `illustrator` — `POST {base}/images/generations`, `response_format=b64_json`, байты или `url`. (5) модель нетекстовой роли — `llm_role_models[role]`, иначе строка `llm_roles` (`model_for_role` для них вернул бы Spark)
+- Почему: Т-§1.3, Т-§11.1, WP0 п.3д; ближайшее правило — OpenAI-совместимые пути
+- Обратимость: вся форма запросов изолирована в трёх методах `ResponsesClient`
+- Тесты: `tests/llm/test_phase4_media_roles.py` (по одному на роль: тело запроса, разбор, строка `ops.llm_ledger`)
+- Требует подтверждения владельцем: нет. [ПРОВЕРИТЬ на стенде]: путь и тело `muse-image-1.0`; значения `w`/`h` рамки; формат записей и префикс маски `sam-3.1`; нужен ли голосу учёт в долларах по секундам (в WP10.4 строка `llm_usage` без токенов)

@@ -4404,6 +4404,54 @@
         "title": "SessionDetail",
         "type": "object"
       },
+      "SessionJob": {
+        "additionalProperties": false,
+        "description": "A row of the learner's plaque (Т-§13.8): a visible job of the session.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "job_key": {
+            "title": "Job Key",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_key",
+          "kind",
+          "status",
+          "created_at"
+        ],
+        "title": "SessionJob",
+        "type": "object"
+      },
+      "SessionJobsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/SessionJob"
+            },
+            "title": "Jobs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "title": "SessionJobsResponse",
+        "type": "object"
+      },
       "SessionListItem": {
         "additionalProperties": false,
         "description": "A row of the session history: the active session and the closed ones.",
@@ -11360,6 +11408,77 @@
           }
         },
         "summary": "Heartbeat"
+      }
+    },
+    "/v1/sessions/{session_id}/jobs": {
+      "get": {
+        "description": "ТЗ Ф4 §4.8, `Т-§13.8` (WP7.4): the plaque — visible jobs of the session in `queued` and\n`running`; a session of another learner or none — `404` (D-B-207).",
+        "operationId": "session_jobs_v1_sessions__session_id__jobs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionJobsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Session Jobs"
       }
     },
     "/v1/sessions/{session_id}/tasks/next": {

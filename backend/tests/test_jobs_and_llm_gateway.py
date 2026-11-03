@@ -548,7 +548,7 @@ async def test_gateway_semaphore_limits_concurrency(
         prompts,
         process_role="api",
         llm_concurrency=limits,
-        llm_default_model="muse-spark",
+        llm_role_models={"extractor": "muse-spark"},
     )
     learner = uuid4()
     await asyncio.gather(*(_generate(gw, learner, None, f"par:{i}") for i in range(6)))
