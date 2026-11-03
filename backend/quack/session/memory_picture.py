@@ -120,45 +120,129 @@ class PictureInputs:
 
 
 def _reached(level: LevelFact) -> bool:
-    raise NotImplementedError
+    return level.status in ("proven", "implied")
 
 
 def _targets(skill: SkillFact, inputs: PictureInputs) -> list[LevelFact]:
-    raise NotImplementedError
+    by_level = {level.level: level for level in skill.levels}
+    wanted = inputs.target_levels.get(skill.skill_id)
+    if wanted is None:
+        return sorted(
+            (level for level in skill.levels if level.status != "not_tested"),
+            key=lambda level: level.level,
+        )
+    return [
+        by_level.get(level, LevelFact(level=level, status="not_tested")) for level in sorted(wanted)
+    ]
 
 
 def _below_target(skill: SkillFact, inputs: PictureInputs) -> bool:
     """A prerequisite enters if a level of its target set is not reached, or nothing is known."""
-    raise NotImplementedError
+    levels = _targets(skill, inputs)
+    if not levels:
+        return True
+    return any(not _reached(level) for level in levels)
 
 
 def picture_skills(inputs: PictureInputs, settings: Settings) -> list[SkillFact]:
     """The skills of the picture in the order of importance, cut at `memory_skills_max`."""
-    raise NotImplementedError
+    by_id = {skill.skill_id: skill for skill in inputs.slice.skills}
+    chosen: dict[UUID, SkillFact] = {}
+
+    def take(skill: SkillFact | None) -> None:
+        if skill is not None and skill.skill_id in inputs.skill_names:
+            chosen.setdefault(skill.skill_id, skill)
+
+    for skill_id in inputs.focus.skill_ids:
+        take(by_id.get(skill_id))
+    topics = set(inputs.focus.topic_ids)
+    for skill in inputs.slice.skills:
+        if skill.topic_id is not None and skill.topic_id in topics:
+            take(skill)
+    goal = list(chosen.values())
+    step_one = [by_id.get(link.skill_id) for skill in goal for link in skill.requires]
+    step_two = [by_id.get(link.skill_id) for skill in step_one if skill for link in skill.requires]
+    for skill in [*step_one, *step_two]:
+        if skill is not None and _below_target(skill, inputs):
+            take(skill)
+    domain = inputs.focus.domain_id
+    for skill in inputs.slice.skills:
+        other = skill.domain_id is not None and domain is not None and skill.domain_id != domain
+        if other and any(_reached(level) for level in skill.levels):
+            take(skill)
+    return list(chosen.values())[: settings.memory_skills_max]
 
 
 def _when(at_ms: int, now_ms: int) -> str:
-    raise NotImplementedError
+    days = max(0, (now_ms - at_ms) // _DAY_MS)
+    if days == 0:
+        return "today"
+    if days == 1:
+        return "yesterday"
+    return f"{days} days ago"
 
 
 def _times(count: int) -> str:
-    raise NotImplementedError
+    return "1 time" if count == 1 else f"{count} times in all"
 
 
 def _name(skill_id: UUID, inputs: PictureInputs, labels: LabelMap) -> str:
-    raise NotImplementedError
+    name = inputs.skill_names.get(skill_id, "an unnamed skill")
+    label = labels.label("skill", skill_id)
+    return f"{name} ({label})" if label else name
 
 
 def _level_part(level: LevelFact, inputs: PictureInputs, now_ms: int) -> str:
-    raise NotImplementedError
+    name = LEVEL_NAMES[level.level]
+    if level.status == "not_tested":
+        return f"{name} — not checked."
+    if level.status == "implied":
+        return f"{name} — follows from a proven level, not checked on its own."
+    words = _STATUS_WORDS[level.status]
+    if level.basis == "transfer":
+        words += " through another domain"
+    facts: list[str] = []
+    deciding = (
+        inputs.evidence.get(level.deciding_evidence_id) if level.deciding_evidence_id else None
+    )
+    if deciding is not None:
+        fact = (
+            f"{_OUTCOME_WORDS[deciding.outcome]} {_when(deciding.occurred_at_ms, now_ms)}, "
+            f"{_SOURCE_WORDS[deciding.source]}"
+        )
+        if deciding.quote:
+            fact += f': "{deciding.quote}"'
+        facts.append(fact + " (deciding)")
+    if level.evidence_count:
+        facts.append(_times(level.evidence_count))
+    return f"{name} — {words}" + (": " + ", ".join(facts) if facts else "") + "."
 
 
 def _misconception_part(item: MisconceptionFact, inputs: PictureInputs, labels: LabelMap) -> str:
-    raise NotImplementedError
+    label = labels.label("misconception", item.misconception_id)
+    head = _MISCONCEPTION_WORDS[item.status] + (f" ({label})" if label else "")
+    text = f"{head}: {item.statement}"
+    if item.confused_with_skill_id is not None:
+        text += f"; mixes it up with {_name(item.confused_with_skill_id, inputs, labels)}"
+    count = item.manifestation_count
+    if count:
+        text += f" — {count} manifestation" + ("" if count == 1 else "s")
+    quotes = [f'"{quote}"' for quote in item.quotes[:2]]
+    if quotes:
+        text += ": " + ", ".join(quotes)
+    return text + "."
 
 
 def _retention(skill: SkillFact, settings: Settings, now_ms: int) -> str | None:
-    raise NotImplementedError
+    notes: list[str] = []
+    last_shown = max((e.occurred_at_ms for e in skill.exposures), default=None)
+    if last_shown is not None and now_ms - last_shown <= settings.hot_window_min * _MINUTE_MS:
+        notes.append("shown minutes ago, still fresh in mind")
+    if skill.due_at_ms is None:
+        notes.append("no checks after a delay yet")
+    elif skill.due_at_ms <= now_ms:
+        notes.append("due for review")
+    return "Retention: " + "; ".join(notes) + "." if notes else None
 
 
 def _skill_line(
@@ -168,11 +252,53 @@ def _skill_line(
     settings: Settings,
     now_ms: int,
 ) -> str:
-    raise NotImplementedError
+    parts = [_name(skill.skill_id, inputs, labels) + "."]
+    levels = _targets(skill, inputs)
+    parts.extend(_level_part(level, inputs, now_ms) for level in levels)
+    if not levels:
+        parts.append("Not checked yet.")
+    parts.extend(
+        _misconception_part(item, inputs, labels)
+        for item in inputs.slice.misconceptions
+        if item.skill_id == skill.skill_id
+    )
+    shown = list(dict.fromkeys(_EXPOSURE_WORDS.get(e.kind, e.kind) for e in skill.exposures))
+    if shown:
+        parts.append("Shown: " + ", ".join(shown) + ".")
+    gap = skill.gap_type
+    confidence = inputs.gap_type_confidence.get(skill.skill_id)
+    if (
+        gap is not None
+        and gap != "none"
+        and confidence is not None
+        and confidence >= settings.gap_type_min_confidence
+    ):
+        parts.append(f"Gap: {_GAP_WORDS[gap]}.")
+    if skill.consolidation_flag:
+        parts.append("Needs consolidation after a shown solution.")
+    retention = _retention(skill, settings, now_ms)
+    if retention:
+        parts.append(retention)
+    return " ".join(parts)
 
 
 def render_memory_picture(
     inputs: PictureInputs, labels: LabelMap, settings: Settings, now_ms: int
 ) -> str:
     """Slot 7 as text; `""` when nothing relevant is known."""
-    raise NotImplementedError
+    skills = picture_skills(inputs, settings)
+    lines = [_skill_line(skill, inputs, labels, settings, now_ms) for skill in skills]
+    for root in inputs.slice.root_causes:
+        if root.skill_id in inputs.skill_names:
+            count = root.hypothesis_count
+            lines.append(
+                f"Possible root of errors: {_name(root.skill_id, inputs, labels)} — "
+                f"{count} error hypothes{'is points' if count == 1 else 'es point'} to it."
+            )
+    if inputs.analyst_summary:
+        lines.append(f"Analyst summary: {inputs.analyst_summary}")
+    lines.extend(f"Ready from agents: {text}" for text in inputs.agent_results)
+    lines.extend(
+        f"Revised check of answer {item.answer_seq}: {item.text}" for item in inputs.revised_checks
+    )
+    return "\n".join(lines)

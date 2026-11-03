@@ -16,11 +16,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from quack.events.records import PlanUpdateRecord
 from quack.events.values import Level
-from quack.llm.labels import LabelMap
+from quack.llm.labels import LABEL_PREFIX, LabelMap
+from quack.session.memory_picture import LEVEL_NAMES
+from quack.session.tools import TOOLS
 
 # The slot variables of `teacher@2` in the order of Т-§10.1 (slot 1 is the prompt text), then
 # the tail and the guard feedback.
@@ -136,23 +140,49 @@ class LearnerSkill:
 def render_tools_and_elements() -> str:
     """Slot 2: the memory tools (Т-§10.4) and the element kinds (Т-§12.3); changes with a
     release only."""
-    raise NotImplementedError
+    lines = ["Memory tools:"]
+    lines.extend(f"- {tool.name}: {tool.description}" for tool in TOOLS)
+    lines.append("Interactive elements: " + ", ".join(ELEMENT_KINDS) + ".")
+    return "\n".join(lines)
 
 
 def render_profile(profile: Profile) -> str:
-    raise NotImplementedError
+    lines = [f"Preference {key}: {value}" for key, value in sorted(profile.preferences.items())]
+    lines.extend(f"Learned: {item}" for item in profile.learned)
+    if profile.manner:
+        lines.append(f"Teacher manner: {profile.manner}")
+    return "\n".join(lines)
 
 
 def _date(at_ms: int, timezone: str | None) -> str:
-    raise NotImplementedError
+    try:
+        zone = ZoneInfo(timezone) if timezone else UTC
+    except ZoneInfoNotFoundError:
+        zone = UTC
+    return datetime.fromtimestamp(at_ms / 1000, tz=zone).strftime("%Y-%m-%d %H:%M")
 
 
 def _levels(levels: Sequence[Level]) -> str:
-    raise NotImplementedError
+    return ", ".join(f"{level} {LEVEL_NAMES[level]}" for level in sorted(levels))
 
 
 def render_goals(hubs: Sequence[HubGoal], labels: LabelMap, timezone: str | None) -> str:
-    raise NotImplementedError
+    lines: list[str] = []
+    for hub in hubs:
+        label = labels.label("hub", hub.hub_id)
+        head = f'{label} "{hub.name}"' if label else f'"{hub.name}"'
+        when = (
+            f"deadline {_date(hub.deadline_at_ms, timezone)}"
+            if hub.deadline_at_ms is not None
+            else "no deadline"
+        )
+        control = _CONTROL_WORDS.get(hub.control_type, hub.control_type)
+        lines.append(f"Hub {head}: {when}, {control}.")
+        for topic in hub.topics:
+            topic_label = labels.label("topic", topic.topic_id)
+            name = f"{topic.name} ({topic_label})" if topic_label else topic.name
+            lines.append(f"- {name}: levels {_levels(topic.required_levels)}")
+    return "\n".join(lines)
 
 
 def frozen_slots(
@@ -160,28 +190,66 @@ def frozen_slots(
 ) -> FrozenSlots:
     """Slots 3 and 4 from the snapshot at the session start; what changed since — lines of
     the tail (Т-§10.1)."""
-    raise NotImplementedError
+    profile = render_profile(at_start.profile)
+    goals = render_goals(at_start.hubs, labels, timezone)
+    before = set(profile.splitlines()) | set(goals.splitlines())
+    current = [
+        *render_profile(now.profile).splitlines(),
+        *render_goals(now.hubs, labels, timezone).splitlines(),
+    ]
+    changes = [f"Changed during this session: {line}" for line in current if line not in before]
+    return FrozenSlots(profile=profile, domain_and_goals=goals, changes=changes)
 
 
 def render_session_plan(goal: SessionGoal, plan: PlanUpdateRecord | None, labels: LabelMap) -> str:
     """Slot 6 (Т-§12.5): the intent and its target, the plan document of the session."""
-    raise NotImplementedError
+    if goal.topic_id is not None:
+        target = labels.label("topic", goal.topic_id) or "a topic"
+    elif goal.hub_id is not None:
+        target = labels.label("hub", goal.hub_id) or "a hub"
+    else:
+        target = "the domain"
+    lines = [f"Goal: {_INTENT_WORDS.get(goal.intent, goal.intent)} {target}"]
+    if plan is not None:
+        if plan.completed_steps:
+            lines.append("Done: " + "; ".join(plan.completed_steps))
+        lines.append(f"Current step: {plan.current_step}")
+        if plan.next_steps:
+            lines.append("Next: " + "; ".join(plan.next_steps))
+        lines.extend(f"Branch ({branch.type}): {branch.description}" for branch in plan.branches)
+    return "\n".join(lines)
 
 
 def render_materials(chunks: Sequence[MaterialChunk], labels: LabelMap) -> str:
     """Slot 8: each chunk as a quote from the material with its source (Т-§19.8)."""
-    raise NotImplementedError
+    out: list[str] = []
+    for chunk in chunks:
+        label = labels.label("chunk", chunk.chunk_id)
+        page = f", page {chunk.page}" if chunk.page is not None else ""
+        source = f'From the material "{chunk.material_name}"{page}'
+        out.append((f"{label}. " if label else "") + source + ":")
+        out.extend(f"> {line}" for line in chunk.text.splitlines())
+    return "\n".join(out)
 
 
 def render_labels(labels: LabelMap, names: Mapping[UUID, str]) -> str:
     """Slot 9: every label of the call with what it names; never an id (Т-§4.5)."""
-    raise NotImplementedError
+    lines: list[str] = []
+    for kind in LABEL_PREFIX:
+        for label, object_id in labels.labels(kind).items():
+            name = names.get(object_id)
+            lines.append(f"{label}: {name}" if name else label)
+    return "\n".join(lines)
 
 
 def render_tail(changes: Sequence[str], skill: LearnerSkill | None) -> str:
     """The tail: changes of slots 3–4 during the session; a called learner skill — this turn
     only."""
-    raise NotImplementedError
+    lines = list(changes)
+    if skill is not None:
+        lines.append(f'The learner called the skill "/{skill.name}" for this turn:')
+        lines.append(skill.text)
+    return "\n".join(lines)
 
 
 @dataclass(frozen=True)
@@ -197,4 +265,15 @@ class TeacherSlots:
 
 def teacher_variables(slots: TeacherSlots) -> dict[str, str]:
     """The variables of `teacher@2` (WP14.1); `guard_feedback` is empty on the first draft."""
-    raise NotImplementedError
+    return {
+        "tools_and_elements": render_tools_and_elements(),
+        "profile": slots.frozen.profile,
+        "domain_and_goals": slots.frozen.domain_and_goals,
+        "conversation": slots.conversation,
+        "session_plan": slots.session_plan,
+        "memory_picture": slots.memory_picture,
+        "materials": slots.materials,
+        "labels": slots.labels,
+        "tail": render_tail(slots.frozen.changes, slots.skill),
+        "guard_feedback": "",
+    }

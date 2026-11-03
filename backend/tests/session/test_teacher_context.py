@@ -84,6 +84,7 @@ PREREQ = uuid4()  # a prerequisite of the task skill with a level not reached
 PREREQ_DONE = uuid4()  # a prerequisite with every target level proven
 OTHER_DOMAIN_SKILL = uuid4()  # proven in another domain
 NOISE = uuid4()  # another topic of the domain, no link to the goal
+OTHER_FAILED = uuid4()  # another domain, nothing proven: no transfer to offer
 DECIDING_OK = uuid4()
 DECIDING_FAIL = uuid4()
 MISCONCEPTION = uuid4()
@@ -95,6 +96,7 @@ NAMES = {
     PREREQ_DONE: "Factorials",
     OTHER_DOMAIN_SKILL: "Geometric series",
     NOISE: "Taylor series",
+    OTHER_FAILED: "Harmonic series",
 }
 
 
@@ -141,6 +143,12 @@ def _slice() -> MemorySlice:
         projected_seq=40,
         skills=[
             SkillFact(skill_id=NOISE, topic_id=OTHER_TOPIC, domain_id=DOMAIN, levels=[]),
+            SkillFact(
+                skill_id=OTHER_FAILED,
+                topic_id=uuid4(),
+                domain_id=OTHER_DOMAIN,
+                levels=[_level(3, "failed", basis="direct", evidence_count=2)],
+            ),
             SkillFact(
                 skill_id=OTHER_DOMAIN_SKILL,
                 topic_id=uuid4(),
@@ -269,6 +277,7 @@ def test_memory_picture_selection_order_and_limit() -> None:
     assert [s.skill_id for s in picture_skills(_inputs(), two)] == [TASK_SKILL, GOAL_SKILL]
     text = render_memory_picture(_inputs(), _labels(), SETTINGS, NOW_MS)
     assert "Taylor series" not in text
+    assert "Harmonic series" not in text
     assert "Factorials" not in text
     lines = text.splitlines()
     assert (
@@ -282,6 +291,35 @@ def test_memory_picture_selection_order_and_limit() -> None:
     assert (
         "Possible root of errors: Limits of sequences (S3) — 2 error hypotheses point to it."
         in lines
+    )
+
+
+def test_memory_picture_status_words() -> None:
+    """`T-CX2`: implied and transfer in words; a skill without a name is not rendered."""
+    unnamed = uuid4()
+    skill = SkillFact(
+        skill_id=TASK_SKILL,
+        topic_id=TOPIC,
+        domain_id=DOMAIN,
+        levels=[
+            _level(1, "implied"),
+            _level(3, "proven", basis="transfer", evidence_count=2),
+        ],
+        due_at_ms=NOW_MS + DAY_MS,
+    )
+    inputs = _inputs(
+        slice=MemorySlice(
+            learner_id=LEARNER,
+            projected_seq=1,
+            skills=[skill, SkillFact(skill_id=unnamed, topic_id=TOPIC, domain_id=DOMAIN)],
+        ),
+        focus=SliceFocus(skill_ids=[unnamed, TASK_SKILL], domain_id=DOMAIN),
+        target_levels={TASK_SKILL: [1, 3]},
+    )
+    assert [s.skill_id for s in picture_skills(inputs, SETTINGS)] == [TASK_SKILL]
+    assert render_memory_picture(inputs, _labels(), SETTINGS, NOW_MS) == (
+        "D'Alembert test (S1). Recognizes — follows from a proven level, not checked on its "
+        "own. Applies — proven through another domain: 2 times in all."
     )
 
 
@@ -430,13 +468,13 @@ def _session(turns: int, task: UUID) -> _Log:
                     verification="code",
                 ),
             )
-        elif n == 3:
+        elif n in (3, 20):
             action = log.add(
                 "canvas.line_committed",
                 CanvasLineCommitted(
                     canvas_id=SESSION,
-                    line_id="l-a",
-                    text="a_n = n!/n^n",
+                    line_id="l-a" if n == 3 else "l-b",
+                    text="a_n = n!/n^n" if n == 3 else "ratio = 1/e",
                     kind="text",
                     bbox=(0.0, 0.0, 1.0, 1.0),
                     stroke_ids=[],
@@ -490,6 +528,8 @@ def test_conversation_collapse() -> None:
     assert lines[12] == "Turn 13"
     assert "Learner: question 13" in lines and "Teacher: answer 13" in lines
     assert "question 12" not in text  # folded turns are not verbatim
+    # Canvas lines keep their session numbers: line 1 is in a folded turn.
+    assert "Canvas line 2: ratio = 1/e" in lines
     assert lines[-2:] == ["Current action", "Learner: and now?"]
 
     # The folded part stays the same until the next batch of 12 (prefix cache, Т-§10.1).
