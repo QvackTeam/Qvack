@@ -188,6 +188,7 @@ EXPECTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         # ТЗ Ф4 WP21.1 (stream C)
         ("POST", "/v1/sessions/{session_id}/canvases"),
         ("GET", "/v1/canvases/{canvas_id}"),
+        ("POST", "/v1/canvases/{canvas_id}/lines/{line_id}/correct"),
         ("GET", "/v1/domains/{domain_id}/canvases"),
         # ТЗ Ф4 WP22.1
         ("POST", "/v1/canvases/{canvas_id}/pairing"),
