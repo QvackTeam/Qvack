@@ -31,6 +31,7 @@ JOB_KINDS: tuple[str, ...] = (
     "graph.curate",
     "session.sweep_inactive",
     "account.purge_deleted",
+    "agent.viz",
     "photo.pipeline",
 )
 
@@ -44,6 +45,7 @@ KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
     "graph.curate": ("curator",),
     "session.sweep_inactive": (),
     "account.purge_deleted": (),
+    "agent.viz": ("viz_builder", "viz_checker"),
     "photo.pipeline": ("recognizer", "segmenter"),
 }
 
