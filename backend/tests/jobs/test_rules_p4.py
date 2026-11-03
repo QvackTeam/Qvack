@@ -400,3 +400,25 @@ def test_dispatcher_column_of_the_catalog_is_covered_by_rows_or_episodes() -> No
     # [ПРОВЕРИТЬ]); skill.merged, material.parsed — a mark without a row in Т-§13.3 / WP7.1
     # (D-A-162, question to the owner).
     assert unhandled == {"skill.created", "topic.proposed", "skill.merged", "material.parsed"}
+
+
+def test_cheatsheet_consent_is_the_job_of_its_hub() -> None:
+    """Т-§17.7 «генерация — после согласия» (D-A-199, #207): `agent.requested {kind: artifact,
+    params: {artifact: cheatsheet, hub_id}}` puts `artifact.cheatsheet` of the hub with the
+    request; without a hub — nothing; other artifacts stay `agent.artifact`."""
+    hub = uid("hub")
+    params = {"artifact": "cheatsheet", "hub_id": hub}
+    plan = _one(
+        _event("agent.requested",
+               payload={"kind": "artifact", "params": params, "needed_in_session": False})
+    )  # fmt: skip
+    assert (plan.kind, plan.lock_key, plan.coalesce_key) == (
+        "artifact.cheatsheet",
+        f"artifact:{hub}",
+        f"artifact:{hub}",
+    )
+    assert plan.payload["hub_id"] == hub and "request_id" in plan.payload
+    no_hub = {"kind": "artifact", "params": {"artifact": "cheatsheet"}, "needed_in_session": False}
+    assert r.plan_jobs(_event("agent.requested", payload=no_hub), SETTINGS) == []
+    notes = {"kind": "artifact", "params": {"artifact": "notes"}, "needed_in_session": False}
+    assert _one(_event("agent.requested", payload=notes)).kind == "agent.artifact"
