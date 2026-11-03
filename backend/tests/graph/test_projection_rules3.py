@@ -25,6 +25,7 @@ from quack.graph.projection.phase_a import apply_events
 from quack.graph.projection.types import NodeRecord, Props, RelKey, RelRecord, SubGraph
 from quack.graph.projection.view import BatchSlice, Need, OutsideSliceError
 from quack.graph.projector_rows import ROWS
+from tests.events.samples import sample_payload
 
 LEARNER = UUID(int=0xA0)
 L = str(LEARNER)
@@ -153,9 +154,15 @@ def test_domain_created_makes_the_domain_and_its_whole_domain_hub() -> None:
     hub = deterministic_id(LEARNER, 1, 0)
     assert nodes[("Domain", DOMAIN)] == _DOMAIN.props
     assert nodes[("Hub", hub)] == {
-        "learnerId": L, "domainId": DOMAIN, "name": "Algebra", "kind": "domain_all",
-        "origin": "learner", "controlType": "no_goal", "deadlineAtMs": 0, "status": "active",
-    }  # fmt: skip
+        "learnerId": L,
+        "domainId": DOMAIN,
+        "name": "Algebra",
+        "kind": "domain_all",
+        "origin": "learner",
+        "controlType": "no_goal",
+        "deadlineAtMs": 0,
+        "status": "active",
+    }
     assert ("Learner", L, "OWNS", "Domain", DOMAIN) in rels
     assert ("Domain", DOMAIN, "HAS_HUB", "Hub", hub) in rels
     assert not any(key[2] == "INCLUDES" for key in rels)
@@ -369,9 +376,13 @@ def test_material_uploaded_parsed_and_chunk_indexed() -> None:
     )
     assert nodes[("Material", MATERIAL)] == _MATERIAL.props | {"pagesCount": 12}
     assert nodes[("Chunk", CHUNK)] == {
-        "learnerId": L, "domainId": DOMAIN, "page": 4, "text": "a/b + c/d",
-        "notation": ["a/b"], "searchable": True,
-    }  # fmt: skip
+        "learnerId": L,
+        "domainId": DOMAIN,
+        "page": 4,
+        "text": "a/b + c/d",
+        "notation": ["a/b"],
+        "searchable": True,
+    }
     assert ("Material", MATERIAL, "HAS_CHUNK", "Chunk", CHUNK) in rels
     assert ("Chunk", CHUNK, "TEACHES", "Skill", SKILL) in rels
     assert ("Chunk", CHUNK, "USES", "Skill", SKILL) in rels  # through the alias
@@ -684,17 +695,25 @@ def test_task_created_with_markup_options_and_new_skills() -> None:
     hypothesis = deterministic_id(LEARNER, seq, "misconception:C")
     options = {o: deterministic_id(LEARNER, seq, f"option:{o}") for o in "ABC"}
     assert nodes[("Task", TASK)] == {
-        "learnerId": L, "domainId": DOMAIN, "familyId": FAMILY, "source": "teacher",
-        "verification": "unchecked", "methodNamed": False,
-    }  # fmt: skip
+        "learnerId": L,
+        "domainId": DOMAIN,
+        "familyId": FAMILY,
+        "source": "teacher",
+        "verification": "unchecked",
+        "methodNamed": False,
+    }
     provisional = {"learnerId": L, "domainId": DOMAIN, "summary": "", "status": "provisional",
                    "origin": "session"}  # fmt: skip
     assert nodes[("Skill", cross)] == provisional | {"name": "Cross multiply"}
     assert nodes[("Skill", lowest)] == provisional | {"name": "Lowest terms"}
     assert nodes[("Topic", simplification)] == {
-        "learnerId": L, "domainId": DOMAIN, "name": "Simplification", "origin": "session",
-        "status": "proposed", "knownClaimedAtMs": 0,
-    }  # fmt: skip
+        "learnerId": L,
+        "domainId": DOMAIN,
+        "name": "Simplification",
+        "origin": "session",
+        "status": "proposed",
+        "knownClaimedAtMs": 0,
+    }
     tests = {(k[4], k[5], k[6]) for k in rels if k[2] == "TESTS"}
     assert tests == {(SKILL, 3, "main"), (SKILL, 4, "main"), (cross, 2, "main"),
                      (cross, 3, "main"), (lowest, 1, "main"), (SKILL_B, 2, "b")}  # fmt: skip
@@ -709,9 +728,14 @@ def test_task_created_with_markup_options_and_new_skills() -> None:
     assert all(("Task", TASK, "HAS_OPTION", "Option", options[o]) in rels for o in "ABC")
     assert ("Option", options["B"], "TRAPS", "Misconception", MISCONCEPTION) in rels
     assert nodes[("Misconception", hypothesis)] == {
-        "learnerId": L, "domainId": DOMAIN, "statement": "multiplies the denominators",
-        "status": "unknown", "triggers": [], "targetedInSessionId": "", "searchable": True,
-    }  # fmt: skip
+        "learnerId": L,
+        "domainId": DOMAIN,
+        "statement": "multiplies the denominators",
+        "status": "unknown",
+        "triggers": [],
+        "targetedInSessionId": "",
+        "searchable": True,
+    }
     assert ("Option", options["C"], "TRAPS", "Misconception", hypothesis) in rels
     assert ("Misconception", hypothesis, "ABOUT", "Skill", SKILL) in rels  # first tested skill
 
@@ -807,12 +831,14 @@ def _verdict_graph(task: NodeRecord = _TASK) -> tuple[list[NodeRecord], list[Rel
     option_b = NodeRecord("Option", OPTION_B, {"learnerId": L, "label": "B", "isCorrect": False})
     nodes = [_DOMAIN, _SKILL, _SKILL_B, task, _TRAP_MISCONCEPTION, option_a, option_b]
     rels = [
-        _tests_rel(SKILL, 3), _tests_rel(SKILL, 4), _tests_rel(SKILL_B, 2, "b"),
+        _tests_rel(SKILL, 3),
+        _tests_rel(SKILL, 4),
+        _tests_rel(SKILL_B, 2, "b"),
         _rel(("Task", TASK), "HAS_OPTION", ("Option", OPTION_A)),
         _rel(("Task", TASK), "HAS_OPTION", ("Option", OPTION_B)),
         _rel(("Option", OPTION_B), "TRAPS", ("Misconception", MISCONCEPTION)),
         _rel(("Misconception", MISCONCEPTION), "ABOUT", ("Skill", SKILL)),
-    ]  # fmt: skip
+    ]
     return nodes, rels
 
 
@@ -832,7 +858,8 @@ def _evidence_props(**changes: Any) -> Props:
         "weight": 0.0, "verification": "code", "delayed": False, "solveTimeMs": 0,
         "gapType": "unknown", "quote": "", "sourceSessionId": str(SESSION),
         "sessionDomainId": DOMAIN, "sourceSeq": ANSWER_SEQ, "derivedKind": "direct",
-        "status": "active", "observationSeq": 0, "extractor": "", "searchable": False,
+        "status": "active", "observationSeq": 0, "extractor": "", "episodeSeq": 0,
+        "searchable": False,
     } | changes  # fmt: skip
 
 
@@ -986,9 +1013,159 @@ def test_model_verdict_hypothesis_is_a_manifestation_of_a_new_misconception() ->
     nodes, rels = _run([_answer(), verdict], *_verdict_graph())
     new = deterministic_id(LEARNER, VERDICT_SEQ, "misconception")
     assert nodes[("Misconception", new)] == {
-        "learnerId": L, "domainId": DOMAIN, "statement": "adds the denominators",
-        "status": "unknown", "triggers": [], "targetedInSessionId": "", "searchable": True,
-    }  # fmt: skip
+        "learnerId": L,
+        "domainId": DOMAIN,
+        "statement": "adds the denominators",
+        "status": "unknown",
+        "triggers": [],
+        "targetedInSessionId": "",
+        "searchable": True,
+    }
     assert ("Misconception", new, "ABOUT", "Skill", SKILL) in rels
     assert ("Evidence", _ev(0), "MANIFESTS", "Misconception", new) in rels
     assert nodes[("Evidence", _ev(0))]["tier"] == 2
+
+
+# --- the teacher's turn, closed tasks, observations (T-P4, group 6; Т-§7.8, Т-§9.1, Т-§8.4) ---
+
+OBS_SEQ = 80
+
+
+def _turn(seq: int = 76) -> StoredEvent:
+    body = sample_payload("turn.committed")
+    markup = body["markup"]
+    markup["exposures"] = [{"skill_id": SKILL, "kind": "explained", "approach": "example_first"},
+                           {"skill_id": str(UUID(int=0x99)), "kind": "example",
+                            "approach": "example_first"}]  # fmt: skip
+    markup["targets_misconception_id"] = MISCONCEPTION
+    markup["tasks"][0]["task_id"] = TASK
+    return _event(seq, "turn.committed", body, domain_id=UUID(DOMAIN), session_id=SESSION)
+
+
+def test_turn_committed_exposures_and_targeting() -> None:
+    """Т-§7.8 п.6, Т-§9.1: exposures of the markup — `Exposure` nodes `OF` their skill (a skill
+    that is gone — no exposure); targeting — the session on the misconception and the target on
+    the tasks of the turn (for `RESISTED`, D-A-134 п.4)."""
+    nodes, rels = _run([_turn()], *_verdict_graph())
+    exposure = deterministic_id(LEARNER, 76, "exposure:0")
+    assert nodes[("Exposure", exposure)] == {
+        "learnerId": L,
+        "atMs": AT_MS,
+        "kind": "explained",
+        "approach": "example_first",
+        "sourceSeq": 76,
+        "sessionDomainId": DOMAIN,
+    }
+    assert ("Exposure", exposure, "OF", "Skill", SKILL) in rels
+    assert ("Exposure", deterministic_id(LEARNER, 76, "exposure:1")) not in nodes
+    assert nodes[("Misconception", MISCONCEPTION)]["targetedInSessionId"] == str(SESSION)
+    assert nodes[("Task", TASK)]["targetsMisconceptionId"] == MISCONCEPTION
+
+
+def test_task_closed_records_how_for_the_consolidation_fold() -> None:
+    """Т-§8.4: a solution shown on request — consolidation, through the fold (WP4.5)."""
+    closed = _event(77, "task.closed", {"task_id": TASK, "how": "solution_shown"})
+    nodes, _ = _run([closed], *_verdict_graph())
+    assert nodes[("Task", TASK)] == _TASK.props | {"closedHow": "solution_shown",
+                                                   "closedAtMs": AT_MS}  # fmt: skip
+
+
+def _observation(seq: int = OBS_SEQ, extractor: str = "extractor@3", **element: Any) -> StoredEvent:
+    body = sample_payload("observation.extracted")
+    body["extractor"] = extractor
+    body["elements"] = [body["elements"][0] | {
+        "skill_id": SKILL, "outcome": "incorrect", "help": "hint", "hint_step": 2,
+        "gap_type": "execution", "quote": "a/b", "events": [5, 7], "at_ms": 1000,
+        "root_cause": {"skill_id": SKILL_B, "confidence": "high"},
+    } | element]  # fmt: skip
+    return _event(seq, "observation.extracted", body, domain_id=UUID(DOMAIN), session_id=SESSION)
+
+
+def test_observation_extracted_gives_t3_evidence_and_supersedes_the_earlier_one() -> None:
+    """Т-§7.8 п.4, Т-§2.8, Т-§9.4: elements — T3 evidence with the quote, help and time of the
+    source events; the earlier observation's evidence of the episode — `superseded`; a root
+    cause — `ROOT_CAUSE {confidence}` by `root_cause_confidence_map`."""
+    earlier = NodeRecord("Evidence", _ev(0, 60), _evidence_props(observationSeq=60, episodeSeq=9,
+                                                                 tier=3))  # fmt: skip
+    nodes, rels = _run([_observation()], [*_verdict_graph()[0], earlier], _verdict_graph()[1])
+    evidence = nodes[("Evidence", _ev(0, OBS_SEQ))]
+    assert evidence == _evidence_props(
+        outcome="incorrect",
+        assistance="hint",
+        hintStep=2,
+        gapType="execution",
+        quote="a/b",
+        atMs=1000,
+        sourceSeq=7,
+        tier=3,
+        verification="model",
+        observationSeq=OBS_SEQ,
+        extractor="extractor@3",
+        episodeSeq=9,
+        searchable=True,
+    )
+    assert ("Evidence", _ev(0, OBS_SEQ), "ON", "Skill", SKILL) in rels
+    assert rels[("Evidence", _ev(0, OBS_SEQ), "ROOT_CAUSE", "Skill", SKILL_B)] == {
+        "confidence": 0.9
+    }
+    assert nodes[("Evidence", _ev(0, 60))]["status"] == "superseded"
+
+
+def test_observation_of_another_extractor_or_unclear_skill_changes_nothing() -> None:
+    """`extractor_precedence = ["extractor@3"]` (WP3.6); «неясно» — no evidence (`Т-§7.6`)."""
+    graph = _verdict_graph()
+    assert _run([_observation(extractor="extractor@2")], *graph) == _run([], *graph)
+    unclear = _observation(skill_id=None, skill_unclear=True)
+    assert _run([unclear], *graph) == _run([], *graph)
+
+
+def test_extracted_hypothesis_is_a_manifestation() -> None:
+    hypothesis = _observation(kind="misconception_hypothesis", level=None, outcome=None,
+                              help="none", hint_step=None, gap_type="misconception",
+                              new_misconception="adds denominators", root_cause=None)  # fmt: skip
+    nodes, rels = _run([hypothesis], *_verdict_graph())
+    new = deterministic_id(LEARNER, OBS_SEQ, "misconception:0")
+    assert nodes[("Misconception", new)]["status"] == "unknown"
+    assert ("Evidence", _ev(0, OBS_SEQ), "MANIFESTS", "Misconception", new) in rels
+    assert nodes[("Evidence", _ev(0, OBS_SEQ))]["level"] == 0
+
+
+def _diagnosed(**diagnosis: Any) -> StoredEvent:
+    body = sample_payload("observation.diagnosed") | {"task_id": TASK}
+    base: dict[str, Any] = dict(body["diagnosis"])
+    body["diagnosis"] = base | diagnosis
+    return _event(81, "observation.diagnosed", body, domain_id=UUID(DOMAIN), session_id=SESSION)
+
+
+def test_canvas_diagnosis_is_level_0_evidence() -> None:
+    """D-A-125 п.2: level 0, incorrect, T3 — on the skill of the named misconception, else on
+    the skills the task tests; `MANIFESTS`; `ROOT_CAUSE` with the diagnosis confidence."""
+    nodes, rels = _run([_diagnosed(misconception_id=MISCONCEPTION, root_cause_skill_id=SKILL_B)],
+                       *_verdict_graph())  # fmt: skip
+    first = _ev(0, 81)
+    assert nodes[("Evidence", first)] == _evidence_props(
+        level=0,
+        tier=3,
+        verification="model",
+        gapType="execution",
+        sourceSeq=81,
+        observationSeq=81,
+    )
+    assert {k for k in rels if k[0] == "Evidence"} == {
+        ("Evidence", first, "ON", "Skill", SKILL),
+        ("Evidence", first, "ON_TASK", "Task", TASK),
+        ("Evidence", first, "MANIFESTS", "Misconception", MISCONCEPTION),
+        ("Evidence", first, "ROOT_CAUSE", "Skill", SKILL_B),
+    }
+    nodes, _ = _run([_diagnosed()], *_verdict_graph())
+    levels = [nodes[("Evidence", _ev(n, 81))]["level"] for n in (0, 1)]
+    assert levels == [0, 0] and ("Evidence", _ev(2, 81)) not in nodes  # SKILL and SKILL_B
+
+
+def test_second_opinion_raises_an_agreed_diagnosis_to_t2() -> None:
+    """D-A-125 п.3 (Т-§7.7): agreed — T3 -> T2; disagreed — stays T3."""
+    diagnosis = _diagnosed(misconception_id=MISCONCEPTION)
+    for agreed, tier in ((True, 2), (False, 3)):
+        opinion = _event(82, "observation.second_opinion", {"target_seq": 81, "agreed": agreed})
+        nodes, _ = _run([diagnosis, opinion], *_verdict_graph())
+        assert nodes[("Evidence", _ev(0, 81))]["tier"] == tier
