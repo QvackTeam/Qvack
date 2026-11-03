@@ -350,7 +350,7 @@ class LLMGateway:
         if (concept is None) == (box is None):
             raise ValueError("segment: exactly one of concept and box")
         provider = self._media_provider()
-        model = self._media_model("segmenter")
+        model = self.settings.model_for_role("segmenter")
 
         def build(timeout: float) -> SegmentRequest:
             return SegmentRequest(
@@ -381,7 +381,7 @@ class LLMGateway:
         """Role `voice` (`muse-voice-transcribe-1.0`): the transcript of a WAV (mono, 16-bit
         PCM, 16 or 24 kHz, up to 10 min and 32 MB); the caller converts the browser audio."""
         provider = self._media_provider()
-        model = self._media_model("voice")
+        model = self.settings.model_for_role("voice")
         response, usage = await self._media_call(
             "voice",
             learner_id,
@@ -410,7 +410,7 @@ class LLMGateway:
         """Role `illustrator` (`muse-image-1.0`): a conceptual illustration, not mathematics
         (П-4.5); bytes of the image or a reference."""
         provider = self._media_provider()
-        model = self._media_model("illustrator")
+        model = self.settings.model_for_role("illustrator")
         response, usage = await self._media_call(
             "illustrator",
             learner_id,
@@ -420,12 +420,6 @@ class LLMGateway:
         )
         value = Illustration(image=response.image, url=response.url, mime=response.mime)
         return LLMResult(value, False, _media_hash("illustrator"), response.model, usage)
-
-    def _media_model(self, role: str) -> str:
-        """The model of a non-text role: an explicit `llm_role_models` entry, else the row of
-        `llm_roles` (Т-§11.1): `model_for_role` falls back to the default text model, which is
-        wrong for these three."""
-        return self.settings.llm_role_models.get(role) or self.settings.llm_roles[role].model
 
     def _media_provider(self) -> MediaProvider:
         if not all(hasattr(self.provider, n) for n in ("segment", "transcribe", "illustrate")):
@@ -443,7 +437,7 @@ class LLMGateway:
         """The path of a non-text call: budgets, slot of the model, attempts (retries, 429 with
         the pressure flag, 400 without retry, breaker), one ledger row per attempt. There is no
         prompt, no outbox and no schema repair: a repeated call is a repeated charge."""
-        model = self._media_model(role)
+        model = self.settings.model_for_role(role)
         timeout = self.settings.llm_role_timeout_s.get(role, self.settings.llm_timeout_sec)
         exempt = role in self.settings.session_budget_exempt_roles
         await self._check_budgets(learner_id, None if exempt else session_id)

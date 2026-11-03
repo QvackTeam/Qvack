@@ -695,11 +695,17 @@ class Settings(BaseSettings):
         return self.meta_api_base_url
 
     def model_for_role(self, role: str, *, hard: bool = False) -> str:
-        """`hard` — a hard call of a role with `hard_model` (Т-§11.1, D-B-166)."""
+        """An explicit `llm_role_models` entry, else the role row of `llm_roles` (Т-§11.1,
+        D-B-188), else the default model; `hard` — a hard call of a role with `hard_model`
+        (D-B-166)."""
         hard_model = self.llm_roles[role].hard_model if role in self.llm_roles else None
         if hard and hard_model is not None:
             return hard_model
-        return self.llm_role_models.get(role, self.llm_default_model)
+        if role in self.llm_role_models:
+            return self.llm_role_models[role]
+        if role in self.llm_roles:
+            return self.llm_roles[role].model
+        return self.llm_default_model
 
     def secret_values(self) -> list[str]:
         """Values the logger must mask (Д-§7)."""

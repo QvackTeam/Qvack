@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-B-188. `model_for_role` читает строку `llm_roles` (WP10.1 п.1)
+- Класс: A (исправление ошибки)
+- WP / место: WP10.1 п.1; `quack/config.py::Settings.model_for_role`, `quack/llm/gateway.py`
+- Контекст: метод брал `llm_role_models` или `llm_default_model` (Spark) и не читал таблицу ролей D-B-101: `verdict_proof`, `second_opinion`, `analyst_deep`, `task_arbiter`, `viz_builder`, `release_judge` шли на Spark вместо Wonder, нетекстовые роли — тоже на Spark
+- Решение: порядок — явная запись `llm_role_models` (переопределение окружения) → модель строки `llm_roles` → `llm_default_model`; `hard_model` как прежде. Обходной `_media_model` D-B-187 снят
+- Почему: Т-§11.1 (модель роли — по таблице), ТЗ Ф4 WP10.1 п.1 «ровно таблицы»
+- Обратимость: одна функция
+- Тесты: `tests/test_settings_meta_api.py::test_default_models_are_the_live_ids`
+- Требует подтверждения владельцем: нет
+
 ### D-B-187. Адаптеры нетекстовых ролей шлюза: `segmenter`, `voice`, `illustrator` (WP10.1)
 - Класс: B
 - WP / место: WP10.1 третий пункт; `quack/llm/media.py`, `gateway.py` (`segment`, `transcribe`, `illustrate`), `responses_client.py`, `provider.py`; `tests/llm/test_phase4_media_roles.py`

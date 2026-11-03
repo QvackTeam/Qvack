@@ -25,6 +25,10 @@ def test_default_models_are_the_live_ids() -> None:
     s = _settings()
     assert s.model_for_role("teacher") == "muse-wonder-1.0"
     assert s.model_for_role("teacher_fallback") == "muse-spark-1.3"
+    # D-B-188: the row of `llm_roles` (Т-§11.1) wins over the default text model.
+    for role in ("verdict_proof", "second_opinion", "analyst_deep", "task_arbiter"):
+        assert s.model_for_role(role) == "muse-wonder-1.0"
+    assert s.model_for_role("segmenter") == "sam-3.1"
     for role in ("extractor", "evaluator", "diagnostic", "task_gen", "structurer", "curator"):
         assert s.model_for_role(role) == "muse-spark-1.3"
     # The model limits of WP5 are keyed by the same IDs.
