@@ -1131,9 +1131,10 @@ def test_extracted_hypothesis_is_a_manifestation() -> None:
 
 
 def _diagnosed(**diagnosis: Any) -> StoredEvent:
-    body = sample_payload("observation.diagnosed") | {"task_id": TASK}
-    base: dict[str, Any] = dict(body["diagnosis"])
-    body["diagnosis"] = base | diagnosis
+    raw = sample_payload("observation.diagnosed")
+    base = raw["diagnosis"]
+    assert isinstance(base, dict)
+    body = raw | {"task_id": TASK, "diagnosis": {**base, **diagnosis}}
     return _event(81, "observation.diagnosed", body, domain_id=UUID(DOMAIN), session_id=SESSION)
 
 
