@@ -196,6 +196,25 @@ async def test_idle_episode_is_closed_by_the_periodic_check(jobs_db: Db) -> None
     assert len(await jobs_of(jobs_db, learner, "extract.episode")) == 1
 
 
+async def test_idle_check_survives_a_failing_learner(jobs_db: Db) -> None:
+    """Law 7: the idle check of one learner failing does not leave the others open."""
+    bad, good = await create_learner(jobs_db), await create_learner(jobs_db)
+    for learner in (bad, good):
+        await Log(jobs_db, learner).put("message.sent", at=0)
+        await drain(dispatcher(jobs_db), learner)
+
+    class Flaky(DispatcherP4):
+        async def _close_idle_of(self, learner_id: UUID, now: datetime) -> int:
+            if learner_id == bad:
+                raise RuntimeError("boom")
+            return await super()._close_idle_of(learner_id, now)
+
+    d = Flaky(SETTINGS, jobs_db, clock=lambda: T0 + timedelta(hours=1))
+    assert await d.close_idle_episodes() == 1
+    assert await events_of(jobs_db, bad, "episode.closed") == []
+    assert len(await events_of(jobs_db, good, "episode.closed")) == 1
+
+
 async def test_idle_check_waits_for_unread_events(jobs_db: Db) -> None:
     """Events the dispatcher has not read may belong to the episode: it is not closed yet."""
     learner = await create_learner(jobs_db)

@@ -77,6 +77,30 @@ async def test_cancel_requested_is_seen_at_the_pulse_and_stops_the_task(jobs_db:
     assert await _status(jobs_db) == "cancelled"
 
 
+async def test_a_failed_pulse_does_not_orphan_the_handler(
+    jobs_db: Db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Law 7/9: the database failing at one pulse is logged; the handler goes on and the job
+    ends `succeeded`."""
+    learner = await create_learner(jobs_db)
+    job = await _put(jobs_db, learner)
+    real, calls = q.heartbeat, []
+
+    async def flaky(db: Db, claimed: q.ClaimedJob) -> q.JobStatus | None:
+        calls.append(1)
+        if len(calls) == 1:
+            raise ConnectionError("database blip")
+        return await real(db, claimed)
+
+    monkeypatch.setattr(q, "heartbeat", flaky)
+
+    async def work() -> None:
+        await asyncio.sleep(2.5)  # three pulses of 1 s
+
+    assert await run_claimed(jobs_db, SETTINGS, job, work) == "succeeded"
+    assert len(calls) >= 2 and await _status(jobs_db) == "succeeded"
+
+
 async def test_a_job_the_cleaner_took_away_stops_without_writing(jobs_db: Db) -> None:
     learner = await create_learner(jobs_db)
     job = await _put(jobs_db, learner)

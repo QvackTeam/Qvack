@@ -266,7 +266,14 @@ class DispatcherP4:
         rows = await self.db.fetch_all(_IDLE_LEARNERS, {"cutoff": cutoff})
         closed_total = 0
         for row in rows:
-            closed_total += await self._close_idle_of(row["learner_id"], now)
+            try:
+                closed_total += await self._close_idle_of(row["learner_id"], now)
+            except Exception as exc:  # law 7: one learner's failure does not stop the others
+                log.error(
+                    "dispatcher_idle_learner_failed",
+                    learner_id=str(row["learner_id"]),
+                    error=repr(exc),
+                )
         return closed_total
 
     async def _close_idle_of(self, learner_id: UUID, now: datetime) -> int:

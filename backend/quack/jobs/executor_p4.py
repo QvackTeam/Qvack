@@ -49,7 +49,15 @@ async def run_claimed(
             done, _ = await asyncio.wait({task}, timeout=interval)
             if done:
                 break
-            status = await q.heartbeat(db, job)
+            try:
+                status = await q.heartbeat(db, job)
+            except Exception as exc:
+                # Law 7/9: a blip of the database at the pulse does not orphan the handler; the
+                # next pulse tries again, and if the database stays away the cleaner decides.
+                log.warning(
+                    "job_heartbeat_failed", kind=job.kind, job_key=job.job_key, error=repr(exc)
+                )
+                continue
             if status is None:
                 await _stop(task)
                 log.warning("job_lost", kind=job.kind, job_key=job.job_key)
