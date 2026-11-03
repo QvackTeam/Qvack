@@ -15,6 +15,7 @@ repeated `batch_no` and `stroke_id` and order chunks by their key (the ULID), no
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -23,6 +24,7 @@ from uuid import UUID
 import msgpack
 import zstandard
 
+from quack.config import Settings
 from quack.storage.keys import canvas_chunk_key
 from quack.storage.objects import ObjectStore, StorageUnavailable
 
@@ -131,6 +133,13 @@ def _points(raw: list[list[float | int]]) -> tuple[Point, ...]:
     return tuple(points)
 
 
+def chunk_max_batches(settings: Settings) -> int:
+    """Т-§15.2 «или при переполнении» (D-C-122): a chunk holds the batches the client sends in
+    `stroke_chunk_seconds` every `stroke_batch_ms`; more pending is an overflow. No new number:
+    the bound comes from the two parameters of Т-§15.2."""
+    return math.ceil(settings.stroke_chunk_seconds * 1000 / settings.stroke_batch_ms)
+
+
 class StrokeJournal:
     """Pending batches of one canvas in one API process."""
 
@@ -141,30 +150,52 @@ class StrokeJournal:
         learner_id: UUID,
         session_id: UUID,
         chunk_seconds: int,
+        max_batches: int,
     ) -> None:
         self._storage = storage
         self._learner_id = learner_id
         self._session_id = session_id
         self._chunk_seconds = chunk_seconds
+        self._max_batches = max_batches
         self._state = _JournalState()
 
     def add(self, batch: StrokeBatch, *, now: datetime) -> bool:
-        """Keep a batch until its chunk is written; `False` for a `batch_no` seen before."""
+        """Keep a batch until its chunk is written; `False` for a `batch_no` seen before. Any
+        batch, a repeat too, lets a chunk that failed to write be tried again."""
         state = self._state
+        state.store_failed = False
         if batch.batch_no in state.seen:
             return False
         state.seen.add(batch.batch_no)
         state.pending.append((batch, now))
         return True
 
+    def written(self, batch_no: int) -> bool:
+        """The batch is in a written chunk: a repeat of it is acknowledged again (the first
+        `ack` may have been lost on the way to the client)."""
+        return batch_no in self._state.written
+
+    def due_in(self, *, now: datetime) -> float | None:
+        """Seconds until the oldest pending batch is due for a chunk; `None` with none pending
+        or after a failed write, until the client repeats a batch (Т-§20.7)."""
+        state = self._state
+        if not state.pending or state.store_failed:
+            return None
+        if len(state.pending) >= self._max_batches:
+            return 0.0  # overflow: write now
+        due_at = state.pending[0][1] + timedelta(seconds=self._chunk_seconds)
+        return max(0.0, (due_at - now).total_seconds())
+
     async def flush_due(self, *, now: datetime) -> list[int]:
-        """Write a chunk if the oldest pending batch waited `chunk_seconds`; the acknowledged
-        batch numbers (empty when nothing was due or the store is down)."""
+        """Write a chunk if the oldest pending batch waited `chunk_seconds` or `max_batches` are
+        pending; the acknowledged batch numbers (empty when nothing was due or the store is
+        down)."""
         state = self._state
         if not state.pending:
             return []
         oldest_at = state.pending[0][1]
-        if now - oldest_at < timedelta(seconds=self._chunk_seconds):
+        overflow = len(state.pending) >= self._max_batches
+        if not overflow and now - oldest_at < timedelta(seconds=self._chunk_seconds):
             return []
         return await self.flush()
 
@@ -178,16 +209,21 @@ class StrokeJournal:
         try:
             await self._storage.put(key, encode_chunk(batches), CHUNK_CONTENT_TYPE)
         except StorageUnavailable:
+            state.store_failed = True
             return []  # no ack: the batches stay pending, the client repeats (Т-§20.7)
         state.next_chunk += 1
         # Batches added while the chunk was being written stay pending with their own time.
         state.pending = state.pending[len(batches) :]
-        return [batch.batch_no for batch in batches]
+        acknowledged = [batch.batch_no for batch in batches]
+        state.written.update(acknowledged)
+        return acknowledged
 
 
 @dataclass
 class _JournalState:
     seen: set[int] = field(default_factory=set[int])
+    written: set[int] = field(default_factory=set[int])
+    store_failed: bool = False
     # Pending batches with the time each was added, oldest first.
     pending: list[tuple[StrokeBatch, datetime]] = field(
         default_factory=list[tuple[StrokeBatch, datetime]]

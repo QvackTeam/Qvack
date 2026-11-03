@@ -14,7 +14,7 @@ from quack.config import Settings
 from quack.db.postgres import SessionFactory
 from quack.db.redis import presence_key
 from tests.session.fixtures import SeededDomain
-from tests.session.helpers import make_token
+from tests.support.auth import learner_headers
 
 pytest_plugins = ["tests.session.fixtures"]
 
@@ -260,7 +260,7 @@ async def test_foreign_or_unknown_session_is_not_found(
     session_id = resp.json()["session_id"]
 
     stranger = uuid4()
-    stranger_headers = {"Authorization": f"Bearer {make_token(settings, stranger)}"}
+    stranger_headers = learner_headers(stranger)
     for headers, sid in ((stranger_headers, session_id), (auth_headers, str(uuid4()))):
         got = await client.get(f"/v1/sessions/{sid}", headers=headers)
         assert got.status_code == 404, got.text
@@ -316,7 +316,7 @@ async def test_session_list_is_newest_first_per_learner_and_domain(
     )
     assert other.json() == {"sessions": []}
 
-    stranger = {"Authorization": f"Bearer {make_token(settings, uuid4())}"}
+    stranger = learner_headers(uuid4())
     assert (await client.get("/v1/sessions", headers=stranger)).json() == {"sessions": []}
 
     for bad in (0, settings.session_list_max_limit + 1):

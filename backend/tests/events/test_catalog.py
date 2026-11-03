@@ -236,3 +236,15 @@ def test_frozen_kinds_accept_their_values() -> None:
     assert validate_payload("artifact.updated", {**sheet, "hub_id": hub})
     typed = {**sample_payload("canvas.line_committed"), "kind": "text"}
     assert validate_payload("canvas.line_committed", typed)
+
+
+def test_session_started_marks_a_resumed_session() -> None:
+    """ТЗ Ф4 WP13.10 (D-A-121): an action in a session closed by the inactivity sweeper writes
+    `session.started {session_id, resumed: true}`; a new session is not resumed."""
+    from quack.events.event_types import SessionStarted
+
+    fresh = validate_payload("session.started", sample_payload("session.started"))
+    assert isinstance(fresh, SessionStarted) and fresh.resumed is False
+    resumed = {**sample_payload("session.started"), "resumed": True}
+    back = validate_payload("session.started", resumed)
+    assert isinstance(back, SessionStarted) and back.resumed is True
