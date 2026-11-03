@@ -4,6 +4,11 @@ on the slice, and only the changed values reach Neo4j (the diff, `Т-§8.1` «о
 
 from __future__ import annotations
 
+from quack.graph.projection.misconception_fold import (
+    FoldSign,
+    MisconceptionParams,
+    fold_misconception,
+)
 from quack.graph.projection.mutations import SetProps
 from quack.graph.projection.skill_fold import FoldEvidence, FoldExposure, FoldParams, fold_skill
 from quack.graph.projection.view import BatchSlice
@@ -77,3 +82,38 @@ def fold_dirty_skills(
         changes = [SetProps("Skill", skill, fold.skill)]
         changes += [SetProps("Evidence", e, p) for e, p in sorted(fold.evidence.items())]
         batch.apply(changes)
+
+
+def _sign(batch: BatchSlice, evidence: str, *, resists: bool) -> FoldSign | None:
+    e = batch.node("Evidence", evidence)
+    if e is None or e.get("status") != "active":
+        return None
+    family = ""
+    for r in batch.rels("Evidence", evidence, "ON_TASK", out=True):
+        family = _str((batch.node("Task", r.to_id) or {}).get("familyId"))
+    return FoldSign(
+        _int(e.get("atMs")), _int(e.get("sourceSeq")), _int(e.get("tier")), family, resists
+    )
+
+
+def fold_dirty_misconceptions(
+    batch: BatchSlice, misconceptions: set[str], params: MisconceptionParams
+) -> None:
+    """Т-§9.2: the status of each misconception the batch touched; `disputed` stays."""
+    for misconception in sorted(misconceptions):
+        props = batch.node("Misconception", misconception)
+        if props is None:
+            continue
+        signs = [
+            sign
+            for rel, resists in (("MANIFESTS", False), ("RESISTED", True))
+            for r in batch.rels("Misconception", misconception, rel, out=False)
+            if (sign := _sign(batch, r.from_id, resists=resists)) is not None
+        ]
+        state = fold_misconception(
+            signs,
+            params,
+            disputed=props.get("status") == "disputed",
+            targeted_session=_str(props.get("targetedInSessionId")),
+        )
+        batch.apply([SetProps("Misconception", misconception, state)])

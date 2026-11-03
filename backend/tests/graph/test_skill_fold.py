@@ -95,3 +95,41 @@ def test_fsrs_card_and_reviews() -> None:
     assert review == fold_skill([_ev(1), _ev(3)], [], P).skill
     near = fold_skill([_ev(1), _ev(2, at=DAY + H)], [], P).skill
     assert near["retReviews"] == 1  # not delayed: an hour later
+
+
+def test_misconception_life_cycle() -> None:
+    """Т-§9.2 (WP5.2): suspected → confirmed → watching → fixed; a new manifestation returns
+    to confirmed; resistances of one family do not count twice; disputed and in_work."""
+    from quack.graph.projection.misconception_fold import (
+        FoldSign,
+        MisconceptionParams,
+        fold_misconception,
+    )
+
+    mp = MisconceptionParams()
+
+    def sign(day: int, family: str, *, resists: bool = False, tier: int = 1) -> FoldSign:
+        return FoldSign(day * DAY, day, tier, family, resists)
+
+    def status(*signs: FoldSign, **kw: Any) -> str:
+        return str(fold_misconception(signs, mp, **kw)["status"])
+
+    shown = [sign(1, "a"), sign(2, "b", tier=3)]
+    assert status(shown[0]) == "suspected"
+    assert status(sign(1, "a", tier=3), sign(2, "b", tier=3)) == "suspected"  # no T1/T2
+    assert status(*shown) == "confirmed"
+    assert status(*shown, targeted_session="s") == "in_work"
+    resist = [sign(3, "c", resists=True), sign(4, "c", resists=True)]
+    assert status(*shown, *resist) == "confirmed"  # one family
+    watching = [*shown, sign(3, "c", resists=True), sign(4, "d", resists=True)]
+    state = fold_misconception(watching, mp)
+    assert (state["status"], state["watchSinceMs"], state["occurrences"]) == (
+        "watching",
+        4 * DAY,
+        2,
+    )
+    assert status(*watching, sign(6, "e", resists=True)) == "watching"  # 2 days
+    assert status(*watching, sign(7, "e", resists=True)) == "fixed"
+    assert status(*watching, sign(7, "e", resists=True), sign(8, "f")) == "confirmed"
+    assert status(shown[0], sign(2, "c", resists=True), sign(3, "d", resists=True)) == "dismissed"
+    assert status(*shown, disputed=True) == "disputed"

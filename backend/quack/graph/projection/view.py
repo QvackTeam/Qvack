@@ -254,6 +254,21 @@ class BatchSlice:
                 dirty |= {r.to_id for r in self.rels(n.label, n.id, rel, out=True)}
         return {s for s in dirty if ("Skill", s) in self._nodes}
 
+    def dirty_misconceptions(self) -> set[str]:
+        """Misconceptions whose manifestations, resistances or own marks the batch changed."""
+        d = self.diff()
+        dirty = {
+            r.to_id for r in [*d.upsert_rels, *d.delete_rels]
+            if r.rel_type in ("MANIFESTS", "RESISTED")
+        }  # fmt: skip
+        for n in d.upsert_nodes:
+            if n.label == "Misconception":
+                dirty.add(n.id)
+            elif n.label == "Evidence":
+                for rel in ("MANIFESTS", "RESISTED"):
+                    dirty |= {r.to_id for r in self.rels(n.label, n.id, rel, out=True)}
+        return {m for m in dirty if ("Misconception", m) in self._nodes}
+
     def snapshot(self) -> SubGraph:
         """Every node and relationship of the slice now (for tests and rebuild)."""
         return SubGraph(

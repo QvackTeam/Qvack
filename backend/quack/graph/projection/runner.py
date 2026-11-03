@@ -21,8 +21,9 @@ from quack.config import Settings
 from quack.db import Db
 from quack.db.db import LockKeyspace
 from quack.events.log import StoredEvent
+from quack.graph.projection.misconception_fold import MisconceptionParams
 from quack.graph.projection.phase_a import EventFailed, apply_events, batch_need
-from quack.graph.projection.phase_b import fold_dirty_skills
+from quack.graph.projection.phase_b import fold_dirty_misconceptions, fold_dirty_skills
 from quack.graph.projection.skill_fold import FoldParams
 from quack.graph.projection.store import (
     load_fold_inputs,
@@ -114,10 +115,12 @@ async def project_learner(
                 str(learner_id), loaded, earlier, RulesParams.from_settings(settings)
             )
             apply_events(events, batch)
-            dirty = batch.dirty_skills()
-            if dirty:  # phase B (WP4): folds of the skills the batch touched
-                batch.extend(await load_fold_inputs(neo4j, str(learner_id), dirty))
+            # Phase B (WP4, WP5.2): folds of the skills and misconceptions the batch touched.
+            dirty, wrong = batch.dirty_skills(), batch.dirty_misconceptions()
+            if dirty or wrong:
+                batch.extend(await load_fold_inputs(neo4j, str(learner_id), dirty, wrong))
                 fold_dirty_skills(batch, dirty, FoldParams.from_settings(settings), events[-1].seq)
+                fold_dirty_misconceptions(batch, wrong, MisconceptionParams.from_settings(settings))
         except EventFailed as failed:
             await db.execute(
                 _RECORD_FAILURE, params | {"seq": failed.seq, "error": repr(failed.cause)[:2000]}

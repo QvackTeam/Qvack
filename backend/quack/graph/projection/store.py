@@ -209,15 +209,19 @@ async def _read_slice(
     return out.subgraph()
 
 
-async def _read_fold(tx: AsyncManagedTransaction, learner: str, skills: set[str]) -> SubGraph:
-    """Phase B input of dirty skills: the skill with its evidence and exposures, the tasks of the
-    evidence with their options and markup (Т-§8.1)."""
+async def _read_fold(
+    tx: AsyncManagedTransaction, learner: str, skills: set[str], misconceptions: set[str]
+) -> SubGraph:
+    """Phase B input of dirty skills and misconceptions: the skill with its evidence and
+    exposures, the misconception with its manifestations and resistances, the tasks of the
+    evidence with their options and markup (Т-§8.1, Т-§9.2)."""
     out = _Collected()
-    seen = await _neighbourhoods(tx, learner, {("Skill", s) for s in skills}, out)
+    roots = {("Skill", s) for s in skills} | {("Misconception", m) for m in misconceptions}
+    seen = await _neighbourhoods(tx, learner, roots, out)
     evidence = {
         (r.from_label, r.from_id)
         for r in out.rels.values()
-        if r.rel_type == "ON" and (r.to_label, r.to_id) in seen
+        if r.rel_type in ("ON", "MANIFESTS", "RESISTED") and (r.to_label, r.to_id) in seen
     }
     await _neighbourhoods(tx, learner, evidence, out)
     tasks = {(r.to_label, r.to_id) for r in out.rels.values() if r.rel_type == "ON_TASK"}
@@ -225,9 +229,11 @@ async def _read_fold(tx: AsyncManagedTransaction, learner: str, skills: set[str]
     return out.subgraph()
 
 
-async def load_fold_inputs(driver: AsyncDriver, learner_id: str, skills: set[str]) -> SubGraph:
+async def load_fold_inputs(
+    driver: AsyncDriver, learner_id: str, skills: set[str], misconceptions: set[str]
+) -> SubGraph:
     async with read_session(driver) as session:
-        return await session.execute_read(_read_fold, learner_id, skills)
+        return await session.execute_read(_read_fold, learner_id, skills, misconceptions)
 
 
 async def load_slice(
