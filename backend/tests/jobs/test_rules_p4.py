@@ -266,3 +266,61 @@ def test_visible_kinds_follow_t_13_8() -> None:
 
 def test_no_rule_for_events_outside_the_table() -> None:
     assert r.plan_jobs(_event("message.sent"), SETTINGS) == []
+
+
+def test_artifact_topic_refresh_after_the_session_and_after_hints() -> None:
+    """Т-§17.7, WP7.1, WP23.2 (D-A-136). `session.ended` with exposures or evidence on a topic —
+    one `artifact.topic_refresh` per topic per session; `task.closed` where hints were needed —
+    the traps block for the task's topics. Lock `artifact:{topic}`, P2, reads the
+    graph. The topics are data beyond the event: the dispatcher gathers them (`RuleFacts`)."""
+    first, second = UUID(int=0x71), UUID(int=0x72)
+    ended = _event("session.ended", seq=40)
+    plans = r.plan_with_facts(ended, SETTINGS, r.RuleFacts(topic_ids=(first, second)))
+    refresh = [p for p in plans if p.kind == "artifact.topic_refresh"]
+    assert [p.payload["topic_id"] for p in refresh] == [str(first), str(second)]
+    plan = refresh[0]
+    assert plan.lock_key == f"artifact:{first}"
+    assert plan.coalesce_key == f"artifact:{first}:session:{ended.session_id}"
+    assert plan.job_key == f"artifact.topic_refresh:{first}:session:{ended.session_id}"
+    assert (plan.priority_class, plan.required_seq) == ("P2", 40)
+    assert plan.payload == {"trigger_seq": 40, "topic_id": str(first), "reason": "session"}
+    assert {"analyst.run", "analyst.deep"} <= {p.kind for p in plans}  # event-only rows stay
+    nothing = r.plan_with_facts(ended, SETTINGS, r.RuleFacts())
+    assert not [p for p in nothing if p.kind.startswith("artifact.")]
+
+    closed = _event("task.closed", seq=41)
+    task = closed.payload["task_id"]
+    (trap,) = [
+        p
+        for p in r.plan_with_facts(closed, SETTINGS, r.RuleFacts(topic_ids=(first,)))
+        if p.kind == "artifact.topic_refresh"
+    ]
+    assert trap.job_key == f"artifact.topic_refresh:{first}:task:{task}"
+    assert trap.lock_key == f"artifact:{first}"
+    # The branches must not coalesce into one queued job: `enqueue_job` would overwrite the
+    # payload of the waiting one (#154, C): the session and the hints branches differ by key.
+    assert trap.coalesce_key == f"artifact:{first}:task:{task}"
+    assert trap.coalesce_key != plan.coalesce_key
+    assert trap.payload == {
+        "trigger_seq": 41,
+        "topic_id": str(first),
+        "reason": "hints",
+        "task_id": task,
+    }
+    assert "artifact.topic_refresh" not in {
+        row.job_kinds[0]
+        for row in r.ROWS_NEED_FACTS
+        if row.event_type in ("session.ended", "task.closed")
+    }
+
+
+def test_hub_deadline_set_puts_one_cheatsheet_job_without_facts() -> None:
+    """Т-§17.7, WP23.5 (D-A-139, D-C-138): `hub.deadline_set` -> one `artifact.cheatsheet` on the
+    hub, payload `{hub_id}`; the offer state is read by the job itself."""
+    event = _event("hub.deadline_set", seq=50)
+    (plan,) = [p for p in r.plan_jobs(event, SETTINGS) if p.kind == "artifact.cheatsheet"]
+    hub = event.payload["hub_id"]
+    assert plan.lock_key == plan.coalesce_key == f"artifact:{hub}"
+    assert plan.priority_class == "P2" and plan.required_seq == 50
+    assert plan.payload == {"trigger_seq": 50, "hub_id": hub}
+    assert "artifact.cheatsheet" not in {row.job_kinds[0] for row in r.ROWS_NEED_FACTS}
