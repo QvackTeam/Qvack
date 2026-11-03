@@ -47,7 +47,7 @@ export function AuthScene({ blind, className }: { blind: boolean; className?: st
       field.render(sec, {
         pointerX: pointer.x,
         pointerY: pointer.y,
-        pointerActive: pointer.active,
+        pointerActive: pointer.active && !reduced,
         disperse: Math.pow(1 - p, 3),
         blind: blindRef.current,
         instant: reduced,
@@ -87,6 +87,9 @@ export function AuthScene({ blind, className }: { blind: boolean; className?: st
       pointer.y = 1 - (e.clientY / window.innerHeight) * 2;
       pointer.active = true;
     };
+    const onLeave = () => {
+      pointer.active = false;
+    };
     const onVis = () => sync();
     const onMotion = () => {
       reduced = mq.matches;
@@ -94,6 +97,7 @@ export function AuthScene({ blind, className }: { blind: boolean; className?: st
       if (reduced) draw();
     };
     window.addEventListener("pointermove", onMove, { passive: true });
+    document.documentElement.addEventListener("pointerleave", onLeave);
     document.addEventListener("visibilitychange", onVis);
     mq.addEventListener("change", onMotion);
 
@@ -108,6 +112,7 @@ export function AuthScene({ blind, className }: { blind: boolean; className?: st
       ro.disconnect();
       io.disconnect();
       window.removeEventListener("pointermove", onMove);
+      document.documentElement.removeEventListener("pointerleave", onLeave);
       document.removeEventListener("visibilitychange", onVis);
       mq.removeEventListener("change", onMotion);
       field.dispose();

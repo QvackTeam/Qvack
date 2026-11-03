@@ -2,9 +2,9 @@ import * as THREE from "three";
 import { createAuthDuck } from "./auth-duck";
 
 /**
- * Экран входа. Копия components/quack/landing/glyph-field.ts: сцена, шейдер и физика нодов те же, но утка своя
- * (auth-duck.ts: сидит, на пароле надевает повязку) и композиция под форму сбоку. Блок «свободные ноды» в render
- * совпадает с лендингом: когда его физика устоится, переносится оттуда как есть.
+ * Экран входа. Копия components/quack/landing/glyph-field.ts: сцена, шейдер, атлас символов и физика нодов те же,
+ * но утка своя (auth-duck.ts: сидит, на пароле надевает повязку) и композиция под форму сбоку.
+ * Блоки «шейдер», «атлас» и «свободные ноды» переносятся с лендинга как есть, когда он меняется.
  *
  * Лендинг: 3D-сцена → поле из мелких математических символов на гексагональной решётке (· + × = ∫ ∂ √ ∑ π Δ λ …).
  * Сцены две: утка (яркая, оранжево-жёлтая) и фон: графы по бокам (хабы-кольца, точки-темы, связи) и россыпь свободных нодов,
@@ -82,7 +82,7 @@ float glyphAlpha(vec2 p, float row, float col, float q) {
   vec2 t = p / q + 0.5;
   if (t.x < 0.0 || t.x > 1.0 || t.y < 0.0 || t.y > 1.0) return 0.0;
   vec2 uv = vec2((col + t.x) / ATLAS_COLS, 1.0 - (row + t.y) / ATLAS_ROWS);
-  return smoothstep(0.28, 0.72, texture2D(uAtlas, uv).a);
+  return smoothstep(0.12, 0.85, texture2D(uAtlas, uv, -0.5).a);
 }
 
 void main() {
@@ -125,9 +125,9 @@ void main() {
   if (L > 0.04 && lv > 0.08) {
     float row = lv < 0.24 ? 0.0 : (lv < 0.46 ? 1.0 : (lv < 0.74 ? 2.0 : 3.0));
     float col = floor(r1 * ATLAS_COLS);
-    float scale = 1.0 + 0.07 * row;
+    float scale = 1.0;
     vec2 p = local / (0.4 + 0.6 * appear);
-    cov = glyphAlpha(p, row, col, 1.25 * scale) * appear;
+    cov = glyphAlpha(p, row, col, 1.5 * scale) * appear;
   }
 
   vec3 col;
@@ -302,27 +302,20 @@ export function createAuthField(canvas: HTMLCanvasElement): AuthField {
   const bgTarget = new THREE.WebGLRenderTarget(1, 1, { samples: 4 });
 
   // атлас символов: в строке ярус яркости (знаки → операторы → анализ → греческие буквы), столбец выбирается случайно по ячейке
-  const ATLAS_CELL = 64;
-  const atlasRows = ["+−=÷<>~±", "×=<>≈≠%∈", "∫∂√∞∇∏⊂∀", "∑πΔλθΩφμ"];
+  const ATLAS_CELL = 128;
+  const atlasRows = ["+−=<>÷±%", "×≈≠≤≥∞°π", "∫√∂∞θλπσ", "∑ΔΩπλθΣΦ"];
   const atlasCanvas = document.createElement("canvas");
   atlasCanvas.width = ATLAS_CELL * 8;
   atlasCanvas.height = ATLAS_CELL * atlasRows.length;
   const actx = atlasCanvas.getContext("2d");
   if (actx) {
     actx.fillStyle = "#fff";
-    actx.strokeStyle = "#fff";
-    actx.lineWidth = ATLAS_CELL * 0.08; // у математического шрифта нет жирного: утолщаем обводкой
-    actx.lineJoin = "round";
     actx.textAlign = "center";
     actx.textBaseline = "middle";
-    actx.font = `700 ${Math.round(ATLAS_CELL * 0.82)}px "Cambria Math","STIX Two Math","Noto Sans Math","Segoe UI Symbol","Apple Symbols","DejaVu Sans",serif`;
+    // обычное начертание без обводки: на мелком кегле тонкие линии serif-шрифтов пропадают, поэтому берём гротески
+    actx.font = `${Math.round(ATLAS_CELL * 0.66)}px "Segoe UI Symbol","Noto Sans Math","DejaVu Sans","Apple Symbols","Arial Unicode MS",sans-serif`;
     atlasRows.forEach((row, r) =>
-      [...row].forEach((ch, c) => {
-        const x = (c + 0.5) * ATLAS_CELL;
-        const y = (r + 0.5) * ATLAS_CELL + ATLAS_CELL * 0.03;
-        actx.strokeText(ch, x, y);
-        actx.fillText(ch, x, y);
-      }),
+      [...row].forEach((ch, c) => actx.fillText(ch, (c + 0.5) * ATLAS_CELL, (r + 0.5) * ATLAS_CELL + ATLAS_CELL * 0.03)),
     );
   }
   const atlas = new THREE.CanvasTexture(atlasCanvas);
