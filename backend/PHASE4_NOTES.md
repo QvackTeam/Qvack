@@ -1020,6 +1020,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/session/test_sessions_db.py` (10). Проверено на неверной реализации: 7 подмен — 6 роняют тест; «конец дважды» безвреден (повтор под тем же ключом ничего не пишет).
 - Требует подтверждения владельцем: нет; п. (е) — вопрос A (класс C)
 - Решено (2026-11-03): п. (е) — D-A-121 (#130): `SessionStarted.resumed: bool = False`; возврат в сессию, закрытую сборщиком, пишет `resumed: true` (после слияния #130).
+- По ревью C #124 (2026-11-03): (е) сделано — `resume_if_swept` пишет `resumed=True`, старт — `False` (#130 влит). (ж) Два старта с одним ключом одновременно: второй прочитал ключ до записи первого, его `append_events` встречает ключ с другой нагрузкой (`IdempotencyConflictError`) — ключ перечитывается в той же транзакции (запись первого уже видна после блокировки строки ученика), возвращается та же сессия, при других параметрах — `SessionConflictError` (закон 5). (з) Пульс сессию не возвращает: «действие в сессии» WP13.10 — действие `POST …/actions` (виды WP13.1), а пульс — присутствие (`Т-§2.2`: в журнал не пишется); пульс закрытой сессии — `LookupError`, код ответа маршрута — при подключении маршрутов по §4.5 \[ПРОВЕРИТЬ\]; клиент после сна вкладки возвращает сессию первым действием. (и) Остаётся к маршрутам: `GET /v1/sessions/{id}` — лента сессии из событий по `seq` (WP13.10); `get_session` библиотеки отдаёт строку `content.sessions`.
 
 ### Поток C
 
@@ -1269,6 +1270,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP13.10 по ревью C #124 (D-B-155 п.е, п.ж): `uv run pytest tests/session/test_sessions_db.py` — 2 failed (возврат без `resumed: true`; одновременный старт с одним ключом — `IdempotencyConflictError`), коммит `e8c8e77`. Зелёный: 11 passed (с `QUACK_TEST_REQUIRE_INFRA=1`).
 - WP13.10, жизненный цикл сессии на `Db` (D-B-155): `uv run pytest tests/session/test_sessions_db.py` — ошибка сбора (нет `quack.session.sessions`), коммит `28f32e3`; на неверной реализации — 6 из 7 подмен роняют тест. Зелёный: 10 passed.
 - WP13.1, согласие на старте сессии (D-B-151): `uv run pytest tests/session/test_session_terms.py` — 2 failed (старт без согласия `201`, без cookie `201`), коммит `f5029a2`. Зелёный: 2 passed; `tests/session` и `tests/llm/test_labels.py` зелёные; `tests/e2e` — 13 failed (`403` на старте, правка у C).
 - WP11.3, WP11.6 на полях A #117 (D-B-145, D-B-146): `uv run pytest tests/practice/test_check_symbolic_job.py tests/practice/test_check_model.py` — 1 failed (`unsupported` ничего не писал) и ошибка сбора (нет `known_misconceptions`), коммит `72e96fb`. Зелёный: `tests/practice`, `tests/events`, `tests/graph/test_read_stub.py`, `tests/jobs/test_rules_p4.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` — 234 passed.
@@ -1329,6 +1331,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Правки тестов
 
+- `tests/session/test_sessions_db.py::test_start_writes_the_event_and_the_row` (B, D-B-155): нагрузка `session.started` получила поле `resumed: false` (D-A-121, #130) — ожидание дополнено полем. Проверка не ослаблена.
 - `tests/session/test_head_guards.py::test_boundary_names_the_missing_prerequisites_once` (D-B-153, до зелёного): проверка «id не в тексте» смотрела на id предпосылки с меткой и не ловила утечку id предпосылки без метки (подмена прошла); теперь проверяются оба id и точный текст. Тест усилен, не ослаблен.
 - `tests/practice/test_check_symbolic_job.py::test_unsupported_form_writes_nothing_yet` → `test_unsupported_form_writes_check_failed_for_the_model` (B, D-B-146): прежний тест закреплял временное поведение до ответа A («`unsupported` нет в каталоге»); A добавил значение в #117, тест проверяет новое поведение: `check.failed {reason: unsupported}` под ключом `check_failed_key`. Тест не ослаблен.
 

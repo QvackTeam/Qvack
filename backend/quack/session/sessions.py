@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from quack.config import Settings
 from quack.db.db import Db
+from quack.events.errors import IdempotencyConflictError
 from quack.events.event_types import SessionEnded, SessionStarted
 from quack.events.log import NewEvent, append_events
 
@@ -120,7 +121,8 @@ class _Stored(BaseModel):
 
 async def start_session(db: Db, *, learner_id: UUID, body: StartSession) -> SessionView:
     """Write `session.started` and the row; a repeat with the same key and parameters returns
-    the same session, with other parameters — `SessionConflictError`."""
+    the same session, with other parameters — `SessionConflictError`. A concurrent start with
+    the same key that committed first is read again after the conflict (D-B-155 п.ж)."""
     params = {"learner_id": learner_id, "domain_id": str(body.domain_id)}
     if await db.fetch_one(_DOMAIN_OF_LEARNER, params, row=_Found) is None:
         raise LookupError(f"domain {body.domain_id} is not the learner's")
@@ -137,11 +139,18 @@ async def start_session(db: Db, *, learner_id: UUID, body: StartSession) -> Sess
             topic_id=body.topic_id,
             hub_id=body.hub_id,
         )
-        await append_events(
-            db,
-            learner_id,
-            [_event("session.started", payload, key, "learner", session_id, body.domain_id)],
-        )
+        try:
+            await append_events(
+                db,
+                learner_id,
+                [_event("session.started", payload, key, "learner", session_id, body.domain_id)],
+            )
+        except IdempotencyConflictError:
+            # A concurrent start with the same key committed after our read (law 5).
+            again = await _started_by_key(db, learner_id, key, body)
+            if again is None:
+                raise
+            return again
         await db.execute(
             _INSERT,
             {
@@ -222,6 +231,7 @@ async def resume_if_swept(db: Db, *, learner_id: UUID, session_id: UUID) -> bool
             intent=row.intent or "free",
             topic_id=row.topic_id,
             hub_id=row.hub_id,
+            resumed=True,
         )
         key = f"session.resume:{ended.seq}"
         await append_events(
