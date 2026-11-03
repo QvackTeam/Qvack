@@ -408,6 +408,23 @@ def _episode_reassigned(event: StoredEvent, _s: Settings, p: Any) -> list[JobPla
     ]
 
 
+def _deadline_cheatsheet(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
+    """Т-§17.7, WP23.5 (D-A-139): every `hub.deadline_set` puts one `artifact.cheatsheet` job
+    on the hub; the job reads the journal and itself checks `cheatsheet_offer_days` and the
+    state of the offer (consent `agent.requested` / `artifact.updated`), per C's D-C-138."""
+    key = f"artifact:{p.hub_id}"
+    return [
+        _plan(
+            event,
+            "artifact.cheatsheet",
+            lock_key=key,
+            coalesce_key=key,
+            graph=True,
+            payload={"hub_id": str(p.hub_id)},
+        )
+    ]
+
+
 def _topic_refresh(
     event: StoredEvent, topic: UUID, key_tail: str, payload: dict[str, Any]
 ) -> JobPlan:
@@ -508,8 +525,8 @@ RULES: tuple[RuleRow, ...] = (
     RuleRow(
         "hub.deadline_set",
         ("artifact.cheatsheet",),
-        "the deadline is closer than cheatsheet_offer_days (Т-§17.7)",
-        needs="hub deadline and the offer state",
+        "always; the job checks cheatsheet_offer_days and the offer state (Т-§17.7, D-C-138)",
+        _deadline_cheatsheet,
     ),
     RuleRow(
         "*",

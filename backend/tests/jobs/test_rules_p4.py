@@ -271,7 +271,7 @@ def test_no_rule_for_events_outside_the_table() -> None:
 def test_artifact_topic_refresh_after_the_session_and_after_hints() -> None:
     """Т-§17.7, WP7.1, WP23.2 (D-A-136). `session.ended` with exposures or evidence on a topic —
     one `artifact.topic_refresh` per topic per session; `task.closed` where hints were needed —
-    the traps block for the task's topics. Lock and coalesce `artifact:{topic}`, P2, reads the
+    the traps block for the task's topics. Lock `artifact:{topic}`, P2, reads the
     graph. The topics are data beyond the event: the dispatcher gathers them (`RuleFacts`)."""
     first, second = UUID(int=0x71), UUID(int=0x72)
     ended = _event("session.ended", seq=40)
@@ -312,3 +312,15 @@ def test_artifact_topic_refresh_after_the_session_and_after_hints() -> None:
         for row in r.ROWS_NEED_FACTS
         if row.event_type in ("session.ended", "task.closed")
     }
+
+
+def test_hub_deadline_set_puts_one_cheatsheet_job_without_facts() -> None:
+    """Т-§17.7, WP23.5 (D-A-139, D-C-138): `hub.deadline_set` -> one `artifact.cheatsheet` on the
+    hub, payload `{hub_id}`; the offer state is read by the job itself."""
+    event = _event("hub.deadline_set", seq=50)
+    (plan,) = [p for p in r.plan_jobs(event, SETTINGS) if p.kind == "artifact.cheatsheet"]
+    hub = event.payload["hub_id"]
+    assert plan.lock_key == plan.coalesce_key == f"artifact:{hub}"
+    assert plan.priority_class == "P2" and plan.required_seq == 50
+    assert plan.payload == {"trigger_seq": 50, "hub_id": hub}
+    assert "artifact.cheatsheet" not in {row.job_kinds[0] for row in r.ROWS_NEED_FACTS}
