@@ -22,3 +22,13 @@
 Номера продолжают архив: следующий свободный номер — по `grep -h "^### D-B-" backend/PHASE4_NOTES.md backend/notes/B.md`.
 
 <!-- записи ниже, новые сверху -->
+
+### D-B-187. Адаптеры нетекстовых ролей шлюза: `segmenter`, `voice`, `illustrator` (WP10.1)
+- Класс: B
+- WP / место: WP10.1 третий пункт; `quack/llm/media.py`, `gateway.py` (`segment`, `transcribe`, `illustrate`), `responses_client.py`, `provider.py`; `tests/llm/test_phase4_media_roles.py`
+- Контекст: по WP0 п.3д форма `sam-3.1` и голоса известна (документация Meta, без вызова); для `muse-image-1.0` документов нет; формат спецтокенов описан не полностью (запись «id, рамка, маска», w/h рамки, префикс base85, `|>` внутри данных)
+- Решение: (1) три публичных метода шлюза возвращают `LLMResult[Segmentation | Transcription | Illustration]`; путь вызова общий с текстовыми ролями (бюджеты, слот модели, повторы, 429 и флаг давления, 400, размыкатель, строка учёта на попытку). Без аутбокса и без промпта: версия 0, `prompt_hash` — хеш `роль@media`; повтор вызова — повторная плата. (2) `segmenter` — `POST /responses`, `input_text` (имя предмета ИЛИ `<0f>1<|box;x1=..;y1=..;x2=..;y2=..;w=..;h=..|>`) + `input_image` (data URL), `metadata.mask_encoding`/`include_confidence`, без `text.format`; ответ разбирает `parse_segmentation` (рамка начинает объект, маска за ней — его; до 16; маску не декодируем: `data` — base85 как пришло, `marker` `~`/`!`). (3) `voice` — `POST {base}/asr/transcribe`, multipart `request`+`audio`; токенов нет, длительность в `audio_duration_ms`. (4) `illustrator` — `POST {base}/images/generations`, `response_format=b64_json`, байты или `url`. (5) модель нетекстовой роли — `llm_role_models[role]`, иначе строка `llm_roles` (`model_for_role` для них вернул бы Spark)
+- Почему: Т-§1.3, Т-§11.1, WP0 п.3д; ближайшее правило — OpenAI-совместимые пути
+- Обратимость: вся форма запросов изолирована в трёх методах `ResponsesClient`
+- Тесты: `tests/llm/test_phase4_media_roles.py` (по одному на роль: тело запроса, разбор, строка `ops.llm_ledger`)
+- Требует подтверждения владельцем: нет. [ПРОВЕРИТЬ на стенде]: путь и тело `muse-image-1.0`; значения `w`/`h` рамки; формат записей и префикс маски `sam-3.1`; нужен ли голосу учёт в долларах по секундам (в WP10.4 строка `llm_usage` без токенов)
