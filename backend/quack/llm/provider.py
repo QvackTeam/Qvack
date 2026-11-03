@@ -8,6 +8,16 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 type ReasoningEffort = Literal["low", "high"]
+# Т-§11.1 «Spark с изображением» (recognizer, verdict_free, viz_checker); D-B-170.
+type ImageMime = Literal["image/png", "image/webp"]
+
+
+@dataclass(frozen=True)
+class ImageInput:
+    """An image of a role call (seam S12): the rendered canvas line, a photo, a drawing."""
+
+    mime: ImageMime
+    data: bytes
 
 
 @dataclass(frozen=True)
@@ -26,6 +36,8 @@ class ProviderRequest:
     reasoning_effort: ReasoningEffort | None = None
     max_output_tokens: int | None = None
     prompt_cache_key: str | None = None
+    # Images after the prompt text, in order (D-B-170).
+    images: tuple[ImageInput, ...] = ()
 
 
 @dataclass(frozen=True)

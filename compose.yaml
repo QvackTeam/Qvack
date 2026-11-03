@@ -172,6 +172,19 @@ services:
       COMPUTE_URL: http://compute:8001
       META_API_KEY: ${META_API_KEY:-}
       META_API_BASE_URL: ${META_API_BASE_URL:-}
+      # D-C-133: where sign-in returns (Д-§2.1, Д-§3.1) and the version of the terms (Т-§19.4).
+      AUTH_SUCCESS_REDIRECT_URL: ${AUTH_SUCCESS_REDIRECT_URL:-}
+      TERMS_VERSION: ${TERMS_VERSION:-}
+      # Д-§7: the secrets of `api` — mail, Google sign-in, learner objects, deletions bucket.
+      EMAIL_API_KEY: ${EMAIL_API_KEY:-}
+      GOOGLE_OIDC_CLIENT_ID: ${GOOGLE_OIDC_CLIENT_ID:-}
+      GOOGLE_OIDC_CLIENT_SECRET: ${GOOGLE_OIDC_CLIENT_SECRET:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      DELETIONS_S3_ENDPOINT: ${DELETIONS_S3_ENDPOINT:-}
+      DELETIONS_S3_ACCESS_KEY: ${DELETIONS_S3_ACCESS_KEY:-}
+      DELETIONS_S3_SECRET_KEY: ${DELETIONS_S3_SECRET_KEY:-}
     networks: [backend, egress]
     healthcheck:
       test:
@@ -228,6 +241,15 @@ services:
       PG_POOL_MAX_SIZE: "5"
       META_API_KEY: ${META_API_KEY:-}
       META_API_BASE_URL: ${META_API_BASE_URL:-}
+      # Д-§7: the secrets of `workers` — embeddings, learner objects, daily deletions check.
+      MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
+      MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      DELETIONS_S3_ENDPOINT: ${DELETIONS_S3_ENDPOINT:-}
+      DELETIONS_S3_ACCESS_KEY: ${DELETIONS_S3_ACCESS_KEY:-}
+      DELETIONS_S3_SECRET_KEY: ${DELETIONS_S3_SECRET_KEY:-}
     networks: [backend, egress]
     stop_grace_period: 25s
     mem_limit: 1g

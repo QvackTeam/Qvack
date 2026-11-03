@@ -1,18 +1,21 @@
 # CI (ТЗ Фазы 3 WP9.3, Д-§5.2, Д-§5.3). No pull_request_target, no workflow_run; read-only
-# token; third-party actions pinned by commit SHA (release tag in the comment).
+# token; third-party actions pinned by commit SHA (release tag in the comment). `publish` is the
+# only job with `packages: write`; it runs on pushes only, never on a pull request (Д-§5.3).
 name: ci
 
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, phase-4]
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push to a branch must not cancel the publishing of an older commit: its images are
+  # what deploy.sh <sha> pulls. Only pull request runs are superseded.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend:
@@ -115,3 +118,53 @@ jobs:
           platforms: linux/amd64
           push: false
           tags: quack-compute:ci
+
+  publish:
+    # ТЗ Фазы 4 WP9.3, Д-§5.1: both images to GHCR with the tags <short sha> and <branch>, only
+    # after the other jobs passed. The server pulls by <short sha> (deploy.sh <sha>).
+    if: github.event_name == 'push'
+    needs: [backend, compute, images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      # Owner and commit reach the shell only through env (Д-§5.3).
+      OWNER: ${{ github.repository_owner }}
+      COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Image names and tags
+        id: names
+        run: |
+          registry="ghcr.io/${OWNER,,}"
+          {
+            echo "backend=$registry/quack-backend"
+            echo "compute=$registry/quack-compute"
+            echo "sha=${COMMIT::7}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "$ACTOR" --password-stdin
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: backend
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.names.outputs.backend }}:${{ steps.names.outputs.sha }}
+            ${{ steps.names.outputs.backend }}:${{ github.ref_name }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: compute
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.names.outputs.compute }}:${{ steps.names.outputs.sha }}
+            ${{ steps.names.outputs.compute }}:${{ github.ref_name }}

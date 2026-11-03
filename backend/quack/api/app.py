@@ -11,6 +11,7 @@ from pathlib import Path
 
 import structlog
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -20,6 +21,8 @@ from quack.api.learner_stream import router as learner_stream_router
 from quack.api.openapi import install_openapi, render_openapi
 from quack.api.ratelimit import enforce_action_rate_limit
 from quack.api.resources import AppResources, create_app_resources
+from quack.artifacts.cards_routes import router as cards_router
+from quack.artifacts.notes_routes import router as notes_router
 from quack.artifacts.router import router as artifacts_router
 from quack.auth.consents import has_current_terms
 from quack.auth.google import AuthlibGoogleOIDC, GoogleOIDC
@@ -183,6 +186,17 @@ def create_app(
         response.headers["X-Trace-ID"] = trace_id
         return response
 
+    # ТЗ Ф4 WP9.2, Д-§2.1: the frontend on app./preview.qvack.online calls this API with the
+    # session cookie. An exact origin list with credentials, never `*`. Added last, so it is the
+    # outermost layer and answers a preflight before routing and authentication.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+        allow_headers=["Content-Type", "X-Request-ID"],
+        expose_headers=["X-Request-ID", "X-Trace-ID"],
+    )
     app.include_router(_health_router())
     app.include_router(_healthz_router())
     # Domains and artifacts attach authentication and the `actions` limit in their routers
@@ -190,6 +204,8 @@ def create_app(
     app.include_router(domains_router)
     app.include_router(session_router, dependencies=[Depends(enforce_action_rate_limit)])
     app.include_router(artifacts_router)
+    app.include_router(notes_router)
+    app.include_router(cards_router)
     app.include_router(learner_stream_router)
     app.include_router(auth_router)
     app.include_router(materials_router)

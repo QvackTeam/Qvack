@@ -8,8 +8,11 @@ their bodies live in `quack_compute/math/` (WP11.5).
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
@@ -43,6 +46,19 @@ from quack_compute.pool import JobTimeout, TaskPool
 from quack_compute.renderer import Renderer
 from quack_compute.schemas import MathCheckRequest, MathCheckResponse
 from quack_compute.settings import ComputeSettings
+from quack_compute.tmp_sweeper import sweep_tmp
+
+
+async def _sweep_forever(settings: ComputeSettings, renderer: Renderer) -> None:
+    """Д-§4.2: sweep `compute_tmp_dir` by age once per `tmp_sweep_interval_s` (D-C-133)."""
+    while True:
+        await asyncio.sleep(settings.tmp_sweep_interval_s)
+        await asyncio.to_thread(
+            sweep_tmp,
+            Path(settings.compute_tmp_dir),
+            settings.tmp_max_age_s,
+            browser_open=lambda: renderer.browser_open,
+        )
 
 
 def create_app(settings: ComputeSettings | None = None) -> FastAPI:
@@ -54,9 +70,13 @@ def create_app(settings: ComputeSettings | None = None) -> FastAPI:
         app.state.pool = TaskPool(settings.compute_workers)
         app.state.pool.start()
         app.state.renderer = Renderer(settings.chromium_idle_close_s)
+        sweeper = asyncio.create_task(_sweep_forever(settings, app.state.renderer))
         try:
             yield
         finally:
+            sweeper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sweeper
             await app.state.renderer.close()
             app.state.pool.stop()
 
