@@ -923,6 +923,31 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/graph/test_projection_runner.py::test_changed_topics_are_published_after_commit`.
 - Требует подтверждения владельцем: нет.
 
+### Карта тестов G2 потока A (ТЗ §8 → тест), 2026-11-03
+| ID | Тест | Где |
+| :-- | :-- | :-- |
+| T-P1 | `test_batches_equal_rebuild_hypothesis` | `tests/graph/test_projection_batches.py` (+ `test_projection_runner.py::test_batches_of_any_size_give_one_graph` на Neo4j) |
+| T-P2 | `test_no_missing_properties` | `tests/graph/test_projection_batches.py` |
+| T-P3 | `test_handler_outside_slice_is_bug` | `tests/graph/test_projection_rules3.py` |
+| T-P4 | `test_handler_table` + группы 1–6 модуля | `tests/graph/test_projection_rules3.py` |
+| T-P5 | `test_alias_and_empty_apply` | `tests/graph/test_projection_rules3.py` |
+| T-P6 | `test_unknown_type_stops_stream` | `tests/graph/test_projection_runner.py` |
+| T-P7 | `test_schema_created_on_start` | `tests/graph/test_schema_wp31.py` |
+| T-P8 | `test_rules3_stale_rebuild` | `tests/graph/test_projection_runner.py` |
+| T-F1 | `test_section_8_2_examples` | `tests/graph/test_skill_fold.py` |
+| T-F2–F6, F8, F9 | `test_gates`, `test_weights_and_novelty_in_fold`, `test_implications_and_direct_over_implied`, `test_delayed_fail_on_proven_is_memory`, `test_fsrs_card_and_reviews`, `test_exposure_and_signals`, `test_fold_is_pure` | `tests/graph/test_skill_fold.py` |
+| T-F7 | `test_derived_evidence` | `tests/graph/test_projection_rules3.py` |
+| T-MS1 | `test_misconception_lifecycle_table` | `tests/graph/test_skill_fold.py` |
+| T-MS2 | `test_resist_and_manifest_sources` | `tests/graph/test_projection_rules3.py` |
+| T-MS3 | `test_profile_learned` (+ `tests/graph/test_profile_fold.py`) | `tests/graph/test_projection_batches.py` |
+| T-TH1–TH3 | `test_topic_status_visibility`, `test_display_state_priority`, `test_hub_required_levels_default` | `tests/graph/test_skill_fold.py` |
+| T-TH4 | `test_frontier`, `test_topic_readiness_direct_basis_only`, `test_why`, `test_topic_requires_is_derived_from_skill_links` | `tests/graph/test_read_neo4j_core.py` (четыре чтения — четыре теста, один ID) |
+| T-DB2, T-DB4 | `test_no_fstring_sql`, `test_repository_functions_take_learner_id` | `tests/db/test_sql_static.py` |
+| T-DB7 | `test_squawk_config_and_concurrent_marker` | `tests/db/test_squawk_config.py` |
+| T-D1–D10 | `test_rule_table`, `test_episode_boundaries`, `test_episode_without_content`, `test_coalesce_greatest`, `test_max_jobs_per_learner`, `test_cancel_requested`, `test_skipped_budget`, `test_failed_writes_agent_completed`, `test_periodic_keys` (WP7.5, D-A-166), `test_visible_and_plaque` | `tests/jobs/*` в #182 |
+
+T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_append_events.py` (номера без пропусков, идемпотентность, конфликт хэша, `event_types_seen`, транзакция вызывающего, сигнал после фиксации). Нет к G2 у A: T-DB3 (снятие SQLAlchemy — WP1.3, G3/G4), T-TH5 (API — WP6.5, вне G2). T-DB6 — поиск WP20.5 (C).
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.
