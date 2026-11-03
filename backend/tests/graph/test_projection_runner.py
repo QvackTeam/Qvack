@@ -12,6 +12,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import orjson
+import pytest
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
 
@@ -404,7 +405,7 @@ async def test_hub_edit_scope_and_deadline(
 
 
 async def test_topic_and_hub_reads(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
-    """WP6.5 (§6.4, `Т-§22.2`, D-A-194): a projected topic is read with codes and levels and its
+    """WP6.5 (§6.4, `Т-§22.2`, D-A-198): a projected topic is read with codes and levels and its
     places in sessions; a hub created by the learner is in the hubs of the domain and has its
     readiness; another learner's ids are «not found»."""
     from quack.domains import graph_reads as reads
@@ -429,3 +430,91 @@ async def test_topic_and_hub_reads(pg_db: Db, neo4j: AsyncDriver, settings: Sett
     hub = await reads.hub_view(neo4j, settings, learner, created.hub_id)
     assert hub is not None and hub.goal.control_type == "tasks"
     assert await reads.hub_view(neo4j, settings, other, created.hub_id) is None
+
+
+async def test_today_prep_mode_and_grade(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP17 (`Т-§14.4`, `Т-§14.7`, `Т-§14.8`, D-A-195): «Сегодня» of a domain with nothing to
+    repeat is empty and writes no event; the past deadline of a hub offers the grade until it is
+    reported; prep mode switches once per state; another learner's ids are «not found»."""
+    from datetime import UTC, datetime
+
+    from quack.review import today as review
+
+    learner, other = await create_learner(pg_db), await create_learner(pg_db)
+    domain, topic, skill, material, chunk = uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
+    await append_events(pg_db, learner, _materials(domain, topic, skill, material, chunk))
+    await _project_all(pg_db, neo4j, settings, learner)
+    hub = uuid4()
+    await append_events(pg_db, learner, [
+        _new("hub.created", {"hub_id": str(hub), "domain_id": str(domain), "name": "Exam",
+             "kind": "request", "origin": "learner", "control_type": "tasks"}, "h"),
+        _new("hub.deadline_set", {"hub_id": str(hub), "deadline_at_ms": 1_000,
+             "source": "learner"}, "dl"),
+    ])  # fmt: skip
+    await _project_all(pg_db, neo4j, settings, learner)
+    now = datetime(2026, 11, 3, tzinfo=UTC)
+    view = await review.today(pg_db, neo4j, None, settings, learner, domain, now)
+    assert view is not None and (view.items, view.minutes) == ([], 0.0)
+    assert view.grade_hub_ids == [hub]
+    assert await review.today(pg_db, neo4j, None, settings, other, domain, now) is None
+    on = await review.set_prep_mode(pg_db, neo4j, None, learner, hub, True)
+    assert (
+        on is not None and await review.set_prep_mode(pg_db, neo4j, None, learner, hub, True) == on
+    )
+    off = await review.set_prep_mode(pg_db, neo4j, None, learner, hub, False)
+    assert off is not None and off > on
+    assert await review.set_prep_mode(pg_db, neo4j, None, other, hub, True) is None
+    grade = review.Grade(grade="5", scale="1-5")
+    assert await review.report_grade(pg_db, neo4j, None, learner, hub, grade) is not None
+    after = await review.today(pg_db, neo4j, None, settings, learner, domain, now)
+    assert after is not None and after.grade_hub_ids == []
+
+
+async def test_delete_domain(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP25 (`Т-§19.5`, `Д-§8.5`, D-A-197): no record in the journal — nothing is deleted; a
+    foreign domain is «not found»; the deletion removes the events and objects of the domain,
+    keeps the rest, writes `ops.deletion_log` and rebuilds the graph without the domain."""
+    from datetime import UTC, datetime
+
+    from quack.deletion.domain import delete_domain
+    from quack.storage.deletions import DeletionJournalUnavailable
+    from tests.support.deletions import FakeDeletionJournal
+    from tests.support.storage import InMemoryObjectStore
+
+    learner, other = await create_learner(pg_db), await create_learner(pg_db)
+    gone_domain, kept_domain = uuid4(), uuid4()
+    gone = _materials(gone_domain, *[uuid4() for _ in range(4)])
+    kept = _materials(kept_domain, *[uuid4() for _ in range(4)])
+    kept = [e.model_copy(update={"idempotency_key": f"kept:{e.idempotency_key}"}) for e in kept]
+    await append_events(pg_db, learner, [*gone, *kept])
+    await _project_all(pg_db, neo4j, settings, learner)
+    store = InMemoryObjectStore()
+    await store.put("k", b"pdf", "application/pdf")  # the object_key of both materials
+    now = datetime(2026, 11, 3, tzinfo=UTC)
+    down = FakeDeletionJournal(available=False)
+    with pytest.raises(DeletionJournalUnavailable):
+        await delete_domain(pg_db, neo4j, settings, down, store, learner, gone_domain, now)
+    journal = FakeDeletionJournal()
+    assert (
+        await delete_domain(pg_db, neo4j, settings, journal, store, other, gone_domain, now) is None
+    )
+    done = await delete_domain(pg_db, neo4j, settings, journal, store, learner, gone_domain, now)
+    assert done is not None and done.copies_days == 15
+    assert [r.deletion_id for r in journal.records] == [done.deletion_id]
+    left = await pg_db.fetch_all(
+        "SELECT domain_id FROM core.events WHERE learner_id = %(l)s", {"l": learner}
+    )
+    assert {r["domain_id"] for r in left} == {kept_domain}
+    assert "k" not in store.objects
+    log = await pg_db.fetch_one(
+        "SELECT kind, target_id FROM ops.deletion_log WHERE deletion_id = %(d)s",
+        {"d": done.deletion_id},
+    )
+    assert log is not None and (log["kind"], log["target_id"]) == ("domain", gone_domain)
+    async with neo4j.session() as session:
+        result = await session.run(
+            "MATCH (n {learnerId: $l}) WHERE n.domainId = $d RETURN count(n) AS n",
+            l=str(learner),
+            d=str(gone_domain),
+        )
+        assert (await result.single() or {"n": -1})["n"] == 0

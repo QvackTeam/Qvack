@@ -45,7 +45,6 @@ _SESSIONS = (
     "SELECT seq, session_id FROM core.events "
     "WHERE learner_id = %(learner_id)s AND seq = ANY(%(seqs)s)"
 )
-_PLACES_LIMIT = 200
 
 
 class LevelView(BaseModel):
@@ -127,17 +126,16 @@ def _skill(props: dict[str, Any]) -> SkillView:
 
 
 async def topic_view(
-    db: Db, neo4j: AsyncDriver, learner_id: UUID, topic_id: UUID
+    db: Db, neo4j: AsyncDriver, learner_id: UUID, topic_id: UUID, *, limit: int = 200
 ) -> TopicView | None:
+    """`limit` — how many places at most; the route of WP1.3 passes it from settings (D-A-198)."""
     learner = str(learner_id)
     async with read_session(neo4j) as session:
         result = await session.run(literal(_TOPIC), id=str(topic_id), learner=learner)
         record = await result.single()
         if record is None:
             return None
-        result = await session.run(
-            literal(_PLACES), id=str(topic_id), learner=learner, limit=_PLACES_LIMIT
-        )
+        result = await session.run(literal(_PLACES), id=str(topic_id), learner=learner, limit=limit)
         rows = [dict(r) async for r in result]
     topic: dict[str, Any] = dict(record["topic"])
     seqs = sorted({_int(r["seq"]) for r in rows})
@@ -195,7 +193,7 @@ async def topic_why(
     level: int | None,
 ) -> WhyFacts | None:
     """`Т-§8.7`: the deciding evidence of the level and the latest `why_recent_n`."""
-    if await topic_view(db, neo4j, learner_id, topic_id) is None:
+    if await topic_view(db, neo4j, learner_id, topic_id, limit=1) is None:
         return None
     reader = create_graph_reader(neo4j, settings, learner_id=learner_id, db=db)
     return await reader.why(topic_id, level)  # type: ignore[arg-type]

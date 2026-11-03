@@ -65,6 +65,17 @@ async def _wp8_targets_of(system: System, learner: Learner, ids: Ids) -> Ids:
     )
 
 
+async def _domain_in_graph(system: System, learner: Learner, ids: Ids) -> Ids:
+    """WP6.5: the domain of the walk as a node of `rules@3`, which hub creation looks up."""
+    async with system.resources.neo4j.session() as session:
+        await session.run(
+            "MERGE (d:Domain {id: $domain}) ON CREATE SET d.learnerId = $learner",
+            domain=str(ids.domain_id),
+            learner=str(learner.learner_id),
+        )
+    return ids
+
+
 async def _created_domain(system: System, learner: Learner, ids: Ids, payload: Any) -> Ids:
     return ids.replace(domain_id=UUID(payload["domain_id"]))
 
@@ -198,6 +209,16 @@ STREAM = Stream(
                 "target_id": f"{ids.answer_seq}:{['main', 'other'][v]}",
             },
         ),
+        # ТЗ Ф4 WP6.5 (§6.4 «Хабы», D-A-198): a hub of the learner's request; its id comes from
+        # the key, so a repeat gives the same hub.
+        Route(
+            "POST",
+            "/v1/domains/{domain_id}/hubs",
+            stage=125,
+            requires=("domain_id",),
+            prepare=_domain_in_graph,
+            body=lambda ids, v: {"name": ["Exam", "Quiz"][v], "control_type": "tasks"},
+        ),
         Route(
             "POST",
             "/v1/domains/{domain_id}/archive",
@@ -256,6 +277,30 @@ STREAM = Stream(
             body_key="none",
             body=lambda ids, v: {"deadline_at_ms": 1_000 + v},
         ),
+        # ТЗ Ф4 WP17.4–17.5 (D-A-195): prep mode — the mode already set returns its event; the
+        # grade is keyed by its value.
+        Route(
+            "POST",
+            "/v1/hubs/{hub_id}/prep-mode",
+            no_key="ТЗ §6.4 WP17.4: no key; the same mode returns its event",
+            body_key="none",
+            body=lambda ids, v: {"enabled": [True, False][v]},
+        ),
+        Route(
+            "POST",
+            "/v1/hubs/{hub_id}/grade",
+            no_key="ТЗ §6.4 WP17.5: no key; keyed by the hub and the grade",
+            body_key="none",
+            body=lambda ids, v: {"grade": ["5", "4"][v], "scale": "1-5"},
+        ),
+        # ТЗ Ф4 WP25 (D-A-197): a physical deletion; a repeat finds no domain (404).
+        Route(
+            "DELETE",
+            "/v1/domains/{domain_id}",
+            no_key="ТЗ §6.4 WP25: physical deletion; a repeat is «not found»",
+            body_key="none",
+            body=lambda ids, v: {},
+        ),
     ),
     other_routes=frozenset(
         {
@@ -264,8 +309,17 @@ STREAM = Stream(
             ("GET", "/v1/domains/{domain_id}/graph"),
             ("GET", "/v1/domains/{domain_id}/topics/{topic_id}"),
             ("GET", "/v1/topics/{topic_id}"),
+            # ТЗ Ф4 WP6.5, WP17.2 (D-A-198, D-A-195)
+            ("GET", "/v1/topics/{topic_id}/why"),
+            ("GET", "/v1/domains/{domain_id}/hubs"),
+            ("GET", "/v1/hubs/{hub_id}"),
+            ("GET", "/v1/domains/{domain_id}/today"),
         }
     ),
-    routers=("quack.domains.router:_protected",),
+    routers=(
+        "quack.domains.router:_protected",
+        "quack.review.router:router",
+        "quack.deletion.router:router",
+    ),
     isolation=(_wp8_targets_of,),
 )

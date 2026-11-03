@@ -1136,7 +1136,7 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
 - Почему: закон 7 — сбой фонового не трогает остальное; `Т-§13.1` — пульс и чистильщик решают судьбу задачи.
 - Обратимость: убрать два `try/except`.
 - Тесты: `tests/jobs/test_dispatcher_p4.py::test_idle_check_survives_a_failing_learner`, `tests/jobs/test_executor_p4.py::test_a_failed_pulse_does_not_orphan_the_handler`.
-### D-A-194. WP6.5: чтения тем и хабов; замена `/graph` и `/topics/{id}` — в точке перехода WP1.3
+### D-A-198. WP6.5: чтения тем и хабов; замена `/graph` и `/topics/{id}` — в точке перехода WP1.3
 - Класс: B. WP6.5, WP6.3; ТЗ §6.4 («Граф и темы», «Хабы»), `Т-§4.7`, `Т-§4.8`, `Т-§8.7`, `Т-§22.2`; `quack/domains/graph_reads.py`, `router.py`
 - Решение:
   1. **Смонтированы маршруты, которых нет в Фазе 3:**
@@ -1150,6 +1150,52 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
   4. **`POST /v1/hubs/{id}/prep-mode`, `/grade`** — WP17.
 - Почему: §0.4.3 п.1–2; §0.4.4 п.14 (тесты чужого стека не ломать до перехода).
 - Тесты: `tests/graph/test_projection_runner.py::test_topic_and_hub_reads`; `tests/test_app_assembly.py` (T-A1, снимок OpenAPI пересобран).
+- Требует подтверждения владельцем: нет.
+
+### D-A-195. WP17: «Сегодня», режим подготовки, оценка после дедлайна
+- Класс: B. WP17.2, WP17.4, WP17.5; `Т-§14.4`, `Т-§14.7`, `Т-§14.8`, `П-3.2`; `quack/review/today.py`, маршруты в `quack/domains/router.py`
+- Решение:
+  1. **`GET /v1/domains/{id}/today`.**
+     - Кандидаты ядра (`review_candidates`, WP17.1, D-A-150…155) — только навыки этого домена (`П-3.2`; в `ReviewScope` домена нет, отбор по `Skill.domainId`).
+     - Не больше `today_max_items`, приоритет строго выше `today_min_score` (стартово 0.0: «подбирается на первых данных»).
+     - Причины переводятся в коды пунктов `TodayItem`: `retention`→`due`, `consolidation`, `misconception_recheck`→`misconception`, `hub_requirement`→`deadline`. Оценка времени — `review_item_minutes` × пунктов.
+     - Пустой список — плашки нет, события нет. Непустой — `today.shown` с ключом `today:{домен}:{дата ученика}:{хэш пунктов}`; дата — по `core.learners.settings.timezone`, иначе UTC.
+  2. **Оценка после дедлайна** (WP17.5): `grade_hub_ids` — хабы домена с датой раньше сегодняшнего дня ученика и без `grade.reported`. «Один раз» понимается как «пока оценка не введена»: события «предложение показано» в каталоге нет.
+  3. **`POST /v1/hubs/{id}/prep-mode {enabled}`** → `prep_mode.enabled/disabled`. Запрос того режима, что уже стоит, возвращает его событие без нового (закон 5).
+  4. **`POST /v1/hubs/{id}/grade {grade, scale}`** → `grade.reported`, ключ — хаб и оценка. Хаб остаётся.
+  5. **Место маршрутов.** Пакет `quack.review` — продуктовый (ТЗ §4.1), импорт между продуктовыми пакетами запрещён. Поэтому у него свой роутер `quack/review/router.py`, подключённый в сборке `quack.api.app` (T-A6). `review` и `deletion` добавлены в слой «Продукт» теста слоёв.
+  6. **Не сделано:** предупреждения о темпе (WP17.3, `Т-§14.6`) — нужны дни активности ученика; прогноз и запас `pace_warning_margin` — следующим шагом.
+- Почему: §0.4.3 п.1–2.
+- Тесты: `tests/graph/test_projection_runner.py::test_today_prep_mode_and_grade`; маршруты в реестре `tests/e2e/routes/a.py` (D-C-147); снимок OpenAPI пересобран.
+- Требует подтверждения владельцем: нет.
+
+### D-A-196. S3 после G1: `AgentParamsRecord.hub_id` и `.artifact` — правка v1 (по #191 C)
+- Класс: C (поле нагрузки после G1). WP23.2, `Т-§17.7`, ТЗ §6.4; `quack/events/records.py`
+- Контекст: `POST /v1/artifacts/requests` и согласие на cheat sheet хаба C пишет как `agent.requested {kind: artifact}` (D-C-138, #154). Обработчику `agent.artifact` нужно знать, какой артефакт строить и для какого хаба. В записи параметров таких полей нет, а класть их в `description` — слова вместо данных (закон 2).
+- Решение: в `AgentParamsRecord` два необязательных поля — `hub_id: UUID | None` и `artifact: Literal["notes", "cards", "cheatsheet"] | None` (перечень как у `ArtifactUpdated.kind`). Версия схемы `agent.requested` остаётся 1, как в D-A-121: событий Фазы 4 нигде не развёрнуто, а старые нагрузки без этих полей читаются как раньше.
+- Почему: §0.4.3 п.1–2; закон 2; решение владельца поручено A («сверься с доками и реши сам»).
+- Согласие: C — автор просьбы (#191); B — уведомлён в #191: поля необязательные, обработчиков и схем B они не меняют.
+- Тесты: `tests/events/test_catalog.py::test_agent_artifact_request_names_the_artifact_and_its_hub`.
+- Требует подтверждения владельцем: решение принято по поручению человека A; владелец — уведомлён этой записью.
+
+### D-A-197. WP25: физическое удаление домена — `DELETE /v1/domains/{id}`
+- Класс: B. WP25 п.1–4; `Т-§19.5`, `Т-§20.7`, `Д-§8.5`, `Д-§8.6`; `quack/deletion/domain.py`, `quack/deletion/router.py`
+- Решение:
+  1. **Порядок по WP25.**
+     - Цель ученика проверяется по узлу `Domain` до любой записи: чужой — `404`, и журнал не трогается.
+     - Затем `DeletionRecord` в журнал R2 (`DeletionJournal`, S9). Не записалось — `DeletionJournalUnavailable` → `503 SERVICE_UNAVAILABLE`, ничего не удаляется.
+     - Под advisory-блокировкой ученика одной транзакцией удаляются строки домена. Затем объекты, строка `ops.deletion_log` с тем же `deletion_id`, пересборка ученика (D-A-189). Если блокировку держит проектор — повтор до пяти раз.
+  2. **Границы домена** (`Т-§19.5`):
+     - все события с его `domain_id`;
+     - его сессии (`content.sessions.domain_id`) целиком, со всеми их событиями, планами, манифестами, канвасами;
+     - материалы домена и сессий со страницами;
+     - задачи;
+     - артефакты с версиями.
+  3. **Объекты.** Ключи из `content.materials.object_key`, `material_pages.image_key` и `payload.object_key` удаляемых событий (фото и загрузки) удаляет `ObjectStore.delete_keys`.
+  4. **Ответ** — `200 {deletion_id, copies_days: 15}`. 15 дней — срок копий из `Д-§8.6` («с запасом»: `backup_retention_days` 14 плюс сутки); это значение документа, не настройка.
+  5. **Не сделано.** `DELETE /v1/topics/{id}` (границы темы — события её структуры, навыков и задач), `DELETE /v1/learner` Фазы 4 (сейчас — tombstone Фазы 3, меняется при переходе WP1.3), `reconcile_deletions`/`replay_deletions` (WP25 п.5) — следующим шагом.
+- Почему: §0.4.3 п.1–2; закон 1.
+- Тесты: `tests/graph/test_projection_runner.py::test_delete_domain` (журнал недоступен → ничего; чужой → `None`; события и объект домена удалены, второй домен цел, `ops.deletion_log`, граф без узлов домена). маршрут — в реестре `tests/e2e/routes/a.py` (D-C-147).
 - Требует подтверждения владельцем: нет.
 
 ### Ответы потока A (2026-11-02)
