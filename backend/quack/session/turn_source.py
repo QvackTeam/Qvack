@@ -1,0 +1,420 @@
+"""The context source of the teacher turn — `TurnContextSource` (ТЗ Ф4 WP14, WP13.2 «assemble»;
+Т-§10). D-B-181.
+
+- **The journal of the session** gives the goal (the last `message.sent` with an intent,
+  Т-§12.7), the active tasks (created in the session and not closed), the learner texts, the
+  action the turn answers and its verdict, the effort (Т-§12.9).
+- **Memory** (S4, `quack.graph.read`): profile and goals now, the topics of the goal, the
+  slice for the focus — the skills of the active tasks and of the goal topics (Т-§10.2). The
+  reads go in parallel (WP14.5, Т-§10.7). A slice that cannot be read is the empty slice and
+  `memory_unavailable` (WP6.1).
+- **Slots 3–4** come from the snapshot of the session (D-B-180); the first turn freezes them
+  into its manifest row.
+- **Material chunks** (slot 8): the prefetch by the graph (Т-§10.5) when the driver is given.
+- The rendered context is cut to `teacher_context_max_tokens` (WP14.5); the request goes to the
+  streaming provider of the role; the spoiler guard checks the answers of the active tasks.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
+from uuid import UUID
+
+from neo4j import AsyncDriver
+from neo4j.exceptions import ConnectionAcquisitionTimeoutError, ServiceUnavailable, SessionExpired
+
+from quack.config import Settings
+from quack.db.db import Db
+from quack.events.event_types import MessageSent, TaskClosed, TaskCreated
+from quack.events.log import StoredEvent
+from quack.events.values import AnswerSpec, Verdict
+from quack.graph.read import GraphReader, HubGoal, MemorySlice, SliceFocus, TopicMemory
+from quack.graph.read.materials import materials_prefetch
+from quack.llm.gateway import LLMGateway
+from quack.llm.labels import LabelMap
+from quack.practice.repo import session_events_up_to
+from quack.practice.task_store import get_task
+from quack.session.action_turn import TurnRequest, TurnSetup
+from quack.session.conversation import render_conversation
+from quack.session.memory_picture import (
+    MEMORY_UNAVAILABLE,
+    PictureInputs,
+    render_memory_picture,
+)
+from quack.session.spoiler_guard import answer_in_text, remove_answer_sentences
+from quack.session.teacher_context import (
+    SessionGoal,
+    TeacherSlots,
+    fit_budget,
+    frozen_slots,
+    render_labels,
+    render_materials,
+    render_session_plan,
+    snapshot_slots,
+    teacher_variables,
+)
+from quack.session.teacher_output import TeacherOutputV2
+from quack.session.tools import TOOLS, MaterialChunk, ToolContext, run_tool, tool_definition
+from quack.session.turn_commit import AnsweredAction, LearnerText, TurnManifestRow
+from quack.session.turn_graph import AssembledTurn, Effort, GuardInputs, Role
+from quack.session.turn_inputs import learner_state, load_learner_skill, load_plan, load_snapshot
+from quack.session.turn_policy import resolve_degraded_mode
+
+RENDERER_VERSION = "renderer@1"
+NEO4J_UNAVAILABLE: tuple[type[BaseException], ...] = (
+    ServiceUnavailable,
+    SessionExpired,
+    ConnectionAcquisitionTimeoutError,
+)
+
+_TIMEZONE = "SELECT settings->>'timezone' AS timezone FROM core.learners WHERE learner_id = %(l)s"
+_TASK_ACTIONS = {
+    "hint.requested": "hint_request",
+    "solution.requested": "solution_request",
+    "check.skipped": "check_skip",
+}
+
+
+@dataclass(frozen=True)
+class SessionJournal:
+    """What the turn needs from the events of its session (pure, `read_journal`)."""
+
+    goal: SessionGoal
+    open_tasks: list[UUID]
+    task_skills: list[UUID]
+    learner_texts: list[LearnerText]
+    first_turn: bool
+    repeated_failure: bool
+    skill_invocation: str | None = None
+    answered: AnsweredAction | None = None
+    answered_verdict: Verdict | None = None
+
+
+def _latest_verdicts(events: Sequence[StoredEvent]) -> dict[tuple[int, str], Verdict]:
+    found: dict[tuple[int, str], Verdict] = {}
+    for event in events:
+        if event.type == "verdict.recorded":
+            verdict = Verdict.model_validate(event.payload)
+            found[(verdict.answer_seq, verdict.part)] = verdict
+    return found
+
+
+def _repeated_failure(
+    events: Sequence[StoredEvent], answer_tasks: dict[int, UUID], skills: dict[UUID, set[UUID]]
+) -> bool:
+    """Т-§12.9: the two latest checked answers of the session both failed on one skill."""
+    outcomes: dict[int, bool] = {}
+    for (answer_seq, _part), verdict in _latest_verdicts(events).items():
+        failed = verdict.outcome == "incorrect"
+        outcomes[answer_seq] = outcomes.get(answer_seq, False) or failed
+    last = sorted(outcomes)[-2:]
+    if len(last) < 2 or not all(outcomes[seq] for seq in last):
+        return False
+    first, second = (skills.get(answer_tasks.get(seq, UUID(int=0)), set()) for seq in last)
+    return bool(first & second)
+
+
+def read_journal(events: Sequence[StoredEvent], action_seq: int) -> SessionJournal:
+    """The goal, active tasks, texts and the answered action of the session up to the action."""
+    ordered = sorted(events, key=lambda e: e.seq)
+    goal = SessionGoal(intent="learn")
+    created: dict[UUID, TaskCreated] = {}
+    closed: set[UUID] = set()
+    answer_tasks: dict[int, UUID] = {}
+    texts: list[LearnerText] = []
+    for event in ordered:
+        match event.type:
+            case "message.sent":
+                message = MessageSent.model_validate(event.payload)
+                texts.append(LearnerText(seq=event.seq, text=message.text))
+                if message.intent is not None:
+                    goal = SessionGoal(
+                        intent=message.intent, topic_id=message.topic_id, hub_id=message.hub_id
+                    )
+            case "task.created":
+                task = TaskCreated.model_validate(event.payload)
+                created[task.task_id] = task
+            case "task.closed":
+                closed.add(TaskClosed.model_validate(event.payload).task_id)
+            case "answer.submitted":
+                answer_tasks[event.seq] = UUID(str(event.payload["task_id"]))
+            case _:
+                pass
+    open_tasks = [task_id for task_id in created if task_id not in closed]
+    skills = {
+        task_id: {t.skill_id for t in task.markup.tests if t.skill_id is not None}
+        for task_id, task in created.items()
+    }
+    task_skills = list(dict.fromkeys(s for t in open_tasks for s in skills[t]))
+    journal = SessionJournal(
+        goal=goal,
+        open_tasks=open_tasks,
+        task_skills=task_skills,
+        learner_texts=texts,
+        first_turn=not any(e.type == "turn.committed" for e in ordered),
+        repeated_failure=_repeated_failure(ordered, answer_tasks, skills),
+    )
+    action = next((e for e in ordered if e.seq == action_seq), None)
+    if action is None:
+        return journal
+    if action.type == "message.sent":
+        invocation = MessageSent.model_validate(action.payload).skill_invocation
+        return replace(journal, skill_invocation=invocation)
+    if action.type in _TASK_ACTIONS:
+        task_id = UUID(str(action.payload["task_id"]))
+        kind = _TASK_ACTIONS[action.type]
+        return replace(journal, answered=AnsweredAction(kind=kind, task_id=task_id))  # type: ignore[arg-type]
+    if action.type == "answer.submitted":
+        task_id = answer_tasks[action.seq]
+        verdicts = _latest_verdicts(ordered)
+        mine = {part: v for (seq, part), v in verdicts.items() if answer_tasks.get(seq) == task_id}
+        solved = bool(mine) and all(v.outcome == "correct" for v in mine.values())
+        own = [v for (seq, _p), v in verdicts.items() if seq == action.seq]
+        return replace(
+            journal,
+            answered=AnsweredAction(kind="answer", task_id=task_id, solved=solved),
+            answered_verdict=own[-1] if own else None,
+        )
+    return journal
+
+
+def turn_effort(role: Role, journal: SessionJournal) -> Effort:
+    """Т-§12.9: `high` on the first turn of the session and after two failures on one skill;
+    `teacher_fallback` is always `low`."""
+    if role == "teacher_fallback":
+        return "low"
+    return "high" if journal.first_turn or journal.repeated_failure else "low"
+
+
+def answer_strings(spec: AnswerSpec) -> list[str]:
+    """What of the answer may not be shown (Т-§12.4): the value and the items, both forms."""
+    values = [spec.value] if spec.value is not None else []
+    values.extend(spec.items or [])
+    return [form for value in values for form in (value.latex, value.sympy) if form]
+
+
+def _goal_topics(goal: SessionGoal, hubs: Sequence[HubGoal]) -> list[UUID]:
+    if goal.topic_id is not None:
+        return [goal.topic_id]
+    if goal.hub_id is not None:
+        return [t.topic_id for hub in hubs if hub.hub_id == goal.hub_id for t in hub.topics]
+    return []
+
+
+class MemoryTurnContextSource:
+    """`TurnContextSource` over the journal (Postgres) and memory (S4). `reader` binds the
+    reader of memory to the learner of the turn; `neo4j` — the driver of the material prefetch
+    (no driver — slot 8 is empty)."""
+
+    def __init__(
+        self,
+        *,
+        db: Db,
+        gateway: LLMGateway,
+        settings: Settings,
+        reader: Callable[[UUID], GraphReader],
+        neo4j: AsyncDriver | None = None,
+        clock: Callable[[], int] | None = None,
+    ) -> None:
+        self._db = db
+        self._gateway = gateway
+        self._settings = settings
+        self._reader = reader
+        self._neo4j = neo4j
+        self._clock = clock or (lambda: int(time.time() * 1000))
+
+    async def _slice(
+        self, reader: GraphReader, request: TurnRequest, focus: SliceFocus
+    ) -> tuple[MemorySlice, bool]:
+        try:
+            found = await reader.slice_for_turn(request.learner_id, request.session_id, focus)
+        except NEO4J_UNAVAILABLE:
+            return MemorySlice(learner_id=request.learner_id, projected_seq=0), True
+        return found, False
+
+    async def _chunks(self, learner_id: UUID, skill_ids: Sequence[UUID]) -> list[MaterialChunk]:
+        if self._neo4j is None:
+            return []
+        try:
+            hits = await materials_prefetch(
+                self._neo4j,
+                learner_id=learner_id,
+                skill_ids=skill_ids,
+                k=self._settings.materials_k,
+            )
+        except NEO4J_UNAVAILABLE:
+            return []
+        return [MaterialChunk(h.chunk_id, None, h.page, h.text) for h in hits]
+
+    async def _answers(self, learner_id: UUID, task_ids: Sequence[UUID]) -> list[str]:
+        found: list[str] = []
+        for task_id in task_ids:
+            task = await get_task(self._db, learner_id=learner_id, task_id=task_id)
+            if task is not None:
+                found.extend(answer_strings(task.answer_spec))
+        return found
+
+    async def assemble(self, request: TurnRequest) -> TurnSetup:
+        settings, db = self._settings, self._db
+        learner_id, session_id = request.learner_id, request.session_id
+        reader = self._reader(learner_id)
+        events = await session_events_up_to(
+            db, learner_id=learner_id, session_id=session_id, to_seq=request.action_seq
+        )
+        journal = read_journal(events, request.action_seq)
+        now, plan, zone_row, snapshot, skill = await asyncio.gather(
+            learner_state(reader, learner_id=learner_id, domain_id=request.domain_id),
+            load_plan(db, learner_id=learner_id, session_id=session_id),
+            db.fetch_one(_TIMEZONE, {"l": learner_id}),
+            load_snapshot(db, learner_id=learner_id, session_id=session_id),
+            load_learner_skill(db, learner_id=learner_id, name=journal.skill_invocation)
+            if journal.skill_invocation
+            else _none(),
+        )
+        timezone = zone_row["timezone"] if zone_row is not None else None
+        hubs = await reader.domain_goals(request.domain_id)
+        topics = _goal_topics(journal.goal, hubs)
+        memory: list[TopicMemory] = await reader.topic_memory(topics) if topics else []
+        topic_skills = [s.skill_id for m in memory for s in m.skills]
+        focus = SliceFocus(
+            skill_ids=list(dict.fromkeys([*journal.task_skills, *topic_skills])),
+            topic_ids=topics,
+            domain_id=request.domain_id,
+        )
+        (memory_slice, unavailable), chunks, answers = await asyncio.gather(
+            self._slice(reader, request, focus),
+            self._chunks(learner_id, focus.skill_ids),
+            self._answers(learner_id, journal.open_tasks),
+        )
+
+        freeze = snapshot is None
+        frozen = frozen_slots(snapshot or snapshot_slots(now, timezone), now, timezone)
+        skill_ids = list(
+            dict.fromkeys([*focus.skill_ids, *(s.skill_id for s in memory_slice.skills)])
+        )
+        hub_topics = [t.topic_id for hub in hubs for t in hub.topics]
+        labels = LabelMap.build(
+            settings,
+            skills=skill_ids,
+            topics=list(dict.fromkeys([*topics, *hub_topics])),
+            tasks=journal.open_tasks,
+            misconceptions=[m.misconception_id for m in memory_slice.misconceptions],
+            hubs=[hub.hub_id for hub in hubs],
+            chunks=[chunk.chunk_id for chunk in chunks],
+        )
+        names: dict[UUID, str] = {s.skill_id: s.name for s in memory_slice.skills if s.name}
+        names.update({m.topic_id: m.name for m in memory})
+        names.update({hub.hub_id: hub.name for hub in hubs})
+        names.update({t.topic_id: t.name for hub in hubs for t in hub.topics})
+        picture = (
+            MEMORY_UNAVAILABLE
+            if unavailable
+            else render_memory_picture(
+                PictureInputs(slice=memory_slice, focus=focus, skill_names=names),
+                labels,
+                settings,
+                self._clock(),
+            )
+        )
+        variables = teacher_variables(
+            TeacherSlots(
+                frozen=frozen,
+                conversation=render_conversation(events, labels, settings),
+                session_plan=render_session_plan(journal.goal, plan, labels),
+                memory_picture=picture,
+                materials=render_materials(chunks, labels),
+                labels=render_labels(labels, names),
+                skill=skill,
+            )
+        )
+        role = request.role
+        prompt_version = settings.llm_roles[role].prompt or "teacher@2"
+        prompt_name, version = prompt_version.rsplit("@", 1)
+        template = self._gateway.prompts.load(prompt_name, int(version))
+        variables = fit_budget(template.render, variables, settings.teacher_context_max_tokens)
+        effort = turn_effort(role, journal)
+        stream, prompt = self._gateway.stream_request(
+            role,
+            int(version),
+            TeacherOutputV2,
+            variables,
+            prompt_role=prompt_name,
+            reasoning_effort=effort,
+            tools=[tool_definition(tool) for tool in TOOLS],
+        )
+        tools = ToolContext(
+            learner_id=learner_id,
+            labels=labels,
+            reader=reader,
+            settings=settings,
+            now_ms=self._clock(),
+            domain_id=request.domain_id,
+            skill_names=names,
+        )
+
+        async def execute_tool(name: str, arguments: str) -> str:
+            return await run_tool(name, arguments, tools)
+
+        degraded = resolve_degraded_mode(
+            budget_exceeded=False,
+            llm_unavailable=False,
+            memory_unavailable=unavailable,
+            teacher_fallback=role == "teacher_fallback",
+            projector_lag=memory_slice.lag_degraded,
+        )
+        return TurnSetup(
+            assembled=AssembledTurn(
+                request=stream,
+                guard=GuardInputs(
+                    answered_verdict=journal.answered_verdict,
+                    skill_labels=frozenset(labels.labels("skill")),
+                    misconception_labels=frozenset(labels.labels("misconception")),
+                    task_labels=frozenset(labels.labels("task")),
+                    has_spoiler=lambda text: any(
+                        answer_in_text(text, answer, settings) for answer in answers
+                    ),
+                    remove_spoiler=lambda text: remove_answer_sentences(text, answers, settings),
+                ),
+                effort=effort,
+                degraded_mode=degraded,
+            ),
+            provider=self._gateway.streaming(
+                role,
+                prompt,
+                learner_id=learner_id,
+                session_id=session_id,
+                turn_id=request.manifest_id,
+            ),
+            labels=labels,
+            manifest=TurnManifestRow(
+                manifest_id=request.manifest_id,
+                learner_id=learner_id,
+                session_id=session_id,
+                prompt_version=prompt_version,
+                doctrine_version=None,
+                renderer_version=RENDERER_VERSION,
+                role=role,
+                model=settings.model_for_role(role),
+                effort=effort,
+                projected_seq=memory_slice.projected_seq,
+                label_table=labels.table(),
+                chunk_ids=[chunk.chunk_id for chunk in chunks],
+                degraded_mode=degraded,
+                frozen_slots=(
+                    {"profile": frozen.profile, "domain_and_goals": frozen.domain_and_goals}
+                    if freeze
+                    else None
+                ),
+            ),
+            execute_tool=execute_tool,
+            learner_texts=journal.learner_texts,
+            learner_timezone=timezone,
+            answered=journal.answered,
+        )
+
+
+async def _none() -> None:
+    return None
