@@ -118,7 +118,9 @@ SPARK = "muse-spark-1.3"
 class RoleConfig(BaseModel):
     """One row of the role table Т-§11.1 (ТЗ Ф4 WP10.1). `effort`, `max_output_tokens` and
     `prompt` are null for the roles that are not text calls (`segmenter`, `voice`,
-    `illustrator`): Т-§11.1 gives them no effort row (D-B-101)."""
+    `illustrator`): Т-§11.1 gives them no effort row (D-B-101). `hard_model` — the model of the
+    hard calls of a role whose row reads «Spark, для сложных — Wonder» (`solution_space`,
+    `task_generator`; ТЗ Ф4 WP12.4, WP12.6, D-B-166)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -128,6 +130,7 @@ class RoleConfig(BaseModel):
     priority_class: PriorityClass
     timeout_s: float
     prompt: str | None
+    hard_model: str | None = None
 
 
 def _role(
@@ -169,10 +172,14 @@ def default_llm_roles() -> dict[str, RoleConfig]:
         "analyst_deep": _role(WONDER, "high", 16384, "P2", "analyst@1"),
         "builder": _role(SPARK, "high", 8192, "P2", "builder@1"),
         "material_parser": _role(SPARK, "high", 4096, "P2", "material_parser@1"),
-        "task_generator": _role(SPARK, "high", 8192, "P2", "task_generator@1"),
+        "task_generator": _role(SPARK, "high", 8192, "P2", "task_generator@1").model_copy(
+            update={"hard_model": WONDER}
+        ),
         "task_checker": _role(SPARK, "high", 8192, "P1", "task_checker@1"),
         "task_arbiter": _role(WONDER, "high", 8192, "P2", "task_arbiter@1"),
-        "solution_space": _role(SPARK, "high", 8192, "P2", "solution_space@1"),
+        "solution_space": _role(SPARK, "high", 8192, "P2", "solution_space@1").model_copy(
+            update={"hard_model": WONDER}
+        ),
         "viz_builder": _role(WONDER, "high", 16384, "P2", "viz_builder@1"),
         "viz_checker": _role(SPARK, "low", 4096, "P2", "viz_checker@1"),
         "misconception_describer": _role(SPARK, "high", 4096, "P3", "misconception_describer@1"),
@@ -686,7 +693,11 @@ class Settings(BaseSettings):
         """R4: the old name of `meta_api_base_url`, kept for readers not yet moved to it."""
         return self.meta_api_base_url
 
-    def model_for_role(self, role: str) -> str:
+    def model_for_role(self, role: str, *, hard: bool = False) -> str:
+        """`hard` — a hard call of a role with `hard_model` (Т-§11.1, D-B-166)."""
+        hard_model = self.llm_roles[role].hard_model if role in self.llm_roles else None
+        if hard and hard_model is not None:
+            return hard_model
         return self.llm_role_models.get(role, self.llm_default_model)
 
     def secret_values(self) -> list[str]:

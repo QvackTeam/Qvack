@@ -162,10 +162,11 @@ class LLMGateway:
         prompt_role: str | None = None,
         reasoning_effort: ReasoningEffort | None = None,
         check: Callable[[T], str | None] | None = None,
+        hard: bool = False,
     ) -> LLMResult[T]:
         """`prompt_role` takes the template of `prompt_role@prompt_version` while model,
         limits, ledger and outbox stay with `role` (WP5.4); `reasoning_effort` overrides the
-        role effort (WP6.5).
+        role effort (WP6.5); `hard` takes the role's `hard_model` (Т-§11.1, D-B-166).
 
         `check` finds what the schema cannot (an unknown label, WP14.1): its error text goes
         back to the model once through the repair path; if the second answer is wrong again or
@@ -173,7 +174,7 @@ class LLMGateway:
         No second repair after a schema repair: one repair call per request."""
         prompt = self.prompts.load(prompt_role or role, prompt_version)
         rendered = prompt.render(variables)
-        model = self.settings.model_for_role(role)
+        model = self.settings.model_for_role(role, hard=hard)
         schema = response_model.model_json_schema()
 
         cached = await self._completed_outbox(learner_id, idempotency_key)

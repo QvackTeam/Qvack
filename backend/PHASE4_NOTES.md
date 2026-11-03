@@ -1017,6 +1017,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Не решено \[ПРОВЕРИТЬ\] — вопрос владельцу: план хаба на несколько сессий (`content.study_plans`): кто и когда его строит (в разметке `teacher@2` полей для него нет; «учитель держит грубый план», `П-4.6`) и что такое «порция» (размер, единица — тема, компонента SCC?). До ответа `study_plans` не пишется.
 - Требует подтверждения владельцем: нет
 
+### D-B-166. Пространство решения задачи (WP12.4)
+- Класс: B
+- WP / место: WP12.4, `Т-§5.5`, `Т-§11.1`, `T-TK5`; `quack/practice/solution_space.py` (`build_solution_space`), `quack/config.py` (`RoleConfig.hard_model`, `model_for_role(hard=)`), `quack/llm/gateway.py` (`generate_structured(hard=)`)
+- Контекст: WP12.4 — роль `solution_space`, Spark; Wonder — для ответа `proof` и уровня 6; хранится в документе задачи с версией. `Т-§11.1`: строка «solution\_space — Spark, для сложных — Wonder», так же `task_generator`; ролей в таблице 26 (`T-AI1`), отдельной роли «глубокой» нет. Не названы: как одна роль зовёт две модели; что хранить на месте метки заблуждения неверной ветки (метки живут один вызов, `Т-§4.5`); откуда уровни задачи (в `content.tasks` разметки нет); что делать при двух задачах на одну задачу (правило банка и запрос канваса).
+- Решение: (а) у строки роли — `hard_model` (Wonder для `solution_space`, `task_generator`); `generate_structured(hard=True)` зовёт его, учёт, лимиты и outbox остаются у роли; роли без `hard_model` флаг не меняет. Новой роли нет — таблица `Т-§11.1` цела. (б) Сложная — ответ `proof` или уровень 6 в `tests` разметки; разметка читается из `task.created` по `created_seq` документа. (в) Заблуждение неверной ветки хранится его id (строкой) вместо метки; метка, неизвестная после повтора, — null. (г) Версия — версия промпта (`solution_space@1`); ключ вызова `solution_space:{task_id}:{prompt}`; запись — `UPDATE … WHERE solution_space IS NULL`: первое сохранённое пространство остаётся, повторная задача ничего не строит. (д) Пространство — содержимое документа задачи, не память ученика: события нет (закон 1 о модели ученика).
+- Почему: §0.4.3 п.2 (WP12.4, `Т-§5.5`, `Т-§11.1`), п.5.
+- Обратимость: один модуль и поле строки роли.
+- Тесты: `T-TK5` — `tests/practice/test_solution_space.py` (6); `tests/test_llm_runtime.py::test_hard_call_takes_the_hard_model`.
+- Не решено \[ПРОВЕРИТЬ\]: `model_for_role` берёт модель из `llm_role_models` (Фаза 2), а не из `llm_roles[role].model` — модель строки таблицы на вызов не влияет (кроме `hard_model`); провести через WP10 (G4). Обработчики `task.solution_space`/`agent.solution_space` — после чтения заблуждений навыка из S4 и источника эталонного решения.
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -1332,6 +1343,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP12.4, пространство решения (D-B-166): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 7 подмен (без `proof`, без уровня 6, метка вместо id, повторная постройка, без `IS NULL`, без LaTeX условия, `hard=False`), каждая роняет тест. Зелёный: `tests/test_llm_runtime.py`, `tests/practice`, `tests/llm`, `tests/test_settings_meta_api.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/e2e/test_llm_seams_e2e.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 272 passed.
 - D-C-122 п.4, переполнение куска (C, `phase-4-c-wp21-ws`, коммит `57127c3`): `pytest tests/canvas/test_strokes_wp21.py` — 2 failed (`chunk_max_batches` — `NotImplementedError`, кусок ждёт время при переполнении), 5 passed. Зелёный: `tests/canvas` — 19 passed.
 - WP21.2, WebSocket канваса (C, `phase-4-c-wp21-ws`, коммит `f915ac2`): в Linux против `quack-test-*` с dbmate `pytest tests/canvas/test_canvas_ws.py` — 7 failed (маршрута `WS /v1/canvases/{id}/ws` нет — сокет закрывается при рукопожатии; `publish_canvas` — `NotImplementedError`). Зелёный: `tests/canvas` — 16 passed; `tests/auth`, `tests/test_contracts.py`, `tests/test_app_assembly.py` — зелёные.
 - WP21.1, ключ запроса пространства (C, `phase-4-c-wp21-boards`, коммит `3318d8a`, ревью B #116): `pytest tests/canvas/test_boards_wp21.py` — 1 failed (`test_one_request_per_task`: ключ `canvas:{canvas_id}:solution_space`, `actor = system`, без `domain_id`), 4 passed. Зелёный на `f693231`: `tests/canvas`, `tests/e2e/test_isolation_and_idempotency.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` — 24 passed.
