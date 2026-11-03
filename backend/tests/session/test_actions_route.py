@@ -302,6 +302,32 @@ async def test_without_a_session_cookie_is_unauthenticated(
     assert response.json()["error"]["code"] == "UNAUTHENTICATED"
 
 
+async def test_companion_session_is_forbidden(
+    client: httpx.AsyncClient, source: FixedSource, pg_db: Db, settings: Settings
+) -> None:
+    """T-CP1: the phone's `companion` session reaches no other endpoint — `403 UNAUTHORIZED`
+    (D-C-128), no action is written, no turn runs."""
+    who = await _learner(pg_db, settings)
+    phone = await open_session(
+        pg_db,
+        settings,
+        learner_id=who.learner_id,
+        now=datetime.now(UTC),
+        scope="companion",
+        canvas_id=uuid4(),
+    )
+
+    response = await client.post(
+        f"/v1/sessions/{who.session_id}/actions",
+        json={"kind": "message", "text": "hi", "idempotency_key": str(uuid4())},
+        cookies={SESSION_COOKIE: phone},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "UNAUTHORIZED"
+    assert "message.sent" not in await _types(pg_db, who.learner_id) and source.asked == []
+
+
 async def test_session_ended_by_the_sweeper_comes_back(
     client: httpx.AsyncClient, source: FixedSource, pg_db: Db, settings: Settings
 ) -> None:
