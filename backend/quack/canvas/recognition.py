@@ -25,7 +25,7 @@ from quack.compute_client.client import ComputeClient, ComputeUnavailableError
 from quack.compute_client.contracts import RenderStrokesRequest
 from quack.compute_client.contracts import Stroke as RenderStroke
 from quack.db import Db
-from quack.events.event_types import CanvasLineCommitted, CanvasLineErased
+from quack.events.event_types import CanvasLineCommitted, CanvasLineErased, HandwritingCorrected
 from quack.events.log import NewEvent, append_events
 from quack.llm.errors import LLMError
 from quack.llm.gateway import LLMGateway
@@ -45,6 +45,41 @@ class RecognizerOutput(BaseModel):
     crossed_out: bool
 
 
+class SheetBox(BaseModel):
+    """The approximate box of a sheet line as shares of the image, top-left origin."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    left: float = Field(ge=0.0, le=1.0)
+    top: float = Field(ge=0.0, le=1.0)
+    right: float = Field(ge=0.0, le=1.0)
+    bottom: float = Field(ge=0.0, le=1.0)
+
+
+class SheetLine(BaseModel):
+    """A line of a sheet photo (Т-§22.6 п.2): what `RecognizerOutput` gives for a pen line, plus
+    `drawing` as a kind and the approximate box as shares of the image, top-left origin
+    (D-C-134)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["latex", "text", "drawing"]
+    text: str
+    sympy: str | None
+    bbox: SheetBox
+    confidence: float = Field(ge=0.0, le=1.0)
+    crossed_out: bool
+
+
+class RecognizerSheetOutput(BaseModel):
+    """`recognizer@1` in the sheet mode: every line of the photo in one call, top to bottom
+    (ТЗ Ф4 WP22.3 п.2; a prompt with two modes has one schema per mode, D-B-140)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lines: list[SheetLine]
+
+
 # --- recognition of a pen line (WP21.3, D-C-131) ---------------------------------------------
 
 RECOGNIZER_ROLE = "recognizer"
@@ -52,6 +87,9 @@ RECOGNIZER_VERSION = 1
 # compute `/v1/image/render-strokes` answers WebP (WP24); `ImageInput` takes it (D-B-170).
 # Whether Spark reads WebP — [ПРОВЕРИТЬ] on the stand (DoD п.6a), PNG otherwise.
 RENDER_MIME = "image/webp"
+# The two modes of `recognizer@1` (D-C-134): one pen line, or a whole sheet photo (WP22.3).
+LINE_MODE = "line"
+SHEET_MODE = "sheet"
 
 
 @dataclass(frozen=True)
@@ -106,7 +144,7 @@ async def recognize_line(
             RECOGNIZER_ROLE,
             RECOGNIZER_VERSION,
             RecognizerOutput,
-            {},
+            {"mode": LINE_MODE},
             learner_id,
             session_id,
             None,
@@ -236,6 +274,59 @@ async def erase_line(
         ],
         redis=redis,
     )
+
+
+# --- correction of a reading (ТЗ Ф4 WP21.3, Т-§2.8, D-C-137) ---------------------------------
+
+_LINE_OF_CANVAS = (
+    "SELECT 1 AS found FROM core.events WHERE learner_id = %(learner_id)s "
+    "AND type = 'canvas.line_committed' AND payload ->> 'canvas_id' = %(canvas_id)s "
+    "AND payload ->> 'line_id' = %(line_id)s LIMIT 1"
+)
+
+
+class LineNotFound(Exception):
+    """The canvas has no recognized line with this id."""
+
+
+async def correct_line(
+    db: Db,
+    *,
+    learner_id: UUID,
+    session_id: UUID | None,
+    canvas_id: UUID,
+    line_id: str,
+    text: str,
+    sympy: str | None,
+    idempotency_key: str,
+    redis: Redis | None = None,
+) -> HandwritingCorrected:
+    """`handwriting.corrected {canvas_id, line_id, text, sympy}`: the learner corrects how a line
+    was read (П-9.7); the dispatcher queues `canvas.rediagnose` (stream A). Only a line the log
+    has for this canvas can be corrected; the key is the client's (law 5): the same key with
+    another text is `IdempotencyConflictError` (409)."""
+    found = await db.fetch_one(
+        _LINE_OF_CANVAS,
+        {"learner_id": learner_id, "canvas_id": str(canvas_id), "line_id": line_id},
+    )
+    if found is None:
+        raise LineNotFound(f"line {line_id} not found on canvas {canvas_id}")
+    payload = HandwritingCorrected(canvas_id=canvas_id, line_id=line_id, text=text, sympy=sympy)
+    await append_events(
+        db,
+        learner_id,
+        [
+            NewEvent(
+                type="handwriting.corrected",
+                payload=payload,
+                actor="learner",
+                idempotency_key=f"handwriting.corrected:{idempotency_key}",
+                session_id=session_id,
+            )
+        ],
+        redis=redis,
+    )
+    return payload
 
 
 class LineBook:

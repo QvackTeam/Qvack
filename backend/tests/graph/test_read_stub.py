@@ -187,8 +187,10 @@ def test_misconception_detail_has_every_manifestation() -> None:
     assert asyncio.run(_reader().misconception_detail(UUID(int=999))) is None
 
 
-def test_factory_is_not_implemented_before_g2() -> None:
+def test_factory_builds_the_neo4j_reader() -> None:
+    from quack.config import Settings
     from quack.graph.read import create_graph_reader
+    from quack.graph.read.neo4j_reader import Neo4jGraphReader
 
-    with pytest.raises(NotImplementedError):
-        create_graph_reader(None, None)  # type: ignore[arg-type]
+    reader = create_graph_reader(None, Settings(), learner_id=fx.LEARNER)  # type: ignore[arg-type]
+    assert isinstance(reader, Neo4jGraphReader)
