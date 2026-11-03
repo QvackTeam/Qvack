@@ -85,7 +85,11 @@ class RequiresLink(_Fact):
 
 class SkillFact(_Fact):
     skill_id: UUID
+    # Names for the teacher context, so it never reads the graph by names (WP14.1, D-A-137):
+    # the skill's and its topic's. `None` — not read (a double that does not know them).
+    name: str | None = None
     topic_id: UUID | None = None
+    topic_name: str | None = None
     domain_id: UUID | None = None
     levels: list[LevelFact] = []
     # Retention is computed at read time with the current time (Т-§8.3, Т-§10.2).
@@ -270,3 +274,79 @@ class ExtractionCandidates(_Fact):
 
     skills: list[CandidateSkill]
     misconceptions: list[MisconceptionFact]
+
+
+type ControlType = Literal["tasks", "colloquium_proofs", "oral_theory", "no_goal"]
+type ConfidenceBias = Literal["over", "under", "calibrated"]
+
+
+class HubTopicGoal(_Fact):
+    """A topic of a hub with the levels the control requires of it (Т-§4.8, `INCLUDES`)."""
+
+    topic_id: UUID
+    name: str
+    required_levels: list[Level]
+
+
+class HubGoal(_Fact):
+    """A goal hub of a domain for slot 4 (Т-§10.1, WP14.1): read from the graph, so merges,
+    splits and renames of topics are already applied (D-A-137)."""
+
+    hub_id: UUID
+    name: str
+    kind: str
+    control_type: ControlType
+    deadline_at_ms: int | None = None
+    topics: list[HubTopicGoal] = []
+
+
+class ProfileFacts(_Fact):
+    """The `Profile` node for slot 3 (Т-§9.5, WP14.1). `prefs` — explicit preferences
+    (`preference.set`); `manner` — the teacher manner text (`digest.written`). `learned_*` are
+    folded by code from the journal (WP5.3): `None` — «no data», fewer than
+    `profile_min_samples` samples (`learned_confidence_*`: fewer than `calibration_min_reports`)."""
+
+    learner_id: UUID
+    prefs: dict[str, str | int | float | bool] = {}
+    manner: str | None = None
+    learned_helpful_approach: str | None = None
+    learned_confidence_brier: float | None = Field(default=None, ge=0.0, le=1.0)
+    learned_confidence_bias: ConfidenceBias | None = None
+    learned_branch_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    learned_reasoning_share: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class TopicMemory(_Fact):
+    """Skills and misconceptions of one topic (WP14.1): the topics of the session goal, whose
+    `skill_id` go into `SliceFocus.skill_ids`."""
+
+    topic_id: UUID
+    name: str
+    domain_id: UUID | None = None
+    skills: list[SkillFact] = []
+    misconceptions: list[MisconceptionFact] = []
+
+
+class ManifestationFact(_Fact):
+    """One manifestation of a misconception (`MANIFESTS`, Т-§9.3), merges applied."""
+
+    evidence_id: UUID
+    quote: str | None = None
+    task_id: UUID | None = None
+    source_seq: int
+    at_ms: int
+    tier: EvidenceSource
+
+
+class MisconceptionDetail(_Fact):
+    """`misconception_detail` (WP16.2, Т-§9.3): one misconception with **all** its
+    manifestations, for `misconception.describe`. `unknown` — a hypothesis before its first
+    manifestation (the job ends without a model call, `T-AG2`)."""
+
+    misconception_id: UUID
+    status: MisconceptionStatus | Literal["unknown"]
+    statement: str
+    triggers: list[str] = []
+    skill_id: UUID
+    skill_name: str
+    manifestations: list[ManifestationFact] = []

@@ -2664,6 +2664,46 @@
         "title": "ProposeStructureResponse",
         "type": "object"
       },
+      "ReplayChunkView": {
+        "properties": {
+          "size": {
+            "title": "Size",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "size"
+        ],
+        "title": "ReplayChunkView",
+        "type": "object"
+      },
+      "ReplayView": {
+        "description": "Signed links to the stroke chunks of the canvas, oldest first (Т-§15.7, D-C-135).",
+        "properties": {
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/ReplayChunkView"
+            },
+            "title": "Chunks",
+            "type": "array"
+          },
+          "expires_in_s": {
+            "title": "Expires In S",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "chunks",
+          "expires_in_s"
+        ],
+        "title": "ReplayView",
+        "type": "object"
+      },
       "Scaffold": {
         "additionalProperties": false,
         "description": "A scaffold of the solution with gaps the learner fills with the pen (П-9.5).",
@@ -5488,6 +5528,80 @@
           }
         },
         "summary": "Upload Photo",
+        "tags": [
+          "canvas"
+        ]
+      }
+    },
+    "/v1/canvases/{canvas_id}/replay": {
+      "get": {
+        "description": "WP21.6: links live `object_url_ttl_s`; a canvas without a session has no strokes.",
+        "operationId": "canvas_replay_v1_canvases__canvas_id__replay_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "canvas_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Canvas Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Canvas Replay",
         "tags": [
           "canvas"
         ]

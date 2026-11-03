@@ -150,3 +150,47 @@ def test_extraction_candidates_of_wp15() -> None:
     assert (
         len(asyncio.run(reader.extraction_candidates(fx.LEARNER, session, None, k=1)).skills) == 1
     )
+
+
+def test_slice_skills_carry_names() -> None:
+    sl = asyncio.run(_reader().slice_for_turn(fx.LEARNER, UUID(int=1), SliceFocus()))
+    failed = next(s for s in sl.skills if s.skill_id == fx.SKILL_FAILED)
+    assert (failed.name, failed.topic_name) == ("common denominator", "reducing fractions")
+
+
+def test_domain_goals_give_topics_with_required_levels() -> None:
+    (goal,) = asyncio.run(_reader().domain_goals(fx.DOMAIN))
+    assert goal.hub_id == fx.HUB and goal.deadline_at_ms == fx.GOAL_DEADLINE_MS
+    assert [t.topic_id for t in goal.topics] == [fx.TOPIC_READY, fx.TOPIC_OPEN]
+    assert all(t.name and t.required_levels for t in goal.topics)
+
+
+def test_profile_separates_no_data_from_a_value() -> None:
+    p = asyncio.run(_reader().profile(fx.LEARNER))
+    assert p.prefs["language"] == "ru" and p.manner
+    assert p.learned_branch_rate is None  # «no data», not zero
+    assert p.learned_confidence_bias == "over"
+
+
+def test_topic_memory_skips_unknown_topics() -> None:
+    found = asyncio.run(_reader().topic_memory([fx.TOPIC_OPEN, UUID(int=999)]))
+    assert [m.topic_id for m in found] == [fx.TOPIC_OPEN]
+    assert {s.skill_id for s in found[0].skills} == {fx.SKILL_FAILED, fx.SKILL_QUIET}
+    assert [m.misconception_id for m in found[0].misconceptions] == [fx.MISCONCEPTION]
+
+
+def test_misconception_detail_has_every_manifestation() -> None:
+    detail = asyncio.run(_reader().misconception_detail(fx.MISCONCEPTION))
+    assert detail is not None
+    assert (detail.status, detail.skill_name) == ("confirmed", "common denominator")
+    assert [m.task_id is None for m in detail.manifestations] == [True, False]
+    assert asyncio.run(_reader().misconception_detail(UUID(int=999))) is None
+
+
+def test_factory_builds_the_neo4j_reader() -> None:
+    from quack.config import Settings
+    from quack.graph.read import create_graph_reader
+    from quack.graph.read.neo4j_reader import Neo4jGraphReader
+
+    reader = create_graph_reader(None, Settings(), learner_id=fx.LEARNER)  # type: ignore[arg-type]
+    assert isinstance(reader, Neo4jGraphReader)

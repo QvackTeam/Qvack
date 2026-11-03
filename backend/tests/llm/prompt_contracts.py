@@ -19,7 +19,7 @@ from quack.agents import schemas as agents
 from quack.artifacts.schemas import ArtifactGenOutput
 from quack.artifacts.writer import ArtifactWriterOutput
 from quack.canvas.diagnosis import CanvasDiagnoserOutput
-from quack.canvas.recognition import RecognizerOutput
+from quack.canvas.recognition import RecognizerOutput, RecognizerSheetOutput
 from quack.domains.schemas import CuratorOutput, DiagnosticOutput, StructurerOutput
 from quack.llm.labels import LABEL_PREFIX
 from quack.llm.strict_schema import to_strict_json_schema
@@ -66,7 +66,7 @@ PHASE4_PROMPT_SCHEMAS: dict[str, tuple[type[BaseModel], ...]] = {
     "viz_builder@1": (agents.VizBuilderOutput,),
     "release_judge@1": (agents.ReleaseJudgeOutput,),
     # Stream C, layer 2 by §7.3 п.2 (D-C-123).
-    "recognizer@1": (RecognizerOutput,),
+    "recognizer@1": (RecognizerOutput, RecognizerSheetOutput),
     "artifact_writer@1": (ArtifactWriterOutput,),
     "canvas_diagnoser@1": (CanvasDiagnoserOutput,),
 }

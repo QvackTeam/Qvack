@@ -45,6 +45,41 @@ class RecognizerOutput(BaseModel):
     crossed_out: bool
 
 
+class SheetBox(BaseModel):
+    """The approximate box of a sheet line as shares of the image, top-left origin."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    left: float = Field(ge=0.0, le=1.0)
+    top: float = Field(ge=0.0, le=1.0)
+    right: float = Field(ge=0.0, le=1.0)
+    bottom: float = Field(ge=0.0, le=1.0)
+
+
+class SheetLine(BaseModel):
+    """A line of a sheet photo (Т-§22.6 п.2): what `RecognizerOutput` gives for a pen line, plus
+    `drawing` as a kind and the approximate box as shares of the image, top-left origin
+    (D-C-134)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["latex", "text", "drawing"]
+    text: str
+    sympy: str | None
+    bbox: SheetBox
+    confidence: float = Field(ge=0.0, le=1.0)
+    crossed_out: bool
+
+
+class RecognizerSheetOutput(BaseModel):
+    """`recognizer@1` in the sheet mode: every line of the photo in one call, top to bottom
+    (ТЗ Ф4 WP22.3 п.2; a prompt with two modes has one schema per mode, D-B-140)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lines: list[SheetLine]
+
+
 # --- recognition of a pen line (WP21.3, D-C-131) ---------------------------------------------
 
 RECOGNIZER_ROLE = "recognizer"
@@ -52,6 +87,9 @@ RECOGNIZER_VERSION = 1
 # compute `/v1/image/render-strokes` answers WebP (WP24); `ImageInput` takes it (D-B-170).
 # Whether Spark reads WebP — [ПРОВЕРИТЬ] on the stand (DoD п.6a), PNG otherwise.
 RENDER_MIME = "image/webp"
+# The two modes of `recognizer@1` (D-C-134): one pen line, or a whole sheet photo (WP22.3).
+LINE_MODE = "line"
+SHEET_MODE = "sheet"
 
 
 @dataclass(frozen=True)
@@ -106,7 +144,7 @@ async def recognize_line(
             RECOGNIZER_ROLE,
             RECOGNIZER_VERSION,
             RecognizerOutput,
-            {},
+            {"mode": LINE_MODE},
             learner_id,
             session_id,
             None,
