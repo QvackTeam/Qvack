@@ -55,6 +55,7 @@ MISCONCEPTION = UUID(int=0x61)
 MISCONCEPTION_STATEMENT = "adds the denominators when adding fractions"
 MISCONCEPTION_TRIGGERS = ("fractions with different denominators",)
 LAPSE_AT_MS = 1_699_000_000_000
+HINT_STEP = 2
 EVIDENCE_PROVEN = UUID(int=0xE1)
 EVIDENCE_FAILED = UUID(int=0xE2)
 PROJECTED_SEQ = 120
@@ -217,6 +218,10 @@ class FixedGraphReader:
     async def skill_history(
         self, skill_id: UUID, level: Level | None = None, limit: int = 10
     ) -> list[EvidenceFact]:
+        if skill_id == SKILL_FAILED:
+            hinted = _evidence(EVIDENCE_FAILED, skill_id, "incorrect", 110).model_dump()
+            hinted |= {"assistance": "hint", "hint_step": HINT_STEP}
+            return [EvidenceFact.model_validate(hinted)][:limit]
         return [_evidence(EVIDENCE_PROVEN, skill_id, "correct", 100)][:limit]
 
     async def prerequisites(self, skill_id: UUID, limit: int = 10) -> list[PrerequisiteFact]:

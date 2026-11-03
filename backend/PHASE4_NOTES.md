@@ -98,13 +98,13 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | WP0 (зона C) | C | частично: ждёт п.2 (владелец) | — (скрипт п.3а) |
 | WP0 (зона A) | A | выполнен: аудит B1–B7, B21; п.3б, п.3в | — (скрипты п.3б, п.3в) |
 | WP2 (A) | A | **S3 заморожен (G1)** в `phase-4-a-s3-freeze` (D-A-119): 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; Q-A-2, Q-A-3 закрыты | `tests/events`: 82 passed (без инфраструктуры) |
-| WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` (D-A-111); `MisconceptionFact.statement` (D-B-145) — `phase-4-a-g1`; реализация — G2 | `tests/graph/test_read_stub.py`: 10 passed |
+| WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` (D-A-111); `MisconceptionFact.statement` (D-B-145) — `phase-4-a-g1`; факты картины памяти (D-A-126); помощь у свидетельства (D-A-127); реализация — G2 | `tests/graph/test_read_stub.py`: 12 passed |
 | WP7.1 (A), S6 | A | виды задач и таблица правил по событию (D-A-110); строка `known_check` и отмена поручений (D-A-115) — `phase-4-a-g1`; строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 27 passed |
 | S5 (A), WP3.2 таблица | A | строки обработчиков проектора на 38 типов в `phase-4-a-s5` (D-A-125); обработчики — G2 | `tests/graph/test_projector_rows.py`: 3 passed |
 | WP15 швы A (п.4–5 сообщения B), WP7.3 | A | `check_extracted` и `mark_covered` в `phase-4-a-wp15-seams` (D-A-124) | `tests/graph/test_extracted_check.py`, `tests/jobs/test_coverage.py`: 16 passed |
 | S1 (A), `JobContext` | A | поля §4.2 `db`, `storage`, `embeddings`, `deletions` в `phase-4-a-g1` (D-A-114) | `tests/jobs/test_job_context.py`: 2 passed |
 | WP3.1 (A) | A | схема Neo4j Фазы 4 в `quack/db/neo4j.py`: уникальность `id` для Hub, Option, Material, Chunk, Digest, Profile; range по `learnerId` на метках, где его ещё нет; составной `(learnerId, retDueAtMs)` на Skill; пять векторных индексов с фильтрующими свойствами и `embedding_dim`; сосуществует с индексами Фазы 3 до WP1.3. Остальное WP3 (обработчики, фазы А–В) — дальше | `tests/graph/test_schema_wp31.py` + `test_infra.py`: 4 passed (Neo4j 2026.06.0) |
-| WP1.1–1.2 (A) | A | выполнен в `phase-4-a-wp1` (шов S2): базовая миграция dbmate, `Db`, `append_events`, параметры §6.7 потока A. WP1.4 (`.squawk.toml`, S16) — к G2; WP1.3 — к G3/G4 | `tests/db`: 19 passed |
+| WP1.1–1.2 (A) | A | выполнен в `phase-4-a-wp1` (шов S2): базовая миграция dbmate, `Db`, `append_events`, параметры §6.7 потока A; расширяющая миграция `core.pairing_tokens` (D-A-128). WP1.4 (`.squawk.toml`, S16) — к G2; WP1.3 — к G3/G4 | `tests/db`: 20 passed |
 | WP0 (зона B) | B | выполнен: аудит, п.3г, п.3д, п.5 | — (скрипт п.3г) |
 | Этап I G1 (B: S7, S8, S11, S13) | B | контракты в `phase-4-b`, тесты контрактов зелёные | см. «Красные прогоны» |
 | WP10.2–10.3 (B) | B | частично: разбор потока хода и вход шага цикла с инструментами — зелёные (`T-AI2`–`T-AI4`); адаптер `ResponsesClient.stream_structured` и цикл `run_tool_loop` (параллельные инструменты с таймаутом, повтор оборванного с удвоенным лимитом) — зелёные (`T-AI5`, `T-AI6` без строки `ops.llm_usage` — она в WP10.4); встраивание в шлюз (допуск, семафоры, учёт) — с WP13 | 19 passed |
@@ -483,6 +483,22 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (поля названы `Т-§3.4`); S4 — интерфейс A, реализация — G2.
 - Тесты: `tests/graph/test_read_stub.py::test_memory_picture_facts_of_wp14_2`.
 - Требует подтверждения владельцем: нет.
+
+### D-A-127. S4: помощь у свидетельства в `skill_history`
+- Класс: B. WP6.4, WP14.4; вопрос B в D-B-163 (#132); `quack/graph/read/models.py`, `tests/support/graph_read.py`
+- Решение: `EvidenceFact.assistance: Literal["none", "hint", "shown_solution"] = "none"` и `EvidenceFact.hint_step: int | None` (1–3). `skill_history` отдаёт помощь каждого свидетельства («задача, исход, помощь, цитата, дата», `Т-§10.4`). Имена — по свойствам узла `Evidence` (`assistance`, `hintStep`, `Т-§3.4.3`), а не `help` из вопроса B. Перечень значений и ступени 1–3 — `Т-§7.6`. Без подсказки ступени нет — `None` (закон 8). Поля необязательные: читающий код B и C не меняется. Каталог событий не затронут (S3 заморожен, D-A-119). Заглушка `FixedGraphReader` даёт у «проваленного» навыка свидетельство с подсказкой ступени 2.
+- Почему: §0.4.3 п.2 (свойства названы в `Т-§3.4.3`) выше п.7 (единообразие с `ExtractedElementRecord.help` в каталоге).
+- Тесты: `tests/graph/test_read_stub.py::test_skill_history_says_what_help_was_given`.
+- Требует подтверждения владельцем: нет.
+
+### D-A-128. `core.pairing_tokens` — хранение токена привязки (WP22.1 ↔ §6.1)
+- Класс: C. WP22.1, §6.1, §0.4.4 п.4; вопрос C в #128; `backend/db/migrations/20261103000001_pairing_tokens.sql`, `…000002_pairing_tokens_learner_index.sql`, `tests/db/test_baseline_migration.py`
+- Противоречие: WP22.1 и `Т-§16.1` требуют токен привязки — одноразовый, живёт `pairing_ttl_s`, привязан к ученику, сессии, канвасу и задаче, «хранится хэш». В §6.1 места для него нет: `core.auth_links` — письма (`email NOT NULL`), `core.auth_sessions` — уже выданные сессии; токен в ней сам стал бы кукой и не был бы одноразовым.
+- Решение: расширяющая миграция после G0 — таблица `core.pairing_tokens (token_hash TEXT PK, learner_id, session_id, canvas_id NOT NULL, task_id NULL, created_at, expires_at NOT NULL, used_at NULL)`, по образцу `core.auth_links` (\[РЕШЕНИЕ Ф4\] §6.1 для писем). Индекс по `learner_id` для удаления ученика (WP25) — отдельным файлом `CONCURRENTLY` (Д-§6.2). Погашение — одним `UPDATE … SET used_at = now() WHERE token_hash = … AND used_at IS NULL AND expires_at > now()` — код C (`quack/auth`, `quack/canvas`). Запрос погашения по хэшу C вносит в `CROSS_LEARNER_ALLOWED` (`tests/db/test_sql_static.py`) своим PR — согласие A здесь.
+- Почему не Redis: `Т-§19.1` держит сессии в Postgres, потому что в Redis нет ничего, что жалко потерять (`Т-§1.2`); без Redis (§4.2 — он необязателен) привязка не работала бы. §0.4.3 п.1 (одноразовость — атомарный `UPDATE` в Postgres), п.7 (как `core.auth_links`).
+- Тест `T-DB1` (§8.15 п.3): описание «таблицы §6.1 и только их» уточнено — базовая миграция даёт ровно §6.1, каждая расширяющая — только свои таблицы, `down` откатывает по одной. Сила проверки та же; `test_pairing_tokens_table` — колонки, ключ, индекс.
+- Удаление ученика (WP25, A) удаляет и его строки `core.pairing_tokens`.
+- Требует подтверждения владельцем: да.
 
 ### D-A-135. S4: кандидаты извлекателя; S6: переизвлечение после `skill.split` по эпизодам
 - Класс: B. WP6.4, WP15 п.2, п.6, WP7.1; `Т-§2.8`, `Т-§4.11`, `Т-§7.6`, `Т-§3.4.6`; вопрос B в #132; `quack/graph/read/`, `tests/support/graph_read.py`, `quack/jobs/rules_p4.py`
@@ -1069,6 +1085,19 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Не решено \[ПРОВЕРИТЬ\] — вопрос владельцу: план хаба на несколько сессий (`content.study_plans`): кто и когда его строит (в разметке `teacher@2` полей для него нет; «учитель держит грубый план», `П-4.6`) и что такое «порция» (размер, единица — тема, компонента SCC?). До ответа `study_plans` не пишется.
 - Требует подтверждения владельцем: нет
 
+### D-B-155. Жизненный цикл сессии на `Db` (WP13.10, библиотечная часть)
+- Класс: B (п. е — C: каталог S3 заморожен, D-A-119)
+- WP / место: WP13.10, `П-4.10`, `Т-§2.2`, `Т-§22.9`; `quack/session/sessions.py`
+- Контекст: WP13.10 — `POST /v1/sessions` (домен; намерение; тема, хаб или пункт «Сегодня»), `…/heartbeat`, `…/end` (`session.ended`), сборщик неактивных, возврат в сессию после сборщика (`session.started {session_id, resumed: true}`), лента и история. Маршруты Фазы 3 (`lifecycle.py`) — на журнале и таблицах Фазы 3. Не названо: (а) перечень намерений старта; (б) что делает новый старт с открытой сессией; (в) `reason` у `session.ended`; (г) ключи событий; (д) что, если сессию закрыл сам ученик; (е) поле `resumed` — в каталоге у `session.started` его нет.
+- Решение: (а) `learn | practice | review` (кнопки `Т-§12.7`, как у действия `intent`) и `free` — свободный запрос («ведёт так же, как при свободном запросе», `Т-§12.7`). Тема или хаб — не оба. Пункт «Сегодня» клиент передаёт его темой или хабом; связь с подготовленным планом (`content.session_plans` `prepared`) — с WP17 \[ПРОВЕРИТЬ\]. (б) Новый старт открытую сессию не закрывает: сессия остаётся открытой для возврата (`П-4.10`); события `session.abandoned` Фазы 3 в каталоге Ф4 нет. (в) `learner` — `POST …/end`; `inactive` — сборщик (`session_inactivity_timeout_min`, Фаза 3). (г) Старт — `session.start:{idempotency_key}` (повтор с теми же параметрами — та же сессия, с другими — `SessionConflictError` → `409 IDEMPOTENCY_CONFLICT`); конец — `session.end:{session_id}:{seq открытия}`; возврат — `session.resume:{seq конца}`. `session.started` и строка `content.sessions` — одна транзакция; конец и возврат — в транзакции со строкой `FOR UPDATE`. (д) Возвращается только сессия, закрытая сборщиком: WP13.10 говорит о ней одной; закрытая учеником остаётся закрытой. (е) Возврат пишет `session.started` той же сессии с полным payload без `resumed`: возврат распознаётся как второе `session.started` того же `session_id` в журнале. Нужно поле `resumed: bool = False` в `SessionStarted` — по D-A-119 только новой версией схемы с записью класса C и согласием трёх потоков; вопрос A.
+- Не в этом пункте: маршруты (`POST /v1/sessions` и др.) переходят на эту библиотеку после D-C-119 (C переводит весь API на сессии, тесты `tests/session` — у C); выборка сборщика по всем ученикам (запрос через учеников требует строки в `CROSS_LEARNER_ALLOWED`, `tests/db/test_sql_static.py`, зона A) и регистрация задачи `session.sweep_inactive` — с рантаймом A (D-A-116); вызов `resume_if_swept` из записи действия — с телом `/actions`.
+- Почему: §0.4.3 п.1 (идемпотентность), п.2 (WP13.10, `П-4.10`), п.5.
+- Обратимость: один модуль.
+- Тесты: `tests/session/test_sessions_db.py` (10). Проверено на неверной реализации: 7 подмен — 6 роняют тест; «конец дважды» безвреден (повтор под тем же ключом ничего не пишет).
+- Требует подтверждения владельцем: нет; п. (е) — вопрос A (класс C)
+- Решено (2026-11-03): п. (е) — D-A-121 (#130): `SessionStarted.resumed: bool = False`; возврат в сессию, закрытую сборщиком, пишет `resumed: true` (после слияния #130).
+- По ревью C #124 (2026-11-03): (е) сделано — `resume_if_swept` пишет `resumed=True`, старт — `False` (#130 влит). (ж) Два старта с одним ключом одновременно: второй прочитал ключ до записи первого, его `append_events` встречает ключ с другой нагрузкой (`IdempotencyConflictError`) — ключ перечитывается в той же транзакции (запись первого уже видна после блокировки строки ученика), возвращается та же сессия, при других параметрах — `SessionConflictError` (закон 5). (з) Пульс сессию не возвращает: «действие в сессии» WP13.10 — действие `POST …/actions` (виды WP13.1), а пульс — присутствие (`Т-§2.2`: в журнал не пишется); пульс закрытой сессии — `LookupError`, код ответа маршрута — при подключении маршрутов по §4.5 \[ПРОВЕРИТЬ\]; клиент после сна вкладки возвращает сессию первым действием. (и) Остаётся к маршрутам: `GET /v1/sessions/{id}` — лента сессии из событий по `seq` (WP13.10); `get_session` библиотеки отдаёт строку `content.sessions`.
+
 ### D-B-162. Извлекатель по эпизодам: окно, вход, вызов роли (WP15 п.1–3)
 - Класс: B
 - WP / место: WP15 п.1–3, `Т-§7.5`, `Т-§7.6`, `Т-§4.5`; `quack/agents/extract_episode.py`
@@ -1420,6 +1449,8 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP13.10 по ревью C #124 (D-B-155 п.е, п.ж): `uv run pytest tests/session/test_sessions_db.py` — 2 failed (возврат без `resumed: true`; одновременный старт с одним ключом — `IdempotencyConflictError`), коммит `e8c8e77`. Зелёный: 11 passed (с `QUACK_TEST_REQUIRE_INFRA=1`).
+- WP13.10, жизненный цикл сессии на `Db` (D-B-155): `uv run pytest tests/session/test_sessions_db.py` — ошибка сбора (нет `quack.session.sessions`), коммит `28f32e3`; на неверной реализации — 6 из 7 подмен роняют тест. Зелёный: 10 passed.
 - WP15 п.4–5, проверка и запись (D-B-165): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 8 подмен (без транзакции, `causation_seq`, `observation_seq`, вердикт code, окно вместо эпизода, `min` вместо `max`, текст ответа, текст строки канваса), каждая роняет тест. Зелёный: `tests/agents`, `tests/graph/test_extracted_check.py`, `tests/jobs/test_coverage.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 34 passed.
 - WP15 п.1–3, окно, вход и вызов `extractor@3` (D-B-162): `uv run pytest tests/agents/test_extract_episode.py` — 4 failed (`NotImplementedError`), коммит `ac6bed8`; на неверной реализации — 12 подмен, каждая роняет тест (после усиления тестов, см. «Правки тестов»). Зелёный: 4 passed; с `QUACK_TEST_REQUIRE_INFRA=1` вместе с `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/llm/test_labels.py` — 74 passed.
 - D-C-119, весь API на сессиях (C, `phase-4-c-d112`, коммит `e8a6aee`): в Linux против `quack-test-*` с dbmate `pytest tests/test_app_assembly.py tests/domains/test_auth_and_learner.py tests/session/test_auth_and_stream_resilience.py` — 14 failed (старый вход: сессия не принимается маршрутами Фазы 3, код 401 `UNAUTHORIZED`, `/v1/auth/register|login|me` ещё смонтированы, лимит без Redis считает только `auth`), 11 passed. Зелёный — в описании PR.
@@ -1487,12 +1518,15 @@ PR #77 (dbmate v2.36.0, sha256).
 - WP13.9, `known_check` без темы (D-B-149 п. ж): `-k known_check` — 1 failed (запрос без темы записан), коммит `730bf0c`. Зелёный: 26 passed.
 - WP13.9, запись хода (D-B-149): `cd backend && uv run pytest tests/session/test_turn_commit.py` — ошибка сбора (нет `quack.session.turn_commit`), коммит `d7972cc`; на неверной реализации (6 подмен) — каждая роняет 1–2 теста. Зелёный: 6 passed.
 - WP13.9, дедлайн из разговора, подсказки, закрытие задачи (D-B-149 п. г, д): тот же файл — ошибка сбора (нет `AnsweredAction`, `LearnerText`), коммит `6e39af5`; на неверной реализации — 8 подмен, каждая роняет 1–3 теста. Зелёный: 16 passed.
+- `core.pairing_tokens` (A, D-A-128, `phase-4-a-pairing-tokens`, коммит `6c49e1d`): `QUACK_TEST_REQUIRE_INFRA=1 uv run pytest tests/db/test_baseline_migration.py` — 2 failed (нет `core.pairing_tokens`). Подмены: нет файла индекса, `task_id NOT NULL`, `down` не удаляет таблицу, `used_at NOT NULL`, таблица в базовой миграции — 5/5 роняют тест. Зелёный: `tests/db` — 20 passed.
+- S4, помощь у свидетельства (A, D-A-127, `phase-4-a-s4-assistance`, коммит `a6f9ed8`): `uv run pytest tests/graph/test_read_stub.py` — 1 failed (у `EvidenceFact` нет `assistance`), 11 passed. Подмены: нет верхней границы ступени, умолчание `hint`, нет `shown_solution`, ступень по умолчанию 1 — 4/4 роняют тест. Зелёный: 12 passed.
 - WP15, помощь и тип пробела (A, D-A-124 п.3а, коммит `9a1a444`): `uv run pytest tests/graph/test_extracted_check.py` — 1 failed (подсказка без ступени проходит). Подмены: ступень без подсказки, подсказка без ступени, положительный с типом пробела, `partial` обязан `none` — 4/4. Зелёный: 13 passed.
 - S4 кандидаты, S6 `skill.split` (A, D-A-135, коммит `8c5181b`): `uv run pytest tests/graph/test_read_stub.py tests/jobs/test_rules_p4.py` — 2 failed (`NotImplementedError`; `skill.split` ставит задачу без эпизода). Подмены заглушки: тема, навыки, `k`, заблуждения не кандидатов — 4/4. Зелёный: 40 passed.
 
 ## Правки тестов
 
 - `tests/jobs/test_rules_p4.py::test_handwriting_known_claim_and_reextraction_rows` (A, D-A-135): `skill.split` больше не ставит задачу только по событию. Тест проверяет, что строка — с данными сверх события (по эпизодам, `Т-§2.8`); прежнее утверждение (одна задача без эпизода) расходилось с `Т-§2.8` (§8.15 п.3).
+- `tests/session/test_sessions_db.py::test_start_writes_the_event_and_the_row` (B, D-B-155): нагрузка `session.started` получила поле `resumed: false` (D-A-121, #130) — ожидание дополнено полем. Проверка не ослаблена.
 - `tests/agents/test_extract_episode.py` (B, D-B-162, до зелёного): две подмены прошли (метки заблуждениям не-кандидатов; `episode_context_turns = 0` без ходов перед эпизодом). Добавлены проверки меток заблуждений и окна при нуле. Тесты усилены, не ослаблены.
 - `tests/graph/test_extracted_check.py::test_negative_elements_need_a_quote_from_their_sources` (A, D-A-124 п.3а, до слияния #133): положительный элемент с новым навыком получил `gap_type = none` — прежние данные нарушали контракт выхода (WP15 п.3). Проверяемое утверждение (`missing_quote`) то же.
 - `tests/test_compose_contract.py` (C, D-C-119): удалён `test_only_api_has_the_jwt_secret` из #122 — `JWT_SECRET` удаляется вместе с JWT (§2.3 строка 3, §8.15 п.1); из проверки `projector` убрано несуществующее имя `JWT_SECRET`.
