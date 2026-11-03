@@ -2,8 +2,9 @@
 Т-§10). D-B-181.
 
 - **The journal of the session** gives the goal (`session.started`, then the last
-  `message.sent` with an intent, Т-§12.7), the active tasks (created in the session and not closed), the learner texts, the
-  action the turn answers and its verdict, the effort (Т-§12.9).
+  `message.sent` with an intent, Т-§12.7), the active tasks (created in the session and not
+  closed), the learner texts, the action the turn answers and its verdict, the effort
+  (Т-§12.9).
 - **Memory** (S4, `quack.graph.read`): profile and goals now, the topics of the goal, the
   slice for the focus — the skills of the active tasks and of the goal topics (Т-§10.2). The
   reads go in parallel (WP14.5, Т-§10.7). A slice that cannot be read is the empty slice and
