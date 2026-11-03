@@ -42,6 +42,19 @@ from quack.llm.errors import (
     ProviderUnavailableError,
     UnavailableReason,
 )
+from quack.llm.media import (
+    BoxPrompt,
+    Illustration,
+    IllustrationRequest,
+    MaskEncoding,
+    MediaProvider,
+    Segmentation,
+    SegmentRequest,
+    TranscribeMode,
+    TranscribeRequest,
+    Transcription,
+    parse_segmentation,
+)
 from quack.llm.pressure import (
     circuit_open_in_redis,
     low_remaining,
@@ -318,6 +331,140 @@ class LLMGateway:
         ctx = _CallContext(role, prompt, model, learner_id, session_id, turn_id, key)
         return _GatewayStream(self, ctx)
 
+    # --- non-text roles (ТЗ Ф4 WP10.1, D-B-187) ---
+
+    async def segment(
+        self,
+        image: ImageInput,
+        *,
+        learner_id: UUID,
+        session_id: UUID | None = None,
+        turn_id: UUID | None = None,
+        concept: str | None = None,
+        box: BoxPrompt | None = None,
+        mask_encoding: MaskEncoding = "lossless",
+        include_confidence: bool = True,
+    ) -> LLMResult[Segmentation]:
+        """Role `segmenter` (`sam-3.1`): objects of the image by a short name `concept` or by
+        a `box` (exactly one of them), with boxes, masks and confidence (up to 16)."""
+        if (concept is None) == (box is None):
+            raise ValueError("segment: exactly one of concept and box")
+        provider = self._media_provider()
+        model = self._media_model("segmenter")
+
+        def build(timeout: float) -> SegmentRequest:
+            return SegmentRequest(
+                model, image, timeout, concept, box, mask_encoding, include_confidence
+            )
+
+        response, usage = await self._media_call(
+            "segmenter",
+            learner_id,
+            session_id,
+            turn_id,
+            lambda timeout: provider.segment(build(timeout)),
+        )
+        value = parse_segmentation(response.content, mask_encoding)
+        return LLMResult(value, False, _media_hash("segmenter"), response.model, usage)
+
+    async def transcribe(
+        self,
+        wav: bytes,
+        *,
+        learner_id: UUID,
+        session_id: UUID | None = None,
+        turn_id: UUID | None = None,
+        mode: TranscribeMode = "PUSH_TO_TALK",
+        language_bias: str | None = None,
+        keywords: Sequence[str] = (),
+    ) -> LLMResult[Transcription]:
+        """Role `voice` (`muse-voice-transcribe-1.0`): the transcript of a WAV (mono, 16-bit
+        PCM, 16 or 24 kHz, up to 10 min and 32 MB); the caller converts the browser audio."""
+        provider = self._media_provider()
+        model = self._media_model("voice")
+        response, usage = await self._media_call(
+            "voice",
+            learner_id,
+            session_id,
+            turn_id,
+            lambda timeout: provider.transcribe(
+                TranscribeRequest(model, wav, timeout, mode, language_bias, tuple(keywords))
+            ),
+        )
+        value = Transcription(
+            text=response.content,
+            audio_duration_ms=response.audio_duration_ms,
+            turns=list(response.turns),
+        )
+        return LLMResult(value, False, _media_hash("voice"), response.model, usage)
+
+    async def illustrate(
+        self,
+        prompt: str,
+        *,
+        learner_id: UUID,
+        session_id: UUID | None = None,
+        turn_id: UUID | None = None,
+        size: str | None = None,
+    ) -> LLMResult[Illustration]:
+        """Role `illustrator` (`muse-image-1.0`): a conceptual illustration, not mathematics
+        (П-4.5); bytes of the image or a reference."""
+        provider = self._media_provider()
+        model = self._media_model("illustrator")
+        response, usage = await self._media_call(
+            "illustrator",
+            learner_id,
+            session_id,
+            turn_id,
+            lambda timeout: provider.illustrate(IllustrationRequest(model, prompt, timeout, size)),
+        )
+        value = Illustration(image=response.image, url=response.url, mime=response.mime)
+        return LLMResult(value, False, _media_hash("illustrator"), response.model, usage)
+
+    def _media_model(self, role: str) -> str:
+        """The model of a non-text role: an explicit `llm_role_models` entry, else the row of
+        `llm_roles` (Т-§11.1): `model_for_role` falls back to the default text model, which is
+        wrong for these three."""
+        return self.settings.llm_role_models.get(role) or self.settings.llm_roles[role].model
+
+    def _media_provider(self) -> MediaProvider:
+        if not all(hasattr(self.provider, n) for n in ("segment", "transcribe", "illustrate")):
+            raise TypeError(f"{type(self.provider).__name__} has no non-text roles")
+        return self.provider  # type: ignore[return-value]
+
+    async def _media_call[R: ProviderResponse](
+        self,
+        role: str,
+        learner_id: UUID,
+        session_id: UUID | None,
+        turn_id: UUID | None,
+        invoke: Callable[[float], Awaitable[R]],
+    ) -> tuple[R, LLMUsage]:
+        """The path of a non-text call: budgets, slot of the model, attempts (retries, 429 with
+        the pressure flag, 400 without retry, breaker), one ledger row per attempt. There is no
+        prompt, no outbox and no schema repair: a repeated call is a repeated charge."""
+        model = self._media_model(role)
+        timeout = self.settings.llm_role_timeout_s.get(role, self.settings.llm_timeout_sec)
+        exempt = role in self.settings.session_budget_exempt_roles
+        await self._check_budgets(learner_id, None if exempt else session_id)
+        template = PromptTemplate(role, 0, "", _media_hash(role))
+        ctx = _CallContext(role, template, model, learner_id, session_id, turn_id, "")
+        request = ProviderRequest(
+            model=model,
+            prompt="",
+            json_schema={},
+            schema_name=role,
+            temperature=0.0,
+            timeout_sec=timeout,
+        )
+        totals = [0, 0, 0, 0]
+        async with self._admitted(role, model):
+            response = await self._attempts_with(
+                ctx, request, totals, lambda _request: invoke(timeout)
+            )
+        await self._ledger(ctx, response, totals[3], "ok", None)
+        return response, LLMUsage(totals[0], totals[1], totals[2], totals[3])
+
     # --- admission: semaphores per model (WP5.1) ---
 
     def _semaphore(self, model: str) -> asyncio.Semaphore:
@@ -352,6 +499,15 @@ class LLMGateway:
     async def _attempts(
         self, ctx: _CallContext, request: ProviderRequest, totals: list[int]
     ) -> ProviderResponse:
+        return await self._attempts_with(ctx, request, totals, self.provider.complete_structured)
+
+    async def _attempts_with[R: ProviderResponse](
+        self,
+        ctx: _CallContext,
+        request: ProviderRequest,
+        totals: list[int],
+        invoke: Callable[[ProviderRequest], Awaitable[R]],
+    ) -> R:
         settings = self.settings
         started = time.monotonic()
         failures = rate_limited = 0
@@ -361,7 +517,7 @@ class LLMGateway:
             attempt_started = time.monotonic()
             try:
                 async with asyncio.timeout(request.timeout_sec):
-                    response = await self.provider.complete_structured(request)
+                    response = await invoke(request)
             except ProviderRateLimitedError as exc:
                 self._circuit_neutral(ctx.model)
                 ttl = await self._rate_limited(ctx, exc, _latency(attempt_started))
@@ -724,6 +880,11 @@ class _GatewayStream:
             await set_pressure_flag(
                 gw.redis, ctx.model, gw.settings.pressure_header_ttl_s, "headers", _now()
             )
+
+
+def _media_hash(role: str) -> str:
+    """`prompt_hash` of the ledger row of a non-text role: there is no prompt (version 0)."""
+    return hashlib.sha256(f"{role}@media".encode()).hexdigest()
 
 
 def _parse[T: BaseModel](model: type[T], content: str) -> tuple[T | None, str]:
