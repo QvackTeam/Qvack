@@ -32,13 +32,17 @@ class WrittenBlock(_Strict):
     """A block of notes or of a cheat sheet (Т-§17.2). `updates` — the number (from 1) of the
     block of the current version it replaces; null — a new block. `sources` — chunk labels
     (`P…`) the block rests on: a definition or statement from materials without one is
-    rejected by code (Т-§17.4); a block without sources is an explanation of the system."""
+    rejected by code (Т-§17.4); a block without sources is an explanation of the system.
+    `formulas` — the identities of the block that can be checked symbolically (`left = right`,
+    LaTeX): code sends each to compute; one that does not pass is a violation, and after the
+    second generation the block is marked «не проверено» (WP23.3, D-C-156)."""
 
     updates: Annotated[int, Field(ge=1)] | None
     kind: BlockKind
     content: str
     sources: list[str]
     skills: list[str]
+    formulas: list[str] = Field(default_factory=list[str])
 
 
 class WrittenCard(_Strict):

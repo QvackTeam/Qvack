@@ -645,6 +645,8 @@ class Settings(BaseSettings):
     # WP23 (Т-§17)
     cards_per_topic_max: int = 15
     cheatsheet_fit_rounds: int = 2
+    # Т-§17.4 (WP23.3): formulas of one block that code sends to compute; the rest stay unchecked
+    artifact_formulas_per_block_max: int = 5
     # WP9 (Д-§2.1, Д-§4.2, Д-§8.1, Д-§9.3)
     disk_warn_pct: int = 75
     disk_crit_pct: int = 90

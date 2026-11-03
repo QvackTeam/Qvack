@@ -23,6 +23,36 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-C-157. WP23.3: поля блока `basis` и `unverified`, общий код проверок для конспекта и cheat sheet
+- Класс: C (формат хранения без данных — правится на месте, как D-C-135; маршрутов и событий нет)
+- WP / место: WP23.3, Т-§17.2, Т-§17.4; `quack/artifacts/documents.py` (`Block`, `SystemBlock`), `quack/artifacts/accuracy.py` (новый), `topic_refresh.py`, `hub_cheatsheet.py`, `hub_cheatsheet_routes.py`
+- Контекст: ТЗ требует отметки «не проверено» и «без опоры», но поля блока (Т-§17.2) их не называют, `kind` — закрытый список.
+- Решение: (1) У `Block` два поля: `basis` (`materials` — блок назвал кусок; `system` — «пояснение системы», без опоры; `null` — блок ученика) и `unverified` (bool, по умолчанию `false`). В JSON версии и в ответах API — `basis`, `unverified` (без псевдонимов). (2) Правка блока учеником сбрасывает обе отметки (блок стал его). Принятие дополнения блок ученика не меняет. (3) Блоки системы, которые «собери сам» оставляет на месте, сохраняют отметки. (4) Общий код — `accuracy.write_blocks`: цикл «вызов роли, проверка, одна перегенерация» вместо двух копий в `topic_refresh` и `hub_cheatsheet`; `compute` — необязательный параметр (`None` = формулы «не проверено»), задача `artifact.topic_refresh` передаёт `ctx.compute`, маршрут `review` — `resources.compute`.
+- Почему: Т-§17.4, закон 8 («не проверено» — явное значение), WP23.2 («повторная генерация один раз»), «общий код — в quack/artifacts».
+- Обратимость: код C; данных учеников нет (D-C-135), старые версии читаются (поля по умолчанию).
+- Тесты: `tests/artifacts/test_accuracy_wp23_3.py` (`test_a_learner_edit_clears_the_marks`, `test_the_review_keeps_the_marks_of_the_systems_blocks`, `test_the_topic_job_passes_compute_to_the_notes`); `test_documents_wp23.py` (форма блока в ответе).
+- Требует подтверждения владельцем: нет
+
+### D-C-156. WP23.3: формулы блока — поле `formulas`, проверка в compute, «не проверено»
+- Класс: C (поле выхода роли C; слой 2 промпта — C; `PROMPT_CONTRACTS.md` пересобран, регистрация схемы у B не менялась)
+- WP / место: WP23.3, Т-§17.4; `quack/artifacts/writer.py` (`WrittenBlock.formulas`), `quack/artifacts/accuracy.py` (`split_identity`, `formula_request`, `verify_formula`), `quack/prompts/artifact_writer/v1.md` (черновик, правится на месте, манифест пересобран), `quack/config.py` (`artifact_formulas_per_block_max`)
+- Контекст: ТЗ: «формулы, проверяемые символьно, проверяет compute (`/v1/math/check` в режиме тождества)», но не сказано, какие формулы в блоке проверяемые. Выделять их из Markdown эвристикой нельзя: уравнение `x^2 = 4` не тождество, и проверка дала бы ложное «неверно».
+- Решение: (1) Писатель сам перечисляет в `formulas` тождества, производные и интегралы блока одной строкой LaTeX `слева = справа` (ровно один `=` вне скобок). (2) Код шлёт каждую в `ComputeClient.math_check`: `kind = expression`, `mode = equal`, обе стороны как `latex`, `timeout_ms = symbolic_background_timeout_ms`, пороги из `Settings`. (3) `passed` — `completed` и `correct`. Всё остальное (`incorrect`, `unclear`, `failed`, не тождество, длиннее предела `MathInput`) — `failed`: нарушение, одна перегенерация, при повторном провале блок остаётся с `unverified = true` (не отбрасывается). (4) Нет ответа compute (`ComputeUnavailableError`, таймаут) или `compute = None` — `unavailable`: писатель не виноват, перегенерации нет, блок помечен `unverified`. (5) Не больше `artifact_formulas_per_block_max` (5) формул на блок, остальные не проверяются, блок помечен.
+- Почему: Т-§17.4, закон 2 (проверяет код, не модель), закон 8, §0.3 (пороги в конфиге).
+- Обратимость: код C; поле имеет значение по умолчанию `[]`, строгая схема делает его обязательным для модели.
+- Тесты: `tests/artifacts/test_accuracy_wp23_3.py` (формулы: прошла, перегенерация, дважды не прошла, не разобрана, compute недоступен, без compute, не тождество, cheat sheet).
+- Требует подтверждения владельцем: нет
+
+### D-C-155. WP23.3: опора блока — определение без куска, «без опоры», страница из куска
+- Класс: C (достройка контракта: Т-§17.3 и Т-§17.4 по-разному говорят о блоке без куска)
+- WP / место: WP23.3, WP23.2, T-AR2, Т-§17.3, Т-§17.4; `quack/artifacts/accuracy.py` (`lacks_source`, `system_block`)
+- Контекст: Т-§17.3 / T-AR2: определение или утверждение без ссылки — нарушение (перегенерация, затем отбрасывание). Т-§17.4: утверждения без опоры на материалы помечаются как пояснения системы. Оба требования нельзя применить к одному блоку.
+- Решение: (1) Нарушение — блок вида `definition` или `statement` без `sources`, когда в контексте есть хотя бы один кусок материалов: писатель мог сослаться. (2) Если кусков нет вовсе, ссылаться не на что: блок остаётся и помечен `basis = system`. Любой другой вид без `sources` (`why`, `summary`, …) — не нарушение, `basis = system`; своё пояснение писатель кладёт в такой вид (промпт обновлён). (3) Страница или слайд — `sources[].page` из куска, который писатель назвал меткой `P…`; выдумать страницу он не может. Кусок без страницы (`page = null`) ссылкой допустим. (4) Одинаково для конспекта и cheat sheet.
+- Почему: T-AR2, Т-§17.3, Т-§17.4, закон 2.
+- Обратимость: код C; ужесточить (требовать страницу) — одна проверка в `lacks_source`.
+- Тесты: `tests/artifacts/test_accuracy_wp23_3.py` (`test_output_checks_regenerate_once` — T-AR2, `test_a_definition_names_the_page_of_its_chunk`, `test_a_block_without_a_source_is_a_system_explanation`, `test_without_materials_a_definition_is_a_system_explanation`, `test_a_fixed_definition_on_the_second_try_is_kept`).
+- Требует подтверждения владельцем: нет
+
 ### D-C-154. WP23.4: генерация карточек — второй вызов `artifact_writer@1` в `artifact.topic_refresh`, карточка — задача банка без проверки истинности
 - Класс: C (достройка контракта WP23.4 по ТЗ и D-C-140; новых полей и событий нет)
 - WP / место: WP23.4, WP23.2, Т-§17.5, Т-§17.7, Т-§5.3; `quack/artifacts/topic_refresh.py` (`refresh_topic_cards`, `refresh_topic`, `valid_cards`, `card_id_for`)

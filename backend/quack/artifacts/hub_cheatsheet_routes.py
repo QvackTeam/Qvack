@@ -142,6 +142,7 @@ async def review_cheatsheet(
             learner_id=learner_id,
             hub_id=hub_id,
             key=body.idempotency_key,
+            compute=resources.compute,
             redis=resources.redis,
         )
     except ArtifactNotFound as exc:

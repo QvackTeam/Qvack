@@ -643,6 +643,7 @@ Output fields:
 - `blocks.content`: string
 - `blocks.sources`: list[string]
 - `blocks.skills`: list[string]
+- `blocks.formulas`: list[string]
 - `cards`: list[object]
 - `cards.kind`: "definition" | "sign_to_method" | "distinction" | "against_misconception"
 - `cards.prompt`: string

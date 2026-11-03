@@ -29,6 +29,7 @@ from uuid import UUID, uuid5
 
 from redis.asyncio import Redis
 
+from quack.artifacts.accuracy import write_blocks
 from quack.artifacts.documents import (
     Artifact,
     ArtifactNotFound,
@@ -38,17 +39,14 @@ from quack.artifacts.documents import (
     write_system_blocks,
 )
 from quack.artifacts.topic_refresh import (
-    WRITER_ROLE,
     WriterInput,
     chunks_text,
     needed_hints,
     numbered_blocks_text,
     personal_text,
     phrasings_text,
-    system_blocks,
     worked_phrasings,
 )
-from quack.artifacts.writer import ArtifactWriterOutput
 from quack.compute_client.client import ComputeClient
 from quack.compute_client.contracts import RenderPdfRequest
 from quack.config import Settings
@@ -207,38 +205,6 @@ def _with_sheet(context: HubWriterInput, sheet: Artifact, artifact_type: str) ->
 # --- the writer ------------------------------------------------------------------------------
 
 
-async def _ask_writer(
-    gateway: LLMGateway,
-    settings: Settings,
-    context: HubWriterInput,
-    *,
-    learner_id: UUID,
-    key: str,
-) -> tuple[list[SystemBlock], str]:
-    """The blocks with ids instead of labels and the prompt (`artifact_writer@N`, §0.4) they
-    were written by; Т-§17.3: a violation — one more generation, then the element is dropped."""
-    prompt = settings.llm_roles[WRITER_ROLE].prompt
-    if prompt is None:
-        raise ValueError("role 'artifact_writer' has no prompt")
-    blocks: list[SystemBlock] = []
-    for attempt in range(2):
-        result = await gateway.generate_structured(
-            WRITER_ROLE,
-            int(prompt.rsplit("@", 1)[1]),
-            ArtifactWriterOutput,
-            context.variables,
-            learner_id,
-            None,
-            None,
-            key + (":retry" if attempt else ""),
-        )
-        blocks, bad = system_blocks(result.value.blocks, context)
-        if bad == 0:
-            break
-        log.info("artifact_writer_violations", key=key, bad=bad, attempt=attempt)
-    return blocks, prompt
-
-
 async def generate_hub_cheatsheet(
     db: Db,
     gateway: LLMGateway,
@@ -269,9 +235,10 @@ async def generate_hub_cheatsheet(
                 db, learner_id=learner_id, kind="cheatsheet", owner_id=hub_id
             )
             context = _with_sheet(context, sheet, shorten_type(pages))
-        blocks, created_by = await _ask_writer(
+        blocks, created_by = await write_blocks(
             gateway,
             settings,
+            compute,
             context,
             learner_id=learner_id,
             key=f"artifact_writer:cheatsheet:{hub_id}:{key}:r{round_}",
@@ -310,6 +277,7 @@ async def review_hub_cheatsheet(
     hub_id: UUID,
     key: str,
     redis: Redis | None = None,
+    compute: ComputeClient | None = None,
 ) -> Review:
     """«Собери сам — я проверю» (Т-§17.6): remarks on the learner's own sheet. Nothing to check
     (no learner block, or the graph does not know the hub yet) — no call, no remarks."""
@@ -321,9 +289,10 @@ async def review_hub_cheatsheet(
     )
     if context is None:
         return Review(sheet, ())
-    written, created_by = await _ask_writer(
+    written, created_by = await write_blocks(
         gateway,
         settings,
+        compute,
         context,
         learner_id=learner_id,
         key=f"artifact_writer:cheatsheet_review:{hub_id}:{key}",
@@ -333,7 +302,13 @@ async def review_hub_cheatsheet(
     named = {block.block_id for block in written if block.block_id is not None}
     kept = [
         SystemBlock(
-            block_id=b.block_id, kind=b.kind, content=b.content, sources=b.sources, skills=b.skills
+            block_id=b.block_id,
+            kind=b.kind,
+            content=b.content,
+            sources=b.sources,
+            skills=b.skills,
+            basis=b.basis,
+            unverified=b.unverified,
         )
         for b in sheet.blocks
         if b.owner == "system" and b.supplement_to is None and b.block_id not in named

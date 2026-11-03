@@ -49,9 +49,7 @@ def verdict(outcome: str) -> MathCheckResponse:
 class Stand:
     """The writer answers `answers[i]` on the i-th call (the last one repeats)."""
 
-    def __init__(
-        self, settings: Settings, engine: AsyncEngine, db: SessionFactory, pg: Db
-    ) -> None:
+    def __init__(self, settings: Settings, engine: AsyncEngine, db: SessionFactory, pg: Db) -> None:
         self.settings = settings
         self.provider = ScriptedLLMProvider()
         self.scenario = ComputeScenario()
@@ -75,9 +73,7 @@ class Stand:
         return len(self.provider.calls_for(schema_name="ArtifactWriterOutput"))
 
     def math_requests(self) -> list[dict[str, Any]]:
-        return [
-            json.loads(r.content) for r in self.scenario.requests if r.url.path == MATH
-        ]
+        return [json.loads(r.content) for r in self.scenario.requests if r.url.path == MATH]
 
     async def refresh(self, learner: UUID, topic_id: UUID, *, key: str = "job-1") -> int | None:
         r = self.resources

@@ -36,16 +36,17 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 from redis.asyncio import Redis
 
+from quack.artifacts.accuracy import WRITER_ROLE, write_blocks
 from quack.artifacts.cards import topic_cards, write_system_cards
 from quack.artifacts.documents import (
     Block,
     Card,
-    SystemBlock,
     _domain_of_owner,
     get_artifact,
     write_system_blocks,
 )
-from quack.artifacts.writer import ArtifactWriterOutput, WrittenBlock, WrittenCard
+from quack.artifacts.writer import ArtifactWriterOutput, WrittenCard
+from quack.compute_client.client import ComputeClient
 from quack.config import Settings
 from quack.db import Db
 from quack.graph.read import GraphReader, TopicMemory, create_graph_reader
@@ -53,7 +54,7 @@ from quack.graph.read.materials import ChunkHit, materials_prefetch
 from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
 from quack.llm.gateway import LLMGateway
-from quack.llm.labels import LabelKind, LabelMap, UnknownLabelError
+from quack.llm.labels import LabelKind, LabelMap
 from quack.logging import get_logger
 from quack.practice.markup import markup_record, validate_markup
 from quack.practice.role_outputs import TaskCondition
@@ -61,7 +62,6 @@ from quack.practice.task_store import create_task
 
 log = get_logger(__name__)
 
-WRITER_ROLE = "artifact_writer"
 NOTES_TYPE = "notes"
 CARDS_TYPE = "cards"
 NO_LEARNER_SKILL = "None."
@@ -283,42 +283,6 @@ def valid_cards(
     return cards, bad
 
 
-def system_blocks(
-    written: Sequence[WrittenBlock], context: WriterInput
-) -> tuple[list[SystemBlock], int]:
-    """The writer's blocks with ids instead of labels, and the number of violating ones."""
-    blocks: list[SystemBlock] = []
-    bad = 0
-    for item in written:
-        try:
-            blocks.append(_system_block(item, context))
-        except (UnknownLabelError, IndexError):
-            bad += 1
-    return blocks, bad
-
-
-def _system_block(item: WrittenBlock, context: WriterInput) -> SystemBlock:
-    target = None
-    if item.updates is not None:
-        if item.updates > len(context.current):
-            raise IndexError(item.updates)
-        target = context.current[item.updates - 1].block_id
-    sources = []
-    for label in item.sources:
-        hit = context.chunks[context.labels.resolve("chunk", label)]
-        sources.append(
-            {
-                "chunk_id": str(hit.chunk_id),
-                "material_id": str(hit.material_id) if hit.material_id else None,
-                "page": hit.page,
-            }
-        )
-    skills = [str(context.labels.resolve("skill", label)) for label in item.skills]
-    return SystemBlock(
-        block_id=target, kind=item.kind, content=item.content, sources=sources, skills=skills
-    )
-
-
 async def refresh_topic_notes(
     db: Db,
     gateway: LLMGateway,
@@ -330,35 +294,22 @@ async def refresh_topic_notes(
     topic_id: UUID,
     key: str,
     redis: Redis | None = None,
+    compute: ComputeClient | None = None,
 ) -> int | None:
     """A new version of the topic's notes; returns it, or `None` — nothing to write (the graph
     does not know the topic, or no valid block came back). A repeated job reads the same answer
-    through the outbox and writes no new version (D-C-125 п.4)."""
+    through the outbox and writes no new version (D-C-125 п.4). Formulas of the blocks go to
+    `compute` (WP23.3, `quack.artifacts.accuracy`); without it they stay «не проверено»."""
     context = await writer_input(
         db, reader, prefetch, settings, learner_id=learner_id, topic_id=topic_id
     )
     if context is None:
         log.info("topic_refresh_unknown_topic", topic_id=str(topic_id))
         return None
-    prompt = settings.llm_roles[WRITER_ROLE].prompt  # `artifact_writer@N`, §0.4
-    if prompt is None:
-        raise ValueError("role 'artifact_writer' has no prompt")
-    blocks: list[SystemBlock] = []
-    for attempt in range(2):  # Т-§17.3: a violation — one more generation, then dropped
-        result = await gateway.generate_structured(
-            WRITER_ROLE,
-            int(prompt.rsplit("@", 1)[1]),
-            ArtifactWriterOutput,
-            context.variables,
-            learner_id,
-            None,
-            None,
-            f"artifact_writer:notes:{topic_id}:{key}" + (":retry" if attempt else ""),
-        )
-        blocks, bad = system_blocks(result.value.blocks, context)
-        if bad == 0:
-            break
-        log.info("artifact_writer_violations", topic_id=str(topic_id), bad=bad, attempt=attempt)
+    blocks, prompt = await write_blocks(
+        gateway, settings, compute, context,
+        learner_id=learner_id, key=f"artifact_writer:notes:{topic_id}:{key}",
+    )  # fmt: skip
     if not blocks:
         return None
     notes = await write_system_blocks(
@@ -465,12 +416,13 @@ async def refresh_topic(
     topic_id: UUID,
     key: str,
     redis: Redis | None = None,
+    compute: ComputeClient | None = None,
 ) -> tuple[int | None, int | None]:
     """The job `artifact.topic_refresh` (Т-§17.7): new versions of the notes and of the cards of
     the topic; each is `None` when there was nothing to write."""
     notes = await refresh_topic_notes(
         db, gateway, reader, prefetch, settings,
-        learner_id=learner_id, topic_id=topic_id, key=key, redis=redis,
+        learner_id=learner_id, topic_id=topic_id, key=key, redis=redis, compute=compute,
     )  # fmt: skip
     cards = await refresh_topic_cards(
         db, gateway, reader, prefetch, settings,
@@ -494,5 +446,5 @@ async def _topic_refresh_handler(job: ClaimedJob, ctx: JobContext) -> None:
     await refresh_topic(
         ctx.db, ctx.llm, reader, prefetch, ctx.settings,
         learner_id=learner_id, topic_id=UUID(job.payload["topic_id"]), key=str(job.id),
-        redis=ctx.redis,
+        redis=ctx.redis, compute=ctx.compute,
     )  # fmt: skip
