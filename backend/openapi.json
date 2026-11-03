@@ -1252,6 +1252,39 @@
         "title": "DomainSummary",
         "type": "object"
       },
+      "EditHub": {
+        "additionalProperties": false,
+        "description": "`topics` — the whole new scope with required levels (empty levels — by `controlType`,\nWP6.3); `deadline_at_ms` — the new date, `null` removes it. At least one of them.",
+        "properties": {
+          "deadline_at_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At Ms"
+          },
+          "topics": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/HubTopicLevels"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topics"
+          }
+        },
+        "title": "EditHub",
+        "type": "object"
+      },
       "EditStructureRequest": {
         "properties": {
           "added_prereqs": {
@@ -1875,6 +1908,28 @@
         "title": "HintResponse",
         "type": "object"
       },
+      "HubTopicLevels": {
+        "additionalProperties": false,
+        "properties": {
+          "required_levels": {
+            "items": {
+              "$ref": "#/components/schemas/Level"
+            },
+            "title": "Required Levels",
+            "type": "array"
+          },
+          "topic_id": {
+            "format": "uuid",
+            "title": "Topic Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic_id"
+        ],
+        "title": "HubTopicLevels",
+        "type": "object"
+      },
       "KeyedRequest": {
         "additionalProperties": false,
         "description": "§6.4: a changing path carries `idempotency_key` (T-E2).",
@@ -1977,6 +2032,11 @@
         ],
         "title": "LearnerSettingsPatch",
         "type": "object"
+      },
+      "Level": {
+        "maximum": 6.0,
+        "minimum": 1.0,
+        "type": "integer"
       },
       "LineCorrection": {
         "description": "WP21.3: how the line really reads (`Т-§22.7`: LaTeX to show, SymPy to check).",
@@ -7892,6 +7952,110 @@
           }
         },
         "summary": "Reassign Episode Endpoint",
+        "tags": [
+          "domains"
+        ]
+      }
+    },
+    "/v1/hubs/{hub_id}": {
+      "patch": {
+        "description": "WP6.3, ТЗ §6.4 «Хабы»: the learner corrects the scope and the date (Т-§4.8).",
+        "operationId": "edit_hub_endpoint_v1_hubs__hub_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hub_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Hub Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditHub"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Edited"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Edit Hub Endpoint",
         "tags": [
           "domains"
         ]

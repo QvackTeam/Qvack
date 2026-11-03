@@ -423,3 +423,12 @@ async def reassign_episode_endpoint(
     r = get_resources(request)
     seq = await topic_edits.reassign(r.db, r.neo4j, r.redis, learner_id, episode_seq, req.topic_id)
     return _edited(seq)
+
+
+@_protected.patch("/hubs/{hub_id}", response_model=topic_edits.Edited, status_code=202)
+async def edit_hub_endpoint(
+    hub_id: UUID, req: topic_edits.EditHub, request: Request, learner_id: CurrentLearnerId
+) -> topic_edits.Edited:
+    """WP6.3, ТЗ §6.4 «Хабы»: the learner corrects the scope and the date (Т-§4.8)."""
+    r = get_resources(request)
+    return _edited(await topic_edits.edit_hub(r.db, r.neo4j, r.redis, learner_id, hub_id, req))

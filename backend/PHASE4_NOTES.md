@@ -976,7 +976,8 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
   1. **Маршруты:** `PATCH /v1/topics/{id} {name}` → `topic.renamed`; `POST /v1/topics/{id}/merge {into}` → `topic.merged`; `POST /v1/topics/{id}/hide` → `topic.hidden`; `POST /v1/topics/{id}/known` → `known.claimed`; `POST /v1/episodes/{episode_seq}/reassign {topic_id}` → `episode.reassigned`. Ответ — `202 {seq}`, как у D-A-192.
   2. **Проверка цели** (закон 1). Тема — узел `Topic` ученика. Объединение — обе темы ученика, разные и одного домена. Эпизод — событие `episode.closed` ученика с этим `seq`. Иначе — `404 NOT_FOUND`.
   3. **Ключ идемпотентности.** В запросах §6.4 его нет, поэтому ключ — сама правка с исходным состоянием (закон 5): переименование — `{тема}:{старое имя}->{новое}`, «знаю» — `{тема}:{knownClaimedAtMs}`, остальные — по своим id. Повтор запроса даёт то же событие, следующая правка того же вида — новое.
-  4. **Не здесь.** `PATCH /v1/hubs/{id}` (охват и дата дедлайна) — с WP6.5. Разделение темы — фразой в сессии (B). `topic.moved` — ПОЗЖЕ.
+  4. **`PATCH /v1/hubs/{id} {topics?, deadline_at_ms?}`** (WP6.3, «Хабы» §6.4): весь новый охват → `hub.topics_changed`; дата → `hub.deadline_set {source: learner}`, `null` снимает дедлайн. Нужно хотя бы одно поле. Темы охвата — ученика и домена хаба, иначе `404`. Ключ — от текущего и нового состояния (дайджест охвата, прежняя и новая дата). Разделение темы делается фразой в сессии (B). `topic.moved` — ПОЗЖЕ.
+- Тесты (хаб): `tests/graph/test_projection_runner.py::test_hub_edit_scope_and_deadline`.
 - Почему: §0.4.3 п.1–2.
 - Тесты: `tests/graph/test_projection_runner.py::test_topic_edits_check_the_topic_and_append_one_event`; `tests/test_app_assembly.py` (T-A1, снимок OpenAPI пересобран).
 - Требует подтверждения владельцем: нет.

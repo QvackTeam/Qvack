@@ -219,6 +219,8 @@ EXPECTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/v1/topics/{topic_id}/hide"),
         ("POST", "/v1/topics/{topic_id}/known"),
         ("POST", "/v1/episodes/{episode_seq}/reassign"),
+        # ТЗ Ф4 WP6.3 (stream A)
+        ("PATCH", "/v1/hubs/{hub_id}"),
         ("GET", "/v1/domains/{domain_id}/topics/{topic_id}"),
         ("PATCH", "/v1/domains/{domain_id}/topics/{topic_id}/status"),
         ("GET", "/v1/topics/{topic_id}"),

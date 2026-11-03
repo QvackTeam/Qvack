@@ -369,3 +369,35 @@ async def test_topic_edits_check_the_topic_and_append_one_event(
     assert await edits.hide(pg_db, neo4j, None, mine, t2) == 3
     assert await edits.claim_known(pg_db, neo4j, None, mine, t2) == 4
     assert await edits.reassign(pg_db, neo4j, None, mine, 99, t2) is None  # no such episode
+
+
+async def test_hub_edit_scope_and_deadline(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings
+) -> None:
+    """WP6.3 (`Т-§4.8`, D-A-193): the learner's hub — new scope and date as events; a topic of
+    another domain or a foreign hub is «not found»; `null` removes the date."""
+    from quack.domains.topic_edits import EditHub, HubTopicLevels, edit_hub
+
+    mine = await create_learner(pg_db)
+    hub, topic, far = uuid4(), uuid4(), uuid4()
+    async with neo4j.session() as session:
+        await session.run(
+            "CREATE (:Hub {id: $h, learnerId: $l, domainId: 'd', deadlineAtMs: 0}), "
+            "(:Topic {id: $t, learnerId: $l, domainId: 'd'}), "
+            "(:Topic {id: $f, learnerId: $l, domainId: 'e'})",
+            h=str(hub),
+            t=str(topic),
+            f=str(far),
+            l=str(mine),
+        )
+    scope = EditHub(topics=[HubTopicLevels(topic_id=topic, required_levels=[3, 4])])
+    assert await edit_hub(pg_db, neo4j, None, mine, hub, scope) == 1
+    wrong = EditHub(topics=[HubTopicLevels(topic_id=far)])
+    assert await edit_hub(pg_db, neo4j, None, mine, hub, wrong) is None
+    assert await edit_hub(pg_db, neo4j, None, await create_learner(pg_db), hub, scope) is None
+    assert await edit_hub(pg_db, neo4j, None, mine, hub, EditHub(deadline_at_ms=None)) == 2
+    events = await pg_db.fetch_all(
+        "SELECT type, payload FROM core.events WHERE learner_id = %(l)s ORDER BY seq", {"l": mine}
+    )
+    assert [e["type"] for e in events] == ["hub.topics_changed", "hub.deadline_set"]
+    assert events[1]["payload"]["deadline_at_ms"] is None

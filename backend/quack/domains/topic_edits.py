@@ -10,16 +10,19 @@ edit of the same kind a new one (law 5).
 
 from __future__ import annotations
 
-from typing import Any
+import hashlib
+import json
+from typing import Any, Self
 from uuid import UUID
 
 from neo4j import AsyncDriver
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from redis.asyncio import Redis
 
 from quack.db import Db
 from quack.db.neo4j import literal, read_session
 from quack.events.log import NewEvent, append_events
+from quack.events.values import Level
 
 _TOPIC = (
     "MATCH (t:Topic {id: $id}) WHERE t.learnerId = $learner "
@@ -127,3 +130,79 @@ async def reassign(
     payload = {"episode_seq": episode_seq, "topic_id": str(topic_id)}
     key = f"episode.reassigned:{episode_seq}:{topic_id}"
     return await _append(db, redis, learner_id, "episode.reassigned", payload, key)
+
+
+# --- WP6.3: scope and deadline of a hub (`PATCH /v1/hubs/{id}`, Т-§4.8) ---------------------
+
+_HUB = (
+    "MATCH (h:Hub {id: $id}) WHERE h.learnerId = $learner "
+    "OPTIONAL MATCH (h)-[i:INCLUDES]->(t:Topic) "
+    "RETURN h.domainId AS domain, h.deadlineAtMs AS deadline, "
+    "collect([t.id, i.requiredLevels]) AS topics"
+)
+_TOPICS_OF_DOMAIN = (
+    "MATCH (t:Topic) WHERE t.learnerId = $learner AND t.domainId = $domain AND t.id IN $ids "
+    "RETURN count(t) AS n"
+)
+
+
+class HubTopicLevels(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    topic_id: UUID
+    required_levels: list[Level] = Field(default_factory=list)
+
+
+class EditHub(BaseModel):
+    """`topics` — the whole new scope with required levels (empty levels — by `controlType`,
+    WP6.3); `deadline_at_ms` — the new date, `null` removes it. At least one of them."""
+
+    model_config = ConfigDict(extra="forbid")
+    topics: list[HubTopicLevels] | None = None
+    deadline_at_ms: int | None = None
+
+    @model_validator(mode="after")
+    def _something(self) -> Self:
+        if not ({"topics", "deadline_at_ms"} & self.model_fields_set):
+            raise ValueError("nothing to change: give topics or deadline_at_ms")
+        return self
+
+
+def _digest(value: object) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()[:16]
+
+
+async def edit_hub(
+    db: Db, neo4j: AsyncDriver, redis: Redis | None, learner_id: UUID, hub_id: UUID, body: EditHub
+) -> int | None:
+    """`hub.topics_changed` and/or `hub.deadline_set {source: learner}`; None — the hub or a
+    topic is not the learner's, or a topic is of another domain. Returns the last event."""
+    async with read_session(neo4j) as session:
+        result = await session.run(literal(_HUB), id=str(hub_id), learner=str(learner_id))
+        hub = await result.single()
+        if hub is None:
+            return None
+        if body.topics is not None:
+            ids = sorted({str(t.topic_id) for t in body.topics})
+            result = await session.run(
+                literal(_TOPICS_OF_DOMAIN), learner=str(learner_id), domain=hub["domain"], ids=ids
+            )
+            found = await result.single()
+            if found is None or int(found["n"]) != len(ids):
+                return None
+    seq: int | None = None
+    if body.topics is not None:
+        now = sorted([str(t), sorted(levels or [])] for t, levels in hub["topics"] if t)
+        new = sorted([str(t.topic_id), sorted(t.required_levels)] for t in body.topics)
+        payload = {"hub_id": str(hub_id), "topics": [
+            {"topic_id": t, "required_levels": levels} for t, levels in new]}  # fmt: skip
+        key = f"hub.topics_changed:{hub_id}:{_digest(now)}->{_digest(new)}"
+        seq = await _append(db, redis, learner_id, "hub.topics_changed", payload, key)
+    if "deadline_at_ms" in body.model_fields_set:
+        payload = {
+            "hub_id": str(hub_id),
+            "deadline_at_ms": body.deadline_at_ms,
+            "source": "learner",
+        }
+        key = f"hub.deadline_set:{hub_id}:{hub['deadline'] or 0}->{body.deadline_at_ms}"
+        seq = await _append(db, redis, learner_id, "hub.deadline_set", payload, key)
+    return seq
