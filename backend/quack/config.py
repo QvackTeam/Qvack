@@ -518,6 +518,9 @@ class Settings(BaseSettings):
     # WP16.5 (Т-§13.6 п.1): the allowed libraries, name → path under `viz_static_base_url`; the
     # documents name D3, Plotly, KaTeX but no files or versions (D-B-177 [ПРОВЕРИТЬ], C: WP9.2).
     viz_libraries: dict[str, str] = Field(default_factory=dict)
+    # WP8.2 (WP16.6): the short check of «я это уже знаю» — at most this many tasks, one per
+    # skill of the topic (the document says «1–3»). D-B-193.
+    known_check_max_tasks: int = 3
     # WP10.6 (ТЗ Ф4 §2.3 строка 20): UUIDv5 namespace of the learner pseudonym in traces.
     # Phase 4 decision D-B-105: a fixed namespace, never changed after the first trace.
     langsmith_pseudonym_ns: str = "6f1c2a9e-4b7d-5e3a-9c21-0d8e7f6a5b43"

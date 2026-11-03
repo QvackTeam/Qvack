@@ -22,6 +22,10 @@ _SESSION_UP_TO = (
     f"SELECT {_COLUMNS} FROM core.events WHERE learner_id = %(learner_id)s "
     "AND session_id = %(session_id)s AND seq <= %(to_seq)s ORDER BY seq"
 )
+_AGENT_REQUEST = (
+    f"SELECT {_COLUMNS} FROM core.events WHERE learner_id = %(learner_id)s "
+    "AND type = 'agent.requested' AND payload->>'request_id' = %(request_id)s LIMIT 1"
+)
 _OF_TASKS = (
     f"SELECT {_COLUMNS} FROM core.events WHERE learner_id = %(learner_id)s "
     "AND type = ANY(%(types)s) AND payload->>'task_id' = ANY(%(task_ids)s) ORDER BY seq"
@@ -34,6 +38,15 @@ async def event_by_key(db: Db, *, learner_id: UUID, key: str) -> StoredEvent | N
 
 async def event_by_seq(db: Db, *, learner_id: UUID, seq: int) -> StoredEvent | None:
     return await db.fetch_one(_BY_SEQ, {"learner_id": learner_id, "seq": seq}, row=StoredEvent)
+
+
+async def agent_request(db: Db, *, learner_id: UUID, request_id: UUID) -> StoredEvent:
+    """The `agent.requested` of a request id (WP16.6)."""
+    params = {"learner_id": learner_id, "request_id": str(request_id)}
+    found = await db.fetch_one(_AGENT_REQUEST, params, row=StoredEvent)
+    if found is None:
+        raise LookupError(f"agent.requested {request_id} not found")
+    return found
 
 
 async def session_events_up_to(
