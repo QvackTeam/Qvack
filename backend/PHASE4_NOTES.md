@@ -1409,7 +1409,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (WP16.4, `Т-§4.9`), п.5.
 - Обратимость: один модуль.
 - Тесты: `T-AG5` — `tests/practice/test_domain_classify.py` (4); мутации (порог, проверка метки, обрезка имени) — тесты падают.
-- Не решено \[ПРОВЕРИТЬ\]: списки маршрутов в тестах C (`EXPECTED_ROUTES` в `tests/test_app_assembly.py`, тело для `tests/e2e/endpoints.py`) — правка C.
+- Списки маршрутов в тестах C: `POST /v1/domains/classify` добавлен в `EXPECTED_ROUTES` (`tests/test_app_assembly.py`) и в `NO_IDEMPOTENCY_KEY` (`tests/e2e/endpoints.py`): тело ТЗ Ф4 WP16.4 — `{text | material_id}` без `idempotency_key`, событие не пишется (п. ж), повтор безвреден; путь без `{id}` — T-E3 не затрагивает.
 - Требует подтверждения владельцем: нет
 
 ### Поток C
