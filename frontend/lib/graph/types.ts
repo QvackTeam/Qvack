@@ -45,6 +45,12 @@ export type HubLink = { hubId: string; topicId: string };
 /** `(Topic)-[:REQUIRES]->(Topic)`: `topicId` needs `requiresId` first. Cycles are possible (4.6) */
 export type RequiresEdge = { topicId: string; requiresId: string };
 
+/**
+ * A topic asked about in this domain that belongs to a subject the learner has its own domain for (4.7).
+ * It lives in that domain; here it is read as a selection, with the name of its domain. There is no copy.
+ */
+export type OtherDomainTopic = { topic: GraphTopic; domainId: string; domainName: string };
+
 export type GraphModel = {
   domainId: string;
   domainName: string;
@@ -52,6 +58,8 @@ export type GraphModel = {
   hubs: GraphHub[];
   includes: HubLink[];
   requires: RequiresEdge[];
+  /** Topics from other subjects shown here in the left column. Topics with status `off_domain` are in `topics` */
+  otherDomain: OtherDomainTopic[];
   /** Mock "now"; the real API uses `Date.now()` */
   nowMs: number;
 };
