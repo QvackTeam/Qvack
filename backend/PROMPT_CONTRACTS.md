@@ -706,6 +706,20 @@ Output fields:
 Input blocks: `artifact_type`, `learner_skill`, `topic_graph`, `material_chunks`, `worked_phrasings`, `personal`, `current_blocks`
 Label fields: `blocks.sources`, `blocks.skills`, `cards.markup.tests.skill`, `cards.markup.variantOf`, `cards.markup.options.misconception`
 
+## `canvas_diagnoser@1` → `CanvasDiagnoserOutput`
+
+Output fields:
+
+- `error`: boolean
+- `gap_type`: "no_idea" | "when_to_apply" | "confusion" | "execution" | "slip" | "misconception" | "none"
+- `misconception`: string | null
+- `misconception_hypothesis`: string | null
+- `root_cause`: string | null
+- `confidence`: number
+
+Input blocks: `problem`, `solution_space`, `skills`, `known_misconceptions`, `earlier_lines`, `line`
+Label fields: `misconception`, `root_cause`
+
 ## Edit points after G1
 
 - teacher tool names, if tools appear (R9);

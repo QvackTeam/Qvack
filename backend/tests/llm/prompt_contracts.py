@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from quack.agents import schemas as agents
 from quack.artifacts.schemas import ArtifactGenOutput
 from quack.artifacts.writer import ArtifactWriterOutput
+from quack.canvas.diagnosis import CanvasDiagnoserOutput
 from quack.canvas.recognition import RecognizerOutput
 from quack.domains.schemas import CuratorOutput, DiagnosticOutput, StructurerOutput
 from quack.llm.labels import LABEL_PREFIX
@@ -67,6 +68,7 @@ PHASE4_PROMPT_SCHEMAS: dict[str, tuple[type[BaseModel], ...]] = {
     # Stream C, layer 2 by §7.3 п.2 (D-C-123).
     "recognizer@1": (RecognizerOutput,),
     "artifact_writer@1": (ArtifactWriterOutput,),
+    "canvas_diagnoser@1": (CanvasDiagnoserOutput,),
 }
 
 # Every prompt with its schemas: what `T-M5` and `PROMPT_CONTRACTS.md` cover.
@@ -135,6 +137,7 @@ LABEL_FIELDS: dict[str, list[str]] = {
     ],
     "builder@1": ["items.target", "items.same_idea", "pairs.first", "pairs.second"],
     "today_planner@1": ["items.tasks"],
+    "canvas_diagnoser@1": ["misconception", "root_cause"],
 }
 
 # Phrases the code relies on: each must appear in the prompt text (`test_prompt_has_its_markers`).
