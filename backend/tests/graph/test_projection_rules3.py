@@ -16,6 +16,7 @@ from uuid import UUID
 
 import pytest
 
+import quack.events.event_types  # noqa: F401  (registers the catalog before SPECS is read)
 from quack.events.log import StoredEvent
 from quack.events.registry import SPECS, UnknownEventTypeError
 from quack.graph.ids import deterministic_id
@@ -99,6 +100,7 @@ _ALIAS_OF = _rel(("Alias", SKILL_OLD), "ALIAS_OF", ("Skill", SKILL))
 def test_every_projector_row_has_a_handler() -> None:
     """S5: one handler per row; the catalog types «без обработчика» have none (Т-§2.4)."""
     assert set(HANDLERS) == {row.event_type for row in ROWS}
+    assert len(SPECS) > len(ROWS)
     for (event_type, version), spec in SPECS.items():
         handler = handler_for(_event(1, event_type, {}, schema_version=version))
         assert (handler is not None) == spec.projector, event_type
