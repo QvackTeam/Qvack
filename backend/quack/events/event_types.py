@@ -505,7 +505,10 @@ class _SessionRef(EventPayload):
 
 @register("session.started", projector=False, dispatcher=True)
 class SessionStarted(_SessionRef):
-    pass
+    """`resumed` — an action in a session closed by the inactivity sweeper reopens it
+    (ТЗ Ф4 WP13.10, D-A-121)."""
+
+    resumed: bool = False
 
 
 @register("session.ended", projector=True, dispatcher=True)
