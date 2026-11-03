@@ -9,12 +9,10 @@ question) shows up as a wrong option list or a wrong grade.
 from __future__ import annotations
 
 import inspect
-from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple, cast
 from uuid import UUID, uuid4
 
 import httpx
-import jwt
 import pytest
 from fastapi import FastAPI
 from neo4j import AsyncDriver
@@ -24,9 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.compute_client.client import ComputeClient
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.domains import diagnostic
-from quack.domains.auth import DEV_JWT_SECRET, JWT_ALGORITHM
 from quack.domains.schemas import (
     DiagnosticOutput,
     PrereqEdge,
@@ -42,6 +40,7 @@ from quack.llm.gateway import LLMGateway
 from quack.practice.evaluation import TaskToCheck, evaluate_answer
 from quack.practice.schemas import parse_reference_solution
 from tests.domains.conftest import FakeLLMProvider
+from tests.support.auth import session_cookie, session_token
 
 DIAG_SESSION_KEY_PATTERN = "diagnostic:session:*"
 
@@ -58,7 +57,7 @@ class Question(NamedTuple):
 
 
 def _auth_headers(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+    return session_cookie(token)
 
 
 def _queue_question(provider: FakeLLMProvider, tag: str) -> Question:
@@ -159,8 +158,8 @@ async def diag_domain(
 
 
 @pytest.fixture
-async def other_learner(db: SessionFactory, settings: Settings) -> tuple[UUID, str]:
-    """A second, unrelated learner (`auth.users` row + bearer token)."""
+async def other_learner(db: SessionFactory, pg_db: Db, settings: Settings) -> tuple[UUID, str]:
+    """A second, unrelated learner (`auth.users` row + session token, ТЗ Ф4 WP18.3)."""
     learner_id = uuid4()
     async with db() as session, session.begin():
         await session.execute(
@@ -176,17 +175,7 @@ async def other_learner(db: SessionFactory, settings: Settings) -> tuple[UUID, s
                 "prefs": "{}",
             },
         )
-    now = datetime.now(UTC)
-    token = jwt.encode(
-        {
-            "sub": str(learner_id),
-            "iat": int(now.timestamp()),
-            "exp": int((now + timedelta(days=7)).timestamp()),
-        },
-        settings.jwt_secret.get_secret_value() or DEV_JWT_SECRET,
-        algorithm=JWT_ALGORITHM,
-    )
-    return learner_id, token
+    return learner_id, await session_token(pg_db, learner_id, settings)
 
 
 async def _start(
