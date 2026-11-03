@@ -6843,7 +6843,7 @@
     },
     "/v1/learner/stream": {
       "get": {
-        "description": "SSE `projection_advanced` (WP7); data are fetched with ordinary GETs.",
+        "description": "SSE `projection_advanced` (WP7), `artifact_updated`, `material_parsed` (ТЗ Ф4 §4.8);\ndata are fetched with ordinary GETs.",
         "operationId": "get_learner_stream_v1_learner_stream_get",
         "responses": {
           "200": {
