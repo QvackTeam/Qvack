@@ -632,6 +632,7 @@ class Settings(BaseSettings):
     mark_min_confidence: float = 0.8
     error_grace_ms: int = 8000
     stuck_idle_s: int = 60
+    stuck_erase_times: int = 3
     max_unprompted_marks_per_task: int = 2
     min_intervention_gap_s: int = 45
     # Client parameters served in GET /v1/me (ТЗ §6.7); Т-§21.3 (§15.2, §15.3, §16.2).
