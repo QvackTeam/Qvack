@@ -982,6 +982,18 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
 - Тесты: `tests/graph/test_projection_runner.py::test_topic_edits_check_the_topic_and_append_one_event`; `tests/test_app_assembly.py` (T-A1, снимок OpenAPI пересобран).
 - Требует подтверждения владельцем: нет.
 
+### D-A-194. T-E2/T-E3: маршруты WP6.3 и WP8 без `idempotency_key` — исключения с причиной
+- Класс: B. WP6.3, WP8.1, WP8.2; ТЗ §6.4 («Граф и темы», «Хабы»), строка про `idempotency_key` и `T-E2`; `tests/e2e/endpoints.py`, `tests/e2e/test_isolation_and_idempotency.py`
+- Контекст: CI #185 красный на `T-E2` («не пройдены» новые изменяющие маршруты) и `T-E3` (`KeyError: 'hub_id'`). §6.4 требует `idempotency_key` у изменяющих маршрутов, «кроме перечисленных в `T-E2`». Таблицы WP8.1/WP8.2 и WP6.3 ключа в запросе не задают; из семи маршрутов без ключа модели запросов запрещают лишние поля (`extra="forbid"`).
+- Решение:
+  1. **`POST /v1/disputes`** несёт ключ по ТЗ (WP8.1) и входит в обход `T-E2` (`IDEMPOTENT_WALK`) после правки строки на холсте: цель — вердикт `"<answer_seq>:<part>"` с `answer.submitted` в журнале Фазы 4; тело «иное» (`part`) даёт `409 IDEMPOTENCY_CONFLICT`.
+  2. **Семь маршрутов без ключа** — `POST /v1/verdicts/{answer_seq}/typo`, `PATCH /v1/topics/{id}`, `POST /v1/topics/{id}/merge`, `…/hide`, `…/known`, `POST /v1/episodes/{episode_seq}/reassign`, `PATCH /v1/hubs/{id}` — внесены в `NO_IDEMPOTENCY_KEY` с причиной «ТЗ §6.4: ключа нет; ключ события — сама правка с исходным состоянием» (D-A-192 п.2, D-A-193 п.3, закон 5). Ключ в запрос не добавлялся: контракт ТЗ не меняем.
+  3. **`T-E3`:** в `Ids` и `path_for` добавлены `hub_id`, `answer_seq`, `episode_seq`; перед обходом у ученика A заводятся узел `Hub`, узел `Topic` (если его нет), `answer.submitted` и `episode.closed` в журнале Фазы 4. Ученик B на все семь маршрутов и на хаб получает `404`, события A не растут.
+- Почему: закон 5 (повтор правки даёт то же событие) уже обеспечен ключом события и проверяется `test_projection_runner`; ключ запроса ТЗ для этих маршрутов не вводит. Ближайшее правило ТЗ — перечислить исключения в `T-E2` с причиной.
+- Обратимость: если владелец решит ввести ключ запроса, маршрут уходит из `NO_IDEMPOTENCY_KEY` в `IDEMPOTENT_WALK`, в модель добавляется поле.
+- Тесты: `tests/e2e/test_isolation_and_idempotency.py::test_mutating_endpoints_are_idempotent`, `::test_cross_learner_isolation`.
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.

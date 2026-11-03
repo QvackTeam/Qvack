@@ -59,6 +59,7 @@ IDEMPOTENT_WALK: tuple[tuple[str, str], ...] = (
     ("PATCH", "/v1/cards/{card_id}"),
     ("DELETE", "/v1/cards/{card_id}"),
     ("POST", "/v1/canvases/{canvas_id}/lines/{line_id}/correct"),
+    ("POST", "/v1/disputes"),
     ("POST", "/v1/sessions/{session_id}/finish"),
     ("POST", "/v1/domains/{domain_id}/archive"),
 )
@@ -195,7 +196,55 @@ async def _advance(
         return await _canvas_with_a_line(system, learner, ids)
     if (method, path) == ("PATCH", "/v1/cards/{card_id}"):
         return replace(ids, card_id=UUID(payload["cards"][0]["card_id"]))
+    if path.endswith("/lines/{line_id}/correct"):
+        # WP8.1: the verdict the dispute names.
+        return replace(ids, answer_seq=await _answer_of_phase4_log(system, learner))
     return ids
+
+
+async def _answer_of_phase4_log(system: System, learner: Learner) -> int:
+    """The `seq` of an `answer.submitted` of the learner in the Phase 4 log (WP8.1)."""
+    answer = NewEvent(
+        type="answer.submitted",
+        payload={
+            "task_id": str(uuid4()),
+            "source": "chat",
+            "answer": {"kind": "number", "value": "2"},
+        },
+        actor="learner",
+        idempotency_key=f"te2:answer:{uuid4()}",
+    )
+    [stored] = await append_events(system.resources.db, learner.learner_id, [answer])
+    return stored.seq
+
+
+async def _wp8_targets_of(system: System, learner: Learner, ids: Ids) -> Ids:
+    """T-E3 for WP6.3/WP8: a hub and a topic of the learner in the graph, a verdict and a closed
+    episode in the Phase 4 log — what the routes of WP8 and `PATCH /v1/hubs/{id}` look up."""
+    hub_id = uuid4()
+    async with system.resources.neo4j.session() as session:
+        await session.run(
+            "MERGE (t:Topic {id: $topic}) ON CREATE SET t.learnerId = $learner, "
+            "t.domainId = $domain, t.name = 'Limits' "
+            "CREATE (:Hub {id: $hub, learnerId: $learner, domainId: $domain})",
+            topic=str(ids.topic_id),
+            learner=str(learner.learner_id),
+            domain=str(ids.domain_id),
+            hub=str(hub_id),
+        )
+    episode = NewEvent(
+        type="episode.closed",
+        payload={"from_seq": 1, "to_seq": 1, "has_content": False},
+        actor="code",
+        idempotency_key=f"te3:episode:{uuid4()}",
+    )
+    [closed] = await append_events(system.resources.db, learner.learner_id, [episode])
+    return replace(
+        ids,
+        hub_id=hub_id,
+        answer_seq=await _answer_of_phase4_log(system, learner),
+        episode_seq=closed.seq,
+    )
 
 
 async def _canvas_with_a_line(system: System, learner: Learner, ids: Ids) -> Ids:
@@ -326,6 +375,7 @@ async def test_cross_learner_isolation(system: System) -> None:
         diagnostic_task_id=j.assigned_task_id,
         structure_version=1,
     )
+    ids = await _wp8_targets_of(system, a, ids)
     await system.settle()
     a_events = await _events(system, a.learner_id)
 
