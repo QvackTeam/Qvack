@@ -1,0 +1,56 @@
+"use client";
+
+import { useSyncExternalStore } from "react";
+
+/** Общая кривая easing из REDESIGN (ease-out) */
+export const EASE_OUT = "cubic-bezier(0.16, 1, 0.3, 1)";
+
+const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
+const PRELOADER_KEY = "quack:preloader";
+
+function subscribeReducedMotion(onChange: () => void) {
+  // на всякий случай: старые браузеры без matchMedia
+  if (typeof window === "undefined" || !window.matchMedia) return () => {};
+  const mql = window.matchMedia(REDUCED_QUERY);
+  mql.addEventListener("change", onChange);
+  return () => mql.removeEventListener("change", onChange);
+}
+
+function getReducedMotionSnapshot() {
+  return window.matchMedia(REDUCED_QUERY).matches;
+}
+
+function getServerReducedMotionSnapshot() {
+  return false;
+}
+
+/** true, если пользователь просит меньше движения (prefers-reduced-motion) */
+export function usePrefersReducedMotion(): boolean {
+  return useSyncExternalStore(
+    subscribeReducedMotion,
+    getReducedMotionSnapshot,
+    getServerReducedMotionSnapshot,
+  );
+}
+
+/** Показывать прелоадер? Раз за сессию вкладки */
+export function shouldShowPreloader(): boolean {
+  try {
+    return window.sessionStorage.getItem(PRELOADER_KEY) === null;
+  } catch {
+    // storage недоступен — лучше показать, чем упасть
+    return true;
+  }
+}
+
+/** Прелоадер пошёл на выход: под его шторкой уже можно показывать интерфейс */
+export const PRELOADER_EXIT_EVENT = "quack:preloader-exit";
+
+/** Отметить, что прелоадер уже показан в этой вкладке */
+export function markPreloaderShown(): void {
+  try {
+    window.sessionStorage.setItem(PRELOADER_KEY, "1");
+  } catch {
+    // storage недоступен — ничего не делаем
+  }
+}

@@ -6,7 +6,9 @@ import type { Domain } from "@/lib/mock/types";
 import { scrollToId } from "@/lib/scroll";
 import { cn } from "@/lib/utils";
 import { usePathname } from "next/navigation";
+import { useRef } from "react";
 import { useShell } from "./app-shell";
+import { MenuToggle } from "./menu-toggle";
 import { ProfileMenu } from "./profile-menu";
 import { useT } from "@/lib/i18n/provider";
 
@@ -17,13 +19,17 @@ export function DomainSidebar({
   domains,
   activeId,
   onSelect,
+  withMenu = true,
 }: {
   domains: Domain[];
   activeId: string;
   onSelect: (id: string) => void;
+  /** Кнопка полноэкранного меню в шапке; в мобильной шторке её нет (там она в верхней полосе) */
+  withMenu?: boolean;
 }) {
   const t = useT();
-  const { graphMode, openGraph } = useShell();
+  const { graphMode, openGraph, menuOpen, openMenu, closeMenu } = useShell();
+  const toggleRef = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
   const onGraph = pathname === "/";
 
@@ -40,7 +46,25 @@ export function DomainSidebar({
 
   return (
     <nav aria-label={t.shell.subjects} className="flex h-full flex-col bg-cloth-deep px-3 pt-4 pb-3">
-      <p className="px-3 pb-5 font-serif text-body font-bold text-paper">Quack!</p>
+      {/* шапка: кнопка меню слева, название антиквой капсом */}
+      <div className="flex min-h-10 items-center justify-between gap-2 px-3 pb-1">
+        {withMenu ? (
+          <div ref={toggleRef} data-menu-anchor>
+            <MenuToggle
+              open={menuOpen}
+              onClick={() => (menuOpen ? closeMenu() : openMenu(toggleRef.current?.querySelector("button") ?? null))}
+              labelOpen={t.menu.open}
+              labelClose={t.menu.close}
+            />
+          </div>
+        ) : null}
+        <p className="display-caps text-[1.375rem] text-paper">Qvack!</p>
+      </div>
+
+      <p className="caps flex items-center justify-between px-3 pt-5 pb-2 text-paper-dim">
+        <span>{t.shell.subjects}</span>
+        <span className="num">{domains.length}</span>
+      </p>
 
       <ul className="flex flex-col gap-0.5 overflow-y-auto">
         {domains.map((d) => {
@@ -82,7 +106,10 @@ export function DomainSidebar({
           );
         })}
         <li>
-          <Link href="/domains/new" className={cn(row, "text-paper-dim")}>
+          <Link
+            href="/domains/new"
+            className="caps mt-2 ml-3 inline-flex min-h-10 items-center gap-2 rounded-pill border border-seam px-4 text-paper-dim transition-colors hover:border-rule hover:bg-cloth-hover hover:text-paper"
+          >
             <Plus aria-hidden className="size-3.5" />
             {t.shell.newSubject}
           </Link>
