@@ -135,7 +135,7 @@
 | WP16.4 | Определение домена | влит | `POST /v1/domains/classify` (#157) | — | — | T-AG5 |
 | WP16.5 | Строитель визуализаций | частично | `agent.viz`: генерация, рендер, одна попытка исправления (#168) | `GET /v1/viz/{id}` с CSP (объявление в `quack/artifacts/router.py`); `deploy/static/viz/` с закреплёнными D3/Plotly/KaTeX | — | T-AG6 |
 | WP16.6 | Поручения и доставка | влит | Обработчики `task.solution_space`, `agent.solution_space`, `agent.task_generation`, `check.known_claim`, `agent.illustration`, регистрация #173 (#208, D-B-191…193, D-B-196) | `agent.artifact` — C | — | T-AG7 |
-| WP16.7 | Проигрывание, судья, метрики (P2) | частично | Функции `session/replay.py::replay_session`, `agents/metrics.py::metrics`, `agents/judge.py` (#208, D-B-194, D-B-195) | регистрация `ops replay-session`/`ops metrics` (C, S15); эталонные наборы LangSmith; качество извлечения `Т-§7.11` | — | — |
+| WP16.7 | Проигрывание, судья, метрики (P2) | частично | Функции `session/replay.py::replay_session`, `agents/metrics.py::metrics`, `agents/judge.py` (#208, D-B-194, D-B-195); качество извлечения `agents/extraction_eval.py` (D-B-209) | регистрация `ops replay-session`/`ops metrics`/оценки извлечения (C, S15); выгрузка наборов LangSmith — оператор | — | — |
 | WP16.8 | Подготовка «Сегодня» | влит | `today.prepare` (#180) | — | — | T-RV2 |
 
 ### 4.3. Поток C: вход, каналы, материалы, артефакты, compute, эксплуатация, сквозная проверка
@@ -202,7 +202,7 @@
 3. **WP10.7, хвост** — живой прогон владельцем: `META_API_KEY=… POSTGRES_DSN=… uv run python scripts/meta_smoke.py --out …` (DoD п.6a, D-B-187 [ПРОВЕРИТЬ]).
 4. **WP16.3, хвост** — вызов `reconcile_domain` из `material.parse` (C, WP20.2).
 5. **WP10.4, хвост** — `db=` в `LLMGateway` при WP1.3 (A/C), снятие `ops.llm_ledger` и outbox на SQLAlchemy.
-6. **WP16.7, хвост** — эталонные наборы LangSmith, качество извлечения `Т-§7.11`; регистрация команд — C.
+6. **WP16.7, хвост** — регистрация команд `ops` (C, #209); выгрузка наборов LangSmith — оператор.
 7. **WP8.3 со стороны B** — `db=ctx.db` в читатель при первом отчёте «до и после» (issue #190); Q-A-4.
 
 ### Поток C
