@@ -31,7 +31,14 @@ apt-get update -y
 apt-get install -y ca-certificates curl gnupg ufw fail2ban unattended-upgrades
 
 step "users: admin (sudo) and deploy (no sudo)"
-id admin >/dev/null 2>&1 || useradd --create-home --shell /bin/bash --groups sudo admin
+if ! id admin >/dev/null 2>&1; then
+  # Ubuntu ships a legacy group `admin`; useradd refuses to create a same-named user group.
+  if getent group admin >/dev/null; then
+    useradd --create-home --shell /bin/bash --gid admin --groups sudo admin
+  else
+    useradd --create-home --shell /bin/bash --groups sudo admin
+  fi
+fi
 id deploy >/dev/null 2>&1 || useradd --create-home --shell /bin/bash deploy
 install_key() { # user key
   local home; home="$(getent passwd "$1" | cut -d: -f6)"
