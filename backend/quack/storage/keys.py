@@ -41,8 +41,13 @@ def material_page_key(learner_id: UUID, material_id: UUID, page: int) -> str:
     return f"{learner_prefix(learner_id)}materials/{material_id}/pages/{page}.webp"
 
 
-def canvas_chunk_key(learner_id: UUID, session_id: UUID, chunk: int) -> str:
-    return f"{learner_prefix(learner_id)}canvas/{session_id}/{chunk}-{new_ulid()}.bin"
+def canvas_chunk_prefix(learner_id: UUID, session_id: UUID, canvas_id: UUID) -> str:
+    """The chunks of one canvas: a session has several canvases (WP21.6, D-C-135)."""
+    return f"{learner_prefix(learner_id)}canvas/{session_id}/{canvas_id}/"
+
+
+def canvas_chunk_key(learner_id: UUID, session_id: UUID, canvas_id: UUID, chunk: int) -> str:
+    return f"{canvas_chunk_prefix(learner_id, session_id, canvas_id)}{chunk}-{new_ulid()}.bin"
 
 
 def photo_original_key(learner_id: UUID, photo_id: UUID) -> str:
