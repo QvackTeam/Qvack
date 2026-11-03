@@ -19,6 +19,7 @@ from quack.prompts.registry import PromptNotFoundError
 
 SESSION = uuid4()
 LEARNER = uuid4()
+_REPLAY = ["ops", "replay-session", "--session", str(SESSION), "--teacher", "teacher@2"]
 
 
 class _Closable:
@@ -74,10 +75,7 @@ def test_parser_of_the_p4_ops_commands() -> None:
         None,
         None,
     )
-    r = parser.parse_args(
-        ["ops", "replay-session", "--session", str(SESSION), "--teacher", "teacher@4"]
-        + ["--renderer", "2", "--out", "r.json"]
-    )
+    r = parser.parse_args([*_REPLAY, "--renderer", "2", "--out", "r.json"])
     assert (r.renderer, r.out) == (2, "r.json")
     for bad in (
         ["ops", "metrics"],
@@ -136,10 +134,7 @@ async def test_ops_replay_session_passes_the_documented_arguments(
     monkeypatch.setattr(cli, "session_learner", session_learner)
     monkeypatch.setattr(cli, "replay_session", replay_session)
     monkeypatch.setattr(cli, "release_judge", lambda gateway: judge)
-    args = cli.build_parser().parse_args(
-        ["ops", "replay-session", "--session", str(SESSION), "--teacher", "teacher@2"]
-        + ["--renderer", "3", "--out", str(out)]
-    )
+    args = cli.build_parser().parse_args([*_REPLAY, "--renderer", "3", "--out", str(out)])
     assert await cli._ops(settings, args) == 0
 
     assert wiring.calls["session_learner"] == (wiring.db, SESSION)
@@ -194,10 +189,7 @@ async def test_ops_replay_session_refusals_exit_2(
 
     monkeypatch.setattr(cli, "session_learner", session_learner)
     monkeypatch.setattr(cli, "replay_session", replay_session)
-    args = cli.build_parser().parse_args(
-        ["ops", "replay-session", "--session", str(SESSION), "--teacher", "teacher@2"]
-        + ["--out", str(tmp_path / "r.json")]
-    )
+    args = cli.build_parser().parse_args([*_REPLAY, "--out", str(tmp_path / "r.json")])
     assert await cli._ops(_settings(), args) == 2  # the session is unknown
     assert state["replayed"] == 0 and wiring.db.closed
 

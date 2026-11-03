@@ -135,7 +135,7 @@
 | WP16.4 | Определение домена | влит | `POST /v1/domains/classify` (#157) | — | — | T-AG5 |
 | WP16.5 | Строитель визуализаций | частично | `agent.viz`: генерация, рендер, одна попытка исправления (#168) | `GET /v1/viz/{id}` с CSP (объявление в `quack/artifacts/router.py`); `deploy/static/viz/` с закреплёнными D3/Plotly/KaTeX | — | T-AG6 |
 | WP16.6 | Поручения и доставка | влит | Обработчики `task.solution_space`, `agent.solution_space`, `agent.task_generation`, `check.known_claim`, `agent.illustration`, регистрация #173 (#208, D-B-191…193, D-B-196) | `agent.artifact` — C | — | T-AG7 |
-| WP16.7 | Проигрывание, судья, метрики (P2) | частично | Функции `session/replay.py::replay_session`, `agents/metrics.py::metrics`, `agents/judge.py` (#208, D-B-194, D-B-195) | регистрация `ops replay-session`/`ops metrics` (C, S15); эталонные наборы LangSmith; качество извлечения `Т-§7.11` | — | — |
+| WP16.7 | Проигрывание, судья, метрики (P2) | частично | Функции `session/replay.py::replay_session`, `agents/metrics.py::metrics`, `agents/judge.py` (#208, D-B-194, D-B-195); команды `ops metrics`, `ops replay-session` в `cli.py` (C, D-C-151, ветка phase-4-c-b209) | эталонные наборы LangSmith; качество извлечения `Т-§7.11` | — | — |
 | WP16.8 | Подготовка «Сегодня» | влит | `today.prepare` (#180) | — | — | T-RV2 |
 
 ### 4.3. Поток C: вход, каналы, материалы, артефакты, compute, эксплуатация, сквозная проверка
@@ -143,7 +143,7 @@
 | WP | Название | Статус | Что есть | Что осталось | Блокер | Тесты §8 |
 | :-- | :-- | :-: | :-- | :-- | :-- | :-- |
 | WP0 | Вход и аудит (зоны A, B выполнены) | влит | `main` зелёный, чистый старт подтверждён владельцем 2026-11-02, п.3а–3е закрыты (#71, #72) | — | — | T-A9b |
-| WP9.1 | compose | частично | `compose.yaml`: Caddy, сети, лимиты, секреты ролей (#102, #174) | сервис `alerts` и таймер; сверить состав с `Д-§3` | — | T-OPS1, T-OPS6 |
+| WP9.1 | compose | частично | `compose.yaml`: Caddy, сети, лимиты, секреты ролей (#102, #174); `LLM_PRICES`, `LANGSMITH_API_KEY` у `api`/`workers`, пустая `LLM_PRICES` допустима вне prod (D-B-198, D-C-149, ветка phase-4-c-b209) | сервис `alerts` и таймер; сверить состав с `Д-§3` | — | T-OPS1, T-OPS6 |
 | WP9.2 | Caddy и образы | влит | `deploy/Caddyfile`, Dockerfile с `dbmate`, `pg_dump 16`, `age`, CORS (#120, #177) | — | — | — |
 | WP9.3 | CI | частично | Jobs: backend, squawk, compute, images, publish в GHCR (#77, #171, #178, #189) | шаги: реестр событий (с A), типы фронтенда из OpenAPI, `modal/`, изоляция и один писатель отдельно; job выкатки | — | T-DB7 |
 | WP9.4 | Выкатка и откат | частично | `deploy/deploy.sh` (#120) | job выкатки в окружении `production`, `DEPLOY_FREEZE`; проверка порядка шагов | — | T-OPS8 |
@@ -202,7 +202,7 @@
 3. **WP10.7, хвост** — живой прогон владельцем: `META_API_KEY=… POSTGRES_DSN=… uv run python scripts/meta_smoke.py --out …` (DoD п.6a, D-B-187 [ПРОВЕРИТЬ]).
 4. **WP16.3, хвост** — вызов `reconcile_domain` из `material.parse` (C, WP20.2).
 5. **WP10.4, хвост** — `db=` в `LLMGateway` при WP1.3 (A/C), снятие `ops.llm_ledger` и outbox на SQLAlchemy.
-6. **WP16.7, хвост** — эталонные наборы LangSmith, качество извлечения `Т-§7.11`; регистрация команд — C.
+6. **WP16.7, хвост** — эталонные наборы LangSmith, качество извлечения `Т-§7.11` (команды `ops` зарегистрированы, C).
 7. **WP8.3 со стороны B** — `db=ctx.db` в читатель при первом отчёте «до и после» (issue #190); Q-A-4.
 
 ### Поток C

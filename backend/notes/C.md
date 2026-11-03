@@ -23,6 +23,36 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-C-151. WP16.7: `ops metrics` и `ops replay-session` — формат аргументов, вывод, отказы
+- Класс: C
+- WP / место: WP16.7, S15, issue #209 п.3; `quack/cli.py`, `tests/test_ops_p4_cli.py`
+- Контекст: сигнатуры функций B заданы (#209), но формат `--since`, имя файла отчёта, вывод и коды выхода команд не названы.
+- Решение: `--since` — ISO 8601, время без пояса считается UTC; `metrics` печатает один JSON (`sort_keys`) и выходит с 0. `replay-session`: `--out` необязателен, по умолчанию `replay-session-<session>.json` в текущем каталоге; в stdout идёт `{"out", "summary"}`, полный отчёт в файле. Код 2: сессии нет, промпт не зарегистрирован или `name@N` разобран неверно, пустой `META_API_KEY` (проверка до открытия ресурсов). Шлюз команды строится с `db=db` (D-B-197), чтобы строки `ops.llm_usage` писались. Роль `ops` в prod не получает `META_API_KEY` (Д-§7), поэтому `replay-session` запускается там, где ключ есть (стенд, dev); `metrics` ключа не требует.
+- Почему: `Д-§7` (ключ модели только у `api` и `workers`), соглашение кодов выхода `seed-learners` (отказ = 2), `Т-§18.2`.
+- Обратимость: изменение аргументов — правка парсера и теста; формат JSON не контракт.
+- Тесты: `tests/test_ops_p4_cli.py`.
+- Требует подтверждения владельцем: нет
+
+### D-C-150. `ModelPrice`: три токеновых цены обязательны, лишний ключ и отрицательное число — ошибка
+- Класс: C
+- WP / место: WP10.4, ревью потока C в PR #208 (замечание 1, issue #209 п.6); `quack/config.py`, `tests/test_settings_p4_review.py`, `tests/llm/test_usage_usd.py`
+- Контекст: в #208 все пять полей имели значение по умолчанию 0: `{}`, опечатка ключа и минус проходили, модель считалась бесплатной, бюджеты в долларах (D-B-199) переставали работать.
+- Решение: `input`, `cached_input`, `output` обязательны, все поля `ge=0`, `extra="forbid"`; `per_minute` и `per_image` необязательны (0). Модель голоса или картинок пишет токеновые цены явными нулями. Тест B `test_usage_usd` поправлен на явные нули у `voice-m`.
+- Почему: закон 8 (отсутствие не ноль), D-B-198, D-B-199; предложение ревью.
+- Обратимость: убрать `extra`/`ge`/обязательность — одна правка класса.
+- Тесты: `tests/test_settings_p4_review.py` (обязательность, опечатка, минус, разбор `per_minute`/`per_image` из `LLM_PRICES`).
+- Требует подтверждения владельцем: нет
+
+### D-C-149. Пустая `LLM_PRICES` читается как пустая таблица; compose передаёт `${LLM_PRICES:-}`
+- Класс: C
+- WP / место: WP9.1, WP10.4, D-B-198, ревью потока C в PR #208 (замечание 2, issue #209 п.4); `quack/config.py`, `compose.yaml`, `deploy/env.example`, `backend/.env.example`, `tests/test_compose_contract.py`
+- Контекст: `LLM_PRICES=` давала `SettingsError` при разборе JSON, в том числе в dev; compose для прочих секретов использует `${X:-}`.
+- Решение: поле `llm_prices` помечено `NoDecode`, `field_validator(mode="before")` читает пустую или пробельную строку как `{}`, остальное как JSON. В compose `LLM_PRICES: ${LLM_PRICES:-}` и `LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}` только у `api` и `workers` (не у `meta-mock` профиля `loadtest`). В prod пустая таблица по-прежнему останавливает `api`/`workers` (D-B-198); в dev и test пустая допустима. Значения цен даёт владелец: в `env.example` они пусты.
+- Почему: D-B-198, D-B-201, Д-§7 (секрет только у своих сервисов), Д-§11 (трассировка выключена на стенде).
+- Обратимость: вернуть строгий разбор — убрать валидатор; compose — две строки.
+- Тесты: `tests/test_settings_p4_review.py::test_an_empty_llm_prices_is_the_empty_table`, `tests/test_compose_contract.py` (держатели переменных, имена в двух `env.example`).
+- Требует подтверждения владельцем: нет
+
 ### D-C-148. WP23.5: cheat sheet хаба — окно предложения, подгонка под страницу, «собери сам»
 - Класс: C
 - WP / место: WP23.5; `quack/graph/read/cheatsheet_offer.py`, `quack/artifacts/hub_cheatsheet.py`, `hub_cheatsheet_routes.py`, строка в `HANDLER_MODULES` (`quack/runtime/__init__.py`), `tests/artifacts/test_cheatsheet_*`
