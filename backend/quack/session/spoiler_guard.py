@@ -58,9 +58,9 @@ def _is_trivial(answer: str, settings: Settings) -> bool:
     return False
 
 
-def spoiler_found(text: str, task: TaskToCheck, settings: Settings) -> bool:
-    """True if `text` contains the answer of `task` by its `reference_solution`."""
-    answer = _answer(task)
+def answer_in_text(text: str, answer: str, settings: Settings) -> bool:
+    """True if `text` contains `answer` (normalized); trivial answers are never spoilers."""
+    answer = _normalize(answer)
     if not answer or _is_trivial(answer, settings):
         return False
     normalized = _normalize(text)
@@ -72,6 +72,27 @@ def spoiler_found(text: str, task: TaskToCheck, settings: Settings) -> bool:
         )
     token = re.compile(rf"(?<![\w.^]){re.escape(answer)}(?![\w^(])")
     return token.search(normalized) is not None
+
+
+def spoiler_found(text: str, task: TaskToCheck, settings: Settings) -> bool:
+    """True if `text` contains the answer of `task` by its `reference_solution`."""
+    answer = _answer(task)
+    return answer is not None and answer_in_text(text, answer, settings)
+
+
+def remove_answer_sentences(text: str, answers: Sequence[str], settings: Settings) -> str:
+    """`text` without the sentences that contain any of `answers` (Т-§12.1; the answers of the
+    active tasks of `content.tasks`, ТЗ Ф4 WP13.5)."""
+    parts = _SENTENCE_BREAK.split(text)
+    kept: list[str] = []
+    for index in range(0, len(parts), 2):
+        sentence = parts[index]
+        if any(answer_in_text(sentence, answer, settings) for answer in answers):
+            continue
+        kept.append(sentence)
+        if index + 1 < len(parts):
+            kept.append(parts[index + 1])
+    return "".join(kept).strip()
 
 
 def find_spoiler(text: str, tasks: Sequence[TaskToCheck], settings: Settings) -> TaskToCheck | None:

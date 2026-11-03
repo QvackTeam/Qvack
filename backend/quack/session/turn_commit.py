@@ -58,12 +58,12 @@ _INSERT_MANIFEST = """
 INSERT INTO ops.turn_manifests (
     manifest_id, learner_id, session_id, prompt_version, doctrine_version, renderer_version,
     role, model, effort, projected_seq, overlay_seqs, label_table, digest_id, chunk_ids,
-    similar_ids, context_text, degraded_mode
+    similar_ids, context_text, degraded_mode, frozen_slots
 ) VALUES (
     %(manifest_id)s, %(learner_id)s, %(session_id)s, %(prompt_version)s, %(doctrine_version)s,
     %(renderer_version)s, %(role)s, %(model)s, %(effort)s, %(projected_seq)s,
     %(overlay_seqs)s, %(label_table)s, %(digest_id)s, %(chunk_ids)s, %(similar_ids)s,
-    %(context_text)s, %(degraded_mode)s
+    %(context_text)s, %(degraded_mode)s, %(frozen_slots)s
 )
 ON CONFLICT (manifest_id) DO NOTHING
 """
@@ -148,6 +148,9 @@ class TurnManifestRow:
     similar_ids: list[UUID] = field(default_factory=list)
     context_text: str | None = None
     degraded_mode: DegradedMode | None = None
+    # Slots 3 and 4 frozen at the session start (Т-§10.1, D-A-137): only on the turn that
+    # froze them; later turns read the earliest row of the session that has them.
+    frozen_slots: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -640,6 +643,7 @@ def _manifest_params(manifest: TurnManifestRow) -> dict[str, Any]:
         "chunk_ids": manifest.chunk_ids,
         "similar_ids": manifest.similar_ids,
         "context_text": manifest.context_text,
+        "frozen_slots": Jsonb(manifest.frozen_slots) if manifest.frozen_slots is not None else None,
         "degraded_mode": manifest.degraded_mode,
     }
 
