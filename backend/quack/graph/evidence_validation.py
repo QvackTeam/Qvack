@@ -4,7 +4,7 @@ WP12.2 п.1–2, `Т-§7.6`). Seam S6: the `turn.extract` handler of stream B ca
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal, Protocol
@@ -17,6 +17,9 @@ from quack.events.payloads import (
     NewSkillRef,
     SkillRef,
 )
+from quack.events.records import ExtractedElementRecord, RejectedElementRecord
+from quack.events.values import GapType as P4GapType
+from quack.events.values import NewSkill
 
 # The extractor's word for "skill not clear" (`Т-§7.6`): no evidence.
 UNCLEAR_SKILL = "unclear"
@@ -146,3 +149,104 @@ def _check(
     if item.level is not None and caps and item.level > min(caps):
         return "level_above_task"
     return None
+
+
+# --- Phase 4: `extractor@3` (ТЗ Ф4 WP15 п.4, п.8; `Т-§7.6`) --------------------------------
+#
+# The extractor output of stream B (`quack.agents.schemas.ExtractedElement`) is checked here
+# before `observation.extracted` is written: labels become ids (`ExtractedElementRecord`),
+# failed elements stay in the observation with the reason (`RejectedElementRecord`). The core
+# cannot import the product model (§4.1), so the input is a protocol of the same fields.
+
+type RejectionReason = Literal[
+    "unknown_label",
+    "incomplete_element",
+    "source_outside_episode",
+    "missing_quote",
+    "quote_not_in_source",
+    "level_above_task",
+    "code_verdict_exists",
+]
+
+
+class RootCauseLike(Protocol):
+    @property
+    def skill(self) -> str: ...
+    @property
+    def confidence(self) -> Literal["low", "medium", "high"]: ...
+
+
+class ExtractorElementLike(Protocol):
+    """One element of `extractor@3` (`Т-§7.6`, WP15 п.3) with short labels."""
+
+    @property
+    def kind(self) -> Literal["evidence", "misconception_hypothesis"]: ...
+    @property
+    def skill(self) -> str | None: ...
+    @property
+    def new_skill(self) -> NewSkill | None: ...
+    @property
+    def skill_unclear(self) -> bool: ...
+    @property
+    def level(self) -> int | None: ...
+    @property
+    def outcome(self) -> Literal["correct", "incorrect", "partial"] | None: ...
+    @property
+    def help(self) -> Literal["none", "hint", "shown_solution"]: ...
+    @property
+    def hint_step(self) -> int | None: ...
+    @property
+    def gap_type(self) -> P4GapType: ...
+    @property
+    def misconception(self) -> str | None: ...
+    @property
+    def new_misconception(self) -> str | None: ...
+    @property
+    def root_cause(self) -> RootCauseLike | None: ...
+    @property
+    def quote(self) -> str: ...
+    @property
+    def events(self) -> Sequence[int]: ...
+
+
+@dataclass(frozen=True)
+class EpisodeSource:
+    """An event of the episode that an element may cite: its text and time (`Т-§2.1`)."""
+
+    seq: int
+    text: str
+    at_ms: int
+
+
+@dataclass(frozen=True)
+class EpisodeCheckContext:
+    """What code knows when it checks the elements of one `observation.extracted`.
+
+    - `skill_labels` / `misconception_labels`: label → id of the call (`LabelMap.labels`);
+    - `episode`: the events of the episode by seq — the context turns before it are not
+      citable (`Т-§7.5`: only the episode is interpreted);
+    - `task_levels`: seq of an event of a task → the highest level of the task markup;
+    - `code_verdicts`: `(skill_id, level)` with a verdict of class code in the episode
+      (WP15 п.8)."""
+
+    skill_labels: Mapping[str, UUID]
+    misconception_labels: Mapping[str, UUID]
+    episode: Mapping[int, EpisodeSource]
+    task_levels: Mapping[int, int] = field(default_factory=dict)
+    code_verdicts: frozenset[tuple[UUID, int]] = frozenset()
+
+
+@dataclass(frozen=True)
+class CheckedElements:
+    """`elements` and `rejected` of `observation.extracted`; `rejected[i].index` — the position
+    of the element in the extractor output."""
+
+    elements: list[ExtractedElementRecord]
+    rejected: list[RejectedElementRecord]
+
+
+def check_extracted(
+    elements: Sequence[ExtractorElementLike], ctx: EpisodeCheckContext
+) -> CheckedElements:
+    """The checks of `Т-§7.6` and WP15 п.4, п.8 for every element, in output order."""
+    raise NotImplementedError
