@@ -175,19 +175,30 @@ def render_goals(hubs: Sequence[HubGoal], labels: LabelMap, timezone: str | None
     return "\n".join(lines)
 
 
+# Slots 3 and 4 are rendered without labels: the label table lives for one call (Т-§4.5)
+# while these slots keep their text for the whole session (Т-§10.1); slot 9 names every
+# label of the call (D-B-180).
+_NO_LABELS = LabelMap({})
+
+
+def snapshot_slots(state: LearnerState, timezone: str | None) -> dict[str, str]:
+    """The text of slots 3 and 4 for `ops.turn_manifests.frozen_slots` (D-A-137)."""
+    return {
+        "profile": render_profile(state.profile),
+        "domain_and_goals": render_goals(state.hubs, _NO_LABELS, timezone),
+    }
+
+
 def frozen_slots(
-    at_start: LearnerState, now: LearnerState, labels: LabelMap, timezone: str | None
+    snapshot: Mapping[str, str], now: LearnerState, timezone: str | None
 ) -> FrozenSlots:
     """Slots 3 and 4 from the snapshot at the session start; what changed since — lines of
     the tail (Т-§10.1)."""
-    profile = render_profile(at_start.profile)
-    goals = render_goals(at_start.hubs, labels, timezone)
+    profile, goals = snapshot["profile"], snapshot["domain_and_goals"]
     before = set(profile.splitlines()) | set(goals.splitlines())
-    current = [
-        *render_profile(now.profile).splitlines(),
-        *render_goals(now.hubs, labels, timezone).splitlines(),
-    ]
-    changes = [f"Changed during this session: {line}" for line in current if line not in before]
+    current = snapshot_slots(now, timezone)
+    lines = [*current["profile"].splitlines(), *current["domain_and_goals"].splitlines()]
+    changes = [f"Changed during this session: {line}" for line in lines if line not in before]
     return FrozenSlots(profile=profile, domain_and_goals=goals, changes=changes)
 
 
