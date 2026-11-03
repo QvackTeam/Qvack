@@ -48,6 +48,11 @@ function matanGraph(locale: Locale): GraphModel | undefined {
     includes: domain.topics.filter((t) => t.hubId).map((t) => ({ hubId: t.hubId!, topicId: t.id })),
     requires: domain.topics.flatMap((t) => t.requires.map((r) => ({ topicId: t.id, requiresId: r }))),
     otherDomain: domain.outside.map((o) => ({ topic: topicOf(o.id, o.title, "solid"), domainId: "linal", domainName: o.fromDomain })),
+    today: [
+      { id: "d1", kind: "item", topicId: "power", action: "learn", minutes: 25, href: "/session/radius" },
+      { id: "d2", kind: "item", hubId: "series", action: "practice", minutes: 40 },
+      { id: "d3", kind: "item", topicId: "remarkable", action: "review", minutes: 10 },
+    ],
     nowMs: MOCK_NOW_MS,
   };
 }
@@ -107,6 +112,11 @@ function linalGraph(locale: Locale): GraphModel {
     hubs,
     includes,
     requires: ROWS.flatMap((r) => r.requires.map((q) => ({ topicId: r.id, requiresId: q }))),
+    today: [
+      { id: "t1", kind: "item", topicId: "matmul", action: "review", minutes: 10 },
+      { id: "t2", kind: "item", hubId: "colloq", action: "practice", minutes: 30 },
+      { id: "t3", kind: "pace_warning", text: locale === "en" ? "3 colloquium topics are behind the pace" : "3 темы к коллоквиуму не успеваются в нужном темпе" },
+    ],
     otherDomain: [{ topic: topicOf("ev", locale === "en" ? "Expected value" : "Матожидание", "review"), domainId: "prob", domainName: locale === "en" ? "Probability" : "Теория вероятностей" }],
     nowMs: MOCK_NOW_MS,
   };

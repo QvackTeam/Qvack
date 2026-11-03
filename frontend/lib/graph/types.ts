@@ -51,6 +51,27 @@ export type RequiresEdge = { topicId: string; requiresId: string };
  */
 export type OtherDomainTopic = { topic: GraphTopic; domainId: string; domainName: string };
 
+/**
+ * "Today" recommendation (14.4). The tech doc fixes no fields, so everything except `id` and `kind` is optional:
+ * the view shows only what the backend sent and invents nothing.
+ */
+export type TodayRec = {
+  id: string;
+  /** `pace_warning` is a card with no action on a topic (14.6) */
+  kind: "item" | "pace_warning";
+  topicId?: string;
+  hubId?: string;
+  /** Name of the target, when the id alone is not enough to find it in the model */
+  name?: string;
+  /** One fixed set of words, so a card always means the same thing */
+  action?: "learn" | "practice" | "review";
+  minutes?: number;
+  /** Ready-made text of a pace warning */
+  text?: string;
+  /** A session that already exists */
+  href?: string;
+};
+
 export type GraphModel = {
   domainId: string;
   domainName: string;
@@ -60,6 +81,7 @@ export type GraphModel = {
   requires: RequiresEdge[];
   /** Topics from other subjects shown here in the left column. Topics with status `off_domain` are in `topics` */
   otherDomain: OtherDomainTopic[];
+  today: TodayRec[];
   /** Mock "now"; the real API uses `Date.now()` */
   nowMs: number;
 };

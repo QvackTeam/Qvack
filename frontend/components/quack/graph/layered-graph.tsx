@@ -88,7 +88,7 @@ function stateOf(t: GraphTopic, nowMs: number): TopicState {
   return "solid";
 }
 
-export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain: Domain }>(function LayeredGraph({ model, domain }, ref) {
+export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain: Domain; highlight?: { topicIds: string[]; hubIds: string[] } }>(function LayeredGraph({ model, domain, highlight }, ref) {
   const tx = useT();
   const router = useRouter();
   const wrap = useRef<HTMLDivElement>(null);
@@ -108,6 +108,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const textW = useRef(new Map<string, number>());
   const lastDraw = useRef(0);
   const flash = useRef(new Map<string, number>());
+  const lit = useRef<string[]>([]);
   const camTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const colY = useRef(new Map<string, number>());
   const colEls = useRef(new Map<string, HTMLElement>());
@@ -297,6 +298,26 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       ctx.arc(x, y, r * 0.38, 0, Math.PI * 2);
       ctx.fillStyle = col.ribbon;
       ctx.fill();
+    }
+
+    // The topic or hub of the "Today" card under the pointer
+    if (lit.current.length) {
+      for (const key of lit.current) {
+        const p = pos(key);
+        if (!p) continue;
+        const x = sx(p.x), y = sy(p.y);
+        const r0 = (key.startsWith("h:") ? rH : rT) + 7;
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = col.ribbon;
+        ctx.beginPath();
+        ctx.arc(x, y, r0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = col.ribbon;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
     }
 
     // Nodes that changed while the learner was looking: a pulse that fades out. The camera does not move for them
@@ -602,6 +623,12 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       leaveDomain(domainId);
     };
   }, [model.domainId, saveNow]);
+
+  // A "Today" card under the pointer lights its node
+  useEffect(() => {
+    lit.current = [...(highlight?.topicIds ?? []), ...(highlight?.hubIds ?? []).map((id) => `h:${id}`)];
+    schedule();
+  }, [highlight, schedule]);
 
   // The graph changed while it is on screen: what changed pulses, and counts as new. The camera stays where it is
   useEffect(() => {
