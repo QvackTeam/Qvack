@@ -195,7 +195,7 @@ async def _source_task(db: Db, learner_id: UUID, family: UUID) -> UUID:
             answer=answer,
         ),
         verification="checked",
-        actor="seminar",
+        actor="code",
         idempotency_key=f"task:{task_id}",
     )
     return task_id

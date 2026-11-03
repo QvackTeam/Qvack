@@ -111,11 +111,9 @@ def generated_task_id(key: str, index: int) -> UUID:
     return uuid5(NAMESPACE_URL, f"task:{key}:{index}")
 
 
-async def source_family(db: Db, source: TaskDocument) -> UUID:
+async def source_family(db: Db, *, learner_id: UUID, source: TaskDocument) -> UUID:
     """The `familyId` of the source task, from its `task.created`."""
-    row = await db.fetch_one(
-        _SELECT_FAMILY, {"learner_id": source.learner_id, "seq": source.created_seq}
-    )
+    row = await db.fetch_one(_SELECT_FAMILY, {"learner_id": learner_id, "seq": source.created_seq})
     if row is None:
         raise LookupError(f"task {source.task_id} has no task.created at seq {source.created_seq}")
     return UUID(row["family_id"])
@@ -160,7 +158,11 @@ async def generate_tasks(
         hard=request.kind == "proof" or request.level == HARD_LEVEL,
     )
     names = {request.skill_id: request.skill_name}
-    inherited = await source_family(db, request.source) if request.source else None
+    inherited = (
+        await source_family(db, learner_id=learner_id, source=request.source)
+        if request.source
+        else None
+    )
     stored: list[UUID] = []
     for index, draft in enumerate(result.value.tasks):
         if markup_errors(TaskGeneratorOutput(tasks=[draft]), labels) is not None:
