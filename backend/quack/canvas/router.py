@@ -1,5 +1,6 @@
 """Routes of canvases (ТЗ Ф4 §6.4 «Канвас», WP21.1, WP21.2): `POST /v1/sessions/{id}/canvases`,
-`GET /v1/canvases/{id}`, `GET /v1/domains/{id}/canvases`, `WS /v1/canvases/{id}/ws`. The
+`GET /v1/canvases/{id}`, `GET /v1/domains/{id}/canvases`, `POST /v1/canvases/{id}/photos`,
+`WS /v1/canvases/{id}/ws`. The
 learner comes only from the session cookie (WP18.3); a session, task, canvas or domain of another
 learner is 404."""
 
@@ -9,13 +10,18 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, WebSocket
+from fastapi import APIRouter, Depends, File, UploadFile, WebSocket
 from pydantic import BaseModel
 
-from quack.api.auth import CurrentSession, get_current_session, websocket_session
+from quack.api.auth import (
+    CurrentSession,
+    get_any_session,
+    get_current_session,
+    websocket_session,
+)
 from quack.api.errors import ApiError
 from quack.api.resources import AppResources, get_resources
-from quack.canvas import boards, socket
+from quack.canvas import boards, photos, socket
 from quack.canvas.board import BoardDoc
 
 router = APIRouter(prefix="/v1", tags=["canvas"])
@@ -35,6 +41,11 @@ class CanvasView(BaseModel):
     doc: BoardDoc
     version: int
     updated_at: datetime
+
+
+class PhotoView(BaseModel):
+    photo_id: UUID
+    canvas_id: UUID
 
 
 class CanvasList(BaseModel):
@@ -93,6 +104,32 @@ async def domain_canvases(domain_id: UUID, session: Session, resources: Resource
     except boards.CanvasNotFound as exc:
         raise _not_found(exc) from exc
     return CanvasList(canvases=[_view(c) for c in canvases])
+
+
+@router.post("/canvases/{canvas_id}/photos", status_code=201, response_model=PhotoView)
+async def upload_photo(
+    canvas_id: UUID,
+    session: Annotated[CurrentSession, Depends(get_any_session)],
+    resources: Resources,
+    file: Annotated[UploadFile, File()],
+) -> PhotoView:
+    """WP22.2: the laptop (`full`) or the phone paired to this canvas (`companion`, WP22.1);
+    a companion of another canvas — 403 (T-CP1)."""
+    if not socket.may_open(session, canvas_id):
+        raise ApiError("UNAUTHORIZED", "a companion session of another canvas", status_code=403)
+    try:
+        photo = await photos.upload_photo(
+            resources.db,
+            resources.storage,
+            resources.settings,
+            learner_id=session.learner_id,
+            canvas_id=canvas_id,
+            data=await file.read(),
+            redis=resources.redis,
+        )
+    except boards.CanvasNotFound as exc:
+        raise _not_found(exc) from exc
+    return PhotoView(photo_id=photo.photo_id, canvas_id=photo.canvas_id)
 
 
 @router.websocket("/canvases/{canvas_id}/ws")
