@@ -1483,6 +1483,15 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Обратимость: одна зависимость, один модуль.
 - Тесты: `tests/auth/test_pairing_wp22.py` (`T-CP1`); маршруты — `T-A1`, исключение — `T-E2`.
 - Требует подтверждения владельцем: нет.
+### D-C-137. WP21.3: исправление прочтения строки — `POST /v1/canvases/{id}/lines/{line_id}/correct`
+- Класс: B (ответ и ключ маршрута; §4.5)
+- WP / место: WP21.3, §6.4; `quack/canvas/recognition.py` (`correct_line`), `quack/canvas/router.py`
+- Решение: (1) тело `{idempotency_key, text, sympy?}` → `handwriting.corrected {canvas_id, line_id, text, sympy}`, actor `learner`, `session_id` канваса; ключ события — `handwriting.corrected:{idempotency_key}` (закон 5, T-E2: повтор — тот же ответ без событий, другой текст с тем же ключом — 409). (2) Исправить можно только строку, которая есть в журнале этого канваса (`canvas.line_committed` с этим `line_id`); чужой канвас или нет строки — 404. Стёртую строку исправить можно: стирание — не удаление (`Т-§15.1`). (3) Ответ 200 — `{canvas_id, line_id, text, sympy}`. Только полная сессия (`companion` — 403, `T-CP1`). (4) Повторный диагноз ставит диспетчер A (`canvas.rediagnose`, P1, `rules_p4.py`); обработчик повторного диагноза — с вызовом `canvas_diagnoser` (WP21.4, D-C-136).
+- Почему: ТЗ Ф4 WP21.3, §6.4, `Т-§2.8`, П-9.7, §4.5.
+- Обратимость: маршрут C.
+- Тесты: `tests/canvas/test_line_correct_wp21.py`; `tests/e2e/test_isolation_and_idempotency.py` (T-E2 — обход открывает канвас со строкой).
+- Требует подтверждения владельцем: нет.
+
 ### D-C-133. Открытые вопросы C к владельцу, решённые по документам (владелец поручил C, 2026-11-03)
 - Класс: B (значения конфигурации и эксплуатации); решения приняты C по прямому поручению владельца («детально сверяешься с документацией и принимаешь решение сама»)
 - WP / место: §6.7, WP18, WP19, WP24; `compose.yaml`, `deploy/env.example`, `compute/quack_compute/tmp_sweeper.py`, `compute/quack_compute/settings.py`
