@@ -201,6 +201,8 @@ EXPECTED_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("DELETE", "/v1/learner"),
         ("GET", "/v1/domains"),
         ("POST", "/v1/domains"),
+        # ТЗ Ф4 WP16.4 (stream B, route in the domains router)
+        ("POST", "/v1/domains/classify"),
         ("GET", "/v1/domains/{domain_id}"),
         ("POST", "/v1/domains/{domain_id}/archive"),
         ("POST", "/v1/domains/{domain_id}/structure/propose"),
