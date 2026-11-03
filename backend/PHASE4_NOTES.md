@@ -1136,6 +1136,20 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
 - Почему: закон 7 — сбой фонового не трогает остальное; `Т-§13.1` — пульс и чистильщик решают судьбу задачи.
 - Обратимость: убрать два `try/except`.
 - Тесты: `tests/jobs/test_dispatcher_p4.py::test_idle_check_survives_a_failing_learner`, `tests/jobs/test_executor_p4.py::test_a_failed_pulse_does_not_orphan_the_handler`.
+### D-A-194. WP6.5: чтения тем и хабов; замена `/graph` и `/topics/{id}` — в точке перехода WP1.3
+- Класс: B. WP6.5, WP6.3; ТЗ §6.4 («Граф и темы», «Хабы»), `Т-§4.7`, `Т-§4.8`, `Т-§8.7`, `Т-§22.2`; `quack/domains/graph_reads.py`, `router.py`
+- Решение:
+  1. **Смонтированы маршруты, которых нет в Фазе 3:**
+     - `GET /v1/topics/{id}/why?level=` — `GraphReader.why`, решающее и последние свидетельства (`Т-§8.7`);
+     - `GET /v1/domains/{id}/hubs` — `domain_goals`;
+     - `POST /v1/domains/{id}/hubs {name, control_type, idempotency_key}` — `hub.created` вида `request`, `origin = learner`; id хаба — от ключа, повтор даёт тот же хаб (закон 5); ответ `201 {hub_id, seq}`;
+     - `GET /v1/hubs/{id}` — цель хаба и готовность только по базе `direct`.
+     Чужой id — `404`.
+  2. **`topic_view`** готов: код состояния `TopicDisplay`, статус, видимость, `nearestDueAtMs`, уровни навыков, «места в сессиях» (`Т-§4.7`, `П-3.3`). Места — показы и действующие свидетельства навыков темы: номер события из графа, сессия — из `core.events`, потому что у `Exposure` по `Т-§3.4.2` нет свойства сессии.
+  3. **Точка перехода.** `GET /v1/domains/{id}/graph` и `GET /v1/topics/{id}` есть в Фазе 3; на них держатся тесты старого стека (e2e, сбой Neo4j, псевдоним темы). Две версии одного пути не живут, поэтому замена — при переключении процессов на `Db` (WP1.3), вместе с переходом C (WP9). T-TH5 (`test_graph_api_codes_not_strings`) — там же.
+  4. **`POST /v1/hubs/{id}/prep-mode`, `/grade`** — WP17.
+- Почему: §0.4.3 п.1–2; §0.4.4 п.14 (тесты чужого стека не ломать до перехода).
+- Тесты: `tests/graph/test_projection_runner.py::test_topic_and_hub_reads`; `tests/test_app_assembly.py` (T-A1, снимок OpenAPI пересобран).
 - Требует подтверждения владельцем: нет.
 
 ### Ответы потока A (2026-11-02)

@@ -18,6 +18,7 @@ from quack.config import Settings
 from quack.domains import (
     diagnostic,
     disputes,
+    graph_reads,
     graph_view,
     learner,
     service,
@@ -52,6 +53,7 @@ from quack.domains.schemas import (
     UpdateTopicStatusRequest,
     UpdateTopicStatusResponse,
 )
+from quack.graph.read.models import HubGoal, WhyFacts
 from quack.llm.gateway import LLMGateway
 from quack.practice import domain_classify
 from quack.practice.domain_classify import ClassifyDomainRequest, DomainSuggestion
@@ -448,3 +450,55 @@ async def edit_hub_endpoint(
     """WP6.3, ТЗ §6.4 «Хабы»: the learner corrects the scope and the date (Т-§4.8)."""
     r = get_resources(request)
     return _edited(await topic_edits.edit_hub(r.db, r.neo4j, r.redis, learner_id, hub_id, req))
+
+
+# --- ТЗ Ф4 WP6.5: reads of topics and hubs (codes, not text; Т-§22.2) ---
+
+
+@_protected.get("/topics/{topic_id}/why", response_model=WhyFacts, status_code=200)
+async def topic_why_endpoint(
+    topic_id: UUID,
+    request: Request,
+    learner_id: CurrentLearnerId,
+    level: Annotated[int | None, Query(ge=1, le=6)] = None,
+) -> WhyFacts:
+    r = get_resources(request)
+    why = await graph_reads.topic_why(r.db, r.neo4j, r.settings, learner_id, topic_id, level)
+    if why is None:
+        raise _not_yours()
+    return why
+
+
+@_protected.get("/domains/{domain_id}/hubs", response_model=list[HubGoal], status_code=200)
+async def domain_hubs_endpoint(
+    domain_id: UUID, request: Request, learner_id: CurrentLearnerId
+) -> list[HubGoal]:
+    r = get_resources(request)
+    hubs = await graph_reads.domain_hubs(r.neo4j, r.settings, learner_id, domain_id)
+    if hubs is None:
+        raise _not_yours()
+    return hubs
+
+
+@_protected.post(
+    "/domains/{domain_id}/hubs", response_model=graph_reads.HubCreated, status_code=201
+)
+async def create_hub_endpoint(
+    domain_id: UUID, req: graph_reads.CreateHub, request: Request, learner_id: CurrentLearnerId
+) -> graph_reads.HubCreated:
+    r = get_resources(request)
+    created = await graph_reads.create_hub(r.db, r.neo4j, r.redis, learner_id, domain_id, req)
+    if created is None:
+        raise _not_yours()
+    return created
+
+
+@_protected.get("/hubs/{hub_id}", response_model=graph_reads.HubView, status_code=200)
+async def hub_view_endpoint(
+    hub_id: UUID, request: Request, learner_id: CurrentLearnerId
+) -> graph_reads.HubView:
+    r = get_resources(request)
+    view = await graph_reads.hub_view(r.neo4j, r.settings, learner_id, hub_id)
+    if view is None:
+        raise _not_yours()
+    return view

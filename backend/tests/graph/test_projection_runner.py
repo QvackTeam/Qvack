@@ -401,3 +401,31 @@ async def test_hub_edit_scope_and_deadline(
     )
     assert [e["type"] for e in events] == ["hub.topics_changed", "hub.deadline_set"]
     assert events[1]["payload"]["deadline_at_ms"] is None
+
+
+async def test_topic_and_hub_reads(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP6.5 (§6.4, `Т-§22.2`, D-A-194): a projected topic is read with codes and levels and its
+    places in sessions; a hub created by the learner is in the hubs of the domain and has its
+    readiness; another learner's ids are «not found»."""
+    from quack.domains import graph_reads as reads
+
+    learner, other = await create_learner(pg_db), await create_learner(pg_db)
+    domain, topic, skill, material, chunk = uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
+    await append_events(pg_db, learner, _materials(domain, topic, skill, material, chunk))
+    await _project_all(pg_db, neo4j, settings, learner)
+    view = await reads.topic_view(pg_db, neo4j, learner, topic)
+    assert view is not None
+    assert (view.display.display_state, view.visibility, view.places) == ("not_tested", "shown", [])
+    assert [lv.status for lv in view.skills[0].levels] == ["unknown"] * 6
+    assert await reads.topic_view(pg_db, neo4j, other, topic) is None
+    body = reads.CreateHub(name="Exam", control_type="tasks", idempotency_key="exam")
+    created = await reads.create_hub(pg_db, neo4j, None, learner, domain, body)
+    assert created is not None
+    assert await reads.create_hub(pg_db, neo4j, None, learner, domain, body) == created  # retry
+    assert await reads.create_hub(pg_db, neo4j, None, other, domain, body) is None
+    await _project_all(pg_db, neo4j, settings, learner)
+    hubs = await reads.domain_hubs(neo4j, settings, learner, domain)
+    assert hubs is not None and created.hub_id in {h.hub_id for h in hubs}
+    hub = await reads.hub_view(neo4j, settings, learner, created.hub_id)
+    assert hub is not None and hub.goal.control_type == "tasks"
+    assert await reads.hub_view(neo4j, settings, other, created.hub_id) is None
