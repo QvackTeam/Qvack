@@ -475,6 +475,9 @@ class Settings(BaseSettings):
     )
     # WP16.3 (Т-§4.3).
     candidate_k: int = 15
+    # WP16.3 (Т-§4.10; D-B-185): a duplicate candidate scores cosine + weight × shared neighbours.
+    hygiene_min_score: float = 0.9
+    hygiene_neighbour_weight: float = 0.1
     # WP16.4 (Т-§4.9).
     domain_autolink_confidence: float = 0.8
     # WP11.2–11.3 (Т-§6.1, Т-§6.4, Т-§6.6).
