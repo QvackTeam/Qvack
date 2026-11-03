@@ -761,6 +761,38 @@
         "title": "CheckpointView",
         "type": "object"
       },
+      "ClassifyDomainRequest": {
+        "additionalProperties": false,
+        "description": "`{text | material_id}`: exactly one of them.",
+        "properties": {
+          "material_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Id"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          }
+        },
+        "title": "ClassifyDomainRequest",
+        "type": "object"
+      },
       "ClientParams": {
         "description": "Numbers of the client from the server config (ТЗ Ф4 §6.7).",
         "properties": {
@@ -1144,6 +1176,59 @@
           "domains"
         ],
         "title": "DomainListResponse",
+        "type": "object"
+      },
+      "DomainSuggestion": {
+        "description": "`existing` — `domain_id` of the learner's domain; `new` — `name` of a new domain;\n`unclear` — nothing is suggested.",
+        "properties": {
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "decision": {
+            "enum": [
+              "existing",
+              "new",
+              "unclear"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "domain_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domain Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "decision"
+        ],
+        "title": "DomainSuggestion",
         "type": "object"
       },
       "DomainSummary": {
@@ -6173,6 +6258,87 @@
           }
         },
         "summary": "Create Domain Endpoint",
+        "tags": [
+          "domains"
+        ]
+      }
+    },
+    "/v1/domains/classify": {
+      "post": {
+        "operationId": "classify_domain_endpoint_v1_domains_classify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassifyDomainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DomainSuggestion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Classify Domain Endpoint",
         "tags": [
           "domains"
         ]

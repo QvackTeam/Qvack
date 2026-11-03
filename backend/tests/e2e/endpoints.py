@@ -25,6 +25,9 @@ NO_IDEMPOTENCY_KEY: dict[tuple[str, str], str] = {
     ("POST", "/v1/canvases/{canvas_id}/photos"): "multipart; each photo is a new snapshot",
     # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
     ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): "no event; the job coalesces",
+    # ТЗ Ф4 WP16.4: the body is `{text | material_id}` only; a direct model call, nothing is
+    # written (D-B-173).
+    ("POST", "/v1/domains/classify"): "no event; a direct classifier call that writes nothing",
 }
 
 # Routes without a body model: the key is not sent.
