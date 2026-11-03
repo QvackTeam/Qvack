@@ -78,6 +78,7 @@ from quack.llm.streaming import (
     StreamRequest,
 )
 from quack.llm.strict_schema import to_strict_json_schema
+from quack.llm.tracing import NullTracer, Tracer, TraceRecord, learner_pseudonym
 from quack.llm.usage import UsageRow, call_cost_usd, check_usd_budgets, insert_usage
 from quack.logging import get_logger
 from quack.prompts.registry import PromptRegistry, PromptTemplate
@@ -149,7 +150,10 @@ class LLMGateway:
         *,
         redis: Redis | None = None,
         db: Db | None = None,
+        tracer: Tracer | None = None,
     ) -> None:
+        # WP10.6: a trace of each attempt; without a tracer — none (tests, `loadtest`).
+        self.tracer: Tracer = tracer or NullTracer()
         # WP10.4 (D-B-197): with `db` the call is accounted in `ops.llm_usage` with its cost
         # and the budgets are in dollars; without it (the SQLAlchemy stack of Phases 1–3,
         # until WP1.3) the row goes to `ops.llm_ledger` and the budgets are in tokens.
@@ -166,6 +170,10 @@ class LLMGateway:
 
     async def aclose(self) -> None:
         """Release the provider's HTTP client at process stop (§4.2, seam S1)."""
+        try:
+            await self.tracer.aclose()
+        except Exception:
+            log.warning("llm_tracer_close_failed")
         close = getattr(self.provider, "aclose", None)
         if callable(close):
             result = close()
@@ -738,7 +746,51 @@ class LLMGateway:
         ctx.rows[0] += 1
         if self.db is not None:
             await self._usage(ctx, response, latency_ms, status, retried)
+            await self._trace(ctx, response, latency_ms, status, error_code)
             return
+        await self._write_ledger(ctx, response, latency_ms, status, error_code)
+        await self._trace(ctx, response, latency_ms, status, error_code)
+
+    async def _trace(
+        self,
+        ctx: _CallContext,
+        response: ProviderResponse,
+        latency_ms: int,
+        status: str,
+        error_code: str | None,
+    ) -> None:
+        """WP10.6: a trace of the attempt after its ledger row. A failure of the tracer — a log
+        line, never an error of the call."""
+        try:
+            await self.tracer.trace(
+                TraceRecord(
+                    role=ctx.role,
+                    prompt=ctx.prompt.ref,
+                    pseudonym=learner_pseudonym(
+                        self.settings.langsmith_pseudonym_ns, ctx.learner_id
+                    ),
+                    model=response.model or ctx.model,
+                    status=status,
+                    error_code=error_code,
+                    input_tokens=response.input_tokens,
+                    output_tokens=response.output_tokens,
+                    cached_tokens=response.cached_tokens,
+                    reasoning_tokens=response.reasoning_tokens,
+                    latency_ms=latency_ms,
+                    ended_at=_now(),
+                )
+            )
+        except Exception:
+            log.warning("llm_trace_failed", role=ctx.role)
+
+    async def _write_ledger(
+        self,
+        ctx: _CallContext,
+        response: ProviderResponse,
+        latency_ms: int,
+        status: str,
+        error_code: str | None,
+    ) -> None:
         async with self.session_factory() as session, session.begin():
             await session.execute(
                 text(
