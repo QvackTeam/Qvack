@@ -1087,6 +1087,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Решено (2026-11-03): D-A-122 п.1 (#130) — `content.study_plans` строит код при старте сессии с целью-хабом (и при записи хода, если плана нет): порция — вершина графа `REQUIRES` тем хаба со сжатыми SCC (`graph.read.topic_requires`, S4), порядок — топологический; модель план хаба не пишет. Согласуется с WP13.6 и `Т-§4.6`. Реализация — B (WP13.6), отдельным пунктом.
 - Требует подтверждения владельцем: нет
 
+### D-B-166. Пространство решения задачи (WP12.4)
+- Класс: B
+- WP / место: WP12.4, `Т-§5.5`, `Т-§11.1`, `T-TK5`; `quack/practice/solution_space.py` (`build_solution_space`), `quack/config.py` (`RoleConfig.hard_model`, `model_for_role(hard=)`), `quack/llm/gateway.py` (`generate_structured(hard=)`)
+- Контекст: WP12.4 — роль `solution_space`, Spark; Wonder — для ответа `proof` и уровня 6; хранится в документе задачи с версией. `Т-§11.1`: строка «solution\_space — Spark, для сложных — Wonder», так же `task_generator`; ролей в таблице 26 (`T-AI1`), отдельной роли «глубокой» нет. Не названы: как одна роль зовёт две модели; что хранить на месте метки заблуждения неверной ветки (метки живут один вызов, `Т-§4.5`); откуда уровни задачи (в `content.tasks` разметки нет); что делать при двух задачах на одну задачу (правило банка и запрос канваса).
+- Решение: (а) у строки роли — `hard_model` (Wonder для `solution_space`, `task_generator`); `generate_structured(hard=True)` зовёт его, учёт, лимиты и outbox остаются у роли; роли без `hard_model` флаг не меняет. Новой роли нет — таблица `Т-§11.1` цела. (б) Сложная — ответ `proof` или уровень 6 в `tests` разметки; разметка читается из `task.created` по `created_seq` документа. (в) Заблуждение неверной ветки хранится его id (строкой) вместо метки; метка, неизвестная после повтора, — null. (г) Версия — версия промпта (`solution_space@1`); ключ вызова `solution_space:{task_id}:{prompt}`; запись — `UPDATE … WHERE solution_space IS NULL`: первое сохранённое пространство остаётся, повторная задача ничего не строит. (д) Пространство — содержимое документа задачи, не память ученика: события нет (закон 1 о модели ученика). (е) Имена полей JSON `content.tasks.solution_space` (`key_steps[].statement`, `key_steps[].expression {latex, sympy}`, `wrong_branches[].sign|gap_type|misconception`, `hints`) — шов с C: канвас WP21.4 читает их своим SQL; переименование — только с сообщением C (ревью C #144).
+- Почему: §0.4.3 п.2 (WP12.4, `Т-§5.5`, `Т-§11.1`), п.5.
+- Обратимость: один модуль и поле строки роли.
+- Тесты: `T-TK5` — `tests/practice/test_solution_space.py` (6); `tests/test_llm_runtime.py::test_hard_call_takes_the_hard_model`.
+- Не решено \[ПРОВЕРИТЬ\]: `model_for_role` берёт модель из `llm_role_models` (Фаза 2), а не из `llm_roles[role].model` — модель строки таблицы на вызов не влияет (кроме `hard_model`); провести через WP10 (G4). Обработчики `task.solution_space`/`agent.solution_space` — после чтения заблуждений навыка из S4 и источника эталонного решения.
+- Требует подтверждения владельцем: нет
+
 ### D-B-157. Картина памяти `renderer@1` (WP14.2)
 - Класс: B
 - WP / место: WP14.2, `Т-§10.2`, `Т-§8.2`–`Т-§8.7`; `quack/session/memory_picture.py`
@@ -1689,6 +1700,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP12.4, пространство решения (D-B-166): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 7 подмен (без `proof`, без уровня 6, метка вместо id, повторная постройка, без `IS NULL`, без LaTeX условия, `hard=False`), каждая роняет тест. Зелёный: `tests/test_llm_runtime.py`, `tests/practice`, `tests/llm`, `tests/test_settings_meta_api.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/e2e/test_llm_seams_e2e.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 272 passed.
 - WP23.1, документы артефактов (C, `phase-4-c-wp23-artifacts`): красный прогон отдельно не снят (облегчённый TDD по указанию владельца, 2026-11-03). Зелёный: `tests/artifacts/test_documents_wp23.py` + `tests/test_app_assembly.py` — 25 passed; с ключами — `tests/e2e/test_isolation_and_idempotency.py` + `tests/artifacts/test_documents_wp23.py` — 9 passed.
 - WP20.3, тело `embedding.compute` (C, `phase-4-c-wp20-modal`, коммит `5ff4812`): в Linux `pytest tests/embeddings/test_embedding_compute.py` — ошибка сбора (нет модуля); на неверной реализации (без пропуска готовых узлов) — 1 failed. Зелёный: с `tests/db/test_sql_static.py`, `tests/test_contracts.py` — 14 passed.
 - WP20.3, клиент Modal (C, `phase-4-c-wp20-modal`, коммит `92d406a`): `uv run pytest tests/embeddings` — ошибка сбора (нет `EMBEDDING_APP`, `EMBEDDER_CLASS`, параметра `query_instruction`). На неверной реализации (инструкция у документов; ошибки Modal не переводятся в `EmbeddingsUnavailable`) — по 1 failed. Зелёный: `tests/embeddings` (6, в Linux с `modal/` рядом), `tests/storage/test_s1_resources.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, `tests/test_app_assembly.py` — 46 passed. Правка теста красного коммита: `SecretStr("")` вместо `""` в `model_copy` (ошибка теста, не контракта).
