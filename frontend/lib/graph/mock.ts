@@ -1,6 +1,7 @@
 import type { Locale } from "@/lib/i18n/locale";
 import { getMocks, MOCK_TODAY } from "@/lib/mock";
 import type { DisplayCode, GraphHub, GraphModel, GraphTopic, HubLink } from "./types";
+import { getVisit } from "./visit-store";
 
 const DAY = 86_400_000;
 const clean = (s: string) => s.replace(/­/g, "");
@@ -141,7 +142,11 @@ function editGraph(domainId: string, edit: (m: GraphModel) => GraphModel) {
 declare global {
   interface Window {
     /** Development only: pokes the mock graph to watch how the view reacts to changes */
-    __quackGraph?: { link: (domainId: string, topicId: string, requiresId: string) => void };
+    __quackGraph?: {
+      link: (domainId: string, topicId: string, requiresId: string) => void;
+      /** What counts as new in this domain right now */
+      visit: (domainId: string) => { baseline: boolean; topics: string[]; hubs: string[] };
+    };
   }
 }
 
@@ -150,5 +155,9 @@ export function installGraphDevHandle() {
   if (typeof window === "undefined" || process.env.NODE_ENV === "production") return;
   window.__quackGraph = {
     link: (domainId, topicId, requiresId) => editGraph(domainId, (m) => ({ ...m, requires: [...m.requires, { topicId, requiresId }] })),
+    visit: (domainId) => {
+      const v = getVisit(domainId);
+      return { baseline: v.baseline, topics: [...v.topics], hubs: [...v.hubs] };
+    },
   };
 }

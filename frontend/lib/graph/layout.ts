@@ -85,13 +85,17 @@ const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
  * A topic stands above everything it needs; cycles are collapsed into one layer, side by side.
  * With saved positions a known topic keeps its x, a new one takes the nearest free place in its layer.
  */
-export function layoutGraph(model: GraphModel, stored?: StoredPositions): Layout {
+/** Topics that have at least one "needed before" link, and those links. The rest go to the left column */
+export function chainOf(model: GraphModel) {
   const visible = model.topics.filter(onGraph);
   const ids = new Set(visible.map((t) => t.id));
   const edges = model.requires.filter((e) => ids.has(e.topicId) && ids.has(e.requiresId) && e.topicId !== e.requiresId);
   const linked = new Set(edges.flatMap((e) => [e.topicId, e.requiresId]));
-  const topics = visible.filter((t) => linked.has(t.id));
-  const unlinked = visible.filter((t) => !linked.has(t.id)).map((t) => t.id);
+  return { topics: visible.filter((t) => linked.has(t.id)), edges, unlinked: visible.filter((t) => !linked.has(t.id)).map((t) => t.id) };
+}
+
+export function layoutGraph(model: GraphModel, stored?: StoredPositions): Layout {
+  const { topics, edges, unlinked } = chainOf(model);
 
   const n = topics.length;
   const at = new Map(topics.map((t, i) => [t.id, i]));
