@@ -1,4 +1,6 @@
-"""T-DB1 (ТЗ Ф4 §8.2): the dbmate baseline creates exactly the tables of §6.1 (Т-§3.1)."""
+"""T-DB1 (ТЗ Ф4 §8.2): the dbmate baseline creates exactly the tables of §6.1 (Т-§3.1); the
+extending migrations after G0 (§0.4.4 п.4) add only their own tables and roll back one by one
+(description per §8.15 п.3, D-A-128)."""
 
 from __future__ import annotations
 
@@ -37,6 +39,12 @@ EXPECTED_TABLES = frozenset(
     }
 )
 
+# Extending migrations after the baseline, oldest first: the tables each one adds.
+EXTENSIONS: tuple[frozenset[tuple[str, str]], ...] = (
+    frozenset({("core", "pairing_tokens")}),  # D-A-128: WP22.1, Т-§16.1
+    frozenset(),  # D-A-128: its index by learner, CONCURRENTLY (Д-§6.2)
+)
+
 # dbmate keeps its own bookkeeping table in `public`; everything of ours is in core/content/ops.
 _TABLES = (
     "SELECT table_schema, table_name FROM information_schema.tables "
@@ -60,17 +68,64 @@ def scratch_database() -> str:
 
 def test_baseline_migration_matches_t31(scratch_database: str) -> None:
     url = database_url(scratch_database, for_dbmate=True)
+    every = EXPECTED_TABLES.union(*EXTENSIONS)
 
     run_dbmate(url, "up")
-    assert _tables(scratch_database) == EXPECTED_TABLES
+    assert _tables(scratch_database) == every
 
     again = run_dbmate(url, "up")
     assert "Applying" not in again.stdout
-    assert _tables(scratch_database) == EXPECTED_TABLES
+    assert _tables(scratch_database) == every
 
+    # `down` rolls back one migration, the newest first: down to the tables of §6.1, then none.
+    present = set(every)
+    for added in reversed(EXTENSIONS):
+        run_dbmate(url, "down")
+        present -= added
+        assert _tables(scratch_database) == present
+    assert present == EXPECTED_TABLES
     run_dbmate(url, "down")
     assert _tables(scratch_database) == set()
 
     run_dbmate(url, "up")
-    assert _tables(scratch_database) == EXPECTED_TABLES
+    assert _tables(scratch_database) == every
     run_dbmate(url, "drop")
+
+
+_COLUMNS = (
+    "SELECT column_name, data_type, is_nullable FROM information_schema.columns "
+    "WHERE table_schema = 'core' AND table_name = 'pairing_tokens'"
+)
+_PRIMARY_KEY = (
+    "SELECT a.attname FROM pg_index i "
+    "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+    "WHERE i.indrelid = 'core.pairing_tokens'::regclass AND i.indisprimary"
+)
+_LEADING_INDEX_COLUMNS = (
+    "SELECT a.attname FROM pg_index i "
+    "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0] "
+    "WHERE i.indrelid = 'core.pairing_tokens'::regclass"
+)
+
+
+def test_pairing_tokens_table(p4_database: str) -> None:
+    """D-A-128 (WP22.1, Т-§16.1): one-time pairing token of a canvas — only its hash is stored;
+    bound to the learner, session, canvas and, if any, task; lives until `expires_at`; spent at
+    `used_at`. Indexed by learner for deletion (WP25)."""
+    timestamp = "timestamp with time zone"
+    with psycopg.connect(p4_database) as conn:
+        columns = set(conn.execute(_COLUMNS).fetchall())
+        primary_key = [row[0] for row in conn.execute(_PRIMARY_KEY).fetchall()]
+        leading = {row[0] for row in conn.execute(_LEADING_INDEX_COLUMNS).fetchall()}
+    assert columns == {
+        ("token_hash", "text", "NO"),
+        ("learner_id", "uuid", "NO"),
+        ("session_id", "uuid", "NO"),
+        ("canvas_id", "uuid", "NO"),
+        ("task_id", "uuid", "YES"),
+        ("created_at", timestamp, "NO"),
+        ("expires_at", timestamp, "NO"),
+        ("used_at", timestamp, "YES"),
+    }
+    assert primary_key == ["token_hash"]
+    assert "learner_id" in leading
