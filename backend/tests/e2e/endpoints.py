@@ -70,6 +70,8 @@ class Ids:
     # WP23.1: the block the walk writes and the supplement the system adds to it.
     learner_block_id: UUID = NO_MATERIAL
     block_id: UUID = NO_MATERIAL
+    # WP21.3: a recognized line of the canvas the walk opens for the correction route.
+    line_id: str = "none"
 
 
 def path_for(path: str, ids: Ids) -> str:
@@ -82,6 +84,7 @@ def path_for(path: str, ids: Ids) -> str:
         material_id=ids.material_id,
         canvas_id=ids.canvas_id,
         block_id=ids.block_id,
+        line_id=ids.line_id,
     )
 
 
@@ -165,6 +168,10 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
         ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"): {},
         ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"): {},
         ("POST", "/v1/canvases/{canvas_id}/pairing"): {},
+        ("POST", "/v1/canvases/{canvas_id}/lines/{line_id}/correct"): {
+            "text": ["x=2", "x=3"][v],
+            "sympy": None,
+        },
         ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): {"domain_id": str(ids.domain_id)},
     }
     body = dict(bodies[(method, path)])

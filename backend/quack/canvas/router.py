@@ -1,6 +1,7 @@
 """Routes of canvases (ТЗ Ф4 §6.4 «Канвас», WP21.1, WP21.2): `POST /v1/sessions/{id}/canvases`,
 `GET /v1/canvases/{id}`, `GET /v1/domains/{id}/canvases`, `POST /v1/canvases/{id}/photos`,
-`WS /v1/canvases/{id}/ws`, `GET /v1/canvases/{id}/replay` (WP21.6). The
+`POST /v1/canvases/{id}/lines/{line_id}/correct`, `WS /v1/canvases/{id}/ws`,
+`GET /v1/canvases/{id}/replay` (WP21.6). The
 learner comes only from the session cookie (WP18.3); a session, task, canvas or domain of another
 learner is 404."""
 
@@ -11,7 +12,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, UploadFile, WebSocket
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from quack.api.auth import (
     CurrentSession,
@@ -21,7 +22,7 @@ from quack.api.auth import (
 )
 from quack.api.errors import ApiError
 from quack.api.resources import AppResources, get_resources
-from quack.canvas import boards, photos, replay, socket
+from quack.canvas import boards, photos, recognition, replay, socket
 from quack.canvas.board import BoardDoc
 
 router = APIRouter(prefix="/v1", tags=["canvas"])
@@ -41,6 +42,21 @@ class CanvasView(BaseModel):
     doc: BoardDoc
     version: int
     updated_at: datetime
+
+
+class LineCorrection(BaseModel):
+    """WP21.3: how the line really reads (`Т-§22.7`: LaTeX to show, SymPy to check)."""
+
+    idempotency_key: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    sympy: str | None = None
+
+
+class CorrectedLine(BaseModel):
+    canvas_id: UUID
+    line_id: str
+    text: str
+    sympy: str | None
 
 
 class PhotoView(BaseModel):
@@ -166,6 +182,39 @@ async def upload_photo(
     except boards.CanvasNotFound as exc:
         raise _not_found(exc) from exc
     return PhotoView(photo_id=photo.photo_id, canvas_id=photo.canvas_id)
+
+
+@router.post("/canvases/{canvas_id}/lines/{line_id}/correct", response_model=CorrectedLine)
+async def correct_line(
+    canvas_id: UUID, line_id: str, body: LineCorrection, session: Session, resources: Resources
+) -> CorrectedLine:
+    """WP21.3: `handwriting.corrected` (Т-§2.8, П-9.7); a canvas or line of another learner, or
+    a line the canvas does not have, is 404."""
+    try:
+        canvas = await boards.get_canvas(
+            resources.db, learner_id=session.learner_id, canvas_id=canvas_id
+        )
+        corrected = await recognition.correct_line(
+            resources.db,
+            learner_id=session.learner_id,
+            session_id=canvas.session_id,
+            canvas_id=canvas_id,
+            line_id=line_id,
+            text=body.text,
+            sympy=body.sympy,
+            idempotency_key=body.idempotency_key,
+            redis=resources.redis,
+        )
+    except boards.CanvasNotFound as exc:
+        raise _not_found(exc) from exc
+    except recognition.LineNotFound as exc:
+        raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
+    return CorrectedLine(
+        canvas_id=corrected.canvas_id,
+        line_id=corrected.line_id,
+        text=corrected.text,
+        sympy=corrected.sympy,
+    )
 
 
 @router.websocket("/canvases/{canvas_id}/ws")

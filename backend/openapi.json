@@ -847,6 +847,42 @@
         "title": "ConsentRevocation",
         "type": "object"
       },
+      "CorrectedLine": {
+        "properties": {
+          "canvas_id": {
+            "format": "uuid",
+            "title": "Canvas Id",
+            "type": "string"
+          },
+          "line_id": {
+            "title": "Line Id",
+            "type": "string"
+          },
+          "sympy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sympy"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "canvas_id",
+          "line_id",
+          "text",
+          "sympy"
+        ],
+        "title": "CorrectedLine",
+        "type": "object"
+      },
       "CreateDomainRequest": {
         "properties": {
           "idempotency_key": {
@@ -1816,6 +1852,38 @@
           "timezone"
         ],
         "title": "LearnerSettingsPatch",
+        "type": "object"
+      },
+      "LineCorrection": {
+        "description": "WP21.3: how the line really reads (`Т-§22.7`: LaTeX to show, SymPy to check).",
+        "properties": {
+          "idempotency_key": {
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "sympy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sympy"
+          },
+          "text": {
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotency_key",
+          "text"
+        ],
+        "title": "LineCorrection",
         "type": "object"
       },
       "LinkRequest": {
@@ -5149,6 +5217,119 @@
           }
         },
         "summary": "Get Canvas",
+        "tags": [
+          "canvas"
+        ]
+      }
+    },
+    "/v1/canvases/{canvas_id}/lines/{line_id}/correct": {
+      "post": {
+        "description": "WP21.3: `handwriting.corrected` (Т-§2.8, П-9.7); a canvas or line of another learner, or\na line the canvas does not have, is 404.",
+        "operationId": "correct_line_v1_canvases__canvas_id__lines__line_id__correct_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "canvas_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Canvas Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "line_id",
+            "required": true,
+            "schema": {
+              "title": "Line Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LineCorrection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectedLine"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Correct Line",
         "tags": [
           "canvas"
         ]
