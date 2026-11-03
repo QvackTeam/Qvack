@@ -757,13 +757,8 @@ export const ru: Dict = {
     },
   },
   preloader: {
-    tagline1: "Снаружи — полный штиль.",
-    tagline2: "Под водой лапки работают вовсю.",
     kindTop: "ИИ-РЕПЕТИТОР",
     kindBottom: "ДЛЯ ТОЧНЫХ НАУК",
-    loading: "Грузим твои конспекты",
-    wait: "Секундочку",
-    percent: (n: number) => `${n}%`,
   },
   menu: {
     open: "Меню",

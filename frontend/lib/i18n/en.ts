@@ -756,13 +756,8 @@ export const en = {
     },
   },
   preloader: {
-    tagline1: "Calm on the surface.",
-    tagline2: "Paddling hard underneath.",
     kindTop: "AI TUTOR",
     kindBottom: "FOR EXACT SCIENCES",
-    loading: "Loading your notes",
-    wait: "Hang on a sec",
-    percent: (n: number) => `${n}%`,
   },
   menu: {
     open: "Menu",

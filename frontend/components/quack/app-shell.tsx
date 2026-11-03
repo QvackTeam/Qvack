@@ -9,7 +9,6 @@ import { API_MODE } from "@/lib/api/client";
 import { useData } from "@/lib/api/data";
 import { useT } from "@/lib/i18n/provider";
 import { MOCK_TODAY } from "@/lib/mock";
-import { PRELOADER_EXIT_EVENT, shouldShowPreloader } from "@/lib/motion";
 import type { Domain, Session } from "@/lib/mock/types";
 import { cn } from "@/lib/utils";
 import { DomainSidebar } from "./domain-sidebar";
@@ -149,28 +148,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setMenuOpen(true);
   }, []);
   const closeMenu = useCallback(() => setMenuOpen(false), []);
-
-  // Первый заход в вкладке на «/»: залогиненного встречает раскрытое меню — под шторкой прелоадера.
-  // Дальше (перезагрузка, переходы) меню открывается только кнопкой
-  const entryPath = useRef(pathname);
-  const greet = useRef<boolean | null>(null);
-  const loggedIn = !API_MODE || !!data.me;
-  useEffect(() => {
-    greet.current ??= entryPath.current === "/" && shouldShowPreloader();
-    if (!greet.current || !loggedIn) return;
-    const show = () => {
-      greet.current = false;
-      const btn = [...document.querySelectorAll<HTMLElement>("[data-menu-anchor] button")].find((b) => b.getClientRects().length > 0);
-      openMenu(btn ?? null);
-    };
-    // профиль мог загрузиться уже после ухода прелоадера
-    if (!shouldShowPreloader()) {
-      show();
-      return;
-    }
-    window.addEventListener(PRELOADER_EXIT_EVENT, show, { once: true });
-    return () => window.removeEventListener(PRELOADER_EXIT_EVENT, show);
-  }, [loggedIn, openMenu]);
 
   // любой переход (в том числе «назад») закрывает меню
   const [menuPath, setMenuPath] = useState(pathname);
