@@ -48,6 +48,11 @@ function matanGraph(locale: Locale): GraphModel | undefined {
     includes: domain.topics.filter((t) => t.hubId).map((t) => ({ hubId: t.hubId!, topicId: t.id })),
     requires: domain.topics.flatMap((t) => t.requires.map((r) => ({ topicId: t.id, requiresId: r }))),
     otherDomain: domain.outside.map((o) => ({ topic: topicOf(o.id, o.title, "solid"), domainId: "linal", domainName: o.fromDomain })),
+    recentSessions: domain.sessions.map((s) => ({
+      id: s.id,
+      atMs: Date.parse(s.date),
+      topicIds: s.topics.map((name) => domain.topics.find((t) => clean(t.title) === clean(name))?.id).filter((x): x is string => !!x),
+    })),
     today: [
       { id: "d1", kind: "item", topicId: "power", action: "learn", minutes: 25, href: "/session/radius" },
       { id: "d2", kind: "item", hubId: "series", action: "practice", minutes: 40 },
@@ -112,6 +117,12 @@ function linalGraph(locale: Locale): GraphModel {
     hubs,
     includes,
     requires: ROWS.flatMap((r) => r.requires.map((q) => ({ topicId: r.id, requiresId: q }))),
+    recentSessions: [
+      { id: "l1", atMs: MOCK_NOW_MS - 1 * DAY, topicIds: ["det", "matmul"] },
+      { id: "l2", atMs: MOCK_NOW_MS - 3 * DAY, topicIds: ["gauss", "inverse"] },
+      { id: "l3", atMs: MOCK_NOW_MS - 6 * DAY, topicIds: ["span", "indep"] },
+      { id: "l4", atMs: MOCK_NOW_MS - 30 * DAY, topicIds: ["vec", "dot"] },
+    ],
     today: [
       { id: "t1", kind: "item", topicId: "matmul", action: "review", minutes: 10 },
       { id: "t2", kind: "item", hubId: "colloq", action: "practice", minutes: 30 },
