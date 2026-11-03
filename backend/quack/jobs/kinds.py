@@ -31,6 +31,8 @@ JOB_KINDS: tuple[str, ...] = (
     "graph.curate",
     "session.sweep_inactive",
     "account.purge_deleted",
+    "agent.viz",
+    "photo.pipeline",
 )
 
 # WP5.3/T-Q10: the roles whose models a kind calls; a kind waits while any of them is pressured.
@@ -43,6 +45,8 @@ KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
     "graph.curate": ("curator",),
     "session.sweep_inactive": (),
     "account.purge_deleted": (),
+    "agent.viz": ("viz_builder", "viz_checker"),
+    "photo.pipeline": ("recognizer", "segmenter"),
 }
 
 
