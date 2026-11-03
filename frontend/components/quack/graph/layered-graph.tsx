@@ -23,12 +23,17 @@ type Colors = Record<"paper" | "dim" | "ribbon" | "cloth" | TopicState, string> 
 type Arrow = { id: string; dir: "up" | "down" | "left" | "right"; ind: IndicatorId; n: number; x: number; y: number; key: string };
 const IND_VAR: Record<IndicatorId, string> = { new: "var(--ind-new)", relevant: "var(--ind-relevant)", deadline: "var(--ind-deadline)", weak: "var(--ind-weak)", review: "var(--ind-review)" };
 
+/** The forms of the canvas rings, as far as a CSS border can draw them: for the left column, which has no canvas node */
+const RING_STYLE: Record<IndicatorId, string> = { new: "solid", relevant: "dashed", deadline: "solid", weak: "double", review: "dotted" };
+
 const K_MIN = 0.04;
 const K_MAX = 2.4;
 const FIT_K_MAX = 1.2;
 const FIT_MARGIN = 56;
 /** How much of its brightness a node loses while a hub is in focus */
 const FOCUS_DIM = 0.86;
+/** How much of its brightness a node loses while an indicator is on and the node is not one of the lit ones */
+const IND_DIM = 0.78;
 const TWEEN_MS = 450;
 /** A topic leaving the column for its place on the graph travels slower: the learner should see where it went */
 const MOVE_MS = 900;
@@ -127,6 +132,11 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const lit = useRef<string[]>([]);
   // Indicators: which indicators light which node, how bright each halo is now, where the camera stood before the first click
   const marks = useRef(new Map<string, IndicatorId[]>());
+  // Everything an active indicator lights, ringed on the canvas or not (the left column has no canvas node). The last
+  // non-empty set stays while the dimming fades out, so switching off lets the graph come back instead of snapping
+  const indLit = useRef<ReadonlySet<string>>(new Set());
+  const indMix = useRef(0);
+  const lastInd = useRef(0);
   const halo = useRef(new Map<string, number>());
   const haloAt = useRef(new Map<string, Pt>());
   const lastHalo = useRef(0);
@@ -208,7 +218,8 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     // hovering a topic lights its curves to its hubs.
     const hoverHub = hovered?.startsWith("h:") ? hovered.slice(2) : null;
     const hoverTopic = hovered && !hovered.startsWith("h:") ? hovered : null;
-    const litHubs = new Set(hoverTopic ? (links.hubsOf.get(hoverTopic) ?? []) : []);
+    // A topic in the left column has no node on the graph, so it lights no hub: nothing would show what it is tied to
+    const litHubs = new Set(hoverTopic && pos(hoverTopic) ? (links.hubsOf.get(hoverTopic) ?? []) : []);
 
     // Focus: while a hub is under the pointer, only that hub and its topics stay lit, the rest of the graph sinks.
     // The fade runs on its own clock, so moving off a hub lets the graph come back instead of snapping
@@ -222,9 +233,22 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     focusMix.current = focus;
     if (focus === 0) focusHub.current = null;
     const focusId = focusHub.current;
-    const focusSet = focusId ? new Set([`h:${focusId}`, ...(links.byHub.get(focusId) ?? [])]) : null;
-    /** How much of its brightness a node keeps while a hub is in focus */
-    const bright = (key: string) => (focusSet && !focusSet.has(key) ? 1 - FOCUS_DIM * focus : 1);
+    const focusSet = focusId ? new Set([`h:${focusId}`, ...(links.byHub.get(focusId) ?? []).filter((id) => pos(id))]) : null;
+
+    // Indicators: while one is on, whatever it does not light sinks. Same idea as the hub focus, on its own clock
+    const iEase = 1 - Math.exp(-Math.min(100, fnow - lastInd.current) / 140);
+    lastInd.current = fnow;
+    const iTarget = activeRef.current.size ? 1 : 0;
+    const i0 = indMix.current;
+    const indNow = Math.abs(iTarget - i0) < 0.01 ? iTarget : i0 + (iTarget - i0) * iEase;
+    indMix.current = indNow;
+    const indSet = indLit.current;
+    const indDim = indNow > 0 && indSet.size > 0;
+    const indK = 1 - IND_DIM * indNow;
+    /** What an indicator leaves of a node's brightness. The node under the pointer and the one a "Today" card points at stay lit */
+    const indFor = (key: string) => (indDim && !indSet.has(key) && key !== hovered && !lit.current.includes(key) ? indK : 1);
+    /** How much of its brightness a node keeps while a hub is in focus or an indicator is on */
+    const bright = (key: string) => (focusSet && !focusSet.has(key) ? 1 - FOCUS_DIM * focus : 1) * indFor(key);
     for (const [id, el] of colEls.current) el.style.opacity = String(bright(id));
     const ringR = clamp(13 * Math.pow(k, 0.6), 5, 15);
     ctx.lineWidth = 1.2;
@@ -238,10 +262,10 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       const sxp = hx, syp = hy + Math.max(ringR + 6, 0.5 * GAP_Y * k);
       let any = false;
       for (const topicId of members) {
+        // A topic of the left column has no node, so there is nothing to draw the curve to
         const a = pos(topicId);
-        const cy = colY.current.get(topicId);
-        const ax = a ? sx(a.x) : colW, ay = a ? sy(a.y) : cy;
-        if (ay === undefined || (!a && !colW)) continue;
+        if (!a) continue;
+        const ax = sx(a.x), ay = sy(a.y);
         if (!near(ax, ay, 300) && !near(hx, hy, 300)) continue;
         any = true;
         const dist = Math.max(0, ay - hy) / Math.max(k, 1e-6) / GAP_Y; // in layers
@@ -249,7 +273,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
         let alpha = 0.06 + 0.24 * close;
         if (lit) alpha = 0.5 + 0.3 * close;
         else if (hoverTopic === topicId) alpha = 0.85;
-        alpha *= mute;
+        alpha *= mute * indFor(topicId);
         const mid = (ay + syp) / 2;
         const g = ctx.createLinearGradient(0, ay, 0, syp);
         g.addColorStop(0, `rgba(${col.ribbonRgb},${(alpha * 0.3).toFixed(3)})`);
@@ -291,15 +315,14 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     };
     ctx.strokeStyle = col.dim;
     ctx.lineWidth = 1.4;
-    if (focusSet) {
-      // Links between the topics of the focused hub stay; every other link sinks
-      ctx.globalAlpha = 0.6 * (1 - FOCUS_DIM * focus);
-      line((a, b) => !(focusSet.has(a) && focusSet.has(b)));
-      ctx.globalAlpha = 0.6;
-      line((a, b) => focusSet.has(a) && focusSet.has(b));
-    } else {
-      ctx.globalAlpha = 0.6;
-      line(() => true);
+    // Links between the topics of the focused hub stay, and so do links between two lit topics; every other link sinks
+    const inFocus = (a: string, b: string) => !!focusSet && focusSet.has(a) && focusSet.has(b);
+    const bothLit = (a: string, b: string) => indSet.has(a) && indSet.has(b);
+    for (const focused of focusSet ? [false, true] : [true]) {
+      for (const marked of indDim ? [false, true] : [true]) {
+        ctx.globalAlpha = 0.6 * (focused ? 1 : 1 - FOCUS_DIM * focus) * (marked ? 1 : indK);
+        line((a, b) => (!focusSet || inFocus(a, b) === focused) && (!indDim || bothLit(a, b) === marked));
+      }
     }
     if (hovered && !hovered.startsWith("h:")) {
       ctx.strokeStyle = col.paper;
@@ -597,7 +620,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       ctx.fillText(lb.text, lb.x, lb.y);
     }
     ctx.globalAlpha = 1;
-    return settling || haloSettling || flash.current.size > 0 || focus !== fTarget;
+    return settling || haloSettling || flash.current.size > 0 || focus !== fTarget || indNow !== iTarget;
   }, []);
 
   const frame = useCallback(
@@ -821,6 +844,13 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       for (const h of s.hubs) if (layout.nodes.has(`h:${h}`)) m.set(`h:${h}`, [...(m.get(`h:${h}`) ?? []), id]);
     }
     marks.current = m;
+    const litNow = new Set<string>();
+    for (const id of ind.active) {
+      const s = ind.selections[id];
+      for (const t of s.topics) litNow.add(t);
+      for (const h of s.hubs) litNow.add(`h:${h}`);
+    }
+    if (litNow.size) indLit.current = litNow;
     activeRef.current = ind.active;
     schedule();
   }, [ind, layout, schedule]);
@@ -1026,29 +1056,47 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       <section className={first ? "" : "mt-4 border-t border-seam-soft pt-3"}>
         <h3 className="caps px-4 pb-1 text-paper-dim">{title}</h3>
         <ul>
-          {items.map(({ topic, domainName }) => (
-            <li
-              key={topic.id}
-              ref={(el) => {
-                if (el) colEls.current.set(topic.id, el);
-                else colEls.current.delete(topic.id);
-              }}
-              onPointerEnter={() => enterItem(topic.id)}
-              onPointerLeave={() => setHoverKey(null)}
-            >
-              <Link
-                href={`/topic/${topic.id}`}
-                className="flex items-start gap-2.5 px-4 py-2 text-small text-paper outline-none transition-colors duration-(--dur-s) ease-(--ease-out) hover:bg-cloth-hover focus-visible:bg-cloth-hover"
-                style={{ opacity: topic.status === "proposed" ? 0.65 : 1 }}
+          {items.map(({ topic, domainName }) => {
+            const rings = INDICATORS.filter((id) => ind.active.has(id) && ind.selections[id].topics.includes(topic.id));
+            return (
+              <li
+                key={topic.id}
+                ref={(el) => {
+                  if (el) colEls.current.set(topic.id, el);
+                  else colEls.current.delete(topic.id);
+                }}
+                onPointerEnter={() => enterItem(topic.id)}
+                onPointerLeave={() => setHoverKey(null)}
               >
-                <StateDot state={stateOf(topic, model.nowMs)} className="mt-1.5" />
-                <span className="min-w-0">
-                  {topic.name}
-                  {domainName && <span className="caps mt-0.5 block text-paper-dim">{domainName}</span>}
-                </span>
-              </Link>
-            </li>
-          ))}
+                <Link
+                  href={`/topic/${topic.id}`}
+                  className="flex items-start gap-2.5 px-4 py-2 text-small text-paper outline-none transition-colors duration-(--dur-s) ease-(--ease-out) hover:bg-cloth-hover focus-visible:bg-cloth-hover"
+                  style={{ opacity: topic.status === "proposed" ? 0.65 : 1 }}
+                >
+                  <span className="relative mt-1.5 inline-flex shrink-0">
+                    <StateDot state={stateOf(topic, model.nowMs)} />
+                    {rings.map((id, i) => (
+                      <span
+                        key={id}
+                        aria-hidden
+                        className="pointer-events-none absolute rounded-full"
+                        style={{
+                          inset: -(3.5 + 3.5 * i),
+                          border: `${id === "weak" ? 3 : 1.5}px ${RING_STYLE[id]} ${IND_VAR[id]}`,
+                          ...(id === "deadline" ? { outline: `1.5px dotted ${IND_VAR[id]}`, outlineOffset: 1.5 } : null),
+                        }}
+                      />
+                    ))}
+                  </span>
+                  <span className="min-w-0">
+                    {topic.name}
+                    {domainName && <span className="caps mt-0.5 block text-paper-dim">{domainName}</span>}
+                    {rings.length > 0 && <span className="sr-only"> ({rings.map((id) => tx.graphInd[id]).join(", ")})</span>}
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       </section>
     );
