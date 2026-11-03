@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -16,10 +17,8 @@ from quack.agents import extract_episode
 from quack.agents.extract_episode import (
     GAP_TYPE_TABLE,
     NONE_LINE,
-    CandidateSkill,
-    KnownMisconception,
+    ExtractionTrigger,
     call_extractor,
-    candidate_skill_ids,
     episode_check_context,
     extraction_key,
     extraction_window,
@@ -34,29 +33,38 @@ from quack.db import Db
 from quack.events.event_types import (
     AnswerSubmitted,
     CanvasLineCommitted,
+    EpisodeClosed,
     HintShown,
     ItemFlaggedUnclear,
     MessageSent,
+    TaskCreated,
+    TaskVerified,
     TurnCommitted,
     VoiceTranscribed,
 )
-from quack.events.log import StoredEvent
+from quack.events.log import NewEvent, StoredEvent, append_events
 from quack.events.records import (
     BodyBlockRecord,
     ElementRecord,
     ExposureRecord,
     PlanUpdateRecord,
     TaskElementRecord,
+    TaskMarkupRecord,
+    TaskPartRecord,
     TestedLevelRecord,
     TurnHeadRecord,
     TurnMarkupRecord,
     TurnTaskRecord,
 )
-from quack.events.values import AnswerSpec, LearnerAnswer, MathValue, Verdict
+from quack.events.registry import EventPayload
+from quack.events.values import AnswerSpec, LearnerAnswer, MathValue, NewSkill, Verdict
 from quack.graph.evidence_validation import CheckedElements, check_extracted
+from quack.graph.read import CandidateSkill, ExtractionCandidates, MisconceptionFact
 from quack.llm.gateway import LLMGateway, LLMResult
 from quack.prompts.registry import PromptRegistry
 from tests.db.fixtures import create_learner
+from tests.support.embeddings import FakeEmbeddingClient
+from tests.support.graph_read import SKILL_FAILED, SKILL_QUIET, TOPIC_OPEN, FixedGraphReader
 
 SETTINGS = Settings()
 LEARNER = uuid4()
@@ -65,6 +73,20 @@ SKILL = uuid4()
 OTHER_SKILL = uuid4()
 MISCONCEPTION = uuid4()
 TASK = uuid4()
+TOPIC = uuid4()
+
+
+def _candidate(skill_id: UUID, name: str) -> CandidateSkill:
+    return CandidateSkill(skill_id=skill_id, name=name, topic_id=TOPIC)
+
+
+def _known(misconception_id: UUID, skill_id: UUID, statement: str) -> MisconceptionFact:
+    return MisconceptionFact(
+        misconception_id=misconception_id,
+        skill_id=skill_id,
+        status="suspected",
+        statement=statement,
+    )
 
 
 class _Log:
@@ -254,12 +276,12 @@ def test_extractor_input() -> None:
     log, start = _episode()
     window = extraction_window(log.events, start, len(log.events), SETTINGS)
     candidates = [
-        CandidateSkill(SKILL, "D'Alembert test"),
-        CandidateSkill(OTHER_SKILL, "Root test"),
+        _candidate(SKILL, "D'Alembert test"),
+        _candidate(OTHER_SKILL, "Root test"),
     ]
     known = [
-        KnownMisconception(MISCONCEPTION, SKILL, "uses the root test for factorials"),
-        KnownMisconception(uuid4(), uuid4(), "a misconception of a skill that is no candidate"),
+        _known(MISCONCEPTION, SKILL, "uses the root test for factorials"),
+        _known(uuid4(), uuid4(), "a misconception of a skill that is no candidate"),
     ]
     labels = window_labels(window, candidates, known, SETTINGS)
     variables = extractor_variables(window, candidates, known, labels)
@@ -295,22 +317,6 @@ def test_extractor_input() -> None:
 
     empty = extractor_variables(extraction_window([], 1, 1, SETTINGS), [], [], labels)
     assert empty["events_before"] == empty["episode"] == empty["candidate_skills"] == NONE_LINE
-
-
-def test_candidate_skills() -> None:
-    """WP15 п.2: session skills first, then the nearest by vector, at most
-    `candidate_skills_k`; Modal down — only the session's."""
-    session = [uuid4() for _ in range(3)]
-    nearest = [session[1], *(uuid4() for _ in range(20))]
-    chosen = candidate_skill_ids(session, nearest, SETTINGS)
-    assert chosen[:3] == session
-    assert len(chosen) == SETTINGS.candidate_skills_k
-    assert chosen[3] == nearest[1]
-    assert candidate_skill_ids(session, [], SETTINGS) == session
-    # п.6: a re-extraction keeps only the skills of the named topic or of the split
-    topic = [uuid4(), uuid4()]
-    assert candidate_skill_ids(session, nearest, SETTINGS, restrict=topic) == topic
-    assert candidate_skill_ids(session, nearest, SETTINGS, restrict=[]) == []
 
 
 def _element(**kw: Any) -> ExtractedElement:
@@ -372,8 +378,8 @@ async def test_call_extractor() -> None:
     unknown label goes back to the model through `check` (Т-§4.5)."""
     log, start = _episode()
     window = extraction_window(log.events, start, len(log.events), SETTINGS)
-    candidates = [CandidateSkill(SKILL, "D'Alembert test")]
-    known = [KnownMisconception(MISCONCEPTION, SKILL, "uses the root test for factorials")]
+    candidates = [_candidate(SKILL, "D'Alembert test")]
+    known = [_known(MISCONCEPTION, SKILL, "uses the root test for factorials")]
     labels = window_labels(window, candidates, known, SETTINGS)
     variables = extractor_variables(window, candidates, known, labels)
     answer = ExtractorOutputV3(elements=[_element()])
@@ -433,7 +439,7 @@ def test_extracted_elements_checked_on_the_episode() -> None:
     episode bars `evidence` on its pair «skill + level» (WP15 п.4, п.8)."""
     log, start = _episode()
     window = extraction_window(log.events, start, len(log.events), SETTINGS)
-    candidates = [CandidateSkill(SKILL, "D'Alembert test"), CandidateSkill(OTHER_SKILL, "Root")]
+    candidates = [_candidate(SKILL, "D'Alembert test"), _candidate(OTHER_SKILL, "Root")]
     labels = window_labels(window, candidates, [], SETTINGS)
     ctx = episode_check_context(window, labels, {TASK: [(SKILL, 3), (OTHER_SKILL, 2)]})
     answer, verdict, canvas, voice = start + 2, start + 3, start + 4, start + 5
@@ -473,7 +479,7 @@ async def test_record_extraction(pg_db: Db) -> None:
     learner_id = await create_learner(pg_db)
     log, start = _episode()
     window = extraction_window(log.events, start, len(log.events), SETTINGS)
-    labels = window_labels(window, [CandidateSkill(SKILL, "D'Alembert test")], [], SETTINGS)
+    labels = window_labels(window, [_candidate(SKILL, "D'Alembert test")], [], SETTINGS)
     ctx = episode_check_context(window, labels, {})
     canvas = start + 4
     checked = check_extracted([_cited([canvas], "n!"), _cited([1], "question 1")], ctx)
@@ -537,3 +543,220 @@ async def test_record_extraction_commits_nothing_on_failure(
         {"l": learner_id},
     )
     assert rows == []
+
+
+class _SpyReader(FixedGraphReader):
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked: list[dict[str, Any]] = []
+
+    async def extraction_candidates(
+        self,
+        learner_id: UUID,
+        session_id: UUID,
+        episode_vector: Sequence[float] | None,
+        k: int,
+        *,
+        topic_id: UUID | None = None,
+        skill_ids: Sequence[UUID] | None = None,
+    ) -> ExtractionCandidates:
+        self.asked.append(
+            {"vector": episode_vector, "k": k, "topic_id": topic_id, "skill_ids": skill_ids}
+        )
+        return await super().extraction_candidates(
+            learner_id, session_id, episode_vector, k, topic_id=topic_id, skill_ids=skill_ids
+        )
+
+
+async def _closed_episode(db: Db, learner_id: UUID) -> dict[str, int]:
+    """A message before the episode; in it a task testing `SKILL_FAILED` at level 2, a wrong
+    answer, a reply; then `episode.closed` of the three."""
+
+    def new(type_: str, payload: EventPayload, key: str) -> NewEvent:
+        return NewEvent(
+            type=type_, payload=payload, actor="learner", idempotency_key=key, session_id=SESSION
+        )
+
+    task_markup = TaskMarkupRecord(
+        tests=[TestedLevelRecord(skill_id=SKILL_FAILED, level=2)],
+        method_named=False,
+        answer=AnswerSpec(type="number", value=MathValue(latex="5/6", sympy="5/6")),
+    )
+    created = TaskCreated(
+        task_id=TASK,
+        family_id=uuid4(),
+        source="generated",
+        markup=task_markup,
+        verification="checked",
+    )
+    answer = AnswerSubmitted(
+        task_id=TASK,
+        answer=LearnerAnswer(kind="number", value="2/5"),
+        text="I added the denominators: 1/2 + 1/3 = 2/5",
+        source="chat",
+    )
+    stored = await append_events(
+        db,
+        learner_id,
+        [
+            new("message.sent", MessageSent(text="hello"), "m0"),
+            new("task.created", created, "t1"),
+            new("answer.submitted", answer, "a1"),
+            new("message.sent", MessageSent(text="so the bottoms add up"), "m1"),
+        ],
+    )
+    first, last = stored[1].seq, stored[-1].seq
+    (closed,) = await append_events(
+        db,
+        learner_id,
+        [
+            new(
+                "episode.closed",
+                EpisodeClosed(from_seq=first, to_seq=last, has_content=True),
+                f"episode:{SESSION}:{last}",
+            )
+        ],
+    )
+    return {"before": stored[0].seq, "answer": stored[2].seq, "reply": last, "closed": closed.seq}
+
+
+async def test_extract_episode_job(pg_db: Db) -> None:
+    """WP15 п.1–6 on the reader of S4: the window of `episode.closed`, the candidates of the
+    reader with the episode vector, one call, the check by code against the stored markup, the
+    observation with coverage. `episode.reassigned` restricts to the topic, `skill.split` to the
+    parts (D-A-135); each trigger is its own observation. Modal down — no vector."""
+    learner_id = await create_learner(pg_db)
+    seqs = await _closed_episode(pg_db, learner_id)
+    answer, closed = seqs["answer"], seqs["closed"]
+    output = ExtractorOutputV3(
+        elements=[
+            # the task tests level 2: level 4 from its answer is above the markup
+            _cited([answer], "added the denominators", skill="S2", level=4),
+            _cited(
+                [answer],
+                "I added the denominators",
+                skill="S2",
+                outcome="incorrect",
+                gap_type="misconception",
+            ),
+            _cited([seqs["before"]], "hello"),  # the context turn is not the episode
+        ]
+    )
+    gateway = _Gateway(output)
+    reader = _SpyReader()
+    embeddings = FakeEmbeddingClient(SETTINGS.embedding_dim)
+
+    async def run(payload: dict[str, Any], *, modal: bool = True) -> StoredEvent:
+        embeddings.available = modal
+        return await extract_episode.extract_episode(
+            pg_db,
+            cast(LLMGateway, gateway),
+            SETTINGS,
+            reader,
+            embeddings,
+            learner_id=learner_id,
+            trigger=ExtractionTrigger.from_payload(payload),
+        )
+
+    first = await run({"trigger_seq": closed})
+    assert first.idempotency_key == f"obs:{closed}:extractor@3:{closed}"
+    assert first.session_id == SESSION
+    assert [e["skill_id"] for e in first.payload["elements"]] == [str(SKILL_FAILED)]
+    assert [r["reason"] for r in first.payload["rejected"]] == [
+        "level_above_task",
+        "source_outside_episode",
+    ]
+    asked = reader.asked[-1]
+    assert asked["k"] == SETTINGS.candidate_skills_k
+    assert asked["topic_id"] is None and asked["skill_ids"] is None
+    assert asked["vector"] == embeddings.vector(
+        "2/5\nI added the denominators: 1/2 + 1/3 = 2/5\nso the bottoms add up"
+    )
+    variables = gateway.calls[-1]["variables"]
+    assert variables["candidate_skills"].count("\n") == 2  # all three skills of the reader
+    assert f"[{seqs['before']}] learner: hello" in variables["events_before"]
+
+    reassigned = await run(
+        {"trigger_seq": closed + 10, "episode_seq": closed, "topic_id": str(TOPIC_OPEN)}
+    )
+    assert reader.asked[-1]["topic_id"] == TOPIC_OPEN
+    assert "add fractions" not in gateway.calls[-1]["variables"]["candidate_skills"]
+    assert reassigned.payload["trigger_seq"] == closed + 10 and reassigned.seq != first.seq
+
+    split = await run(
+        {
+            "trigger_seq": closed + 20,
+            "episode_seq": closed,
+            "restrict_skill_ids": [str(SKILL_QUIET)],
+        },
+        modal=False,
+    )
+    assert reader.asked[-1]["skill_ids"] == [SKILL_QUIET]
+    assert reader.asked[-1]["vector"] is None
+    # the only candidate is S1 now: the elements citing S2 are unknown labels
+    assert [r["reason"] for r in split.payload["rejected"]][:2] == ["unknown_label"] * 2
+    rows = await pg_db.fetch_all(
+        "SELECT episode_seq, observation_seq FROM ops.coverage WHERE learner_id = %(l)s",
+        {"l": learner_id},
+    )
+    assert [(r["episode_seq"], r["observation_seq"]) for r in rows] == [(closed, split.seq)]
+    # a retry of a trigger is the same observation (law 5)
+    assert (await run({"trigger_seq": closed})).seq == first.seq
+
+
+async def test_extract_episode_needs_an_episode(pg_db: Db) -> None:
+    learner_id = await create_learner(pg_db)
+    seqs = await _closed_episode(pg_db, learner_id)
+    with pytest.raises(ValueError):
+        await extract_episode.extract_episode(
+            pg_db,
+            cast(LLMGateway, _Gateway(ExtractorOutputV3(elements=[]))),
+            SETTINGS,
+            FixedGraphReader(),
+            FakeEmbeddingClient(SETTINGS.embedding_dim),
+            learner_id=learner_id,
+            trigger=ExtractionTrigger(episode_seq=seqs["answer"], trigger_seq=seqs["answer"]),
+        )
+
+
+def test_task_tests_from_the_stored_markup() -> None:
+    """The level cap comes from `task.created` with its parts; a `corrected_markup` of the
+    check replaces it (WP12.2); a new skill has no id and gives no pair."""
+    other = uuid4()
+
+    def markup(level: int, *, part_skill: UUID | None = None) -> TaskMarkupRecord:
+        spec = AnswerSpec(type="number", value=MathValue(latex="1", sympy="1"))
+        parts = (
+            [
+                TaskPartRecord(
+                    part="a",
+                    answer=spec,
+                    tests=[TestedLevelRecord(skill_id=part_skill, level=5)],
+                )
+            ]
+            if part_skill
+            else None
+        )
+        return TaskMarkupRecord(
+            tests=[
+                TestedLevelRecord(skill_id=SKILL, level=level),
+                TestedLevelRecord(new_skill=NewSkill(name="new", topic_hint="t"), level=1),
+            ],
+            method_named=False,
+            answer=spec,
+            parts=parts,
+        )
+
+    log = _Log()
+    created = TaskCreated(
+        task_id=TASK,
+        family_id=uuid4(),
+        source="generated",
+        markup=markup(2, part_skill=other),
+        verification="unchecked",
+    )
+    log.add("task.created", created)
+    assert extract_episode.task_tests(log.events) == {TASK: [(SKILL, 2), (other, 5)]}
+    log.add("task.verified", TaskVerified(task_id=TASK, corrected_markup=markup(4)))
+    log.add("task.verified", TaskVerified(task_id=TASK))
+    assert extract_episode.task_tests(log.events) == {TASK: [(SKILL, 4)]}
