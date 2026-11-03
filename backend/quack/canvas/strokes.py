@@ -1,7 +1,8 @@
 """The stroke journal of a canvas (Т-§15.1, Т-§15.2, ТЗ Ф4 WP21.2).
 
 Strokes are raw material, not events: the API keeps the client's batches in memory and writes a
-chunk `learners/{id}/canvas/{session_id}/{chunk}-{ulid}.bin` every `stroke_chunk_seconds`.
+chunk `learners/{id}/canvas/{session_id}/{canvas_id}/{chunk}-{ulid}.bin` every
+`stroke_chunk_seconds` (the canvas in the key — D-C-135).
 A batch is acknowledged only after its chunk is written; a repeated `batch_no` is dropped; with
 the store down nothing is acknowledged and the client sends again (Т-§20.7). Chunk format:
 points as deltas `(dx, dy, dt, pressure)`, MessagePack, zstd. An erasure is an operation of
@@ -149,12 +150,14 @@ class StrokeJournal:
         *,
         learner_id: UUID,
         session_id: UUID,
+        canvas_id: UUID,
         chunk_seconds: int,
         max_batches: int,
     ) -> None:
         self._storage = storage
         self._learner_id = learner_id
         self._session_id = session_id
+        self._canvas_id = canvas_id
         self._chunk_seconds = chunk_seconds
         self._max_batches = max_batches
         self._state = _JournalState()
@@ -205,7 +208,9 @@ class StrokeJournal:
         if not state.pending:
             return []
         batches = [batch for batch, _ in state.pending]
-        key = canvas_chunk_key(self._learner_id, self._session_id, state.next_chunk)
+        key = canvas_chunk_key(
+            self._learner_id, self._session_id, self._canvas_id, state.next_chunk
+        )
         try:
             await self._storage.put(key, encode_chunk(batches), CHUNK_CONTENT_TYPE)
         except StorageUnavailable:
