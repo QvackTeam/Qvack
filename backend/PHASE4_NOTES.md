@@ -1692,6 +1692,25 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/artifacts/test_topic_refresh_wp23.py`.
 - Требует подтверждения владельцем: нет.
 
+### D-C-142. WP9.3: шаг squawk в CI — новые миграции, правила вне `Д-§5.2` п.2 исключены
+- Класс: B (C по §7.3: `.github/**`; конфиг — S16 A, D-A-187, #185)
+- WP / место: WP1.4, WP9.3, `Д-§5.2` п.2, `Д-§6.2`; `.github/workflows/ci.yml` (job `squawk`), `tests/test_ci_squawk.py`
+- Контекст: `Д-§5.2` п.2 — «squawk по новым миграциям: блокирующие ALTER и индексы без CONCURRENTLY». squawk 2.71.0 с настройками по умолчанию даёт ещё и предупреждения вне этой области. На текущих миграциях `phase-4` это `require-lock-timeout`, `require-statement-timeout` (вопрос A в #187), `ban-drop-schema` (откат базовой) и `ban-drop-column`; на новых файлах — ещё `prefer-robust-stmts`.
+- Решение:
+  1. Отдельный job `squawk`. Проверяются файлы `backend/db/migrations/*.sql`, добавленные или изменённые относительно базы PR (`--diff-filter=AM`); на push — относительно `before`. Без базы и без новых миграций проверять нечего.
+  2. squawk-cli закреплён: `SQUAWK_VERSION = 2.71.0` (≥ 2.51.0). Запуск — `--config backend/.squawk.toml` (`pg_version`, `assume_in_transaction`, `Д-§6.2`).
+  3. Исключены правила вне области п.2: тайм-ауты блокировки и оператора, повторяемость операторов, удаление колонок и схем. Правила индексов (`require-concurrent-index-creation`, `-deletion`, `ban-concurrent-index-creation-in-transaction`) и блокирующих `ALTER` остаются. Тест не даёт их исключить.
+  4. `publish` ждёт `squawk` (`Д-§5.2`: без всех проверок не сливается).
+- Проверено на squawk 2.71.0:
+  - четыре текущие миграции проходят;
+  - `CREATE INDEX CONCURRENTLY` без `-- migrate:up transaction:false` и `-- squawk-disable-assume-in-transaction` падает (`ban-concurrent-index-creation-in-transaction`);
+  - обычный `CREATE INDEX` падает (`require-concurrent-index-creation`);
+  - правильный файл с обеими строками проходит.
+- Почему: `Д-§5.2` п.2, `Д-§6.2`; ТЗ Ф4 WP1.4, WP9.3.
+- Обратимость: список исключений в одной строке job.
+- Тесты: `tests/test_ci_squawk.py`; у A — `tests/db/test_squawk_config.py` (T-DB7).
+- Требует подтверждения владельцем: нет.
+
 ### D-C-141. §4.8: `jobs_changed` — канал `learner:{id}`, объект от очереди
 - Класс: B (C — потребитель канала; издатель — очередь A, D-A-165, #182)
 - WP / место: §4.8, WP7.4, T-D10; `quack/api/learner_stream.py`
