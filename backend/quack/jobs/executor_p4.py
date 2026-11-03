@@ -56,12 +56,12 @@ async def run_claimed(
                 return "lost"
             if status == "cancel_requested":
                 await _stop(task)
-                await q.mark_cancelled(db, job)
+                await q.mark_cancelled(db, job, redis=redis)
                 log.info("job_cancelled", kind=job.kind, job_key=job.job_key)
                 return "cancelled"
     except asyncio.CancelledError:
         await _stop(task)
-        await q.release(db, job)
+        await q.release(db, job, redis=redis)
         log.info("job_released_on_shutdown", kind=job.kind, job_key=job.job_key)
         raise
     return await _finish(db, settings, job, task, redis)
@@ -82,11 +82,11 @@ async def _finish(
     except asyncio.CancelledError:  # the handler cancelled itself: an error of the job
         error = RuntimeError("the handler was cancelled")
     if error is None:
-        await q.complete(db, job)
+        await q.complete(db, job, redis=redis)
         return "succeeded"
     if isinstance(error, JobDeferred):
         log.info("job_deferred", kind=job.kind, job_key=job.job_key, reason=error.reason)
-        decision = await q.defer(db, job, error.delay_sec, error.reason)
+        decision = await q.defer(db, job, error.delay_sec, error.reason, redis=redis)
         return "lost" if decision is None else "deferred"
     permanent = isinstance(error, JobFailedPermanently)
     reason = error.reason if isinstance(error, JobFailedPermanently) else error
@@ -139,7 +139,7 @@ class JobWorker:
         kinds = await self.claimable_kinds()
         if not kinds:
             return False
-        job = await q.claim_next(self.db, self.settings, kinds=kinds)
+        job = await q.claim_next(self.db, self.settings, kinds=kinds, redis=self.redis)
         if job is None:
             return False
         handler = self.handlers[job.kind]
@@ -161,7 +161,7 @@ class JobWorker:
     async def _cleaner(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
             try:
-                await q.reap_stale(self.db, self.settings)
+                await q.reap_stale(self.db, self.settings, redis=self.redis)
             except Exception as exc:
                 log.error("job_cleaner_error", error=repr(exc))
             with contextlib.suppress(TimeoutError):

@@ -330,7 +330,7 @@ class DispatcherP4:
         if event.type == "turn.committed":
             requests = cancelled_requests(event)
             if requests:
-                await request_cancel(self.db, event.learner_id, requests)
+                await request_cancel(self.db, event.learner_id, requests, redis=self.redis)
         if event.type == "episode.closed" and not event.payload["has_content"]:
             # WP7.2, `Т-§7.5`: nothing to interpret — the dispatcher covers the episode itself.
             extractor = self.settings.llm_roles["extractor"].prompt
@@ -345,7 +345,7 @@ class DispatcherP4:
             )
         put = 0
         for plan in plans:
-            if await enqueue(self.db, plan) != "duplicate":
+            if await enqueue(self.db, plan, redis=self.redis) != "duplicate":
                 put += 1
         return put
 

@@ -10,8 +10,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
+import orjson
+from redis.asyncio import Redis
+
 from quack.config import Settings
 from quack.db import Db
+from quack.db.redis import learner_signal_channel
 from quack.jobs import queue_p4 as q
 from quack.jobs.rules_p4 import JobPlan, PriorityClass
 from tests.db.fixtures import create_learner
@@ -598,3 +602,37 @@ async def test_visible_jobs_of_the_session_only(jobs_db: Db) -> None:
     seen = await q.visible_jobs(jobs_db, learner, session)
     assert [(j.job_key, j.kind, j.status) for j in seen] == [("viz", "agent.viz", "queued")]
     assert await q.visible_jobs(jobs_db, other, another) == []
+
+
+# --- the plaque signal (T-D10; Т-§13.8, D-C-141) ------------------------------------------
+
+
+async def test_status_change_of_a_visible_job_publishes_jobs_changed(
+    jobs_db: Db, redis: Redis
+) -> None:
+    learner, session = await create_learner(jobs_db), uuid4()
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(learner_signal_channel(learner))
+
+    async def next_message(wait_s: float) -> object:
+        return await pubsub.get_message(ignore_subscribe_messages=True, timeout=wait_s)
+
+    expected = orjson.dumps({"kind": "jobs_changed", "session_id": str(session)}).decode()
+    try:
+        async with jobs_db.transaction():
+            await q.enqueue(
+                jobs_db, _plan(learner, "v", session_id=session, visible=True), redis=redis
+            )
+            assert await next_message(0.2) is None  # not before the commit
+        assert (await next_message(5.0))["data"] == expected  # type: ignore[index]
+        await q.enqueue(jobs_db, _plan(learner, "hidden", session_id=session), redis=redis)
+        await q.enqueue(jobs_db, _plan(learner, "no-session", visible=True), redis=redis)
+        assert await next_message(0.3) is None
+        job = await q.claim_next(jobs_db, Settings(), kinds=["check.model"], redis=redis)
+        assert job is not None and job.job_key == "v"
+        assert (await next_message(5.0))["data"] == expected  # type: ignore[index]
+        await q.complete(jobs_db, job, redis=redis)
+        assert (await next_message(5.0))["data"] == expected  # type: ignore[index]
+        assert await next_message(0.3) is None  # one publication per change
+    finally:
+        await pubsub.aclose()

@@ -15,12 +15,15 @@ nests), so the dispatcher inserts jobs in the transaction of its offset.
 * **Attempts**: a claim counts an attempt (`attempts += 1`), so a worker that dies mid-job spends
   one too and a job that kills its worker does not loop; `attempts` is also the fence of the
   claim: a worker that lost its job (reaped and claimed again) completes nothing (D-A-161).
+* **Plaque signal**: every status change of a `visible` job of a session publishes, after the
+  commit, `{"kind": "jobs_changed", "session_id"}` on `learner:{id}` (Т-§13.8, D-C-141, #183).
 * **Cancel** (`request_cancel`): queued → `cancelled`, running → `cancel_requested`; the executor
   sees the status when it beats (`heartbeat`) and cancels the task (Т-§13.1, Т-§13.7).
 """
 
 from __future__ import annotations
 
+import asyncio
 import random
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -28,12 +31,14 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
+import orjson
 import psycopg.errors
 from psycopg.types.json import Jsonb
 from redis.asyncio import Redis
 
 from quack.config import Settings
 from quack.db import Db
+from quack.db.redis import learner_signal_channel
 from quack.events.log import NewEvent, append_events
 from quack.jobs.rules_p4 import JobPlan
 from quack.logging import get_logger
@@ -116,6 +121,44 @@ def _claimed(row: dict[str, Any]) -> ClaimedJob:
     )
 
 
+# --- the plaque signal (Т-§13.8; D-C-141, #183) -----------------------------------------
+
+_pending_signals: set[asyncio.Task[None]] = set()
+
+
+async def _publish_jobs_changed(redis: Redis, learner_id: UUID, session_id: UUID) -> None:
+    try:
+        await redis.publish(
+            learner_signal_channel(learner_id),
+            orjson.dumps({"kind": "jobs_changed", "session_id": str(session_id)}),
+        )
+    except Exception:  # law 9: a lost signal does not undo the transition
+        log.warning("jobs_changed_publish_failed", learner_id=str(learner_id))
+
+
+def _jobs_changed(
+    db: Db, redis: Redis | None, learner_id: UUID | None, session_id: UUID | None, visible: bool
+) -> None:
+    """A job on the learner's plaque changed its status: after the commit, one signal; the
+    client asks `GET /v1/sessions/{id}/jobs`. A job not `visible` or without a session — none."""
+    if redis is None or learner_id is None or session_id is None or not visible:
+        return
+    learner, session = learner_id, session_id
+
+    def schedule() -> None:
+        task = asyncio.get_running_loop().create_task(
+            _publish_jobs_changed(redis, learner, session)
+        )
+        _pending_signals.add(task)
+        task.add_done_callback(_pending_signals.discard)
+
+    db.on_commit(schedule)
+
+
+def _job_changed(db: Db, redis: Redis | None, job: ClaimedJob) -> None:
+    _jobs_changed(db, redis, job.learner_id, job.session_id, job.visible)
+
+
 # --- insert -------------------------------------------------------------------------------
 
 _JOB_EXISTS = "SELECT 1 FROM ops.jobs WHERE job_key = %(job_key)s"
@@ -135,7 +178,7 @@ _INSERT = (
 )
 
 
-async def enqueue(db: Db, plan: JobPlan) -> EnqueueResult:
+async def enqueue(db: Db, plan: JobPlan, *, redis: Redis | None = None) -> EnqueueResult:
     """Put one job (WP7.1, Т-§13.1). Idempotent by `job_key`: the dispatcher replaying an event
     after a crash finds the job it already put, whatever its status, and does nothing."""
     params = {
@@ -163,7 +206,10 @@ async def enqueue(db: Db, plan: JobPlan) -> EnqueueResult:
             except psycopg.errors.UniqueViolation:
                 # A concurrent insert took the `coalesce_key` between our UPDATE and INSERT.
                 continue
-            return "duplicate" if inserted is None else "inserted"
+            if inserted is None:
+                return "duplicate"
+            _jobs_changed(db, redis, plan.learner_id, plan.session_id, plan.visible)
+            return "inserted"
     raise RuntimeError(f"job {plan.job_key} lost the race for {plan.coalesce_key} twice")
 
 
@@ -232,7 +278,7 @@ async def _over_budget(db: Db, settings: Settings, job: ClaimedJob) -> bool:
 
 
 async def claim_next(
-    db: Db, settings: Settings, *, kinds: Sequence[str] | None = None
+    db: Db, settings: Settings, *, kinds: Sequence[str] | None = None, redis: Redis | None = None
 ) -> ClaimedJob | None:
     """Take the best claimable job, or None. `kinds` — the kinds with a handler whose models
     have admission (Т-§13.2); None — any. Jobs over the session budget met on the way become
@@ -265,6 +311,7 @@ async def claim_next(
                     {"job_key": job.job_key, "reason": "session_agent_budget_usd exceeded"},
                 )
                 log.info("job_skipped_budget", kind=job.kind, job_key=job.job_key)
+                _job_changed(db, redis, job)
                 continue
             try:
                 async with conn.transaction():
@@ -276,6 +323,7 @@ async def claim_next(
             if started is None:
                 tried.append(job.job_key)
                 continue
+            _job_changed(db, redis, job)
             return _claimed(started)
     return None
 
@@ -302,22 +350,27 @@ _FINISH = (
 )
 
 
-async def _finish(db: Db, job: ClaimedJob, status: JobStatus, error: str | None = None) -> bool:
-    row = await db.fetch_one(
-        _FINISH,
-        {"job_key": job.job_key, "attempts": job.attempts, "status": status, "error": error},
-    )
+async def _finish(
+    db: Db, job: ClaimedJob, status: JobStatus, error: str | None, redis: Redis | None
+) -> bool:
+    async with db.transaction():
+        row = await db.fetch_one(
+            _FINISH,
+            {"job_key": job.job_key, "attempts": job.attempts, "status": status, "error": error},
+        )
+        if row is not None:
+            _job_changed(db, redis, job)
     return row is not None
 
 
-async def complete(db: Db, job: ClaimedJob) -> bool:
+async def complete(db: Db, job: ClaimedJob, *, redis: Redis | None = None) -> bool:
     """`succeeded`. A job whose cancel was requested but finished anyway keeps its result."""
-    return await _finish(db, job, "succeeded")
+    return await _finish(db, job, "succeeded", None, redis)
 
 
-async def mark_cancelled(db: Db, job: ClaimedJob) -> bool:
+async def mark_cancelled(db: Db, job: ClaimedJob, *, redis: Redis | None = None) -> bool:
     """The executor cancelled the task after `cancel_requested` (Т-§13.7)."""
-    return await _finish(db, job, "cancelled")
+    return await _finish(db, job, "cancelled", None, redis)
 
 
 # --- failure, retry, defer, release -------------------------------------------------------
@@ -357,7 +410,13 @@ _CANCEL_SUPERSEDED = (
 
 
 async def _requeue(
-    db: Db, job: ClaimedJob, *, attempts: int, delay_s: float, error: str | None
+    db: Db,
+    job: ClaimedJob,
+    *,
+    attempts: int,
+    delay_s: float,
+    error: str | None,
+    redis: Redis | None,
 ) -> RetryDecision:
     """Back to `queued` after `delay_s`. A newer job with the same `coalesce_key` already waits
     (the unique index refuses a second one): this job is superseded — its `required_seq` goes to
@@ -380,7 +439,9 @@ async def _requeue(
                 _CANCEL_SUPERSEDED,
                 {**params, "error": "superseded by a waiting job with the same coalesce_key"},
             )
+            _job_changed(db, redis, job)
             return RetryDecision("cancelled", attempts, None)
+        _job_changed(db, redis, job)
     assert row is not None
     return RetryDecision("queued", attempts, row["run_at"])
 
@@ -441,10 +502,10 @@ async def fail_or_retry(
         if locked is None:
             return None
         if locked["status"] == "cancel_requested":
-            await mark_cancelled(db, job)
+            await mark_cancelled(db, job, redis=redis)
             return RetryDecision("cancelled", job.attempts, None)
         if permanent or job.attempts >= settings.job_max_attempts:
-            await _finish(db, job, "failed", message)
+            await _finish(db, job, "failed", message, redis)
             await _write_failure_event(db, job, message, redis)
             return RetryDecision("failed", job.attempts, None)
         delay = (
@@ -452,10 +513,14 @@ async def fail_or_retry(
             if retry_delay_s is None
             else retry_delay_s
         )
-        return await _requeue(db, job, attempts=job.attempts, delay_s=delay, error=message)
+        return await _requeue(
+            db, job, attempts=job.attempts, delay_s=delay, error=message, redis=redis
+        )
 
 
-async def defer(db: Db, job: ClaimedJob, delay_s: float, reason: str) -> RetryDecision | None:
+async def defer(
+    db: Db, job: ClaimedJob, delay_s: float, reason: str, *, redis: Redis | None = None
+) -> RetryDecision | None:
     """Run again in `delay_s` without spending the attempt (the handler is not ready: the
     model is under pressure, the daily budget is out)."""
     async with db.transaction():
@@ -463,16 +528,16 @@ async def defer(db: Db, job: ClaimedJob, delay_s: float, reason: str) -> RetryDe
         if locked is None:
             return None
         if locked["status"] == "cancel_requested":
-            await mark_cancelled(db, job)
+            await mark_cancelled(db, job, redis=redis)
             return RetryDecision("cancelled", job.attempts, None)
         return await _requeue(
-            db, job, attempts=job.attempts - 1, delay_s=delay_s, error=_short(reason)
+            db, job, attempts=job.attempts - 1, delay_s=delay_s, error=_short(reason), redis=redis
         )
 
 
-async def release(db: Db, job: ClaimedJob) -> RetryDecision | None:
+async def release(db: Db, job: ClaimedJob, *, redis: Redis | None = None) -> RetryDecision | None:
     """Shutdown after the grace period: back to `queued` at once, the attempt unspent."""
-    return await defer(db, job, 0.0, "released on shutdown")
+    return await defer(db, job, 0.0, "released on shutdown", redis=redis)
 
 
 _STALE = (
@@ -483,7 +548,7 @@ _STALE = (
 )
 
 
-async def reap_stale(db: Db, settings: Settings) -> int:
+async def reap_stale(db: Db, settings: Settings, *, redis: Redis | None = None) -> int:
     """The cleaner (Т-§13.1): a job in work without a pulse for `job_stale_after_sec` returns to
     the queue — or is `failed` when its attempts are out; a stale `cancel_requested` is
     `cancelled`. Returns the number of jobs touched."""
@@ -492,9 +557,11 @@ async def reap_stale(db: Db, settings: Settings) -> int:
         for row in rows:
             job = _claimed(row)
             if row["status"] == "cancel_requested":
-                await mark_cancelled(db, job)
+                await mark_cancelled(db, job, redis=redis)
             else:
-                await fail_or_retry(db, job, "heartbeat timeout", settings, retry_delay_s=0.0)
+                await fail_or_retry(
+                    db, job, "heartbeat timeout", settings, retry_delay_s=0.0, redis=redis
+                )
         return len(rows)
 
 
@@ -504,7 +571,7 @@ _CANCEL = (
     "UPDATE ops.jobs SET status = CASE status WHEN 'queued' THEN 'cancelled' "
     "ELSE 'cancel_requested' END WHERE learner_id = %(learner_id)s "
     "AND status IN ('queued', 'running') AND payload->>'request_id' = ANY(%(ids)s::text[]) "
-    "RETURNING status"
+    "RETURNING status, session_id, visible"
 )
 
 
@@ -514,15 +581,20 @@ class CancelOutcome:
     requested: int  # running jobs, now `cancel_requested`
 
 
-async def request_cancel(db: Db, learner_id: UUID, request_ids: Sequence[UUID]) -> CancelOutcome:
+async def request_cancel(
+    db: Db, learner_id: UUID, request_ids: Sequence[UUID], *, redis: Redis | None = None
+) -> CancelOutcome:
     """The teacher's `planUpdate` no longer needs these requests (Т-§13.7): a job still in the
     queue is `cancelled`, a running one is `cancel_requested` and stops at its next pulse.
     Only the learner's own jobs (law 1)."""
     if not request_ids:
         return CancelOutcome(0, 0)
-    rows = await db.fetch_all(
-        _CANCEL, {"learner_id": learner_id, "ids": [str(i) for i in request_ids]}
-    )
+    async with db.transaction():
+        rows = await db.fetch_all(
+            _CANCEL, {"learner_id": learner_id, "ids": [str(i) for i in request_ids]}
+        )
+        for session_id in {r["session_id"] for r in rows if r["visible"]}:
+            _jobs_changed(db, redis, learner_id, session_id, True)
     statuses = [r["status"] for r in rows]
     return CancelOutcome(statuses.count("cancelled"), statuses.count("cancel_requested"))
 
