@@ -14,6 +14,7 @@ from quack.api.resources import AppResources, get_resources
 from quack.compute_client.client import ComputeClient
 from quack.config import Settings
 from quack.events.errors import IdempotencyConflictError
+from quack.jobs.queue_p4 import visible_jobs
 from quack.llm.gateway import LLMGateway
 from quack.session import lifecycle, sessions, stream, turns
 from quack.session.action_turn import TurnContextSource, turn_frames
@@ -33,6 +34,8 @@ from quack.session.schemas import (
     FinishSessionRequest,
     HeartbeatResponse,
     SessionDetail,
+    SessionJob,
+    SessionJobsResponse,
     SessionListResponse,
     SessionStarted,
     StartSessionRequest,
@@ -130,6 +133,25 @@ async def get_session(
     session_id: UUID, learner_id: LearnerId, resources: Resources
 ) -> SessionDetail:
     return await lifecycle.get_session(resources, learner_id, session_id)
+
+
+@router.get("/sessions/{session_id}/jobs")
+async def session_jobs(
+    session_id: UUID, learner_id: LearnerId, resources: Resources
+) -> SessionJobsResponse:
+    """ТЗ Ф4 §4.8, `Т-§13.8` (WP7.4): the plaque — visible jobs of the session in `queued` and
+    `running`; a session of another learner or none — `404` (D-B-207)."""
+    try:
+        await sessions.get_session(resources.db, learner_id=learner_id, session_id=session_id)
+    except LookupError as exc:
+        raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
+    jobs = await visible_jobs(resources.db, learner_id, session_id)
+    return SessionJobsResponse(
+        jobs=[
+            SessionJob(job_key=j.job_key, kind=j.kind, status=j.status, created_at=j.created_at)
+            for j in jobs
+        ]
+    )
 
 
 @router.post("/sessions/{session_id}/heartbeat")

@@ -79,6 +79,19 @@ class SessionListResponse(StrictModel):
     sessions: list[SessionListItem]
 
 
+class SessionJob(StrictModel):
+    """A row of the learner's plaque (Т-§13.8): a visible job of the session."""
+
+    job_key: str
+    kind: str
+    status: str  # `queued` or `running`
+    created_at: datetime
+
+
+class SessionJobsResponse(StrictModel):
+    jobs: list[SessionJob]
+
+
 class TurnView(StrictModel):
     turn_index: int
     turn_id: UUID

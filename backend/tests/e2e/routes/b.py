@@ -154,6 +154,7 @@ STREAM = Stream(
             ("GET", "/v1/sessions/active"),
             ("GET", "/v1/sessions/{session_id}"),
             ("GET", "/v1/sessions/{session_id}/events"),
+            ("GET", "/v1/sessions/{session_id}/jobs"),
         }
     ),
     routers=("quack.session.router:router",),
