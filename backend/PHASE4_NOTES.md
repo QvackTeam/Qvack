@@ -1337,7 +1337,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Решение: обработчики читают нагрузку строки (`answer_seq`, `part`; `task_ids`) и вызывают готовые тела (`insure_symbolic`, `check_with_model` + `record_verdict`, `check_teacher_task`). Для `check.model` известные заблуждения и состояния проверяемых уровней берутся из среза S4 для навыков разметки задачи; `failed` — есть ли `check.failed` этого ответа и части; уже записанный вердикт — выход (закон 5). Для `task.check` имена проверяемых навыков берутся из среза сессии хода. Виды — в реестре по процедуре (б) #173.
 - Почему: §0.4.3 п.2, п.5.
 - Тесты: тела покрыты своими тестами; T-Q7 зелёный.
-- Не решено \[ПРОВЕРИТЬ\]: `second_opinion.diagnosis`, `task.solution_space`, `agent.task_generation`, `agent.solution_space`, `check.known_claim` ждут #144 и #148.
+- Не решено \[ПРОВЕРИТЬ\]: `task.solution_space`, `agent.task_generation`, `agent.solution_space`, `check.known_claim` — после #144 и #148 (их тела там); `second_opinion.diagnosis` — следующий шаг B.
 ### D-B-179. Описание заблуждения на фактах S4 (WP16.2)
 - Класс: B
 - WP / место: WP16.2, WP7.1, `Т-§9.3`, `T-AG2`; `quack/agents/misconception_describe.py` (`describe_misconception`, `render_manifestations`, `run_misconception_describe`)
