@@ -1197,6 +1197,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `T-X1` — `tests/agents/test_extract_episode.py::test_extracted_elements_checked_on_the_episode`, `test_record_extraction`, `test_record_extraction_commits_nothing_on_failure`.
 - Не решено \[ПРОВЕРИТЬ\]: потолок уровня — по задаче целиком, не по части (`part`) ответа; задача `extract.episode` (сборка окна из журнала, кандидаты из S4, `task_tests` из `content.tasks`) — следующим шагом WP15.
 - Требует подтверждения владельцем: нет
+### D-B-171. Источник куска без имени материала
+- Класс: B
+- WP / место: WP14.1 слот 8, WP14.4 `search_materials`, `Т-§10.5`, `Т-§19.8`; `quack/session/tools.py` (`MaterialChunk.material_name`, `render_chunks`); вопрос C в #137, D-C-127 п.5
+- Контекст: `MaterialChunk` требовал имя материала; документы имени материала не называют — ни у узла `Material` (`Т-§3.4`), ни в `content.materials` (§6.1 ТЗ Ф4). `ChunkHit` C (#140) имени не несёт.
+- Решение: `material_name: str | None`; без имени источник — метка куска и страница: «P1. From a material, page 3:». С именем — как прежде.
+- Почему: §0.4.3 п.2 (поле не названо документами — не выдумывать), п.5.
+- Обратимость: одно поле.
+- Тесты: `tests/session/test_memory_tools.py::test_search_materials_and_modal_down`.
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
