@@ -723,8 +723,8 @@ async def test_responses_request_contract(
         "strict": True,
         "schema": to_strict_json_schema(model),
     }
-    assert body["reasoning"] == {"effort": settings.llm_role_reasoning[role]}
-    assert body["max_output_tokens"] == settings.llm_role_max_output_tokens[role]
+    assert body["reasoning"] == {"effort": settings.effort_for_role(role)}
+    assert body["max_output_tokens"] == settings.max_output_tokens_for_role(role)
     assert body["prompt_cache_key"] == f"{prompt_role or role}@1"
     forbidden = {
         "temperature",
@@ -791,7 +791,7 @@ async def test_output_items_parsing(db: SessionFactory, settings: Settings) -> N
             )
         ).one()
     assert (row.cached_input_tokens, row.reasoning_tokens) == (120, 300)
-    assert row.reasoning_effort == settings.llm_role_reasoning["teacher"]
+    assert row.reasoning_effort == settings.effort_for_role("teacher")
 
     only_commentary = _MockResponses(
         httpx2.Response(200, json=_responses_body("", commentary="Thinking it over.")),

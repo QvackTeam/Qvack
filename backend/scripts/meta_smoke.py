@@ -364,8 +364,7 @@ def _row(
     **extra: Any,
 ) -> dict[str, Any]:
     headers = dict(seen.headers) if seen is not None else {}
-    table = settings.llm_roles.get(role)
-    effort = table.effort if table is not None else settings.llm_role_reasoning.get(role)
+    effort = settings.effort_for_role(role)
     return {
         "role": role,
         "prompt": prompt,

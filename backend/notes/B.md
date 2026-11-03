@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-B-208. `effort`, лимит выхода и таймаут роли — из строки `llm_roles` (WP10.1 п.1)
+- Класс: A (исправление ошибки)
+- WP / место: WP10.1 п.1; `quack/config.py` (`effort_for_role`, `max_output_tokens_for_role`, `timeout_for_role`), `quack/llm/gateway.py`, `scripts/meta_smoke.py`
+- Контекст: шлюз брал `effort`, `max_output_tokens` и таймаут только из словарей Фазы 3 (`llm_role_reasoning`, `llm_role_max_output_tokens`, `llm_role_timeout_s`): роли таблицы Фазы 4 уходили без `effort` и без лимита, замер D-B-134 не применялся (находка WP10.7)
+- Решение: запись словаря Фазы 3 — переопределение, иначе строка `llm_roles`, иначе (таймаут) `llm_timeout_sec`; из словарей Фазы 3 убраны `teacher`, `teacher_fallback`, `extractor` — их значения теперь из таблицы (`extractor` 16 384, `teacher_fallback` 8192 по D-B-134)
+- Почему: Т-§11.1, ТЗ Ф4 WP10.1 п.1 «ровно таблицы»; та же ошибка, что D-B-188
+- Обратимость: три функции
+- Тесты: `tests/test_llm_runtime.py` (T-L8: тело запроса), `tests/llm/test_meta_smoke.py`
+- Требует подтверждения владельцем: нет
+
 ### D-B-204. Без ключа — «Не проверено», код 1; в отчёте — что ушло в запросе (WP10.7)
 - Класс: B
 - WP / место: WP10.7, DoD п.6a; `backend/scripts/meta_smoke.py` (`run`, `render_report`, `exit_code`)

@@ -228,7 +228,7 @@ class LLMGateway:
             )
         exempt = role in self.settings.session_budget_exempt_roles
         await self._admit_budget(role, learner_id, None if exempt else session_id)
-        effort = reasoning_effort or self.settings.llm_role_reasoning.get(role)
+        effort = reasoning_effort or self.settings.effort_for_role(role)
         ctx = _CallContext(
             role, prompt, model, learner_id, session_id, turn_id, idempotency_key, effort
         )
@@ -259,9 +259,9 @@ class LLMGateway:
             json_schema=to_strict_json_schema(response_model),
             schema_name=response_model.__name__,
             temperature=temperature,
-            timeout_sec=self.settings.llm_role_timeout_s.get(role, self.settings.llm_timeout_sec),
+            timeout_sec=self.settings.timeout_for_role(role),
             reasoning_effort=effort,
-            max_output_tokens=self.settings.llm_role_max_output_tokens.get(role),
+            max_output_tokens=self.settings.max_output_tokens_for_role(role),
             prompt_cache_key=f"{prompt_role or role}@{prompt_version}",
             images=tuple(images),
         )
@@ -323,9 +323,9 @@ class LLMGateway:
             json_schema=to_strict_json_schema(response_model),
             schema_name=response_model.__name__,
             temperature=0.0,
-            timeout_sec=self.settings.llm_role_timeout_s.get(role, self.settings.llm_timeout_sec),
-            reasoning_effort=reasoning_effort or self.settings.llm_role_reasoning.get(role),
-            max_output_tokens=self.settings.llm_role_max_output_tokens.get(role),
+            timeout_sec=self.settings.timeout_for_role(role),
+            reasoning_effort=reasoning_effort or self.settings.effort_for_role(role),
+            max_output_tokens=self.settings.max_output_tokens_for_role(role),
             prompt_cache_key=f"{prompt_role or role}@{prompt_version}",
         )
         return StreamRequest(request, tools=tuple(tools)), prompt
@@ -456,7 +456,7 @@ class LLMGateway:
         the pressure flag, 400 without retry, breaker), one ledger row per attempt. There is no
         prompt, no outbox and no schema repair: a repeated call is a repeated charge."""
         model = self.settings.model_for_role(role)
-        timeout = self.settings.llm_role_timeout_s.get(role, self.settings.llm_timeout_sec)
+        timeout = self.settings.timeout_for_role(role)
         exempt = role in self.settings.session_budget_exempt_roles
         await self._admit_budget(role, learner_id, None if exempt else session_id)
         template = PromptTemplate(role, 0, "", _media_hash(role))
