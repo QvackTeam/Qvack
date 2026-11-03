@@ -643,6 +643,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `test_tool_loop_step_limit`.
 - Требует подтверждения владельцем: нет
 
+### D-B-118. Объявление `POST /v1/sessions/{id}/actions` родным SSE FastAPI
+- Класс: B
+- WP / место: WP13.1 (Этап I, к G1 по запросу C), `quack/session/router.py`, `quack/session/actions.py`
+- Контекст: шов S11 требует кадры §4.7 и `Element` в OpenAPI к G1; FastAPI сам не выводит схему тела SSE.
+- Варианты: (а) `EventSourceResponse` FastAPI 0.162 и генератор с типом `AsyncIterator[ActionFrame]` — схема кадров в `itemSchema` под `text/event-stream`; (б) свой класс ответа и `responses` — FastAPI добавляет рядом с `$ref` `type: string`.
+- Решение: (а); `201 {seq}` — `ActionAccepted` под `application/json`. Тело — `NotImplementedError` до WP13.
+- Почему: §0.4.3 п.6–7 (проверяемо, средствами уже используемой библиотеки).
+- Обратимость: один маршрут.
+- Тесты: `test_actions_route_in_openapi`.
+- Требует подтверждения владельцем: нет
+
 ### D-B-121. Часть задачи без частей — `main`
 - Класс: B. WP11.4, `quack/practice/answers.py` (`DEFAULT_PART`): ключ вердикта `verdict:{answer_seq}:{part}` (`Т-§6.1`) требует часть, а у задачи без частей (`Т-§6.2`) её нет. Значение `main` — одна константа. Тесты: `test_instant_verdict_in_answer_transaction`. Подтверждение: нет.
 
@@ -1218,6 +1229,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 
 - Требует подтверждения владельцем: нет
 
+### D-B-156. Тело `POST /v1/sessions/{id}/actions`: порты графа в API
+- Класс: B
+- WP / место: WP13.1, WP13.2, §4.7, §4.5; `quack/session/action_turn.py` (`ApiTurnPorts`, `turn_frames`, `TurnContextSource`), `quack/session/router.py` (`post_action`), `quack/session/actions.py` (`ActionFrame` — `RootModel`)
+- Контекст: #75 объявил маршрут (D-B-119); граф хода — на портах (D-B-148), запись — `turn_commit` (D-B-149), сессии — `sessions.py` (D-B-155). Не названо: (а) откуда граф получает контекст до WP14; (б) кто держит блокировку хода между процессами; (в) коды кадра `error`; (г) ответ на действие в закрытой сессии; (д) как маршрут отвечает и SSE, и `201` при неизменном контракте S11; (е) вход маршрута до перевода API на сессии (D-C-119).
+- Решение: (а) порт `TurnContextSource.assemble(TurnRequest) → TurnSetup` (запрос модели и входы правил, провайдер роли через `LLMGateway.streaming`, таблица меток, строка манифеста, инструменты, данные для записи — цитаты ученика, пояс, на что отвечает ход); реализует WP14. Маршрут берёт его из `app.state.turn_context_source`; нет — `503 SERVICE_UNAVAILABLE`. До WP14 PR не вливается (D-B-119). (б) `admit`: Redis `SET NX EX 60` на `lock:turn:{session}` (TTL Фазы 3), занято другим процессом — кадр `error {TURN_LOCKED, retryable}`; освобождение — сравнение токена после хода; в процессе — `TurnSlots` (одна сессия — один ход, новый отменяет старый); без Redis — только `TurnSlots` (`Т-§20.7`). Роль: флаг давления модели учителя — ждать не дольше `teacher_admission_wait_ms`, иначе `teacher_fallback` (`Т-§11.3`, WP5.3 Фазы 3). Канал отмены `session:{id}:cancel` между процессами — \[ПРОВЕРИТЬ\] с развёртыванием нескольких `api` (сейчас один процесс). (в) Коды §4.5 Фазы 3: модель не ответила (ошибки шлюза и провайдера, предел шагов инструментов) — `LLM_DEGRADED`, повторяемо; блокировка — `TURN_LOCKED`; прочее — `SERVICE_UNAVAILABLE`; хода в журнале нет (`Т-§12.1`). Ответ шаблоном при `llm_unavailable` / `budget_exceeded` (`degraded_mode`, §4.4) — отдельным пунктом \[ПРОВЕРИТЬ\]. (г) Сессия ученика открыта — действие пишется; закрыта сборщиком — сначала возврат (`resume_if_swept`, WP13.10); закрыта учеником или чужая — `404 NOT_FOUND`, ничего не пишется. (д) Обычная функция: `201 {seq}` (`ActionAccepted`) или поток SSE (`sse_keepalive_response`, `sse_keepalive_s`); 200 описан тем же `itemSchema` с `data` → `ActionFrame`, что и в #75; `ActionFrame` — `RootModel` с тем же именем компонента (для `responses.model`). (е) Ученик — только из cookie сессии (`get_current_session`, `Т-§19.1`); ограничитель частоты роутера сессий Фазы 3 пока требует и токен — до D-C-119 (тесты шлют оба, как e2e, D-C-115). Вызов «исправь разметку» — без модели (порт отдаёт `None`, элемент убирается): инструкции для него в `teacher@2` нет — с промптом.
+- Почему: §0.4.3 п.2 (§4.7, WP13.1–13.2, `Т-§12.1`, `Т-§19.1`), п.3 (контракт S11 не меняется), п.5.
+- Обратимость: два модуля и маршрут.
+- Тесты: `tests/session/test_actions_route.py` (8, по HTTP): кадры §4.7, `201`, чужая сессия, без cookie, возврат после сборщика, закрытая учеником, кадр ошибки без хода, освобождение блокировки. Проверено на неверной реализации: 5 подмен — каждая роняет тест. e2e потока C (`T-E2`, `T-E3`) ждут маршрут в обходах — у C.
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -1689,6 +1710,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP13.1–13.2, тело `/actions` (D-B-156): `uv run pytest tests/session/test_actions_route.py` — ошибка сбора (нет `quack.session.action_turn`), коммит `a5066ee`; на неверной реализации — 5 подмен, каждая роняет тест. Зелёный: 8 passed.
 - WP23.1, документы артефактов (C, `phase-4-c-wp23-artifacts`): красный прогон отдельно не снят (облегчённый TDD по указанию владельца, 2026-11-03). Зелёный: `tests/artifacts/test_documents_wp23.py` + `tests/test_app_assembly.py` — 25 passed; с ключами — `tests/e2e/test_isolation_and_idempotency.py` + `tests/artifacts/test_documents_wp23.py` — 9 passed.
 - WP20.3, тело `embedding.compute` (C, `phase-4-c-wp20-modal`, коммит `5ff4812`): в Linux `pytest tests/embeddings/test_embedding_compute.py` — ошибка сбора (нет модуля); на неверной реализации (без пропуска готовых узлов) — 1 failed. Зелёный: с `tests/db/test_sql_static.py`, `tests/test_contracts.py` — 14 passed.
 - WP20.3, клиент Modal (C, `phase-4-c-wp20-modal`, коммит `92d406a`): `uv run pytest tests/embeddings` — ошибка сбора (нет `EMBEDDING_APP`, `EMBEDDER_CLASS`, параметра `query_instruction`). На неверной реализации (инструкция у документов; ошибки Modal не переводятся в `EmbeddingsUnavailable`) — по 1 failed. Зелёный: `tests/embeddings` (6, в Linux с `modal/` рядом), `tests/storage/test_s1_resources.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, `tests/test_app_assembly.py` — 46 passed. Правка теста красного коммита: `SecretStr("")` вместо `""` в `model_copy` (ошибка теста, не контракта).
@@ -1773,6 +1795,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Правки тестов
 
+- `tests/session/test_actions_route.py` (B, D-B-156, до зелёного): клиент шлёт и токен Фазы 3 (ограничитель частоты роутера сессий), и cookie сессии; маршрут берёт ученика только из cookie. Тест «без cookie» шлёт один токен и ждёт `401 UNAUTHENTICATED`. Добавлен тест освобождения блокировки хода. Утверждения не ослаблены.
 - `tests/e2e/test_isolation_and_idempotency.py`, `tests/e2e/endpoints.py` (C, WP23.1): три маршрута блоков — в обходе `T-E2`; тема для них записывается в журнал Фазы 4 (`topic.created`), которого структура Фазы 3 в обходе не пишет (D-C-112); `accept` и `DELETE` — в `NO_OTHER_BODY` (тело — только ключ).
 - `tests/test_app_assembly.py` (C, WP23.1): в `EXPECTED_ROUTES` и `_declared_routes` добавлены четыре маршрута конспекта §6.4 (§8.15 п.2 — новый маршрут контракта).
 - `tests/e2e/endpoints.py`, `tests/test_app_assembly.py` (C, WP22.2): маршрут снимка — в `T-A1`, в `NO_IDEMPOTENCY_KEY` и `MULTIPART` (`T-E2`, `T-E3`).
@@ -1791,6 +1814,13 @@ PR #77 (dbmate v2.36.0, sha256).
 - `tests/session/test_holdback.py` (B, до зелёного): `test_spoiler_found_only_at_the_end` ошибочно ждал спойлер только в `finish`, хотя по WP13.4 весь накопленный текст проверяется на каждом куске. Заменён на `test_spoiler_completed_inside_the_holdback` (спойлер ловится на куске, который его дописал) и `test_finish_checks_the_whole_text`. Проверка не ослаблена: показанный текст по-прежнему пуст.
 - `tests/llm/test_phase4_ai_layer.py` (`T111`): `max_output_tokens` десяти ролей — по замеру (D-B-134); `Т-§11.1` разрешает менять конфиг по замеру. Сила проверки не меняется.
 - `tests/test_contracts.py` (`T-A6`): в `PRODUCT` добавлен `agents` (ТЗ Ф4 §4.1). Сила проверки не меняется.
+- `tests/test_app_assembly.py` (C, PR #75, §8.15 п.2): `T-A1` — в набор маршрутов добавлен
+  `POST /v1/sessions/{session_id}/actions` (§6.4). `test_openapi_documents_every_response` — у
+  `/actions` ровно два ответа 2xx, `200` (SSE) и `201` (`{seq}`) по §4.7, у остальных — по-прежнему
+  ровно один; модель SSE-ответа принимается из `itemSchema` (так FastAPI описывает одно событие в
+  OpenAPI 3.2), модель обязательна, как раньше. `test_sse_endpoints_document_event_stream` расширен
+  на `/actions`. Тест падает на маршруте с одним 2xx или без модели события (§8.15 п.4).
+  `backend/openapi.json` пересобран `ops openapi`.
 - `compute/tests/math/test_equivalence.py`: `PARAMS` берётся из `test_params.py` (у `Params` новые поля, D-B-124). Утверждения не менялись.
 
 - D-C-119 (C, по D-A-113 и D-C-112 п.2): удалены вместе с кодом (§8.15 п.1) — `tests/domains/test_auth_and_learner.py::test_register_normalizes_email_and_rejects_duplicate` (вход по ссылке и ученик по адресу — `T-AU1` `test_magic_link_flow`), `::test_login_and_me_jwt_validation` (сессия, отзыв, 401 без неё — `T-AU4` `test_session_revocation`, `tests/auth/test_auth_routes.py::test_bad_link_and_no_session_are_401`), `::test_auth_rate_limiting_per_ip` (лимиты входа на адрес и IP — `T-AU2` `test_link_rate_limits_*`); `tests/session/test_fixtures.py::test_token_uses_dev_secret_when_jwt_secret_is_empty` (JWT нет); `tests/test_ops_phase3.py::test_seed_learners_refuses_without_jwt_secret` (JWT_SECRET нет, сессия не требует секрета); `tests/test_settings_meta_api.py::test_prod_jwt_secret_is_at_least_32_bytes` (JWT нет).
