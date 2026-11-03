@@ -15,6 +15,7 @@ repeated `batch_no` and `stroke_id` and order chunks by their key (the ULID), no
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -133,7 +134,10 @@ def _points(raw: list[list[float | int]]) -> tuple[Point, ...]:
 
 
 def chunk_max_batches(settings: Settings) -> int:
-    raise NotImplementedError
+    """Т-§15.2 «или при переполнении» (D-C-122): a chunk holds the batches the client sends in
+    `stroke_chunk_seconds` every `stroke_batch_ms`; more pending is an overflow. No new number:
+    the bound comes from the two parameters of Т-§15.2."""
+    return math.ceil(settings.stroke_chunk_seconds * 1000 / settings.stroke_batch_ms)
 
 
 class StrokeJournal:
@@ -152,6 +156,7 @@ class StrokeJournal:
         self._learner_id = learner_id
         self._session_id = session_id
         self._chunk_seconds = chunk_seconds
+        self._max_batches = max_batches
         self._state = _JournalState()
 
     def add(self, batch: StrokeBatch, *, now: datetime) -> bool:
@@ -176,17 +181,21 @@ class StrokeJournal:
         state = self._state
         if not state.pending or state.store_failed:
             return None
+        if len(state.pending) >= self._max_batches:
+            return 0.0  # overflow: write now
         due_at = state.pending[0][1] + timedelta(seconds=self._chunk_seconds)
         return max(0.0, (due_at - now).total_seconds())
 
     async def flush_due(self, *, now: datetime) -> list[int]:
-        """Write a chunk if the oldest pending batch waited `chunk_seconds`; the acknowledged
-        batch numbers (empty when nothing was due or the store is down)."""
+        """Write a chunk if the oldest pending batch waited `chunk_seconds` or `max_batches` are
+        pending; the acknowledged batch numbers (empty when nothing was due or the store is
+        down)."""
         state = self._state
         if not state.pending:
             return []
         oldest_at = state.pending[0][1]
-        if now - oldest_at < timedelta(seconds=self._chunk_seconds):
+        overflow = len(state.pending) >= self._max_batches
+        if not overflow and now - oldest_at < timedelta(seconds=self._chunk_seconds):
             return []
         return await self.flush()
 
