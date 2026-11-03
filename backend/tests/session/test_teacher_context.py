@@ -67,6 +67,8 @@ from quack.session.teacher_context import (
     render_session_plan,
     teacher_variables,
 )
+from tests.support import graph_read as fx
+from tests.support.graph_read import FixedGraphReader
 
 SETTINGS = Settings()
 LEARNER = uuid4()
@@ -253,19 +255,50 @@ def test_memory_picture_rendering() -> None:
     # Gap type: not shown without enough confidence; shown at the threshold.
     assert "Gap:" not in text
     sure = render_memory_picture(
-        _inputs(gap_type_confidence={TASK_SKILL: SETTINGS.gap_type_min_confidence}),
+        _inputs(slice=_with_task_skill(gap_type_confidence=SETTINGS.gap_type_min_confidence)),
         labels,
         SETTINGS,
         NOW_MS,
     )
     assert "Gap: mixes it up with a similar idea." in sure.splitlines()[0]
     unsure = render_memory_picture(
-        _inputs(gap_type_confidence={TASK_SKILL: SETTINGS.gap_type_min_confidence - 0.01}),
+        _inputs(
+            slice=_with_task_skill(gap_type_confidence=SETTINGS.gap_type_min_confidence - 0.01)
+        ),
         labels,
         SETTINGS,
         NOW_MS,
     )
     assert "Gap:" not in unsure
+
+
+def _with_task_skill(**fields: Any) -> MemorySlice:
+    """The slice with facts of the task skill changed (S4 fields of #136, D-A-126)."""
+    base = _slice()
+    skills = [s.model_copy(update=fields) if s.skill_id == TASK_SKILL else s for s in base.skills]
+    return base.model_copy(update={"skills": skills})
+
+
+async def test_memory_picture_on_the_s4_stub() -> None:
+    """`T-CX2` on `FixedGraphReader` (seam S4, D-A-126): the gap type shown by its confidence,
+    «forgot» by the last lapse, the conditions of a misconception; a skill without them shows
+    none of these (law 8)."""
+    reader = FixedGraphReader()
+    focus = SliceFocus(skill_ids=[fx.SKILL_FAILED, fx.SKILL_QUIET], topic_ids=[], domain_id=None)
+    memory = await reader.slice_for_turn(fx.LEARNER, uuid4(), focus)
+    names = {fx.SKILL_FAILED: "Adding fractions", fx.SKILL_QUIET: "Common denominator"}
+    inputs = PictureInputs(slice=memory, focus=focus, skill_names=names)
+    labels = LabelMap.build(
+        SETTINGS, skills=[fx.SKILL_FAILED, fx.SKILL_QUIET], misconceptions=[fx.MISCONCEPTION]
+    )
+    failed, quiet = render_memory_picture(inputs, labels, SETTINGS, fx.NOW_MS).splitlines()[:2]
+    assert "Gap: " in failed
+    days = (fx.NOW_MS - fx.LAPSE_AT_MS) // DAY_MS
+    assert f"forgot after a delay {days} days ago" in failed
+    assert f"{fx.MISCONCEPTION_STATEMENT}; shows when {fx.MISCONCEPTION_TRIGGERS[0]}" in failed
+    assert quiet.startswith("Common denominator (S2).")
+    for absent in ("Gap: ", "forgot", "shows when"):
+        assert absent not in quiet
 
 
 def test_memory_picture_selection_order_and_limit() -> None:

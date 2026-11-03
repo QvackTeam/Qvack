@@ -1027,7 +1027,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (WP14.2, `Т-§10.2`, `Т-§8.2`–`Т-§8.7`, доктрина `teacher@2`), п.5.
 - Обратимость: слова и порядок — в одном модуле.
 - Тесты: `T-CX2` — `tests/session/test_teacher_context.py::test_memory_picture_*`.
-- Не решено \[ПРОВЕРИТЬ\] — с A (S4, `quack/graph/read/models.py`): поля `SkillFact.gap_type_confidence`, `MisconceptionFact.triggers` (условия проявления, WP14.2), время последнего провала памяти у `SkillFact` («забыл»). До них «забыл» и условия не отрисовываются, тип пробела — только при переданной уверенности.
+- Решено (было \[ПРОВЕРИТЬ\] с A): поля S4 D-A-126 (#136) — тип пробела показывается по `SkillFact.gap_type_confidence` (не ниже `gap_type_min_confidence`), «forgot after a delay …» — по `SkillFact.last_lapse_at_ms`, условия проявления — «shows when …» по `MisconceptionFact.triggers`; без поля — ничего (закон 8). Тест — `test_memory_picture_on_the_s4_stub` на `FixedGraphReader`.
 - Требует подтверждения владельцем: нет
 
 ### D-B-158. Разговор и строки эпизодов (WP14.3)

@@ -105,15 +105,13 @@ class RevisedCheck:
 class PictureInputs:
     """What slot 7 is rendered from. `target_levels` — the target set of each skill (Т-§8.5);
     a skill without one shows the levels it has data on. `evidence` — the deciding evidence by
-    id. `gap_type_confidence` — `gapTypeConfidence` (Т-§8.4) by skill; without it the gap type
-    is not shown."""
+    id."""
 
     slice: MemorySlice
     focus: SliceFocus
     skill_names: Mapping[UUID, str]
     target_levels: Mapping[UUID, Sequence[Level]] = field(default_factory=dict)
     evidence: Mapping[UUID, EvidenceFact] = field(default_factory=dict)
-    gap_type_confidence: Mapping[UUID, float] = field(default_factory=dict)
     analyst_summary: str | None = None
     agent_results: Sequence[str] = ()
     revised_checks: Sequence[RevisedCheck] = ()
@@ -222,6 +220,8 @@ def _misconception_part(item: MisconceptionFact, inputs: PictureInputs, labels: 
     label = labels.label("misconception", item.misconception_id)
     head = _MISCONCEPTION_WORDS[item.status] + (f" ({label})" if label else "")
     text = f"{head}: {item.statement}"
+    if item.triggers:
+        text += "; shows when " + "; ".join(item.triggers)
     if item.confused_with_skill_id is not None:
         text += f"; mixes it up with {_name(item.confused_with_skill_id, inputs, labels)}"
     count = item.manifestation_count
@@ -238,6 +238,8 @@ def _retention(skill: SkillFact, settings: Settings, now_ms: int) -> str | None:
     last_shown = max((e.occurred_at_ms for e in skill.exposures), default=None)
     if last_shown is not None and now_ms - last_shown <= settings.hot_window_min * _MINUTE_MS:
         notes.append("shown minutes ago, still fresh in mind")
+    if skill.last_lapse_at_ms is not None:
+        notes.append(f"forgot after a delay {_when(skill.last_lapse_at_ms, now_ms)}")
     if skill.due_at_ms is None:
         notes.append("no checks after a delay yet")
     elif skill.due_at_ms <= now_ms:
@@ -266,7 +268,7 @@ def _skill_line(
     if shown:
         parts.append("Shown: " + ", ".join(shown) + ".")
     gap = skill.gap_type
-    confidence = inputs.gap_type_confidence.get(skill.skill_id)
+    confidence = skill.gap_type_confidence
     if (
         gap is not None
         and gap != "none"
