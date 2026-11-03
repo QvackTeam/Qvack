@@ -326,8 +326,9 @@ async def _topic_refresh_handler(job: ClaimedJob, ctx: JobContext) -> None:
             ctx.neo4j, learner_id=learner_id, skill_ids=skill_ids, k=ctx.settings.materials_k
         )
 
+    reader = create_graph_reader(ctx.neo4j, ctx.settings, learner_id=learner_id)  # D-A-144
     await refresh_topic_notes(
-        ctx.db, ctx.llm, create_graph_reader(ctx.neo4j, ctx.settings), prefetch, ctx.settings,
+        ctx.db, ctx.llm, reader, prefetch, ctx.settings,
         learner_id=learner_id, topic_id=UUID(job.payload["topic_id"]), key=str(job.id),
         redis=ctx.redis,
     )  # fmt: skip
