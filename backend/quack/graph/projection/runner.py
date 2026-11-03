@@ -11,6 +11,7 @@ Phase B folds the skills the batch touched (WP4); misconceptions, the profile an
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
@@ -21,10 +22,12 @@ from quack.config import Settings
 from quack.db import Db
 from quack.db.db import LockKeyspace
 from quack.events.log import StoredEvent
+from quack.graph.profile_fold import PROFILE_EVENT_TYPES
 from quack.graph.projection.phase_a import EventFailed, apply_events, batch_need
 from quack.graph.projection.phase_b import run_folds
 from quack.graph.projection.store import (
     load_fold_inputs,
+    load_profile_evidence,
     load_slice,
     load_topic_inputs,
     read_watermark,
@@ -83,9 +86,28 @@ def _event_refs(need: Need, events: dict[int, StoredEvent]) -> set[NodeRef]:
     return refs
 
 
+_PROFILE_EVENTS = (
+    "SELECT " + _EVENT_COLUMNS + " FROM core.events "
+    "WHERE learner_id = %(learner_id)s AND type = ANY(%(types)s) ORDER BY seq"
+)
+
+
+async def _profile_events(db: Db, learner_id: UUID) -> list[StoredEvent]:
+    """The journal events the profile fold reads (WP5.3)."""
+    types = sorted(PROFILE_EVENT_TYPES)
+    return await db.fetch_all(
+        _PROFILE_EVENTS, {"learner_id": learner_id, "types": types}, row=StoredEvent
+    )
+
+
 class _Neo4jFolds:
-    def __init__(self, neo4j: AsyncDriver, learner: str) -> None:
-        self._neo4j, self._learner = neo4j, learner
+    def __init__(self, neo4j: AsyncDriver, db: Db, learner_id: UUID) -> None:
+        self._neo4j, self._db, self._learner_id = neo4j, db, learner_id
+        self._learner = str(learner_id)
+
+    async def profile_inputs(self) -> tuple[SubGraph, Sequence[StoredEvent]]:
+        evidence = await load_profile_evidence(self._neo4j, self._learner)
+        return evidence, await _profile_events(self._db, self._learner_id)
 
     async def fold_inputs(self, skills: set[str], misconceptions: set[str]) -> SubGraph:
         return await load_fold_inputs(self._neo4j, self._learner, skills, misconceptions)
@@ -128,7 +150,8 @@ async def project_learner(
             )
             apply_events(events, batch)
             try:
-                await run_folds(batch, settings, _Neo4jFolds(neo4j, str(learner_id)))
+                loader = _Neo4jFolds(neo4j, db, learner_id)
+                await run_folds(batch, settings, loader, events)
             except Exception as exc:  # a fold error is a program error, like a handler's
                 raise EventFailed(events[-1].seq, exc) from exc
         except EventFailed as failed:

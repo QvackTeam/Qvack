@@ -54,4 +54,13 @@ class DeleteNode:
     id: str
 
 
-type Mutation = MergeNode | SetProps | MergeRel | DeleteRel | DeleteNode
+@dataclass(frozen=True)
+class RemoveProps:
+    """Properties that are «no data» now (`learned*` of the profile, WP5.3): absent, not null."""
+
+    label: str
+    node_id: str
+    keys: tuple[str, ...]
+
+
+type Mutation = MergeNode | SetProps | RemoveProps | MergeRel | DeleteRel | DeleteNode

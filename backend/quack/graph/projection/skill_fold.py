@@ -434,3 +434,15 @@ def fold_skill(
         for x in items
     }
     return SkillFold(skill, computed)
+
+
+def gate_flags(evidence: Sequence[FoldEvidence], novelty: Mapping[str, str]) -> dict[str, bool]:
+    """Whether each evidence of one skill passes the gate of its level (`Т-§7.3`, pair rule
+    included), with the novelty the fold already wrote — for the profile (WP5.3)."""
+    items = [_Ev(e, 0.0, novelty.get(e.id, "new"), False, False) for e in evidence]
+    return {
+        x.e.id: x.e.level >= 1
+        and _opens(x, x.e.level)
+        and _paired(x, [y for y in items if y.e.level == x.e.level])
+        for x in items
+    }

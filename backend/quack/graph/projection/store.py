@@ -321,6 +321,34 @@ async def load_topic_inputs(
         return await session.execute_read(_read_topics, learner_id, topics, skills, hubs)
 
 
+_PROFILE_EVIDENCE = (
+    "MATCH (e:Evidence)-[:ON]->(s:Skill) WHERE e.learnerId = $learner "
+    "AND e.derivedKind = 'direct' AND e.status = 'active' "
+    "OPTIONAL MATCH (e)-[:ON_TASK]->(t:Task) "
+    "RETURN e.id AS eid, properties(e) AS ep, s.id AS sid, properties(s) AS sp, "
+    "t.id AS tid, properties(t) AS tp"
+)
+
+
+async def _read_profile_evidence(tx: AsyncManagedTransaction, learner: str) -> SubGraph:
+    """The direct active evidence of the learner with its skill and task (WP5.3)."""
+    out = _Collected()
+    rows = await tx.run(literal(_PROFILE_EVIDENCE), learner=learner)
+    async for row in rows:
+        out.node("Evidence", row["eid"], row["ep"])
+        out.node("Skill", row["sid"], row["sp"])
+        out.rel(RelRecord("Evidence", row["eid"], "ON", "Skill", row["sid"], {}))
+        if row["tid"] is not None:
+            out.node("Task", row["tid"], row["tp"])
+            out.rel(RelRecord("Evidence", row["eid"], "ON_TASK", "Task", row["tid"], {}))
+    return out.subgraph()
+
+
+async def load_profile_evidence(driver: AsyncDriver, learner_id: str) -> SubGraph:
+    async with read_session(driver) as session:
+        return await session.execute_read(_read_profile_evidence, learner_id)
+
+
 async def load_slice(
     driver: AsyncDriver, learner_id: str, need: Need, event_refs: Iterable[NodeRef] = ()
 ) -> SubGraph:
@@ -387,6 +415,12 @@ async def _write(
         upserts[_label(n.label)].append({"id": n.id, "props": n.props})
     for label, rows in sorted(upserts.items()):
         query = f"UNWIND $rows AS r MERGE (n:{label} {{id: r.id}}) SET n += r.props"
+        await tx.run(literal(query), rows=rows)
+    removals: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for (label, node_id), keys in diff.remove_props:  # a null in `+=` removes the property
+        removals[_label(label)].append({"id": node_id, "props": dict.fromkeys(keys)})
+    for label, rows in sorted(removals.items()):
+        query = f"UNWIND $rows AS r MATCH (n:{label} {{id: r.id}}) SET n += r.props"
         await tx.run(literal(query), rows=rows)
     for (fl, rt, tl), rels in sorted(_rel_groups(diff.upsert_rels).items()):
         query = (

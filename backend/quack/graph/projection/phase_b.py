@@ -4,19 +4,34 @@ on the slice, and only the changed values reach Neo4j (the diff, `Т-§8.1` «о
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Protocol
 
 from quack.config import Settings
+from quack.events.log import StoredEvent
+from quack.graph.profile_fold import (
+    PROFILE_EVENT_TYPES,
+    EvidenceSample,
+    ProfileParams,
+    collect_profile_inputs,
+    profile_id,
+    profile_node_props,
+)
 from quack.graph.projection.misconception_fold import (
     FoldSign,
     MisconceptionParams,
     fold_misconception,
 )
-from quack.graph.projection.mutations import SetProps
-from quack.graph.projection.skill_fold import FoldEvidence, FoldExposure, FoldParams, fold_skill
+from quack.graph.projection.mutations import MergeNode, MergeRel, Mutation, RemoveProps, SetProps
+from quack.graph.projection.skill_fold import (
+    FoldEvidence,
+    FoldExposure,
+    FoldParams,
+    fold_skill,
+    gate_flags,
+)
 from quack.graph.projection.topic_fold import TopicGoal, TopicParams, TopicSkill, fold_topic
-from quack.graph.projection.types import SubGraph
+from quack.graph.projection.types import Props, SubGraph
 from quack.graph.projection.view import BatchSlice
 
 
@@ -174,9 +189,19 @@ class FoldLoader(Protocol):
         self, topics: set[str], skills: set[str], hubs: set[str]
     ) -> tuple[SubGraph, set[str]]: ...
 
+    async def profile_inputs(self) -> tuple[SubGraph, Sequence[StoredEvent]]:
+        """The direct active evidence of the learner and the journal events of the profile."""
+        ...
+
 
 class WholeSlice:
-    """The slice is the whole graph: nothing more to read."""
+    """The slice is the whole graph: nothing more to read; `events` — the journal so far."""
+
+    def __init__(self, events: Sequence[StoredEvent] = ()) -> None:
+        self._events = events
+
+    async def profile_inputs(self) -> tuple[SubGraph, Sequence[StoredEvent]]:
+        return SubGraph(), [e for e in self._events if e.type in PROFILE_EVENT_TYPES]
 
     async def fold_inputs(self, skills: set[str], misconceptions: set[str]) -> SubGraph:
         return SubGraph()
@@ -187,9 +212,48 @@ class WholeSlice:
         return SubGraph(), topics
 
 
-async def run_folds(batch: BatchSlice, settings: Settings, loader: FoldLoader) -> None:
-    """Phase B (WP4, WP5.2) — folds of the skills and misconceptions the batch touched; phase C
-    (WP6.1, WP6.2) — the topics of what changed (Т-§2.4)."""
+def fold_profile(batch: BatchSlice, events: Sequence[StoredEvent], params: ProfileParams) -> None:
+    """WP5.3 (`Т-§9.5`): `pref*`, the manner and `learned*` over the journal and the direct
+    active evidence with the gate flag of the skill fold; «no data» removes a `learned*`."""
+    by_skill: dict[str, list[FoldEvidence]] = {}
+    novelty: dict[str, str] = {}
+    for n in batch.nodes("Evidence"):
+        if n.props.get("derivedKind") != "direct" or (found := _evidence(batch, n.id)) is None:
+            continue
+        novelty[n.id] = _str(n.props.get("novelty"), "new")
+        for r in batch.rels("Evidence", n.id, "ON", out=True):
+            by_skill.setdefault(r.to_id, []).append(found)
+    samples: list[EvidenceSample] = []
+    for skill, evidence in sorted(by_skill.items()):
+        flags = gate_flags(evidence, novelty)
+        samples += [
+            EvidenceSample(e.seq, skill, e.tier, e.outcome, e.assistance, flags[e.id])  # type: ignore[arg-type]
+            for e in evidence
+        ]
+    folded, unset = profile_node_props(collect_profile_inputs(events, samples), params)
+    props: Props = dict(folded.items())
+    learner = batch.learner_id
+    node = profile_id(learner)
+    changes: list[Mutation]
+    if batch.node("Profile", node) is None:
+        changes = [
+            MergeNode("Learner", learner, {"learnerId": learner}),
+            MergeNode("Profile", node, {"learnerId": learner} | props),
+            MergeRel("Learner", learner, "HAS_PROFILE", "Profile", node, {}),
+        ]
+    else:
+        changes = [SetProps("Profile", node, props), RemoveProps("Profile", node, unset)]
+    batch.apply(changes)
+
+
+async def run_folds(
+    batch: BatchSlice,
+    settings: Settings,
+    loader: FoldLoader,
+    events: Sequence[StoredEvent] = (),
+) -> None:
+    """Phase B (WP4, WP5.2, WP5.3) — folds of the skills and misconceptions the batch touched and
+    of the profile; phase C (WP6.1, WP6.2) — the topics of what changed (Т-§2.4)."""
     skills, misconceptions = batch.dirty_skills(), batch.dirty_misconceptions()
     if skills or misconceptions:
         batch.extend(await loader.fold_inputs(skills, misconceptions))
@@ -197,6 +261,11 @@ async def run_folds(batch: BatchSlice, settings: Settings, loader: FoldLoader) -
         fold_dirty_misconceptions(
             batch, misconceptions, MisconceptionParams.from_settings(settings)
         )
+    evidence_changed = any(n.label == "Evidence" for n in batch.diff().upsert_nodes)
+    if evidence_changed or any(e.type in PROFILE_EVENT_TYPES for e in events):
+        loaded, journal = await loader.profile_inputs()
+        batch.extend(loaded)
+        fold_profile(batch, journal, ProfileParams.from_settings(settings))
     topics, touched, hubs = batch.topic_seeds()
     if topics or touched or hubs:
         loaded, topics = await loader.topic_inputs(topics, touched, hubs)

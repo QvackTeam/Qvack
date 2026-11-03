@@ -9,7 +9,7 @@ the batch. A handler that reads outside its own `needs(event)` is a program erro
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from quack.config import Settings
@@ -20,6 +20,7 @@ from quack.graph.projection.mutations import (
     MergeNode,
     MergeRel,
     Mutation,
+    RemoveProps,
     SetProps,
 )
 from quack.graph.projection.types import (
@@ -133,6 +134,7 @@ class SliceDiff:
     delete_nodes: list[NodeRef]
     upsert_rels: list[RelRecord]
     delete_rels: list[RelRecord]
+    remove_props: list[tuple[NodeRef, tuple[str, ...]]] = field(default_factory=list)
 
 
 class BatchSlice:
@@ -179,6 +181,9 @@ class BatchSlice:
                     if (label, node_id) not in self._nodes:
                         raise ValueError(f"SetProps on a missing node {label} {node_id}")
                     self._nodes[(label, node_id)].update(props)
+                case RemoveProps(label, node_id, keys):
+                    for key in keys:
+                        self._nodes.get((label, node_id), {}).pop(key, None)
                 case MergeRel(from_label, from_id, rel_type, to_label, to_id, props):
                     for end in ((from_label, from_id), (to_label, to_id)):
                         if end not in self._nodes:
@@ -210,6 +215,11 @@ class BatchSlice:
             if changed:
                 upsert_nodes.append(NodeRecord(label, node_id, changed))
         delete_nodes = sorted(ref for ref in self._loaded_nodes if ref not in self._nodes)
+        remove_props = [
+            (ref, tuple(sorted(set(before) - set(self._nodes[ref]))))
+            for ref, before in sorted(self._loaded_nodes.items())
+            if ref in self._nodes and set(before) - set(self._nodes[ref])
+        ]
         ordered = sorted(self._rels.items(), key=lambda item: str(item[0]))
         upsert_rels = [
             _copy(r)
@@ -221,7 +231,7 @@ class BatchSlice:
             for key, r in sorted(self._loaded_rels.items(), key=lambda item: str(item[0]))
             if key not in self._rels
         ]
-        return SliceDiff(upsert_nodes, delete_nodes, upsert_rels, delete_rels)
+        return SliceDiff(upsert_nodes, delete_nodes, upsert_rels, delete_rels, remove_props)
 
     def extend(self, loaded: SubGraph) -> None:
         """Phase B reads more of the store after phase A (the evidence of dirty skills): what
@@ -240,6 +250,13 @@ class BatchSlice:
         """Phase B reads the whole slice: folds are not handlers of one event (no `needs`)."""
         props = self._nodes.get((label, node_id))
         return None if props is None else dict(props)
+
+    def nodes(self, label: str) -> list[NodeRecord]:
+        return [
+            NodeRecord(node_label, node_id, dict(props))
+            for (node_label, node_id), props in sorted(self._nodes.items())
+            if node_label == label
+        ]
 
     def rels(self, label: str, node_id: str, rel_type: str, *, out: bool) -> list[RelRecord]:
         return [r for r in self._rels_of(label, node_id, out=out) if r.rel_type == rel_type]

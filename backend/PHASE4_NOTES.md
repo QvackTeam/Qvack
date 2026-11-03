@@ -889,6 +889,21 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Решение: `Neo4jGraphReader(ExtraReads)`; закрытые помощники `ExtraReads` переименованы (`_xrun`, `_xstable`, `_xevidence_rows`, `_xowner`) — прежние имена совпадали с ядром и расходились по смыслу. Читатель, привязанный к ученику, на чужой `learner_id` или чужой узел по id отвечает пустым (`review_candidates`, `similar_mistakes`, `past_solution`, `state_at`, `extraction_candidates`, `skill_history`, `prerequisites`, `prep_context`, `misconception_detail`). `profile` — после PR #176 (`read_profile`).
 - Тесты: `tests/graph/test_read_neo4j_core.py::test_factory_reader_does_not_leak_through_extra_reads` (до привязки `misconception_detail` читал чужое заблуждение).
 - Требует подтверждения владельцем: нет.
+### D-A-188. WP5.3 в фазе Б: профиль `learned*` подключён (после #176 в ветке)
+- Класс: B. WP5.3, WP3.3; `Т-§9.5`; `quack/graph/projection/phase_b.py` (`fold_profile`), `skill_fold.py` (`gate_flags`), `store.py`, `runner.py`, `mutations.py` (`RemoveProps`), `quack/graph/profile_fold.py`
+- Решение:
+  1. **Когда.** Профиль грязный, если в пачке есть событие из `PROFILE_EVENT_TYPES` или пачка изменила свидетельство.
+  2. **Вход.**
+     - Журнал этих типов ученика — из `core.events`.
+     - Все прямые действующие свидетельства ученика с навыком и задачей — из Neo4j.
+     - Флаг ворот (`passes_gate`) считает `gate_flags` по правилам свёртки навыка: ярус, исход, обход, новизна для уровней 4–6, правило пары. Новизна берётся та, что уже записала свёртка.
+  3. **Запись.** Узла `Profile` нет — создаётся с `HAS_PROFILE`. Есть — свойства ставятся, а «нет данных» удаляет `learned*`: мутация `RemoveProps`, в разнице `remove_props`, в Neo4j `SET n += {k: null}`. Отсутствие, а не ноль (закон 8).
+  4. **Типы.** `profile_fold` читает событие через протокол `JournalEvent` (`seq`, `type`, `schema_version`, `payload`), годятся и события Фазы 3 (тесты #176), и `rules@3`.
+  5. **Ветка.** #185 влил `phase-4-a-wp53-profile` (#176, в нём и #179): одна ветка вместо трёх по поручению человека A («минимум PR»).
+- Почему: §0.4.3 п.1–2; WP3.3 («Б — свёртки … заблуждений и профиля»).
+- Тесты: `tests/graph/test_projection_batches.py::test_profile_learned` (T-MS3); T-P1 проходит с профилем; свёртка профиля — `tests/graph/test_profile_fold.py` (#176).
+- Требует подтверждения владельцем: нет.
+
 ### Ответы потока A (2026-11-02)
 
 - **Состояние #78, #80.** Влиты в `phase-4` (слияние в `fc38d58` по сообщению B). Дальше A работает от `phase-4`.

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal, Protocol
 
 from quack.config import Settings
 from quack.events.event_types import (
@@ -29,10 +29,23 @@ from quack.events.event_types import (
     PreferenceSet,
     TurnCommitted,
 )
-from quack.events.models import StoredEvent
 from quack.events.registry import validate_payload
 from quack.graph.ids import deterministic_id
 from quack.graph.types import Props, PropValue
+
+
+class JournalEvent(Protocol):
+    """What the fold reads of an event: the stored event of Phase 3 or of `rules@3`."""
+
+    @property
+    def seq(self) -> int: ...
+    @property
+    def type(self) -> str: ...
+    @property
+    def schema_version(self) -> int: ...
+    @property
+    def payload(self) -> dict[str, Any]: ...
+
 
 # Т-§9.5: self-assessments 1–4 as probabilities.
 CONFIDENCE_PROBABILITY: dict[int, float] = {1: 0.25, 2: 0.5, 3: 0.75, 4: 0.95}
@@ -172,7 +185,7 @@ def pref_key(key: str) -> str:
 
 
 def collect_profile_inputs(
-    events: Iterable[StoredEvent], evidence: Sequence[EvidenceSample] = ()
+    events: Iterable[JournalEvent], evidence: Sequence[EvidenceSample] = ()
 ) -> ProfileInputs:
     """Journal events (any order, any superset: unrelated types are skipped) plus the evidence
     of the learner -> fold inputs. The latest `preference.set` per key and the latest

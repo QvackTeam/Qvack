@@ -124,7 +124,7 @@ async def _project(events: Sequence[StoredEvent], cuts: Sequence[bool]) -> SubGr
     for chunk in (c for c in chunks if c):
         batch = BatchSlice(str(LEARNER), store, done, RulesParams.from_settings(settings))
         apply_events(chunk, batch)
-        await run_folds(batch, settings, WholeSlice())
+        await run_folds(batch, settings, WholeSlice([*done, *chunk]), chunk)
         store, done = batch.snapshot(), [*done, *chunk]
     return store
 
@@ -161,7 +161,7 @@ def test_applying_a_batch_again_changes_nothing() -> None:
         settings = Settings()
         batch = BatchSlice(str(LEARNER), WHOLE, SCRIPT, RulesParams.from_settings(settings))
         apply_events(SCRIPT[-6:], batch)
-        await run_folds(batch, settings, WholeSlice())
+        await run_folds(batch, settings, WholeSlice(SCRIPT), SCRIPT[-6:])
         return batch.snapshot()
 
     assert _graph(asyncio.run(again())) == _graph(WHOLE)
@@ -202,3 +202,21 @@ def test_no_missing_properties() -> None:
     }
     assert missing == {}
     assert all(v is not None for props in nodes.values() for v in props.values())
+
+
+def test_profile_learned() -> None:
+    """T-MS3 (WP5.3, `Т-§9.5`): phase B writes the profile of the learner; below
+    `profile_min_samples` a `learned*` is «no data» — absent, and a value that lost its data is
+    removed from the node, not set to zero (law 8)."""
+    from quack.graph.profile_fold import ProfileParams, profile_id
+    from quack.graph.projection.phase_b import fold_profile
+    from quack.graph.projection.types import NodeRecord
+
+    profile = profile_id(LEARNER)
+    nodes, rels = _graph(WHOLE)
+    assert not [k for k in nodes[("Profile", profile)] if k.startswith("learned")]
+    assert ("Learner", str(LEARNER), "HAS_PROFILE", "Profile", profile) in rels
+    stale = NodeRecord("Profile", profile, {"learnerId": str(LEARNER), "learnedBranchRate": 0.5})
+    batch = BatchSlice(str(LEARNER), SubGraph(nodes=[stale]))
+    fold_profile(batch, [], ProfileParams())
+    assert batch.diff().remove_props == [(("Profile", profile), ("learnedBranchRate",))]
