@@ -234,3 +234,28 @@ async def test_unknown_type_stops_stream(pg_db: Db, neo4j: AsyncDriver, settings
     await resume(pg_db, broken)
     resumed = await project_learner(pg_db, neo4j, settings, broken)
     assert (resumed.status, resumed.applied_seq) == ("applied", 2)
+
+
+async def test_rules3_stale_rebuild(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """T-P8 (WP3.5, Д-§6.3): a learner with `projectorVersion = rules@2` is found by
+    `--stale-rules`; the rebuild puts `rules@3` and the graph of the batch loop."""
+    from quack.graph.projection.rebuild import rebuild_learner
+    from quack.graph.projection.store import stale_learners
+
+    learner = await create_learner(pg_db)
+    await append_events(pg_db, learner, _materials(*[uuid4() for _ in range(5)]))
+    await _project_all(pg_db, neo4j, settings, learner)
+    projected = await _graph(neo4j, learner)
+    async with neo4j.session() as session:
+        await session.run(
+            "MATCH (l:Learner {id: $l}) SET l.projectorVersion = 'rules@2' "
+            "CREATE (:Skill {id: $junk, learnerId: $l})",
+            l=str(learner),
+            junk=str(uuid4()),
+        )
+    assert str(learner) in await stale_learners(neo4j, RULES_VERSION)
+    outcome = await rebuild_learner(pg_db, neo4j, settings, learner)
+    assert (outcome.status, outcome.applied_seq) == ("rebuilt", 6)
+    assert str(learner) not in await stale_learners(neo4j, RULES_VERSION)
+    rebuilt = await _graph(neo4j, learner)
+    assert rebuilt == projected  # the junk is gone, the rest is the same graph

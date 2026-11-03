@@ -442,3 +442,49 @@ async def write_batch(
     applied whole or not at all)."""
     async with driver.session() as session:
         await session.execute_write(_write, learner_id, diff, seq, version)
+
+
+async def replace_learner(
+    driver: AsyncDriver,
+    learner_id: str,
+    graph: SubGraph,
+    seq: int,
+    version: str,
+    *,
+    chunk: int | None = None,
+) -> None:
+    """Rebuild (WP3.5, `Т-§2.7`): the learner's subgraph is replaced. `chunk=None` — in one
+    transaction; otherwise the old subgraph is deleted and the new one written by parts of at
+    most `chunk` operations, the watermark last (a big learner without an active session)."""
+    diff = SliceDiff(upsert_nodes=list(graph.nodes), delete_nodes=[], upsert_rels=list(graph.rels),
+                     delete_rels=[])  # fmt: skip
+
+    async def delete(tx: AsyncManagedTransaction) -> None:
+        for label in sorted(LABELS):
+            query = f"MATCH (n:{_label(label)}) WHERE n.learnerId = $learner DETACH DELETE n"
+            await tx.run(literal(query), learner=learner_id)
+
+    async def whole(tx: AsyncManagedTransaction) -> None:
+        await delete(tx)
+        await _write(tx, learner_id, diff, seq, version)
+
+    async with driver.session() as session:
+        if chunk is None:
+            await session.execute_write(whole)
+            return
+        await session.execute_write(delete)
+        for start in range(0, len(diff.upsert_nodes), chunk):
+            part = SliceDiff(diff.upsert_nodes[start : start + chunk], [], [], [])
+            await session.execute_write(_write, learner_id, part, 0, "")
+        for start in range(0, len(diff.upsert_rels), chunk):
+            part = SliceDiff([], [], diff.upsert_rels[start : start + chunk], [])
+            await session.execute_write(_write, learner_id, part, 0, "")
+        await session.execute_write(_write, learner_id, SliceDiff([], [], [], []), seq, version)
+
+
+async def stale_learners(driver: AsyncDriver, version: str) -> list[str]:
+    """`ops rebuild --stale-rules` (WP3.5, Д-§6.3): learners projected by other rules."""
+    query = "MATCH (l:Learner) WHERE coalesce(l.projectorVersion, '') <> $v RETURN l.id AS id"
+    async with read_session(driver) as session:
+        result = await session.run(literal(query), v=version)
+        return sorted([row["id"] async for row in result])
