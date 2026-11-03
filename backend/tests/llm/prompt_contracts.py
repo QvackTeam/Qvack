@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from quack.agents import schemas as agents
 from quack.artifacts.schemas import ArtifactGenOutput
+from quack.canvas.recognition import RecognizerOutput
 from quack.domains.schemas import CuratorOutput, DiagnosticOutput, StructurerOutput
 from quack.llm.labels import LABEL_PREFIX
 from quack.llm.strict_schema import to_strict_json_schema
@@ -62,6 +63,8 @@ PHASE4_PROMPT_SCHEMAS: dict[str, tuple[type[BaseModel], ...]] = {
     "domain_classifier@1": (agents.DomainClassifierOutput,),
     "viz_builder@1": (agents.VizBuilderOutput,),
     "release_judge@1": (agents.ReleaseJudgeOutput,),
+    # Stream C, layer 2 by §7.3 п.2 (D-C-123).
+    "recognizer@1": (RecognizerOutput,),
 }
 
 # Every prompt with its schemas: what `T-M5` and `PROMPT_CONTRACTS.md` cover.
