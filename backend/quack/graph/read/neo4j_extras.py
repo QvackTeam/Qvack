@@ -129,20 +129,21 @@ class ExtraReads:
     # Optional resources; the class that inherits sets them when it has them.
     _embedder: EmbeddingClient | None = None
     _session_factory: SessionFactory | None = None
+    _bound: UUID | None = None  # the learner of a bound reader (D-A-144)
 
     # --- plumbing -----------------------------------------------------------------------
 
-    async def _run(self, query: str, **params: Any) -> list[Record]:
+    async def _xrun(self, query: str, **params: Any) -> list[Record]:
         result = await self._neo4j.execute_query(cypher(query), parameters_=params, routing_="r")
         return list(result.records)
 
     async def _watermark(self, learner_id: str) -> int:
-        rows = await self._run(
+        rows = await self._xrun(
             "MATCH (l:Learner {id: $l}) RETURN l.projectedSeq AS seq", l=learner_id
         )
         return _int(rows[0]["seq"]) if rows else 0
 
-    async def _stable[T](self, learner_id: str, read: Callable[[], Awaitable[T]]) -> T:
+    async def _xstable[T](self, learner_id: str, read: Callable[[], Awaitable[T]]) -> T:
         """Т-§2.6: watermark, slice, watermark; equal — consistent, otherwise again. When the
         retries run out the last read is returned (law 9: the answer never waits)."""
         attempts = 1 + max(0, self._settings.snapshot_read_retries)
@@ -153,17 +154,17 @@ class ExtraReads:
             if attempts <= 0 or before == await self._watermark(learner_id):
                 return result
 
-    async def _owner(self, label: str, node_id: UUID) -> str | None:
+    async def _xowner(self, label: str, node_id: UUID) -> str | None:
         """`learnerId` of an anchor node; `label` comes from code constants only."""
-        rows = await self._run(
+        rows = await self._xrun(
             f"MATCH (n:{label} {{id: $id}}) RETURN n.learnerId AS learner", id=str(node_id)
         )
         return _text(rows[0]["learner"]) if rows else None
 
-    async def _evidence_rows(
+    async def _xevidence_rows(
         self, learner_id: str, skill_ids: Sequence[str]
     ) -> dict[str, list[EvidenceRow]]:
-        rows = await self._run(
+        rows = await self._xrun(
             "MATCH (e:Evidence)-[:ON]->(s:Skill) WHERE s.learnerId = $l AND e.learnerId = $l "
             "AND s.id IN $skills AND e.status = 'active' AND e.level >= 1 "
             "RETURN s.id AS skill, e.level AS level, e.tier AS tier, e.outcome AS outcome, "
@@ -189,12 +190,12 @@ class ExtraReads:
     async def skill_history(
         self, skill_id: UUID, level: Level | None = None, limit: int = 10
     ) -> list[EvidenceFact]:
-        learner = await self._owner("Skill", skill_id)
+        learner = await self._xowner("Skill", skill_id)
         if learner is None:
             return []
 
         async def read() -> list[EvidenceFact]:
-            rows = await self._run(
+            rows = await self._xrun(
                 "MATCH (s:Skill {id: $skill}) WHERE s.learnerId = $l "
                 "MATCH (e:Evidence)-[:ON]->(s) WHERE e.learnerId = $l AND e.status = 'active' "
                 "AND e.level >= 1 AND ($level IS NULL OR e.level = $level) "
@@ -212,15 +213,15 @@ class ExtraReads:
             facts = (_evidence_fact(r) for r in rows)
             return [f for f in facts if f is not None]
 
-        return await self._stable(learner, read)
+        return await self._xstable(learner, read)
 
     async def prerequisites(self, skill_id: UUID, limit: int = 10) -> list[PrerequisiteFact]:
-        learner = await self._owner("Skill", skill_id)
+        learner = await self._xowner("Skill", skill_id)
         if learner is None:
             return []
 
         async def read() -> list[PrerequisiteFact]:
-            rows = await self._run(
+            rows = await self._xrun(
                 "MATCH (s:Skill {id: $skill}) WHERE s.learnerId = $l "
                 "MATCH (s)-[r:REQUIRES]->(p:Skill) WHERE p.learnerId = $l "
                 f"RETURN p {SKILL_PROJECTION} AS p, coalesce(r.confidence, 1.0) AS confidence "
@@ -229,7 +230,7 @@ class ExtraReads:
                 l=learner,
                 limit=limit,
             )
-            evidence = await self._evidence_rows(learner, [r["p"]["id"] for r in rows])
+            evidence = await self._xevidence_rows(learner, [r["p"]["id"] for r in rows])
             return [
                 PrerequisiteFact(
                     skill_id=UUID(r["p"]["id"]),
@@ -239,7 +240,7 @@ class ExtraReads:
                 for r in rows
             ]
 
-        return await self._stable(learner, read)
+        return await self._xstable(learner, read)
 
     # --- similar_mistakes, past_solution (Т-§10.4, Т-§3.4.6) ----------------------------
 
@@ -253,7 +254,7 @@ class ExtraReads:
         lid = str(learner_id)
         vector: list[float] | None
         if evidence_id is not None:
-            rows = await self._run(
+            rows = await self._xrun(
                 "MATCH (e:Evidence {id: $id}) WHERE e.learnerId = $l RETURN e.embedding AS v",
                 id=str(evidence_id),
                 l=lid,
@@ -278,7 +279,7 @@ class ExtraReads:
         )
 
         async def read() -> list[SimilarMistake]:
-            found = await self._run(
+            found = await self._xrun(
                 query,
                 vector=vector,
                 l=lid,
@@ -300,7 +301,7 @@ class ExtraReads:
                 )
             return result
 
-        return await self._stable(lid, read)
+        return await self._xstable(lid, read)
 
     async def past_solution(
         self, learner_id: UUID, task_id: UUID | None = None, skill_id: UUID | None = None
@@ -311,7 +312,7 @@ class ExtraReads:
         limit = self._settings.memory_tool_limits.get("past_solution", 2)
 
         async def read() -> list[PastSolution]:
-            rows = await self._run(
+            rows = await self._xrun(
                 "MATCH (e:Evidence)-[:ON]->(s:Skill) WHERE e.learnerId = $l AND s.learnerId = $l "
                 "AND e.status = 'active' AND e.quote IS NOT NULL AND e.quote <> '' "
                 "AND ($skill IS NULL OR s.id = $skill) "
@@ -345,7 +346,7 @@ class ExtraReads:
                 )
             return solutions
 
-        return await self._stable(lid, read)
+        return await self._xstable(lid, read)
 
     # --- misconceptions (Т-§9.3) --------------------------------------------------------
 
@@ -354,7 +355,7 @@ class ExtraReads:
     ) -> list[MisconceptionFact]:
         if not skill_ids:
             return []
-        rows = await self._run(
+        rows = await self._xrun(
             "MATCH (m:Misconception)-[:ABOUT]->(s:Skill) WHERE m.learnerId = $l "
             "AND s.learnerId = $l AND s.id IN $skills AND m.status IN $statuses "
             "OPTIONAL MATCH (m)-[:CONFUSED_WITH]->(c:Skill) WHERE c.learnerId = $l "
@@ -392,7 +393,7 @@ class ExtraReads:
     async def misconception_detail(self, misconception_id: UUID) -> MisconceptionDetail | None:
         """The id goes through `Alias`; a misconception that is not live (`dismissed`, `fixed`,
         `disputed`) is `None`, like a missing one: nothing to describe."""
-        anchor = await self._run(
+        anchor = await self._xrun(
             "MATCH (m:Misconception {id: $id}) RETURN m.id AS mid, m.learnerId AS learner "
             "UNION MATCH (:Alias {id: $id})-[:ALIAS_OF*1..5]->(m:Misconception) "
             "RETURN m.id AS mid, m.learnerId AS learner",
@@ -401,9 +402,11 @@ class ExtraReads:
         if not anchor:
             return None
         mid, learner = str(anchor[0]["mid"]), str(anchor[0]["learner"])
+        if self._bound is not None and learner != str(self._bound):
+            return None  # D-A-144: a reader bound to a learner does not read another's nodes
 
         async def read() -> MisconceptionDetail | None:
-            head = await self._run(
+            head = await self._xrun(
                 "MATCH (m:Misconception {id: $mid}) WHERE m.learnerId = $l "
                 "OPTIONAL MATCH (m)-[:ABOUT]->(s:Skill) WHERE s.learnerId = $l "
                 "RETURN m.status AS status, m.statement AS statement, m.triggers AS triggers, "
@@ -416,7 +419,7 @@ class ExtraReads:
             skill = _uuid(head[0]["skill"])
             if skill is None:
                 return None
-            rows = await self._run(
+            rows = await self._xrun(
                 "MATCH (e:Evidence)-[:MANIFESTS]->(m:Misconception {id: $mid}) "
                 "WHERE m.learnerId = $l AND e.learnerId = $l AND e.status = 'active' "
                 "OPTIONAL MATCH (e)-[:ON_TASK]->(t:Task) WHERE t.learnerId = $l "
@@ -447,7 +450,7 @@ class ExtraReads:
                 manifestations=manifestations,
             )
 
-        return await self._stable(learner, read)
+        return await self._xstable(learner, read)
 
     # --- extraction_candidates (WP15 п.2, D-A-135) --------------------------------------
 
@@ -470,7 +473,7 @@ class ExtraReads:
             misconceptions = await self._misconception_facts(lid, [str(c.skill_id) for c in skills])
             return ExtractionCandidates(skills=skills, misconceptions=misconceptions)
 
-        return await self._stable(lid, read)
+        return await self._xstable(lid, read)
 
     async def _candidate_skills(
         self,
@@ -483,7 +486,7 @@ class ExtraReads:
     ) -> list[CandidateSkill]:
         seeds = {
             r["id"]
-            for r in await self._run(
+            for r in await self._xrun(
                 "MATCH (e:Evidence)-[:ON]->(s:Skill) WHERE e.learnerId = $l AND s.learnerId = $l "
                 "AND e.sourceSessionId = $session AND e.status = 'active' RETURN s.id AS id "
                 "UNION MATCH (m:Misconception)-[:ABOUT]->(s:Skill) WHERE m.learnerId = $l "
@@ -506,7 +509,7 @@ class ExtraReads:
         if skill_ids is not None or topic_id is not None:
             # Re-extraction: the pool is the topic or the listed skills, nothing else.
             remember(
-                await self._run(
+                await self._xrun(
                     "MATCH (t:Topic)-[:COVERS]->(s:Skill) WHERE t.learnerId = $l "
                     "AND s.learnerId = $l AND ($topic IS NULL OR t.id = $topic) "
                     "AND ($skills IS NULL OR s.id IN $skills) "
@@ -522,7 +525,7 @@ class ExtraReads:
 
         if seeds:
             remember(
-                await self._run(
+                await self._xrun(
                     "MATCH (seed:Skill) WHERE seed.learnerId = $l AND seed.id IN $seeds "
                     "MATCH (t:Topic)-[:COVERS]->(seed) WHERE t.learnerId = $l "
                     "MATCH (t)-[:COVERS]->(s:Skill) WHERE s.learnerId = $l "
@@ -536,7 +539,7 @@ class ExtraReads:
         ]
         if vector:
             reserve = max(int(self._settings.vector_search_reserve), k)
-            near = await self._run(
+            near = await self._xrun(
                 "CYPHER 25 MATCH (s:Skill) SEARCH s IN (VECTOR INDEX skill_emb FOR $vector "
                 f"WHERE s.learnerId = $l LIMIT {reserve}) SCORE AS score "
                 "MATCH (t:Topic)-[:COVERS]->(s) WHERE t.learnerId = $l "
@@ -558,7 +561,7 @@ class ExtraReads:
     ) -> list[ReviewCandidate]:
         lid = str(learner_id)
         chosen = scope or ReviewScope()
-        return await self._stable(lid, lambda: self._review(lid, now_ms, chosen))
+        return await self._xstable(lid, lambda: self._review(lid, now_ms, chosen))
 
     async def _review(self, lid: str, now_ms: int, scope: ReviewScope) -> list[ReviewCandidate]:
         cfg = self._settings
@@ -650,7 +653,7 @@ class ExtraReads:
         return nearest
 
     async def _skill_rows(self, lid: str) -> dict[str, _SkillRow]:
-        rows = await self._run(
+        rows = await self._xrun(
             "MATCH (s:Skill) WHERE s.learnerId = $l "
             "OPTIONAL MATCH (t:Topic)-[:COVERS]->(s) WHERE t.learnerId = $l "
             f"RETURN s {SKILL_PROJECTION} AS s, t.id AS topic",
@@ -663,14 +666,14 @@ class ExtraReads:
         composition: it is every non-hidden topic of its domain (Т-§4.8)."""
         defaults = self._settings.control_type_levels
         hubs: dict[str, _HubCoverage] = {}
-        listed = await self._run(
+        listed = await self._xrun(
             "MATCH (h:Hub)-[i:INCLUDES]->(t:Topic) WHERE h.learnerId = $l AND t.learnerId = $l "
             "AND coalesce(t.status, 'active') <> 'hidden' "
             "RETURN h.id AS hub, h.deadlineAtMs AS deadline, h.controlType AS control, "
             "t.id AS topic, i.requiredLevels AS levels",
             l=lid,
         )
-        whole = await self._run(
+        whole = await self._xrun(
             "MATCH (d:Domain)-[:HAS_HUB]->(h:Hub) WHERE h.learnerId = $l AND h.kind = 'domain_all' "
             "MATCH (d)-[:HAS_TOPIC]->(t:Topic) WHERE t.learnerId = $l "
             "AND coalesce(t.status, 'active') <> 'hidden' "
@@ -689,7 +692,7 @@ class ExtraReads:
 
     async def _rechecks(self, lid: str, now_ms: int) -> set[str]:
         window = self._settings.watch_days * MS_PER_DAY
-        rows = await self._run(
+        rows = await self._xrun(
             "MATCH (m:Misconception)-[:ABOUT]->(s:Skill) WHERE m.learnerId = $l "
             "AND s.learnerId = $l AND m.status = 'watching' "
             "RETURN s.id AS skill, m.watchSinceMs AS since",
@@ -700,7 +703,7 @@ class ExtraReads:
     async def _goal_prerequisites(self, lid: str, goal: Sequence[UUID]) -> set[str]:
         if not goal:
             return set()
-        rows = await self._run(
+        rows = await self._xrun(
             "MATCH (g:Skill) WHERE g.learnerId = $l AND g.id IN $goal "
             "MATCH (g)-[r:REQUIRES*1..2]->(p:Skill) WHERE p.learnerId = $l "
             "AND all(x IN r WHERE x.confidence >= $min) RETURN DISTINCT p.id AS id",
@@ -715,7 +718,7 @@ class ExtraReads:
     async def prep_context(self, hub_id: UUID, now_ms: int) -> PrepContext:
         """Slot 6 data. `control_materials` stays empty: the graph keeps no kind of a control
         material (sample exam, past variant, …) — see D-A-152."""
-        learner = await self._owner("Hub", hub_id)
+        learner = await self._xowner("Hub", hub_id)
         if learner is None:
             return PrepContext(hub_id=hub_id, ready_count=0, total_count=0)
 
@@ -741,7 +744,7 @@ class ExtraReads:
                 candidates=candidates,
             )
 
-        return await self._stable(learner, read)
+        return await self._xstable(learner, read)
 
     # --- state_at (WP8.3, Т-§2.6) -------------------------------------------------------
 
