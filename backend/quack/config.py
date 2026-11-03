@@ -369,13 +369,11 @@ class Settings(BaseSettings):
         }
     )
     llm_concurrency_default: int = 4
-    # WP5.7 (Т-§11.1): reasoning effort, output limit and timeout by role; roles without an
-    # entry in llm_role_timeout_s use llm_timeout_sec. Teacher "high" is chosen per turn (WP6.5).
+    # WP5.7 (Т-§11.1): reasoning effort, output limit and timeout of the Phase 3 roles outside
+    # `llm_roles`, and overrides of its rows (D-B-208); the rest use llm_timeout_sec. Teacher
+    # "high" is chosen per turn (WP6.5).
     llm_role_reasoning: dict[str, Literal["low", "high"]] = Field(
         default_factory=lambda: {
-            "teacher": "low",
-            "teacher_fallback": "low",
-            "extractor": "high",
             "evaluator": "high",
             "diagnostic": "high",
             "task_gen": "high",
@@ -386,9 +384,6 @@ class Settings(BaseSettings):
     )
     llm_role_max_output_tokens: dict[str, int] = Field(
         default_factory=lambda: {
-            "teacher": 8192,
-            "teacher_fallback": 4096,
-            "extractor": 4096,
             "evaluator": 4096,
             "diagnostic": 4096,
             "task_gen": 4096,
@@ -398,9 +393,7 @@ class Settings(BaseSettings):
         }
     )
     max_output_tokens_cap: int = 16384
-    llm_role_timeout_s: dict[str, float] = Field(
-        default_factory=lambda: {"teacher": 45.0, "teacher_fallback": 30.0}
-    )
+    llm_role_timeout_s: dict[str, float] = Field(default_factory=dict)
     # WP5.2 (Т-§11.2): retries on failure and on 429; base_ms and max_wait_s are Phase 3
     # decisions (ТЗ §6.2).
     llm_retry_attempts: int = 2
@@ -484,8 +477,15 @@ class Settings(BaseSettings):
             "prerequisites": 10,
         }
     )
-    # WP16.3 (Т-§4.3).
+    # WP16.3 (Т-§4.3, Т-§4.2, Т-§4.6; D-B-205): candidates per subject; the confidence of
+    # `same_idea` by the category of the model; of `REQUIRES` by origin (material > model).
     candidate_k: int = 15
+    same_idea_confidence: dict[str, float] = Field(
+        default_factory=lambda: {"low": 0.4, "medium": 0.75, "high": 0.9}
+    )
+    reconcile_requires_confidence: dict[str, float] = Field(
+        default_factory=lambda: {"material": 0.85, "model": 0.65}
+    )
     # WP16.3 (Т-§4.10; D-B-185): a duplicate candidate scores cosine + weight × shared neighbours.
     hygiene_min_score: float = 0.9
     hygiene_neighbour_weight: float = 0.1
@@ -747,6 +747,25 @@ class Settings(BaseSettings):
         if role in self.llm_roles:
             return self.llm_roles[role].model
         return self.llm_default_model
+
+    def effort_for_role(self, role: str) -> Literal["low", "high"] | None:
+        """An `llm_role_reasoning` entry, else the role row of `llm_roles` (D-B-208)."""
+        if role in self.llm_role_reasoning:
+            return self.llm_role_reasoning[role]
+        return self.llm_roles[role].effort if role in self.llm_roles else None
+
+    def max_output_tokens_for_role(self, role: str) -> int | None:
+        """An `llm_role_max_output_tokens` entry, else the role row of `llm_roles` (D-B-208)."""
+        if role in self.llm_role_max_output_tokens:
+            return self.llm_role_max_output_tokens[role]
+        return self.llm_roles[role].max_output_tokens if role in self.llm_roles else None
+
+    def timeout_for_role(self, role: str) -> float:
+        """An `llm_role_timeout_s` entry, else the role row of `llm_roles`, else
+        `llm_timeout_sec` (D-B-208)."""
+        if role in self.llm_role_timeout_s:
+            return self.llm_role_timeout_s[role]
+        return self.llm_roles[role].timeout_s if role in self.llm_roles else self.llm_timeout_sec
 
     def secret_values(self) -> list[str]:
         """Values the logger must mask (Д-§7)."""

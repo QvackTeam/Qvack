@@ -23,6 +23,62 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-B-207. `GET /v1/sessions/{id}/jobs`: модель ответа и проверка владения (WP7.4, issue #212)
+- Класс: B
+- WP / место: WP7.4, §4.8, Т-§13.8; `quack/session/router.py::session_jobs`, `schemas.SessionJobsResponse`
+- Контекст: §4.8/Т-§13.8 задают состав плашки (visible, `queued`/`running`), но не форму ответа и не способ проверки сессии
+- Решение: ответ `{jobs: [{job_key, kind, status, created_at}]}` (как `VisibleJob`, обёртка как у `SessionListResponse`); владение — `sessions.get_session` (`content.sessions`, как у `/actions`), `LookupError` → `404 NOT_FOUND`; задачи — `queue_p4.visible_jobs`
+- Почему: Т-§13.8, issue #212, §7.3 п.3
+- Обратимость: да
+- Тесты: `tests/session/test_session_jobs_route.py`, реестр `tests/e2e/routes/b.py`
+### D-B-208. `effort`, лимит выхода и таймаут роли — из строки `llm_roles` (WP10.1 п.1)
+- Класс: A (исправление ошибки)
+- WP / место: WP10.1 п.1; `quack/config.py` (`effort_for_role`, `max_output_tokens_for_role`, `timeout_for_role`), `quack/llm/gateway.py`, `scripts/meta_smoke.py`
+- Контекст: шлюз брал `effort`, `max_output_tokens` и таймаут только из словарей Фазы 3 (`llm_role_reasoning`, `llm_role_max_output_tokens`, `llm_role_timeout_s`): роли таблицы Фазы 4 уходили без `effort` и без лимита, замер D-B-134 не применялся (находка WP10.7)
+- Решение: запись словаря Фазы 3 — переопределение, иначе строка `llm_roles`, иначе (таймаут) `llm_timeout_sec`; из словарей Фазы 3 убраны `teacher`, `teacher_fallback`, `extractor` — их значения теперь из таблицы (`extractor` 16 384, `teacher_fallback` 8192 по D-B-134)
+- Почему: Т-§11.1, ТЗ Ф4 WP10.1 п.1 «ровно таблицы»; та же ошибка, что D-B-188
+- Обратимость: три функции
+- Тесты: `tests/test_llm_runtime.py` (T-L8: тело запроса), `tests/llm/test_meta_smoke.py`
+- Требует подтверждения владельцем: нет
+
+### D-B-204. Без ключа — «Не проверено», код 1; в отчёте — что ушло в запросе (WP10.7)
+- Класс: B
+- WP / место: WP10.7, DoD п.6a; `backend/scripts/meta_smoke.py` (`run`, `render_report`, `exit_code`)
+- Контекст: ТЗ: «без ключа — „Не проверено“ с командой», «код выхода как в Фазе 3» (0 — все роли прошли, 1 — иначе); как отметить пропущенную роль и что писать в отчёт, не сказано
+- Решение: пустой `META_API_KEY` — сеть и база не трогаются, в stdout (и `--out`) текст «Не проверено» с точной командой, код 1 (ничего не проверено — не зелёный). Роль без файла промпта в реестре (`material_parser`, `viz_checker`) — строка `skipped:no_prompt`, код выхода её не считает ошибкой, но отчёт перечисляет такие роли под «Не проверено». Отчёт: таблица «роль → статус, модель, задержка» и по строке JSON на роль; к полям Фазы 3 добавлены `sent_effort`, `sent_max_output_tokens` — что реально ушло в запросе (`effort` — строка таблицы ролей). Повод: шлюз берёт `effort` и лимит выхода из старых `llm_role_reasoning`/`llm_role_max_output_tokens` (только роли Фазы 3), а не из `llm_roles`, поэтому у ролей Фазы 4 живой прогон покажет `sent_* = null`; правка шлюза — отдельным пакетом (см. отчёт диспетчеру)
+- Почему: ТЗ Ф4 WP10.7, ТЗ Ф3 DoD п.6a; Т-§11.1 (таблица ролей — источник `effort` и лимита)
+- Обратимость: да, только скрипт
+- Тесты: `tests/llm/test_meta_smoke.py` — прогон без ключа, строка с ошибкой схемы даёт код 1
+- Требует подтверждения владельцем: нет
+
+### D-B-203. Состав живого прогона: 26 ролей таблицы, промпты Ф3 вне таблицы, проба стрима с инструментом (WP10.7)
+- Класс: B
+- WP / место: WP10.7, `Т-§11.8` п.1; `backend/scripts/meta_smoke.py`
+- Контекст: ТЗ: «все роли и стриминг с инструментом»; какой вход, какая схема у роли с двумя схемами, на какой модели стрим и как гарантировать вызов инструмента (Meta принимает только `tool_choice: auto`), не сказано
+- Решение: (1) строка на каждую из 26 ролей `Settings.llm_roles` в порядке таблицы: текстовая — один `generate_structured` по промпту её строки таблицы (`teacher@2`, `analyst@1` для `analyst_deep`) и первой схеме из `ROLE_SCHEMAS` (`builder` — `BuilderOutput`, режим `Reconcile`; `recognizer` — `RecognizerOutput`, режим `line`); недостающие переменные промпта — «none», как в Фазе 3; `recognizer`, `verdict_free` получают встроенный PNG; `segmenter` — `gateway.segment(png, concept="circle")`, `voice` — `transcribe` на 0,5 с тона WAV 16 кГц, `illustrator` — `illustrate`. (2) Шесть промптов Фазы 3 вне таблицы (`evaluator`, `task_gen`, `structurer`, `curator`, `diagnostic`, `artifacts`) остаются; `teacher@1`, `extractor@2`, `teacher_fallback@1` сняты — заменены `teacher@2`, `extractor@3`. (3) Строка `stream_tool`: `LLMGateway.streaming` + `run_tool_loop` на модели `teacher` (Wonder, как в `Т-§11.8`): свой инструмент `smoke_lookup` и короткая инструкция в коде скрипта (вход пробы, не промпт роли) «вызови функцию, затем ответь `{value}` по её результату»; успех — инструмент вызван, шагов ≥ 2, `value` = результату, ответ прошёл строгую схему. Вызов инструмента модель делает сама (`auto`): `NoToolCall` в статусе — результат прогона, не сбой скрипта
+- Почему: ТЗ Ф4 WP10.7, Т-§11.8 п.1, Т-§11.1; D-B-187 (не текстовые роли идут через `segment/transcribe/illustrate`)
+- Обратимость: да, только скрипт и его тест
+- Тесты: `tests/llm/test_meta_smoke.py` — все роли таблицы и стрим на подменном провайдере (ответ каждой текстовой роли строится из её строгой схемы), набор вызовов совпадает с `ALL_PROMPT_SCHEMAS` кроме снятых версий
+### D-B-206. Сверка: ответы модели в события, повтор и встречные связи (WP16.3)
+- Класс: B
+- WP / место: WP16.3; `quack/agents/reconcile.py`, `Settings.same_idea_confidence`, `Settings.reconcile_requires_confidence`
+- Контекст: ТЗ даёт варианты `link`/`create`/`suggest_merge`/«та же идея», но не говорит, чему они равны в событиях, как повтор не плодит узлы и откуда уверенность связей
+- Решение: id создаваемых узлов — `uuid5` нормализованного имени в домене (повтор пишет те же события под теми же ключами; одно имя — один узел, `Т-§4.4`); `create` с именем существующего кандидата — `link`. `suggest_merge` у навыка: навык создаётся и пишется `skill.merge_suggested {from = новый, into = цель}`; у темы события нет — тема создаётся. `link` на навык другого домена — предмет пропущен (`outcome = skipped`, правило 6 слоя 1). «Та же идея» — `edge.added {same_idea}` от нового навыка к навыку другого домена; уверенность по категории `same_idea_confidence` (low 0.4, medium 0.75, high 0.9; перенос от `same_idea_min_confidence` = 0.7). `REQUIRES` — из `Subject.requires` (явный порядок материала), `origin = material` при `origin = material`, уверенность `reconcile_requires_confidence` (material 0.85 > model 0.65 ≥ `requires_min_confidence`); встречная пара `A→B`/`B→A` отбрасывается и против записанных в графе (чтение Cypher), и внутри пачки (первая побеждает). Тема нового навыка — метка `T…` модели, иначе имя (в пачке или новая), иначе `Subject.topic`, иначе предмет пропущен. Предмет без ответа модели пропущен. Неизвестная метка — один возврат модели через `check` (`Т-§4.5`). Embeddings недоступны — исключение идёт вверх, задача ждёт (`Т-§20.7`): без кандидатов модель создавала бы дубли. Статус создаваемого навыка — `active` (предложенность темы — статус проектора, `Т-§4.7`)
+- Почему: Т-§4.2, Т-§4.3, Т-§4.4, Т-§4.5, Т-§4.6, ТЗ Ф4 WP16.3, T-AG3
+- Обратимость: да
+- Тесты: `tests/agents/test_reconcile.py`
+- Требует подтверждения владельцем: нет
+
+### D-B-205. Кандидаты сверки — Cypher модуля B, не `GraphReader` (WP16.3)
+- Класс: B
+- WP / место: WP16.3; `quack/agents/reconcile.py::find_candidates/read_requires`
+- Контекст: в `GraphReader` нет поиска кандидатов для сверки по тексту предмета (`extraction_candidates` — под эпизод и сессию); сигнатуры `GraphReader` — контракт A
+- Решение: `find_candidates` — векторный поиск `topic_emb`/`skill_emb` по `embed_query(имя + текст)` в домене, соседи трёх ближайших навыков (`REQUIRES`, та же тема), ближайшие навыки других доменов (поиск по `learnerId`, фильтр домена после поиска), до `candidate_k` на предмет: по трети — другой вид и чужие домены, остальное — свой вид и соседи. Метки общие на вызов: порядок важности — по кругу по предметам; сверх `candidate_skills_k`/`label_max_topics` метки не выдаются. Сверка временных сущностей после сессии (`Т-§4.4`) — уже `graph.hygiene` по `session.ended` (D-B-185): нового вида и правила не нужно. Если A захочет метод в `GraphReader` — заменить тело `find_candidates`
+- Почему: Т-§4.3, Т-§3.4.6, ТЗ Ф4 WP16.3
+- Обратимость: да
+- Тесты: `tests/agents/test_reconcile.py::test_candidates_vector_neighbours_and_other_domains`
+- Требует подтверждения владельцем: нет
+
 ### D-B-202. Удаление трасс: нет подтверждённого API, срок хранения (WP10.6)
 - Класс: B
 - WP / место: WP10.6, WP25; `quack/llm/tracing.py::Tracer.delete_learner`, `Settings.langsmith_retention_days`

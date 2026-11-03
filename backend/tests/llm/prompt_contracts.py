@@ -32,8 +32,8 @@ from quack.session.turn_policy import MEMORY_UNAVAILABLE_MARKER
 
 CONTRACTS_PATH = Path(__file__).resolve().parents[2] / "PROMPT_CONTRACTS.md"
 
-# Prompt reference → output schema, for the versions of Phase 3 (`meta_smoke.py` covers
-# exactly these until WP10.7).
+# Prompt reference → output schema, for the versions of Phase 3 (`meta_smoke.py` covers the
+# roles of the table with the schemas of `ALL_PROMPT_SCHEMAS`, WP10.7).
 PROMPT_SCHEMAS: dict[str, type[BaseModel]] = {
     "teacher@1": TeacherOutput,
     "extractor@2": ExtractorOutputV2,
