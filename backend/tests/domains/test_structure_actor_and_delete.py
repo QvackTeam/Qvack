@@ -18,6 +18,7 @@ from quack.jobs import kinds
 from quack.jobs.queue import enqueue_job
 from quack.llm.errors import ProviderUnavailableError
 from tests.domains.conftest import FakeLLMProvider
+from tests.support.auth import session_cookie
 
 
 async def _q(db: SessionFactory, sql: str, **params: Any) -> list[dict[str, Any]]:
@@ -60,7 +61,7 @@ async def _propose_actor(
     domain_id = await _seed_domain(db, learner_id)
     resp = await api_client.post(
         f"/v1/domains/{domain_id}/structure/propose",
-        headers={"Authorization": f"Bearer {token}"},
+        headers=session_cookie(token),
         json={
             "goals": "g",
             "background": "b",
@@ -132,7 +133,7 @@ async def test_delete_learner_cancels_queued_and_running_jobs(
             text("UPDATE ops.jobs SET status = 'running' WHERE id = :id"), {"id": ids["other"]}
         )
 
-    resp = await api_client.delete("/v1/learner", headers={"Authorization": f"Bearer {token}"})
+    resp = await api_client.delete("/v1/learner", headers=session_cookie(token))
     assert resp.status_code == 200
 
     async def status(name: str) -> str:
