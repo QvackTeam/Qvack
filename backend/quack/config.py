@@ -418,6 +418,8 @@ class Settings(BaseSettings):
     conversation_collapse_turns: int = 12
     # WP14.1 (Т-§4.5): label limits per call.
     candidate_skills_k: int = 15
+    # WP12.7 (Т-§5.7 «LIMIT 5»): tasks returned by one selection.
+    task_select_limit: int = 5
     label_max_topics: int = 8
     label_max_tasks: int = 5
     # WP6.2 (D-C-013): practice thresholds moved from quack/artifacts/params.py (ТЗ-П3).

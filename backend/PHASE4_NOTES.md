@@ -1086,6 +1086,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `T-X1` — `tests/agents/test_extract_episode.py::test_extracted_elements_checked_on_the_episode`, `test_record_extraction`, `test_record_extraction_commits_nothing_on_failure`.
 - Не решено \[ПРОВЕРИТЬ\]: потолок уровня — по задаче целиком, не по части (`part`) ответа; задача `extract.episode` (сборка окна из журнала, кандидаты из S4, `task_tests` из `content.tasks`) — следующим шагом WP15.
 - Требует подтверждения владельцем: нет
+### D-B-169. Подбор задач из банка (WP12.7)
+- Класс: B
+- WP / место: WP12.7, `Т-§5.7`; `quack/practice/select.py` (`select_tasks`), `quack/config.py` (`task_select_limit`)
+- Контекст: `Т-§5.7` даёт ориентир Cypher: навык, уровень, «семейство ещё не встречалось», «ловит заблуждение M», проверенные первыми, `LIMIT 5`; сессия Neo4j — только чтение. Не названы: изоляция узлов внутри запроса; порядок при равенстве; где число 5.
+- Решение: (а) запрос по ориентиру; каждый узел сопоставляется с `learnerId` ученика (навык, задача, задачи семейства; `Т-§3.5`). (б) Порядок — «ловит M», «проверена», затем `t.id` (повторяемость). (в) Число — параметр `task_select_limit = 5` (§0.4: числа — в конфиг). (г) Сессия — `read_session` (закон 3).
+- Почему: §0.4.3 п.2 (WP12.7, `Т-§5.7`), п.5.
+- Обратимость: один запрос.
+- Тесты: `tests/practice/test_select_tasks.py` (Neo4j).
+- Требует подтверждения владельцем: нет
+
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -1415,6 +1425,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP12.7, подбор задач (D-B-169): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 5 подмен (без `learnerId` задачи, без уровня, без «семейство не встречалось», порядок, лимит), каждая роняет тест. Зелёный: `tests/practice/test_select_tasks.py` против Neo4j — 1 passed.
 - WP13.10 по ревью C #124 (D-B-155 п.е, п.ж): `uv run pytest tests/session/test_sessions_db.py` — 2 failed (возврат без `resumed: true`; одновременный старт с одним ключом — `IdempotencyConflictError`), коммит `e8c8e77`. Зелёный: 11 passed (с `QUACK_TEST_REQUIRE_INFRA=1`).
 - WP13.10, жизненный цикл сессии на `Db` (D-B-155): `uv run pytest tests/session/test_sessions_db.py` — ошибка сбора (нет `quack.session.sessions`), коммит `28f32e3`; на неверной реализации — 6 из 7 подмен роняют тест. Зелёный: 10 passed.
 - WP15 п.4–5, проверка и запись (D-B-165): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 8 подмен (без транзакции, `causation_seq`, `observation_seq`, вердикт code, окно вместо эпизода, `min` вместо `max`, текст ответа, текст строки канваса), каждая роняет тест. Зелёный: `tests/agents`, `tests/graph/test_extracted_check.py`, `tests/jobs/test_coverage.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 34 passed.
