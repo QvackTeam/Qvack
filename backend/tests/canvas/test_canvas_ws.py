@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
+import orjson
 import pytest
 from fastapi import FastAPI
 from redis.asyncio import Redis
@@ -165,7 +166,8 @@ async def test_store_down_gives_no_ack(pg_db: Db, settings: Settings, app_for: A
 async def test_sign_in_and_scope(pg_db: Db, settings: Settings, app_for: AppFor) -> None:
     """WP21.2, WP18.3, WP22.1: without a session, with another learner's session or with a
     companion session of another canvas the socket is refused; a companion session of this
-    canvas gets the status only — a client message closes it."""
+    canvas gets the status only — any client message, even a malformed one, closes it with
+    1008 (D-C-124)."""
     owner, other = await create_learner(pg_db), await create_learner(pg_db)
     _, canvas_id = await _canvas(pg_db, owner)
     _, another_canvas = await _canvas(pg_db, owner)
@@ -191,11 +193,12 @@ async def test_sign_in_and_scope(pg_db: Db, settings: Settings, app_for: AppFor)
     assert unknown.value.code == CLOSE_POLICY
 
     companion = await _cookie(pg_db, settings, owner, scope="companion", canvas_id=canvas_id)
-    async with AsgiWebSocket(app, path, cookies=companion) as ws:
-        await ws.send_json(_batch(1))
-        with pytest.raises(WebSocketClosed) as closed:
-            await ws.receive_json()
-        assert closed.value.code == CLOSE_POLICY
+    for message in (orjson.dumps(_batch(1)).decode(), "not json"):
+        async with AsgiWebSocket(app, path, cookies=companion) as ws:
+            await ws.send_text(message)
+            with pytest.raises(WebSocketClosed) as closed:
+                await ws.receive_json()
+            assert closed.value.code == CLOSE_POLICY, message
 
 
 async def test_malformed_message_closes_the_socket(
@@ -217,7 +220,8 @@ async def test_canvas_channel_reaches_every_socket(
     pg_db: Db, settings: Settings, redis: Redis, app_for: AppFor
 ) -> None:
     """Т-§15.2, Т-§1.6: devices of one canvas — the laptop and the companion, in any API
-    process — get its changes through Redis pub/sub `canvas:{id}`."""
+    process — get its changes through Redis pub/sub `canvas:{id}`; the companion only the
+    status (WP22.1, D-C-124)."""
     learner = await create_learner(pg_db)
     _, canvas_id = await _canvas(pg_db, learner)
     laptop_app, phone_app = app_for(), app_for()  # two API processes over one Redis
@@ -229,10 +233,13 @@ async def test_canvas_channel_reaches_every_socket(
         laptop = await stack.enter_async_context(AsgiWebSocket(laptop_app, path, cookies=full))
         phone = await stack.enter_async_context(AsgiWebSocket(phone_app, path, cookies=companion))
         update = {"type": "layer_update", "version": 2}
+        closed = {"type": "task_closed", "task_id": str(uuid4())}
         await _wait_subscribers(redis, f"canvas:{canvas_id}", 2)
         await publish_canvas(redis, canvas_id, update)
+        await publish_canvas(redis, canvas_id, closed)
         assert await laptop.receive_json() == update
-        assert await phone.receive_json() == update
+        assert await laptop.receive_json() == closed
+        assert await phone.receive_json() == closed
 
 
 async def test_strokes_work_without_redis(pg_db: Db, settings: Settings, app_for: AppFor) -> None:

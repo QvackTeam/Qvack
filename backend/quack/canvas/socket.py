@@ -1,9 +1,10 @@
 """The WebSocket of a canvas, `WS /v1/canvases/{id}/ws` (ТЗ Ф4 WP21.2; Т-§1.6, Т-§15.1, Т-§15.2).
 
 Sign-in is the session cookie of the handshake: a `full` session of the canvas owner, or a
-`companion` session paired to this canvas, which only receives the status (WP22.1). Without one
-the socket is refused with close code 1008; a malformed client message closes it with 1007
-(D-C-121).
+`companion` session paired to this canvas, which only receives the status (WP22.1): of the
+server messages only `COMPANION_KINDS`, and any message it sends closes the socket with 1008
+before it is read (D-C-124). Without a session the socket is refused with 1008; a malformed
+client message closes it with 1007 (D-C-121).
 
 `stroke_batch` goes to the stroke journal (`quack.canvas.strokes`): `ack {batch_no}` only after
 the chunk with the batch is written; a repeated `batch_no` writes nothing and, once written, is
@@ -49,6 +50,11 @@ log = get_logger(__name__)
 # 1007 — data inconsistent with the type of the message.
 CLOSE_POLICY = 1008
 CLOSE_INVALID = 1007
+
+# WP22.1: the companion sees the status of its canvas "and nothing more". Of the server messages
+# of WP21.2 only `task_closed` is a status; recognitions, marks, hints and layers are the
+# content of the solution (D-C-124).
+COMPANION_KINDS = frozenset({"task_closed"})
 
 
 def canvas_channel(canvas_id: UUID) -> str:
@@ -148,7 +154,14 @@ async def serve_canvas(
             await send({"type": "ack", "batch_no": batch_no})
 
     relay = (
-        asyncio.create_task(_relay(resources.redis, canvas.canvas_id, send))
+        asyncio.create_task(
+            _relay(
+                resources.redis,
+                canvas.canvas_id,
+                send,
+                COMPANION_KINDS if session.scope == "companion" else None,
+            )
+        )
         if resources.redis is not None
         else None
     )
@@ -160,13 +173,13 @@ async def serve_canvas(
             except TimeoutError:
                 await acknowledge(await journal.flush_due(now=datetime.now(UTC)))
                 continue
+            if session.scope == "companion":
+                await websocket.close(code=CLOSE_POLICY)  # the companion only gets the status
+                return
             try:
                 message = _CLIENT_MESSAGE.validate_json(text)
             except ValidationError:
                 await websocket.close(code=CLOSE_INVALID)
-                return
-            if session.scope == "companion":
-                await websocket.close(code=CLOSE_POLICY)  # the companion only gets the status
                 return
             if isinstance(message, StrokeBatchIn):
                 if journal.written(message.batch_no):
@@ -186,14 +199,20 @@ async def serve_canvas(
         await journal.flush()  # the client is gone: written, but nobody to acknowledge
 
 
-async def _relay(redis: Redis, canvas_id: UUID, send: Any) -> None:
-    """Messages of `canvas:{id}` to this socket; a Redis failure ends the relay, not the socket."""
+async def _relay(
+    redis: Redis, canvas_id: UUID, send: Any, kinds: frozenset[str] | None
+) -> None:
+    """Messages of `canvas:{id}` to this socket (only `kinds` when given); a Redis failure ends
+    the relay, not the socket."""
     pubsub = redis.pubsub()
     try:
         await pubsub.subscribe(canvas_channel(canvas_id))
         async for message in pubsub.listen():  # ends by cancellation when the socket closes
-            if message["type"] == "message":
-                await send(orjson.loads(message["data"]))
+            if message["type"] != "message":
+                continue
+            payload = orjson.loads(message["data"])
+            if kinds is None or payload.get("type") in kinds:
+                await send(payload)
     except RedisError as exc:
         log.warning("canvas_relay_failed", canvas_id=str(canvas_id), error=str(exc))
     finally:
