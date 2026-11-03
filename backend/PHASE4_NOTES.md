@@ -97,9 +97,10 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | :-- | :-: | :-- | :-- |
 | WP0 (зона C) | C | частично: ждёт п.2 (владелец) | — (скрипт п.3а) |
 | WP0 (зона A) | A | выполнен: аудит B1–B7, B21; п.3б, п.3в | — (скрипты п.3б, п.3в) |
-| WP2 (A) | A | черновик каталога S3 (G0) в `phase-4-a-wp2`: 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; заморозка — G1 после Q-A-2, Q-A-3 | `tests/events`: 73 passed |
-| WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` в `phase-4-a-s4-s6` (D-A-111); реализация — G2 | `tests/graph/test_read_stub.py`: 9 passed |
-| WP7.1 (A), S6 | A | виды задач и таблица правил по событию в `phase-4-a-s4-s6` (D-A-110); строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 25 passed |
+| WP2 (A) | A | **S3 заморожен (G1)** в `phase-4-a-s3-freeze` (D-A-119): 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; Q-A-2, Q-A-3 закрыты | `tests/events`: 82 passed (без инфраструктуры) |
+| WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` (D-A-111); `MisconceptionFact.statement` (D-B-145) — `phase-4-a-g1`; реализация — G2 | `tests/graph/test_read_stub.py`: 10 passed |
+| WP7.1 (A), S6 | A | виды задач и таблица правил по событию (D-A-110); строка `known_check` и отмена поручений (D-A-115) — `phase-4-a-g1`; строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 27 passed |
+| S1 (A), `JobContext` | A | поля §4.2 `db`, `storage`, `embeddings`, `deletions` в `phase-4-a-g1` (D-A-114) | `tests/jobs/test_job_context.py`: 2 passed |
 | WP3.1 (A) | A | схема Neo4j Фазы 4 в `quack/db/neo4j.py`: уникальность `id` для Hub, Option, Material, Chunk, Digest, Profile; range по `learnerId` на метках, где его ещё нет; составной `(learnerId, retDueAtMs)` на Skill; пять векторных индексов с фильтрующими свойствами и `embedding_dim`; сосуществует с индексами Фазы 3 до WP1.3. Остальное WP3 (обработчики, фазы А–В) — дальше | `tests/graph/test_schema_wp31.py` + `test_infra.py`: 4 passed (Neo4j 2026.06.0) |
 | WP1.1–1.2 (A) | A | выполнен в `phase-4-a-wp1` (шов S2): базовая миграция dbmate, `Db`, `append_events`, параметры §6.7 потока A. WP1.4 (`.squawk.toml`, S16) — к G2; WP1.3 — к G3/G4 | `tests/db`: 19 passed |
 | WP0 (зона B) | B | выполнен: аудит, п.3г, п.3д, п.5 | — (скрипт п.3г) |
@@ -329,7 +330,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
   4. «Проявление заблуждения»: `verdict.recorded` с `misconception_id` или `misconception_hypothesis`; `observation.diagnosed` с тем же в `diagnosis`; `observation.extracted` с элементом, где `misconception_id`, `new_misconception` или `kind = misconception_hypothesis`. Ставит `analyst.run`; `misconception.describe` — только для известного `misconception_id` (`lock_key = misconception:{id}`): у гипотезы словами узла ещё нет. **Вопрос B (WP16.2):** описывать ли гипотезу, когда проектор создаст узел, и по какому событию.
   5. «Неуверенная пометка» диагноза: `diagnosis.kind == "question"` (`Т-§15.4`, WP21.4: неуверенный диагноз → `question` и второе мнение) → `second_opinion.diagnosis`.
   6. «Задачи банка без пространства решения»: `task.created` с `source` ∈ {`seminar`, `generated`, `material`} → `task.solution_space` (P2). Задачи `teacher` (на лету) получают пространство лениво через `agent.requested {kind: solution_space}` (WP12.4).
-  7. `agent.requested`: вид `agent.<kind>` для `viz`, `illustration`, `task_generation`, `solution_space`, `artifact`; класс P1, если `needed_in_session`, иначе P2. Вид `known_check` задачи агента не ставит (проверку «я это знаю» ставит `known.claimed` → `check.known_claim`). **Вопрос B:** кто пишет `agent.requested {kind: known_check}` и нужна ли по нему задача?
+  7. `agent.requested`: вид `agent.<kind>` для `viz`, `illustration`, `task_generation`, `solution_space`, `artifact`; класс P1, если `needed_in_session`, иначе P2. `known_check` → `check.known_claim` (вида `agent.known_check` в §6.5 нет), класс так же, ключи и `required_seq` — как у `known.claimed`, в параметрах — `request_id` и `topic_id`; без `params.topic_id` задачи нет — проверять нечего (WP8.2; ответ B, #103; ревью B #117; `phase-4-a-g1`).
   8. `photo.pipeline`: `lock_key = canvas:{canvas_id}`; фото вне канваса — `photo:{photo_id}`. `material.parse`: P1 при `session_id`, иначе P2; блокировку шага записи структуры `domain:{id}` ставит обработчик (C) — домена в нагрузке `material.uploaded` нет.
   9. `skill.split`: `extract.episode` с `restrict_skill_ids` = делимый навык и части; `episode.reassigned`: `extract.episode` с `episode_seq` и `topic_id`. Какие эпизоды переизвлечь, находит обработчик WP15.
   10. `visible` (`Т-§13.8`): видимы `check.symbolic`, `check.model`, `task.check`, `photo.pipeline`, `material.parse`, `agent.*`, `check.known_claim`; остальные — нет. \[ПРОВЕРИТЬ\] для `second_opinion.diagnosis`, `canvas.rediagnose`, `today.prepare`, `task.solution_space`, `artifact.*`, `export.data`: документ не называет — сделаны невидимыми.
@@ -357,7 +358,8 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 | `photo.uploaded` | `photo.pipeline` | P1 | `canvas:{id}` / — | — | WP22.3 |
 | `material.uploaded` | `material.parse` | P1 при `session_id`, иначе P2 | — / — | — | WP20.2 |
 | `task.created`, `source` банка | `task.solution_space` | P2 | — / — | — | WP12.4 |
-| `agent.requested` | `agent.<kind>` | P1 при `needed_in_session`, иначе P2 | — / — | — | WP16.6 |
+| `agent.requested` | `agent.<kind>`; `known_check` → `check.known_claim` | P1 при `needed_in_session`, иначе P2 | — / — | — (у `check.known_claim` — seq) | WP16.6, WP8.2 |
+| `turn.committed`, `markup.plan_update.cancel_request_ids` не пуст | отмена задач поручений (D-A-115) | — | — | — | WP7.4 |
 | `today.shown` | `today.prepare` | P2 | `today:{learner}` / `today:{learner}` | seq | WP16.8 |
 | `digest.written`, `plan_divergence` | `analyst.deep` | P2 | `analyst:{learner}` / `analyst_deep:{learner}` | seq | WP16.1 |
 | `known.claimed` | `check.known_claim` | P2 | — / — | seq | WP8.2 |
@@ -378,6 +380,68 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Класс: B (пересечение зон, §7.3)
 - Решение: согласен с п.1 (имя и подпись `get_current_learner_id` не меняются, код роутеров не меняется), п.2 и п.4. Роутер A один: `quack/domains/router.py`; его тесты на старом входе — `tests/domains/test_diag_idempotency.py`, `test_diag_open_and_bank.py`, `test_diag_state_from_events.py`, `test_diagnostic_and_graph_view.py`, `test_graph_view_fixes.py`, `test_topic_alias_routes.py`. Корневые тесты A, которые выпускают токены, — по `grep` на `ensure_users_hook`/`get_current_learner_id` в `tests/` корневых файлов A нет. C правит их одним PR с моим ревью (§7.3): смена способа входа, утверждения не меняются.
 - Требует подтверждения владельцем: нет.
+
+### D-A-113. Удаление пароля и JWT из `quack/domains` — ответ на вопрос C
+- Класс: B (правка файлов A потоком C, §0.4.4 п.14 — по согласованию)
+- Решение: **да**, одним PR C с ревью A. Основание: §2.3 строка 3, WP18.3 («пароль, JWT, `auth.users`, `/v1/auth/register|login` удаляются»), §6.4 «старый → новый» (`POST /v1/auth/register`, `/login`, `GET /v1/auth/me` → вход по ссылке и Google, cookie, `GET /v1/me`), §8.15 п.1–2. Условия:
+  1. `quack/domains/router.py`: удаляются `POST /v1/auth/register`, `POST /v1/auth/login`, `GET /v1/auth/me` и публичный роутер с `enforce_auth_rate_limit`, если в нём ничего не осталось. `PATCH /v1/learner/preferences` и `DELETE /v1/learner` остаются (§6.4: A).
+  2. `quack/domains/auth.py`: удаляются `register_learner`, `login_learner`, `get_learner_me`, `hash_password`, `verify_password`, выпуск JWT, `DEV_JWT_SECRET`, `JWT_ALGORITHM`; модуль — целиком, если ничего не осталось. Импорт `DEV_JWT_SECRET`/`JWT_ALGORITHM` в `tests/domains/test_diag_state_from_events.py` переводится на `login()` в том же PR (D-A-112).
+  3. `tests/domains/test_auth_and_learner.py`: удаляются `test_register_normalizes_email_and_rejects_duplicate`, `test_login_and_me_jwt_validation`, `test_auth_rate_limiting_per_ip` (проверяют удаляемые маршруты) — каждый строкой в «Правках тестов» с тестом `T-AU*`, который проверяет свойство теперь (§8.15 п.1). `test_update_preferences_and_idempotency` и `test_two_phase_account_deletion` **не удаляются**: идемпотентность и удаление остаются (§8.15 п.2) — только вход через `login()`, утверждения те же. Если утверждение одного из них на сессиях не выполняется (например, «после удаления запрос отклонён»), C не ослабляет его и возвращает вопрос A: удаление уходит на `Db` в WP25.
+- Тесты: в PR C. Требует подтверждения владельцем: нет.
+
+### D-A-114. S1: поля `JobContext` Фазы 4
+- Класс: A (§4.2 — набор полей задан)
+- Решение: `JobContext` получает `db`, `storage`, `embeddings`, `deletions` (§4.2: у `workers` всё, кроме `email`); `engine`, `session_factory` уходят с WP1.3. `create_job_context` открывает `Db` (`open_db`, ждёт Postgres, как сам процесс) и строит клиентов конструкторами C (§7.3 п.6); `close_job_context` закрывает в обратном порядке. Пересечения (§7.3, уведомление C): `tests/support/resources.py::build_job_context` получает те же поля с подменами по умолчанию (как `build_app_resources`); `tests/e2e/system.py::job_context` берёт их из ресурсов стенда. `ProjectorContext` не менялся — проектор Фазы 4 строится в WP3.
+- Тесты: `tests/jobs/test_job_context.py` (поля, порядок закрытия). Требует подтверждения владельцем: нет.
+
+### D-A-115. Отмена поручений по `planUpdate` — правило диспетчера, не вызов из хода
+- Класс: B. WP7.4, `Т-§13.7`; вопрос B п.6.
+- Варианты: (а) функция A в транзакции записи хода; (б) диспетчер по `turn.committed`.
+- Решение: (б). B ничего не вызывает: ход пишет `markup.plan_update.cancel_request_ids`, диспетчер по этому событию находит задачи поручений ученика по `payload.request_id` и ставит `running` → `cancel_requested`, `queued` → `cancelled` (WP7.4). Почему: задачу поручения ставит тот же диспетчер по `agent.requested`, а он идёт по `seq` ученика — `agent.requested` всегда обработан раньше хода, который его отменяет; при варианте (а) задача ещё могла не существовать (отставание диспетчера), и отмена терялась бы. Закон 9: ход не ждёт очереди.
+- Сейчас: чистая часть — `rules_p4.cancelled_requests(event)`; запросы к `ops.jobs` — с очередью WP7.4 (G2).
+- Тесты: `tests/jobs/test_rules_p4.py::test_plan_update_cancels_agent_requests`; SQL — тест очереди WP7.4. Требует подтверждения владельцем: нет.
+
+### D-A-116. Обработчики задач Фазы 4: подпись регистрации и ветка рантайма
+- Класс: B. §6.5 («проверка полноты обработчиков при старте `workers` — как в Фазе 3»), WP7.4; вопрос B п.4.
+- Решение: подпись — как в Фазе 3: `@register_job_handler("<вид>")` над `async def handler(job: ClaimedJob, ctx: JobContext) -> None` (`quack.jobs.runner`). `ClaimedJob` Фазы 4 несёт поля `Т-§13.1` (`job_key`, `kind`, `learner_id`, `session_id`, `payload`, `required_seq`, `attempts`); ресурсы — из `ctx` (D-A-114: `ctx.db`, `ctx.llm`, `ctx.compute`, …). Рантайм на `Db` (очередь WP7.4 и диспетчер WP7.1) — ветка `phase-4-a-wp7`, G2. До её слияния модули B не входят в `HANDLER_MODULES` — проверка полноты Фазы 3 не падает; модули с обработчиками Фазы 4 A добавляет в `HANDLER_MODULES` в том же PR, B пишет одну функцию с декоратором на вид в своём модуле.
+- Тесты: `T-Q7` в PR рантайма. Требует подтверждения владельцем: нет.
+
+### D-A-117. Параметры `embedding.compute` — ответ на D-C-117 п.6
+- Класс: B. WP7.1, WP20.3, S6.
+- Решение: (а) параметры несут текст: `{nodes: [{node_kind, node_id, text}]}` — то же, что `EmbeddingNode` C. Текст берёт диспетчер из события, которое его принесло (диспетчер читает только журнал, закон 1), обработчик ничего не читает; `required_seq` — `NULL` (задача читает только журнал, WP7.1). Источник текста: кусок — `chunk.indexed.text`; свидетельство — `quote` элемента наблюдения; заблуждение — формулировка (`statement`); тема и навык — \[ПРОВЕРИТЬ\]: какое свойство (`name`, у навыка ещё `summary`, `Т-§3.4.2`) эмбеддится, документ не называет — решается со строкой в G2. (б) `JobContext` с `db` и `embeddings` — D-A-114 (`phase-4-a-g1`); регистрация вида — D-A-116 (`phase-4-a-wp7`, G2). (в) Да, по документам: правило — для **новых** узлов (WP7.1, `Т-§13.3`), у `topic.renamed` в §6.3 правила диспетчера нет, ключ `emb:{node_kind}:{node_id}:{model}` — WP2.1. Открыто к G2: `misconception.described` в §6.3 с правилом диспетчера; если оно — пересчёт вектора по новой формулировке, тот же ключ второй вектор не запишет — вопрос записи класса C при строке G2.
+- Требует подтверждения владельцем: нет; п.(а) тема/навык и п.(в) `misconception.described` — к G2.
+
+### D-A-118. S6: `plan_jobs` принимает событие Фазы 4
+- Класс: A. `rules_p4.py` (#101) типизировал событие моделью Фазы 3 `quack.events.models.StoredEvent` (`event_id`, `turn_id`, `causation_id`), а диспетчер Фазы 4 читает `core.events` моделью `quack.events.log.StoredEvent` (S2). Исправлено до заморозки S6 (G1); поведение то же.
+
+### D-A-119. S3 заморожен на G1
+- Класс: A (§7.2: «Каталог событий окончательный (S3)» — G1)
+- Решение: каталог `quack/events/event_types.py` — окончательный. Последние поправки по ответам владельцев типов: `Verdict` — `misconception_id` / `misconception_hypothesis` (Q-A-2 п.1, #101); `rejected` — `{index, reason, quote}` (п.3, #101); `CheckFailedReason` + `unsupported` (п.7, #117); `canvas.line_committed.kind` ∈ {`latex`, `text`} (`Т-§15.3`), `artifact.updated.kind` ∈ {`notes`, `cards`, `cheatsheet`} с `topic_id` у конспекта и карточек и `hub_id` у шпаргалки (WP23.1; имена — маршруты §6.4) (Q-A-3, ответ C). Q-A-3 п.1, 3, 5 — без изменений полей.
+- Дальше: новый тип, новое поле или изменение схемы — только новой версией схемы с записью класса C и согласием трёх потоков (§0.4.4 п.2).
+- ~~Открыто у владельца: пишется ли `observation.diagnosed`, если `canvas_diagnoser` ошибки не нашёл.~~ Закрыто **D-C-120** (C, по поручению владельца): событие пишется только при найденной ошибке, `gap_type` ≠ `none`; без ошибки события нет. Схема не меняется. Следствие для A: в WP5.1 каждое `observation.diagnosed` → `Evidence` с `outcome = incorrect` (как в ТЗ WP5.1), ветки «ошибки нет» нет.
+- Тесты: `T-EV1`, `T-EV2`, `T-EV5`, `test_frozen_kinds_reject_other_values`. Требует подтверждения владельцем: нет.
+
+### D-A-120. Прогоны: что по ТЗ, что по скиллу v2
+- Класс: B (порядок работы потока A)
+- Решение: полный прогон набора — один раз перед открытием PR (§0.4.7); после правок по ревью — затронутые тесты и контрактные (`T-A6`, `T-DB2`, `T-DB4`), полный набор — CI PR («без повторных прогонов на промежуточных состояниях», §0.4.7). Красный прогон — в «Красных прогонах» (§7.4) и только по делу: тест падает на отсутствующем поведении или заведомо неверной реализации, а не на `NotImplementedError`. Зелёные прогоны — в описании PR (§0.4.7: команда, SHA, сводная строка). Сочетание параллельных PR перед слиянием проверяется локально. Слияние в `phase-4` — после ревью соседнего потока и зелёного CI (§7.4), решение владельца для этого не нужно (только для `main`, G4).
+- Почему: §0.4.7, §7.4; правка ТЗ исполнителю недоступна (§0.4.4 п.7). Требует подтверждения владельцем: нет.
+
+### D-A-121. `session.started.resumed` — поле из WP13.10 после заморозки S3
+- Класс: C (схема события после G1, §0.4.4 п.2; вопрос B в D-B-155 п.е)
+- Контекст: WP13.10 \[РЕШЕНИЕ Ф4\]: действие в сессии, закрытой сборщиком неактивных, пишет `session.started {session_id, resumed: true}`. Строка §6.3 этого поля не называет, и в каталоге S3 (D-A-119) его не было — расхождение внутри ТЗ.
+- Варианты: (а) поле `resumed: bool = False` в `session.started` v1; (б) версия 2 с апкастером (`Т-§2.1`: «изменение схемы — новая версия»); (в) без поля — возврат распознаётся как второе `session.started` той же сессии (вариант B).
+- Решение: (а). Поле прямо названо в WP13.10 — специальное решение ТЗ выше общего перечня §6.3. Версия 1 правится, а не поднимается: версия нужна, чтобы читались уже записанные события, а событий Фазы 4 нет ни в одном окружении (чистый старт WP0 п.2, `phase-4` не выкачена); поле необязательное, `false` по умолчанию. После первой выкатки Фазы 4 — только новой версией с апкастером (`Т-§2.1`). (в) отвергнут: диспетчер и потребители должны видеть возврат в самом событии, без чтения истории сессии.
+- Согласие потоков: B — просит поле (D-B-155 п.е); C — ревью этого PR.
+- Тесты: `test_session_started_marks_a_resumed_session`. Требует подтверждения владельцем: да (класс C).
+
+### D-A-122. Вопросы B к владельцу — решение по документам (по поручению человека A, 2026-11-03)
+- Класс: B (п.1, п.2); п.3 — подтверждение класса C B, по документам
+1. **`content.study_plans` (D-B-154).** Строит **код**, не модель (закон 2: «модель толкует, код считает»; `Т-§12.5`: «порядок строится по `REQUIRES` со сжатыми циклами», `Т-§4.6`: план крупной теории работает на графе со сжатыми SCC). **Порция** — вершина сжатого графа: тема хаба или группа тем, связанных циклом `REQUIRES` (одна SCC); порядок — топологический порядок сжатого графа; связи — `graph.read.topic_requires` (S4, `REQUIRES` между темами считается при чтении, §2.3 строка 7). Строится при старте сессии с целью-хабом (WP13.10) и при записи хода, если цель сессии — хаб и плана нет; документ производный, как `session_plans`, — пересобирается из графа. Учитель «держит грубый план» (`П-4.6`) — видит документ в контексте, а не пишет его: в разметке `teacher@2` полей для плана хаба нет, и закон 10 запрещает копить выводы модели. «С повторением между ними» (`П-4.6`) — повторение по сроку (WP17), не часть документа. Размер порции в числах документы не называют — числа нет и в решении.
+2. **`verdict_recorded` в канале (D-B-148 п.з).** Не нужен. §4.8 перечисляет виды сообщений; вердикт страховки виден через существующие: `check.symbolic` — видимая задача (`Т-§13.8`: плашка «проверяю решение»), смена её статуса шлёт `jobs_changed {session_id}` (WP7.4, `T-D10`), клиент перечитывает ленту сессии (`GET /v1/sessions/{id}`, WP13.10) и видит `verdict.recorded`; `projection_advanced` — после применения вердикта проектором. Новый вид сообщения — изменение контракта §4.8 без основания в документах.
+3. **D-B-104 (`intent`, `approach`).** Вариант (а) B принимается: доктрины владельца нет, перечни взяты из ближайших первоисточников (`П-4.4`, `П-4.2`, `Т-§9.5`; §0.4.3 п.2) и заморожены в S3 (`TurnHeadRecord`, D-A-119). `П-4.2`: приёмы — примеры, «отдельной сущности „приём“ нет» — поэтому `approach` — метка для профиля (`Т-§9.5`, «что реально помогает»), а не ограничение хода; `none` покрывает ход вне перечня. \[ПРОВЕРИТЬ\] по доктрине: строки таблицы `П-4.2` «короткий блок однотипных задач» и «ретест в новой формулировке» кода не имеют; добавление значений — новой версией схемы `turn.committed` (§0.4.4 п.2). Доктрину A не пишет (§0.4.4 п.13); подтверждение класса C владельцем — на G4.
+
+### D-A-123. Вопросы C к владельцу — решены C в D-C-122, A согласен
+- Класс: B. C решил свои четыре вопроса по поручению владельца в D-C-122 (`phase-4-c-wp21-ws`), раньше этой записи. A сверил с документами и согласен со всеми пунктами: (1) блок набора формул — инструмент слоя ученика, не вид блока (`П-9.4`, `Т-§15.3`); (2) поправка §0.4.7/§7.4 снята — как D-A-120; (3) расхождения по `JWT_SECRET` в `Д-§7` нет; (4) переполнение куска — `chunk_max_batches = ceil(stroke_chunk_seconds · 1000 / stroke_batch_ms)` из двух параметров `Т-§15.2`, без новых чисел. Отдельных решений A по этим вопросам нет.
 
 ### Ответы потока A (2026-11-02)
 
@@ -830,6 +894,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (`Т-§6.8`: «рубрика — ключевые шаги … или ключевые идеи»; `Т-§7.7`: «при сомнении» — сомнении вердикта), п.5.
 - Обратимость: одна функция входа и порядок двух строк.
 - Тесты: `tests/practice/test_check_model.py`.
+- Ответ A (#117, 2026-11-03): `MisconceptionFact.statement` обязателен (`Т-§9.3`). B строит `KnownMisconception` из среза: `known_misconceptions(facts, skill_ids=…)` — заблуждения проверяемых навыков в порядке среза (`quack/practice/model_check.py`).
 - Требует подтверждения владельцем: нет
 - Открыто: рисунок (`drawing`) идёт в `verdict_free` текстом `value`. Изображения в запросе шлюз пока не передаёт (`Т-§6.8` «Spark с изображением»); нужен вход-изображение в `generate_structured` (B, WP10.2) — до него ответ-рисунок проверяется по описанию. У `MisconceptionFact` (S4) нет формулировки заблуждения — для `KnownMisconception.statement` нужна она (вопрос A).
 
@@ -841,6 +906,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.1 (без изменения каталога в чужом файле), п.3.
 - Обратимость: одна ветка в `insure_symbolic`.
 - Тесты: `tests/practice/test_check_symbolic_job.py`.
+- Ответ A (#117, 2026-11-03): `unsupported` есть в `CheckFailedReason`. Страховка пишет `check.failed {reason: unsupported}` вместо «ничего не писать»; строка S6 `check.failed → check.model` отдаёт ответ модели (`Т-§6.6`).
 - Требует подтверждения владельцем: нет
 ### D-B-144. Грамматика API пускает отношения — режим `interval` проходит проверку разметки
 - Класс: B
@@ -1156,6 +1222,22 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: п.3.
 
+### D-C-120. `observation.diagnosed` пишется только при найденной ошибке
+- Класс: B (тип C по §6.3; владелец поручил C решить по документам, 2026-11-03)
+- WP / место: WP21.4 п.3, WP5.1, §6.3; `Т-§7.1`, `Т-§15.4`, `Т-§7.6`, П-9.7; будущий код C `quack/canvas/` (быстрый слой)
+- Контекст: Q-A-3 п.1 и D-A-119 оставили открытым, пишет ли C `observation.diagnosed`, когда `canvas_diagnoser` ошибки в строке не нашёл. Если да — нужна новая версия схемы после заморозки S3 (§0.4.4 п.2).
+- Решение: **нет.** Событие пишется только тогда, когда диагноз нашёл ошибку: `diagnosis.kind` ∈ {`error`, `question`} (Q-A-3 п.1), `gap_type` — один из типов пробела ошибки, никогда не `none`. Если диагноз ошибки не нашёл, события нет, пометки нет (WP21.5: «иначе без пометки»), и второе мнение не ставится. Схема S3 не меняется.
+- Почему (по документам):
+  1. `Т-§7.1`: быстрый слой канваса «шаги дают диагноз — тип пробела, заблуждение, корень ошибки». Все три поля описывают ошибку, а результат шага без ошибки в таблице источников свидетельств не назван.
+  2. WP5.1: каждое `observation.diagnosed` проектор превращает в `Evidence` с `outcome = incorrect` и ярусом по методу. Событие «ошибки нет» дало бы ложное отрицательное свидетельство, а отличать такое событие проектор по документам не умеет. Пришлось бы вводить новое правило WP5.1, которого в ТЗ нет.
+  3. `Т-§15.4` п.1 и `Т-§7.1`: подтверждённый шаг свидетельством уровня не становится, «свидетельство уровня даёт итог задачи». Положительному диагнозу шага в памяти места нет.
+  4. П-9.7, WP21.4 п.2: шаг, которого нет в пространстве решения, — «не ошибка». Его нужно молча пропустить, а не записывать.
+  5. `gap_type = none` в перечне `Т-§7.6` — значение для положительного элемента извлекателя по эпизоду, а не для диагноза шага.
+  6. Закон 6: провенанс строки и так есть — `canvas.line_committed`. Извлекатель видит строку в эпизоде (`Т-§15.1`, `Т-§7.6`) и сам толкует свободное.
+- Обратимость: если владелец решит иначе — новая версия схемы `observation.diagnosed` и правило WP5.1 (класс C, §0.4.4 п.2).
+- Тесты: в WP21.4 (C) — строка без ошибки не пишет `observation.diagnosed`; диагноз с ошибкой пишет `gap_type ≠ none`.
+- Требует подтверждения владельцем: нет (поручено решить C).
+
 ### D-C-115. WP18: маршруты входа, слои, ответы
 - Класс: B
 - WP / место: WP18; `quack/auth/router.py`, `quack/api/auth.py`, `quack/api/app.py`
@@ -1189,6 +1271,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 - WP13.10, жизненный цикл сессии на `Db` (D-B-155): `uv run pytest tests/session/test_sessions_db.py` — ошибка сбора (нет `quack.session.sessions`), коммит `28f32e3`; на неверной реализации — 6 из 7 подмен роняют тест. Зелёный: 10 passed.
 - WP13.1, согласие на старте сессии (D-B-151): `uv run pytest tests/session/test_session_terms.py` — 2 failed (старт без согласия `201`, без cookie `201`), коммит `f5029a2`. Зелёный: 2 passed; `tests/session` и `tests/llm/test_labels.py` зелёные; `tests/e2e` — 13 failed (`403` на старте, правка у C).
+- WP11.3, WP11.6 на полях A #117 (D-B-145, D-B-146): `uv run pytest tests/practice/test_check_symbolic_job.py tests/practice/test_check_model.py` — 1 failed (`unsupported` ничего не писал) и ошибка сбора (нет `known_misconceptions`), коммит `72e96fb`. Зелёный: `tests/practice`, `tests/events`, `tests/graph/test_read_stub.py`, `tests/jobs/test_rules_p4.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` — 234 passed.
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
 - WP18, этап I (C, `phase-4-c-wp18`): в Linux против `quack-test-*` с `QUACK_TEST_REQUIRE_INFRA=1` и dbmate v2.36.0 `pytest tests/auth` — 7 failed (`NotImplementedError`: `request_link`, `redeem_link`, `LinkLimiter`, `cookie_params`, `learner_for_google`, сессии, согласия). Зелёный (библиотека): 7 passed. `T-AU5` — с маршрутами (весь API на сессиях).
 - WP20.1, WP20.5 (C, `phase-4-c-wp20`, коммит `d161aed`): в Linux против `quack-test-*` с dbmate — `tests/materials` 4 failed (`NotImplementedError`). Зелёный: `tests/materials`, `test_contracts.py`, `tests/db/test_sql_static.py` — 15 passed.
@@ -1223,6 +1306,10 @@ PR #77 (dbmate v2.36.0, sha256).
 - S3, модели B из ядра (Q-A-1 вариант (а)): `cd backend && uv run pytest tests/practice/test_core_models.py` — 11 failed (модели `quack.practice` — копии, не объекты `quack.events.values`), 3 passed (поля форм с метками и с id уже совпадают), коммит `ed6188c`. Зелёный: 14 passed; с затронутыми (`tests/practice`, `tests/events`, `tests/session/test_phase4_contracts.py`, `tests/llm/test_phase4_ai_layer.py`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 195 passed. `CheckFailed` теперь модель Pydantic ядра — вызовы B с именованными аргументами.
 - D-B-144 (грамматика API, отношения): `cd backend && uv run pytest tests/practice/test_grammar_relations.py` — 5 failed, 4 passed (отказы и так отказы), коммит `b2d0309`. Зелёный: 9 passed; с затронутыми (`tests/practice`, `tests/session/test_phase4_contracts.py`, `tests/test_contracts.py`) — 116 passed.
 
+- S3, заморозка (A, `phase-4-a-s3-freeze`, коммит `dc04d39`): `pytest tests/events/test_catalog.py -k frozen_kinds` — 5 failed (другие значения `kind` и чужая привязка `topic_id`/`hub_id` принимаются), 1 passed. Зелёный: `tests/events`, `tests/jobs` — 111 passed.
+- S3, `session.started.resumed` (A, `phase-4-a-session-resumed`, коммит `5b2f6f4`, D-A-121): `pytest tests/events/test_catalog.py -k resumed` — 1 failed (`resumed` нет у модели). Зелёный — в описании PR.
+- S6, `known_check` без темы (A, `phase-4-a-g1`, ревью B #117): `pytest tests/jobs/test_rules_p4.py -k without_topic` — 1 failed (ставится `check.known_claim` с `topic_id = "None"`). Зелёный — в описании #117.
+- G1 потока A (`phase-4-a-g1`, коммит `692f4f3`): `pytest tests/jobs tests/graph/test_read_stub.py tests/events/test_catalog.py` — 7 failed (`JobContext` без полей §4.2 и порядок закрытия; `known_check` без задачи; нет `cancelled_requests`; `MisconceptionFact` без `statement` — 2; `check.failed {reason: unsupported}` отклонён), 104 passed. Зелёный — в описании PR.
 - S3/S4/S6 (A, `phase-4-a-s4-s6`): тесты и код писались в одной итерации, красный прогон отдельно не снят (`Verdict` split, `RejectedElementRecord.index`, `quack.graph.read`, `rules_p4.py`). Зелёный: `tests/graph/test_read_stub.py`, `tests/jobs`, `tests/events/test_rejected_element.py`, `tests/practice/test_second_opinion.py`, `tests/db/test_sql_static.py`, `tests/test_contracts.py` (`T-A6`) — локально без инфраструктуры; тесты с Postgres/dbmate (`tests/db`, `tests/events/test_catalog.py`, `tests/practice/test_answer_transaction.py`, `tests/practice/test_tasks_store.py`) локально не запускались (нет `dbmate`) — их прогонит CI.
 - WP11.6, тело `check.model` (D-B-145): `cd backend && uv run pytest tests/practice/test_check_model.py` — 12 failed (`NotImplementedError`), коммит `63ba969`. Зелёный: 12 passed; с затронутыми (`tests/practice`, `tests/llm`, `tests/test_contracts.py`, `tests/test_thresholds_in_settings.py`, инфраструктура B) — 196 passed.
 - WP11.3, тело `check.symbolic` (D-B-146): `cd backend && uv run pytest tests/practice/test_check_symbolic_job.py` — 5 failed (`NotImplementedError`), коммит `2ead504`. Зелёный: 5 passed; с `tests/db/test_sql_static.py` — 9 passed.
@@ -1243,6 +1330,8 @@ PR #77 (dbmate v2.36.0, sha256).
 ## Правки тестов
 
 - `tests/session/test_head_guards.py::test_boundary_names_the_missing_prerequisites_once` (D-B-153, до зелёного): проверка «id не в тексте» смотрела на id предпосылки с меткой и не ловила утечку id предпосылки без метки (подмена прошла); теперь проверяются оба id и точный текст. Тест усилен, не ослаблен.
+- `tests/practice/test_check_symbolic_job.py::test_unsupported_form_writes_nothing_yet` → `test_unsupported_form_writes_check_failed_for_the_model` (B, D-B-146): прежний тест закреплял временное поведение до ответа A («`unsupported` нет в каталоге»); A добавил значение в #117, тест проверяет новое поведение: `check.failed {reason: unsupported}` под ключом `check_failed_key`. Тест не ослаблен.
+
 - `tests/session/test_holdback.py` (B, до зелёного): `test_spoiler_found_only_at_the_end` ошибочно ждал спойлер только в `finish`, хотя по WP13.4 весь накопленный текст проверяется на каждом куске. Заменён на `test_spoiler_completed_inside_the_holdback` (спойлер ловится на куске, который его дописал) и `test_finish_checks_the_whole_text`. Проверка не ослаблена: показанный текст по-прежнему пуст.
 - `tests/llm/test_phase4_ai_layer.py` (`T111`): `max_output_tokens` десяти ролей — по замеру (D-B-134); `Т-§11.1` разрешает менять конфиг по замеру. Сила проверки не меняется.
 - `tests/test_contracts.py` (`T-A6`): в `PRODUCT` добавлен `agents` (ТЗ Ф4 §4.1). Сила проверки не меняется.
@@ -1253,7 +1342,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - **Q-A-2 (A → B, к заморозке S3 на G1).** (1) `Verdict.misconception` в событии — id заблуждения или гипотеза словами, метка недопустима (`Т-§4.5`); оставить одно поле `str` или разделить на `misconception_id` и `misconception_hypothesis`? (2) `element.responded` по §6.3 — без `answer`; ответ на элемент-задачу пишется как `answer.submitted` с `element_id` — так? (3) `observation.extracted.rejected` — форма `{reason, quote}` достаточна? (4) `RootCauseRecord.confidence` — категория в событии, число по `root_cause_confidence_map` считает проектор (A) — согласен? (5) `item.flagged_unclear.text` вместо `quote` (D-A-107). (6) `CheckFailed` стал моделью Pydantic — позиционный конструктор dataclass больше не работает.
 - **Q-A-3 (A → C, к заморозке S3 на G1).** (1) `observation.diagnosed`: `diagnosis.kind` (`error`, `question`) и `method` (`model`, `symbolic`) — по WP5.1, WP21.4 так? (2) `canvas.line_committed.kind` — пока `str`: дай закрытый перечень видов строки (`Т-§15.3`). (3) `material.parsed` — `{material_id, pages_count}` достаточно? (4) `artifact.updated.kind` — пока `str`: назови значения видов WP23.1. (5) `DeletionRecord.target_id` — UUID, как `ops.deletion_log.target_id` (ревью #74).
 - **Q-A-3 — ответ C** (2026-11-03; ТЗ Ф4 §6.3, WP5.1, WP21.3–21.5, WP23.1, `Т-§15.3`, `Т-§15.4`, `Т-§17.1`):
-  1. `observation.diagnosed.method` ∈ {`model`, `symbolic`} — **да**. Основания: WP21.4 п.1 (символьное расхождение) и п.3 (`canvas_diagnoser`); ярусы WP5.1 различают «модель» и «символьное расхождение с указанием заблуждения моделью». Согласное второе мнение — не метод, а отдельное событие `observation.second_opinion {target_seq, agreed}`. `diagnosis.kind` ∈ {`error`, `question`} — **да, с уточнением смысла**. «Неуверенный» по документу — это уверенность ниже `mark_min_confidence` (`Т-§15.4`, таблица пометок; WP21.5). Поэтому C пишет `kind = question`, когда `method = model` и `confidence < mark_min_confidence`, иначе `kind = error`. Правило D-A-110 п.5 (`question` → `second_opinion.diagnosis`) этим согласовано. Пометку на доске (WP21.5) код C считает отдельно: `error` на доске — только при `method = symbolic` или согласном втором мнении. Значит, `kind = error` с `method = model` без второго мнения пометки не даёт. Поля `misconception_id` / `misconception_hypothesis` / `root_cause_skill_id` — как в Q-A-2 п.1. **Вопрос владельцу (не блокирует S3):** пишется ли `observation.diagnosed`, если `canvas_diagnoser` ошибки не нашёл. Документ называет результат только «диагноз с уверенностью» (`Т-§15.4` п.3). До ответа C пишет событие только при найденной ошибке, и третьего значения `kind` не нужно.
+  1. `observation.diagnosed.method` ∈ {`model`, `symbolic`} — **да**. Основания: WP21.4 п.1 (символьное расхождение) и п.3 (`canvas_diagnoser`); ярусы WP5.1 различают «модель» и «символьное расхождение с указанием заблуждения моделью». Согласное второе мнение — не метод, а отдельное событие `observation.second_opinion {target_seq, agreed}`. `diagnosis.kind` ∈ {`error`, `question`} — **да, с уточнением смысла**. «Неуверенный» по документу — это уверенность ниже `mark_min_confidence` (`Т-§15.4`, таблица пометок; WP21.5). Поэтому C пишет `kind = question`, когда `method = model` и `confidence < mark_min_confidence`, иначе `kind = error`. Правило D-A-110 п.5 (`question` → `second_opinion.diagnosis`) этим согласовано. Пометку на доске (WP21.5) код C считает отдельно: `error` на доске — только при `method = symbolic` или согласном втором мнении. Значит, `kind = error` с `method = model` без второго мнения пометки не даёт. Поля `misconception_id` / `misconception_hypothesis` / `root_cause_skill_id` — как в Q-A-2 п.1. Диагноз без найденной ошибки события не пишет — решено в D-C-120 (по документам, владелец поручил решить C); S3 не меняется.
   2. `canvas.line_committed.kind` ∈ {`latex`, `text`}. Основание: `Т-§15.3`, распознаватель выдаёт «LaTeX или текст». Набранная формула (`source = typed`) — всегда `latex` («дают LaTeX напрямую»). Строки с фото (WP22.3) — тот же перечень. Зачёркнутость — отдельное поле `crossed_out`, не вид.
   3. `material.parsed {material_id, pages_count}` — **достаточно** для C. ТЗ полей не называет: канал ученика несёт только `material_parsed {material_id}` (§4.8), `T-MT1` проверяет сам факт события. `pages_count` — столбец `content.materials` (§6.1). Куски и структура приходят своими событиями (`chunk.indexed`, события структуры). Если проектору для узла `Material` (WP3, таблица проектора) нужно что-то ещё — решает A.
   4. `artifact.updated.kind` ∈ {`notes`, `cards`, `cheatsheet`}. Документ называет виды только словами («конспект темы, карточки темы, cheat sheet хаба», WP23.1, `Т-§17.1`). Английские имена взяты из маршрутов §6.4: `GET /v1/topics/{id}/notes`, `/cards`, `GET/POST /v1/hubs/{id}/cheatsheet`. Тот же перечень — в `content.artifacts.kind` (WP23.1, C). Связка: `notes` и `cards` — с `topic_id`, `cheatsheet` — с `hub_id` (`topic_id | hub_id`, WP23.1). Проверку «ровно одно из двух по виду» в модели можно поставить в G1.

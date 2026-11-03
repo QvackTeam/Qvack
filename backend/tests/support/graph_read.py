@@ -49,6 +49,7 @@ SKILL_PROVEN = UUID(int=0x51)
 SKILL_FAILED = UUID(int=0x52)
 SKILL_QUIET = UUID(int=0x53)
 MISCONCEPTION = UUID(int=0x61)
+MISCONCEPTION_STATEMENT = "adds the denominators when adding fractions"
 EVIDENCE_PROVEN = UUID(int=0xE1)
 EVIDENCE_FAILED = UUID(int=0xE2)
 PROJECTED_SEQ = 120
@@ -136,6 +137,7 @@ class FixedGraphReader:
                     misconception_id=MISCONCEPTION,
                     skill_id=SKILL_FAILED,
                     status="suspected",
+                    statement=MISCONCEPTION_STATEMENT,
                     manifestation_count=1,
                     quotes=["a = b"],
                 )

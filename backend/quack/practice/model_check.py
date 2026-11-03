@@ -10,7 +10,7 @@ agreed, Т3 not) is set by code from `secondOpinion` (WP4.1, stream A), never he
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -19,6 +19,7 @@ from quack.db.db import Db
 from quack.events.event_types import AnswerSubmitted
 from quack.events.keys import verdict_key
 from quack.events.log import NewEvent, append_events
+from quack.graph.read.models import MisconceptionFact
 from quack.llm.gateway import LLMGateway
 from quack.practice.answer_spec import AnswerSpec, AnswerType
 from quack.practice.check import (
@@ -114,6 +115,17 @@ class KnownMisconception:
 
     misconception_id: UUID
     statement: str
+
+
+def known_misconceptions(
+    facts: Sequence[MisconceptionFact], *, skill_ids: Collection[UUID]
+) -> list[KnownMisconception]:
+    """The misconceptions of the tested skills from the slice (seam S4), with the statement
+    the model sees as «M1. <statement>» (D-B-145), in the order of the slice."""
+    wanted = set(skill_ids)
+    return [
+        KnownMisconception(f.misconception_id, f.statement) for f in facts if f.skill_id in wanted
+    ]
 
 
 def verdict_role(answer_type: AnswerType, *, failed: bool) -> str:

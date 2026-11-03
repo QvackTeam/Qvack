@@ -77,8 +77,21 @@ def test_models_reject_unknown_fields_and_bad_values() -> None:
             misconception_id=UUID(int=1),
             skill_id=UUID(int=2),
             status="suspected",
+            statement="adds denominators",
             quotes=["a", "b", "c"],
         )
+    with pytest.raises(ValidationError):  # Т-§9.3: a misconception always has its statement
+        MisconceptionFact.model_validate(
+            {"misconception_id": UUID(int=1), "skill_id": UUID(int=2), "status": "suspected"}
+        )
+
+
+def test_misconception_carries_its_statement() -> None:
+    """D-B-145: `check.model` shows the model `M1. <statement>`."""
+    sl = asyncio.run(_reader().slice_for_turn(fx.LEARNER, UUID(int=1), SliceFocus()))
+    (found,) = sl.misconceptions
+    assert found.misconception_id == fx.MISCONCEPTION
+    assert found.statement == fx.MISCONCEPTION_STATEMENT
 
 
 def test_requires_carry_confidence_for_the_guard_rule() -> None:
