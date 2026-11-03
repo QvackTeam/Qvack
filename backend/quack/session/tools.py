@@ -284,8 +284,14 @@ async def _skill_history(ctx: ToolContext, args: SkillHistoryArgs) -> str:
             f"level {fact.level} {LEVEL_NAMES[fact.level]}",
             _OUTCOME[fact.outcome],
             _SOURCE[fact.source],
-            _when(fact.occurred_at_ms, ctx.now_ms),
         ]
+        if fact.assistance == "hint":
+            parts.append(
+                f"after hint step {fact.hint_step} of 3" if fact.hint_step else "after a hint"
+            )
+        elif fact.assistance == "shown_solution":
+            parts.append("after the solution was shown")
+        parts.append(_when(fact.occurred_at_ms, ctx.now_ms))
         task = _task(ctx, fact.task_id)
         if task:
             parts.insert(0, f"task {task}")

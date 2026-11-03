@@ -28,6 +28,8 @@ from quack.session.tools import (
     VoiceSegment,
     run_tool,
 )
+from tests.support import graph_read as fx
+from tests.support.graph_read import FixedGraphReader
 
 SETTINGS = Settings()
 LEARNER = uuid4()
@@ -55,6 +57,8 @@ class _Reader:
                 source="code",
                 quote="n!/n^n" if i == 0 else None,
                 task_id=TASK if i == 0 else None,
+                assistance="hint" if i == 1 else "shown_solution" if i == 2 else "none",
+                hint_step=2 if i == 1 else None,
                 seq=i,
                 occurred_at_ms=NOW_MS - DAY_MS,
             )
@@ -140,7 +144,12 @@ async def test_memory_tools() -> None:
     lines = history.splitlines()
     assert len(lines) == limits["skill_history"]
     assert lines[0] == 'E1: task K1, level 3 Applies, wrong, checked by code, yesterday: "n!/n^n"'
-    assert lines[1] == "E2: level 3 Applies, right, checked by code, yesterday"
+    assert (
+        lines[1] == "E2: level 3 Applies, right, checked by code, after hint step 2 of 3, yesterday"
+    )
+    assert lines[2] == (
+        "E3: level 3 Applies, right, checked by code, after the solution was shown, yesterday"
+    )
     assert reader.calls[-1] == ("skill_history", (SKILL, 3, limits["skill_history"]))
     _ids_absent(history, SKILL, TASK, *(e.evidence_id for e in reader.evidence))
 
@@ -230,3 +239,15 @@ async def test_bad_calls_are_error_texts() -> None:
         out = await run_tool(name, args, ctx)
         assert out.startswith("error:"), (name, out)
     assert reader.calls == []
+
+
+async def test_skill_history_help_on_the_s4_stub() -> None:
+    """`Т-§10.4` «задача, исход, помощь, цитата, дата» on `FixedGraphReader` (D-A-127): the
+    evidence of the failed skill shows its hint step."""
+    ctx = _ctx(
+        cast(_Reader, FixedGraphReader()),
+        labels=LabelMap.build(SETTINGS, skills=[fx.SKILL_FAILED]),
+        skill_names={fx.SKILL_FAILED: "Adding fractions"},
+    )
+    text = await run_tool("skill_history", json.dumps({"skill": "S1", "level": None}), ctx)
+    assert f"after hint step {fx.HINT_STEP} of 3" in text

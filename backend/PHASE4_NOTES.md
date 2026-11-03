@@ -1121,7 +1121,8 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Почему: §0.4.3 п.2 (WP14.4, `Т-§10.4`), п.5.
 - Обратимость: один модуль.
 - Тесты: `T-CX4` — `tests/session/test_memory_tools.py`; `T-CX3` обновлён под `L{N}`.
-- Не решено \[ПРОВЕРИТЬ\] — с A (S4): в `EvidenceFact` нет помощи (подсказка, шаг, показанное решение) — `skill_history` по `Т-§10.4` должен её показывать; до поля помощь не выводится. Подключение порта поиска к `quack/graph/read/materials.py` (C) — при сборке входов WP14. `similar_mistakes(text)` берёт признак «Modal недоступен» из порта поиска материалов (`search is None`): эмбеддинг текста — тот же Modal; если `GraphReader.similar_mistakes` получит свой эмбеддинг, условия развести (ревью C в #137). Порт поиска — `functools.partial(search_chunks, db, embeddings, learner_id=...)` по сигнатуре C (WP20.4, #137).
+- Решено (было \[ПРОВЕРИТЬ\] с A): помощь — `EvidenceFact.assistance`, `hint_step` (D-A-127, #141); `skill_history` пишет «after hint step N of 3» / «after the solution was shown» между источником и датой (`Т-§10.4`). Тест — `test_skill_history_help_on_the_s4_stub` на `FixedGraphReader`.
+- Не решено \[ПРОВЕРИТЬ\]: Подключение порта поиска к `quack/graph/read/materials.py` (C) — при сборке входов WP14. `similar_mistakes(text)` берёт признак «Modal недоступен» из порта поиска материалов (`search is None`): эмбеддинг текста — тот же Modal; если `GraphReader.similar_mistakes` получит свой эмбеддинг, условия развести (ревью C в #137). Порт поиска — `functools.partial(search_chunks, db, embeddings, learner_id=...)` по сигнатуре C (WP20.4, #137).
 - Требует подтверждения владельцем: нет
 
 ### D-B-164. Бюджет контекста учителя (WP14.5)
