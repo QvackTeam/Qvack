@@ -18,6 +18,7 @@ from quack.db.postgres import SessionFactory
 from quack.domains.schemas import StructurerOutput, StructurerSkill, StructurerTopic
 from tests.domains.conftest import FakeLLMProvider
 from tests.domains.test_structure_actor_and_delete import _seed_domain
+from tests.support.auth import session_cookie
 
 
 def _body(goals: str, key: str) -> dict[str, Any]:
@@ -39,7 +40,7 @@ async def test_propose_same_key_other_body_is_conflict(
     db: SessionFactory,
 ) -> None:
     learner_id, token = seeded_learner
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = session_cookie(token)
     domain_id = await _seed_domain(db, learner_id)
     url = f"/v1/domains/{domain_id}/structure/propose"
     fake_llm_provider.enqueue(
