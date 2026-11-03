@@ -214,6 +214,10 @@ class FixedGraphReader:
     async def skill_history(
         self, skill_id: UUID, level: Level | None = None, limit: int = 10
     ) -> list[EvidenceFact]:
+        if skill_id == SKILL_FAILED:
+            hinted = _evidence(EVIDENCE_FAILED, skill_id, "incorrect", 110).model_dump()
+            hinted |= {"assistance": "hint", "hint_step": HINT_STEP}
+            return [EvidenceFact.model_validate(hinted)][:limit]
         return [_evidence(EVIDENCE_PROVEN, skill_id, "correct", 100)][:limit]
 
     async def prerequisites(self, skill_id: UUID, limit: int = 10) -> list[PrerequisiteFact]:
