@@ -149,8 +149,10 @@ async def test_cheatsheet_one_page(stand: Stand, pg_db: Db) -> None:
     result = await stand.generate(learner, hub)
     assert (result.fits, result.page_count, result.rounds, result.version) == (True, 1, 2, 3)
     assert len(stand.writer.prompts) == 3 and len(stand.renders()) == 3
-    assert "one A4 page" not in stand.writer.prompts[0]
-    assert "took 3 pages" in stand.writer.prompts[1] and "one A4 page" in stand.writer.prompts[1]
+    assert "The last version took" not in stand.writer.prompts[0]
+    assert (
+        "took 3 pages" in stand.writer.prompts[1] and "fit on one page" in stand.writer.prompts[1]
+    )
     assert "took 2 pages" in stand.writer.prompts[2]
     sheet = await get_artifact(pg_db, learner_id=learner, kind="cheatsheet", owner_id=hub)
     assert [b.content for b in sheet.blocks] == ["Formulas, draft 3"]

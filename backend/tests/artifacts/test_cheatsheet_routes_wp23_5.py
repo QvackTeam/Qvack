@@ -152,7 +152,5 @@ async def test_review_route_of_a_foreign_hub_is_404(pg_db: Db, client_for: Clien
     learner, stranger = await create_learner(pg_db), await create_learner(pg_db)
     hub, _ = await create_hub(pg_db, learner)
     client = await client_for(stranger, hub)
-    response = await client.post(
-        f"/v1/hubs/{hub}/cheatsheet/review", json={"idempotency_key": "k"}
-    )
+    response = await client.post(f"/v1/hubs/{hub}/cheatsheet/review", json={"idempotency_key": "k"})
     assert response.status_code == 404

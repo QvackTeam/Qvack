@@ -22,6 +22,7 @@ from quack.api.openapi import install_openapi, render_openapi
 from quack.api.ratelimit import enforce_action_rate_limit
 from quack.api.resources import AppResources, create_app_resources
 from quack.artifacts.cards_routes import router as cards_router
+from quack.artifacts.hub_cheatsheet_routes import router as hub_cheatsheet_router
 from quack.artifacts.notes_routes import router as notes_router
 from quack.artifacts.router import router as artifacts_router
 from quack.auth.consents import has_current_terms
@@ -206,6 +207,7 @@ def create_app(
     app.include_router(artifacts_router)
     app.include_router(notes_router)
     app.include_router(cards_router)
+    app.include_router(hub_cheatsheet_router)
     app.include_router(learner_stream_router)
     app.include_router(auth_router)
     app.include_router(materials_router)

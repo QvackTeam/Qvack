@@ -121,16 +121,16 @@ async def writer_input(
         misconceptions=[m.misconception_id for m in topic.misconceptions],
     )
     phrasings = await worked_phrasings(db, reader, learner_id=learner_id, skill_ids=skill_ids)
-    hinted = [s for s in skill_ids if await _needed_hints(reader, s)]
+    hinted = [s for s in skill_ids if await needed_hints(reader, s)]
     notes = await get_artifact(db, learner_id=learner_id, kind="notes", owner_id=topic_id)
     variables = {
         "artifact_type": NOTES_TYPE,
         "learner_skill": NO_LEARNER_SKILL,
         "topic_graph": _topic_graph(topic, labels, await _neighbours(reader, topic)),
-        "material_chunks": _chunks(hits, labels),
-        "worked_phrasings": _phrasings(phrasings, labels),
-        "personal": _personal(topic, labels, hinted),
-        "current_blocks": _blocks(notes.blocks),
+        "material_chunks": chunks_text(hits, labels),
+        "worked_phrasings": phrasings_text(phrasings, labels),
+        "personal": personal_text(topic, labels, hinted),
+        "current_blocks": numbered_blocks_text(notes.blocks),
     }
     return WriterInput(
         variables=variables,
@@ -140,7 +140,7 @@ async def writer_input(
     )
 
 
-async def _needed_hints(reader: GraphReader, skill_id: UUID) -> bool:
+async def needed_hints(reader: GraphReader, skill_id: UUID) -> bool:
     return any(e.assistance != "none" for e in await reader.skill_history(skill_id))
 
 
@@ -178,7 +178,7 @@ def _topic_graph(
     return "\n".join(lines)
 
 
-def _chunks(hits: Sequence[ChunkHit], labels: LabelMap) -> str:
+def chunks_text(hits: Sequence[ChunkHit], labels: LabelMap) -> str:
     if not hits:
         return "None."
     out = []
@@ -188,7 +188,7 @@ def _chunks(hits: Sequence[ChunkHit], labels: LabelMap) -> str:
     return "\n\n".join(out)
 
 
-def _phrasings(found: dict[UUID, str], labels: LabelMap) -> str:
+def phrasings_text(found: dict[UUID, str], labels: LabelMap) -> str:
     lines = [
         f"{label}: {text}"
         for skill_id, text in found.items()
@@ -197,7 +197,7 @@ def _phrasings(found: dict[UUID, str], labels: LabelMap) -> str:
     return "\n\n".join(lines) or "None."
 
 
-def _personal(topic: TopicMemory, labels: LabelMap, hinted: Sequence[UUID]) -> str:
+def personal_text(topic: TopicMemory, labels: LabelMap, hinted: Sequence[UUID]) -> str:
     lines: list[str] = []
     for m in topic.misconceptions:
         quotes = "; ".join(f'"{q}"' for q in m.quotes)
@@ -219,7 +219,7 @@ def _personal(topic: TopicMemory, labels: LabelMap, hinted: Sequence[UUID]) -> s
     return "\n".join(lines) or "None."
 
 
-def _blocks(blocks: Sequence[Block]) -> str:
+def numbered_blocks_text(blocks: Sequence[Block]) -> str:
     if not blocks:
         return "None yet."
     return "\n\n".join(

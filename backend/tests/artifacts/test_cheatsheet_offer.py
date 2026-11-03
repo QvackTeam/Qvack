@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -18,8 +18,8 @@ from tests.db.fixtures import create_learner
 NOW_MS = 1_800_000_000_000
 
 
-async def _offer(db: Db, learner: object, hub: object, settings: Settings) -> bool:
-    return await cheatsheet_offer(db, learner, hub, settings, now_ms=NOW_MS)  # type: ignore[arg-type]
+async def _offer(db: Db, learner: UUID, hub: UUID, settings: Settings) -> bool:
+    return await cheatsheet_offer(db, learner, hub, settings, now_ms=NOW_MS)
 
 
 async def test_offer_when_the_deadline_is_within_offer_days(pg_db: Db, settings: Settings) -> None:
@@ -58,8 +58,12 @@ async def test_offer_follows_the_setting(pg_db: Db, settings: Settings) -> None:
     learner = await create_learner(pg_db)
     hub, _ = await create_hub(pg_db, learner)
     await set_deadline(pg_db, learner, hub, NOW_MS + 10 * DAY_MS)
-    assert not await _offer(pg_db, learner, hub, settings.model_copy(update={"cheatsheet_offer_days": 7}))
-    assert await _offer(pg_db, learner, hub, settings.model_copy(update={"cheatsheet_offer_days": 14}))
+    assert not await _offer(
+        pg_db, learner, hub, settings.model_copy(update={"cheatsheet_offer_days": 7})
+    )
+    assert await _offer(
+        pg_db, learner, hub, settings.model_copy(update={"cheatsheet_offer_days": 14})
+    )
 
 
 async def test_no_offer_once_a_cheat_sheet_exists(pg_db: Db, settings: Settings) -> None:

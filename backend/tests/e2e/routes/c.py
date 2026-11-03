@@ -1,7 +1,8 @@
 """Routes of stream C (ТЗ Ф4 §7.3): auth, consents, learner settings, materials, canvases,
 artifacts (notes, blocks, cards, cheatsheets), the learner stream and health.
 
-Stages 20-30 are the consents, 190-270 the artifacts, blocks, cards and the canvas line.
+Stages 20-30 are the consents, 190-270 the artifacts, blocks, cards and the canvas line, 310-320
+the cheat sheet of a hub.
 """
 
 from __future__ import annotations
@@ -124,7 +125,7 @@ async def _hub_of_the_walk(system: System, learner: Learner, ids: Ids) -> Ids:
         domain_id=domain_id,
     )
     await append_events(system.resources.db, learner.learner_id, [created])
-    return ids.replace(hub_id=hub_id)
+    return ids.replace(cheatsheet_hub_id=hub_id)
 
 
 async def _card_of_topic(system: System, learner: Learner, ids: Ids) -> UUID:
@@ -172,8 +173,8 @@ STREAM = Stream(
         "block_id": NO_ID,
         # WP23.4: a card of the topic (the task behind it).
         "card_id": NO_ID,
-        # WP23.5: a hub of the walk (the cheat sheet routes).
-        "hub_id": NO_ID,
+        # WP23.5: a hub of the walk (the cheat sheet routes); stream A's `hub_id` is a graph hub.
+        "cheatsheet_hub_id": NO_ID,
         # WP21.3: a recognized line of the canvas the walk opens for the correction route.
         "line_id": "none",
     },
@@ -266,21 +267,25 @@ STREAM = Stream(
             requires=("canvas_id", "line_id"),
             body=lambda ids, v: {"text": ["x=2", "x=3"][v], "sympy": None},
         ),
-        # ТЗ Ф4 §6.4, WP23.5: the consent to a cheat sheet and the review of the learner's one.
+        # ТЗ Ф4 §6.4, WP23.5: the review of the learner's cheat sheet and the consent to a
+        # generated one. Last in the walk: the consent writes `agent.requested` with `artifact` and
+        # `hub_id`, which the schema takes with D-A-196 (issue #191); until then that step fails.
         Route(
             "POST",
-            "/v1/hubs/{hub_id}/cheatsheet",
-            stage=272,
-            requires=("hub_id",),
+            "/v1/hubs/{hub_id}/cheatsheet/review",
+            stage=310,
+            requires=("cheatsheet_hub_id",),
+            path_ids={"hub_id": "cheatsheet_hub_id"},
             prepare=_hub_of_the_walk,
             body=lambda ids, v: {},
             no_other_body="the body has no field besides the key",
         ),
         Route(
             "POST",
-            "/v1/hubs/{hub_id}/cheatsheet/review",
-            stage=274,
-            requires=("hub_id",),
+            "/v1/hubs/{hub_id}/cheatsheet",
+            stage=320,
+            requires=("cheatsheet_hub_id",),
+            path_ids={"hub_id": "cheatsheet_hub_id"},
             body=lambda ids, v: {},
             no_other_body="the body has no field besides the key",
         ),
