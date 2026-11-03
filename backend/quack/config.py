@@ -189,11 +189,15 @@ def default_llm_roles() -> dict[str, RoleConfig]:
 
 
 class ModelPrice(BaseModel):
-    """Т-§11.4: dollars per 1M tokens of one model (ТЗ Ф4 WP10.4)."""
+    """Т-§11.4: dollars per 1M tokens of one model (ТЗ Ф4 WP10.4). `per_minute` — dollars per
+    minute of audio and `per_image` — dollars per picture, for the calls that report no tokens
+    (`voice`, `illustrator`; D-B-198). Every field is 0 unless the owner sets it."""
 
-    input: float
-    cached_input: float
-    output: float
+    input: float = 0.0
+    cached_input: float = 0.0
+    output: float = 0.0
+    per_minute: float = 0.0
+    per_image: float = 0.0
 
 
 class Settings(BaseSettings):
@@ -679,6 +683,14 @@ class Settings(BaseSettings):
             ]
             if missing:
                 raise ValueError(f"missing required secrets for ENV=prod: {', '.join(missing)}")
+        return self
+
+    @model_validator(mode="after")
+    def _require_prices_in_prod(self) -> Settings:
+        """ТЗ Ф4 §2.3 row 9, WP10.4: the processes that call models (`api`, `workers`) do not
+        start in prod without the price table; `dev`/`test` run with zero prices (D-B-198)."""
+        if self.env == "prod" and self.process_role in ("api", "workers") and not self.llm_prices:
+            raise ValueError("LLM_PRICES is required for ENV=prod (price table of Т-§11.4)")
         return self
 
     @property
