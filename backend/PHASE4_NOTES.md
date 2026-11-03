@@ -1210,6 +1210,21 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: п.3.
 
+### D-C-127. WP20.4: предвыборка кусков по графу и векторный поиск по `chunk_emb`
+- Класс: B
+- WP / место: WP20.4; `quack/graph/read/materials.py`, `quack/config.py` (`vector_search_reserve`)
+- Контекст: WP20.4 называет `materials_prefetch(skills)` и `materials_search(vector, skills)`. `Т-§10.5` фильтрует поиск «по ученику и домену», WP20.4 — по `learnerId` и `searchable`. Имя материала у узла `Material` и порядок кусков в предвыборке не названы.
+- Решение:
+  1. Обе функции принимают `learner_id` (и `domain_id` у поиска) явно: изоляция (§4.3) — в запросе, сборка инструментов учителя привязывает их к ученику хода.
+  2. Фильтр внутри индекса — `learnerId`, `domainId`, `searchable` (все три объявлены у `chunk_emb`, `Т-§3.4.6`; только равенства через AND). Запасной путь не нужен: WP0 п.3а «работает».
+  3. Запас внутри `SEARCH` — параметр `vector_search_reserve = 30` (`Т-§3.4.6`, `Т-§10.5`; закон о числах в конфиге). `SEARCH` принимает предел литералом — подставляется целое из настроек, не ввод.
+  4. Порядок поиска: куски, учащие навыку в фокусе (`TEACHES`), выше любых других, внутри — по близости; итог — `k` (`materials_k`). Предвыборка: больше навыков фокуса — раньше, затем материал и страница.
+  5. Ответ — `ChunkHit {chunk_id, material_id, page, text, teaches_focus, score}`. Имени материала нет: у `Material` в `Т-§3.4` свойства не названы, в `content.materials` колонки имени нет. [ПРОВЕРИТЬ] для B: `MaterialChunk.material_name` (#137) — откуда брать имя.
+- Почему: WP20.4, `Т-§10.5`, `Т-§3.4.6`, WP0 п.3а.
+- Обратимость: один модуль чтения.
+- Тесты: `tests/materials/test_materials_search_wp20.py` (Neo4j).
+- Требует подтверждения владельцем: нет.
+
 ### D-C-120. `observation.diagnosed` пишется только при найденной ошибке
 - Класс: B (тип C по §6.3; владелец поручил C решить по документам, 2026-11-03)
 - WP / место: WP21.4 п.3, WP5.1, §6.3; `Т-§7.1`, `Т-§15.4`, `Т-§7.6`, П-9.7; будущий код C `quack/canvas/` (быстрый слой)
@@ -1257,6 +1272,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP20.4, поиск кусков (C, `phase-4-c-wp20-search`): красный прогон отдельно не снят (облегчённый TDD). Зелёный: `tests/materials/test_materials_search_wp20.py` + `tests/test_contracts.py` — 9 passed.
 - WP13.1, согласие на старте сессии (D-B-151): `uv run pytest tests/session/test_session_terms.py` — 2 failed (старт без согласия `201`, без cookie `201`), коммит `f5029a2`. Зелёный: 2 passed; `tests/session` и `tests/llm/test_labels.py` зелёные; `tests/e2e` — 13 failed (`403` на старте, правка у C).
 - WP11.3, WP11.6 на полях A #117 (D-B-145, D-B-146): `uv run pytest tests/practice/test_check_symbolic_job.py tests/practice/test_check_model.py` — 1 failed (`unsupported` ничего не писал) и ошибка сбора (нет `known_misconceptions`), коммит `72e96fb`. Зелёный: `tests/practice`, `tests/events`, `tests/graph/test_read_stub.py`, `tests/jobs/test_rules_p4.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` — 234 passed.
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
