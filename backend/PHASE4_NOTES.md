@@ -1587,6 +1587,16 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: нет (п.3 — D-C-122 п.4).
 
+### D-C-135. WP21.6: проигрывание — канвас в ключе куска штрихов, порядок кусков, ответ
+- Класс: B (раскладка ключей — «ориентир» `Т-§3.3`, ТЗ Ф4 WP19)
+- WP / место: WP21.6; `quack/canvas/replay.py`, `quack/canvas/router.py`, `quack/storage/keys.py`, `quack/canvas/strokes.py`
+- Контекст: ориентир ключа куска — `canvas/{session_id}/{chunk}-{ulid}.bin`, но у сессии несколько канвасов (по канвасу на задачу, WP21.1), а `GET /v1/canvases/{id}/replay` отдаёт куски одного канваса. Кусок не знает своего канваса, и сервер отдаёт подписанные ссылки, не открывая куски.
+- Решение: (1) ключ — `learners/{id}/canvas/{session_id}/{canvas_id}/{chunk}-{ulid}.bin`: префикс сессии из ориентира сохранён, канвас — следующий уровень; данных в старой раскладке нет. (2) Порядок кусков — миллисекунда ULID, затем номер куска: номер начинается заново с каждым сокетом (D-C-114), а случайная часть ULID внутри миллисекунды порядок не держит. (3) Ответ — `{chunks: [{url, size}], expires_in_s}`, ссылки живут `object_url_ttl_s`; повторы `batch_no` и `stroke_id` отсекает клиент (D-C-114). Только полная сессия (`companion` — 403, `T-CP1`); чужой канвас — 404.
+- Почему: ТЗ Ф4 WP21.6, `Т-§15.7`, `Т-§3.3`, D-C-114.
+- Обратимость: одна функция ключа; до первых данных стенда.
+- Тесты: `tests/canvas/test_replay_wp21.py`; `tests/storage/test_storage_wp19.py`.
+- Требует подтверждения владельцем: нет.
+
 ### D-C-125. WP23.1: артефакт — документ с версиями; конспект блоками, защита правок ученика
 - Класс: B
 - WP / место: WP23.1, §6.4 «Артефакты»; `quack/artifacts/documents.py`, `quack/artifacts/notes_routes.py`
@@ -1652,6 +1662,13 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Обратимость: одна зависимость, один модуль.
 - Тесты: `tests/auth/test_pairing_wp22.py` (`T-CP1`); маршруты — `T-A1`, исключение — `T-E2`.
 - Требует подтверждения владельцем: нет.
+### D-C-137. WP21.3: исправление прочтения строки — `POST /v1/canvases/{id}/lines/{line_id}/correct`
+- Класс: B (ответ и ключ маршрута; §4.5)
+- WP / место: WP21.3, §6.4; `quack/canvas/recognition.py` (`correct_line`), `quack/canvas/router.py`
+- Решение: (1) тело `{idempotency_key, text, sympy?}` → `handwriting.corrected {canvas_id, line_id, text, sympy}`, actor `learner`, `session_id` канваса; ключ события — `handwriting.corrected:{idempotency_key}` (закон 5, T-E2: повтор — тот же ответ без событий, другой текст с тем же ключом — 409). (2) Исправить можно только строку, которая есть в журнале этого канваса (`canvas.line_committed` с этим `line_id`); чужой канвас или нет строки — 404. Стёртую строку исправить можно: стирание — не удаление (`Т-§15.1`). (3) Ответ 200 — `{canvas_id, line_id, text, sympy}`. Только полная сессия (`companion` — 403, `T-CP1`). (4) Повторный диагноз ставит диспетчер A (`canvas.rediagnose`, P1, `rules_p4.py`); обработчик повторного диагноза — с вызовом `canvas_diagnoser` (WP21.4, D-C-136).
+- Почему: ТЗ Ф4 WP21.3, §6.4, `Т-§2.8`, П-9.7, §4.5.
+- Обратимость: маршрут C.
+- Тесты: `tests/canvas/test_line_correct_wp21.py`; `tests/e2e/test_isolation_and_idempotency.py` (T-E2 — обход открывает канвас со строкой).
 ### D-C-134. WP22.3: конвейер фото — режим листа `recognizer@1`, сравнение с листом, рисунки ждут `segmenter`
 - Класс: B (схема роли C, ключи строк фото); рисунки — BLOCKED-C-204
 - WP / место: WP22.3, S8; `quack/canvas/photo_pipeline.py`, `quack/canvas/recognition.py`, `quack/prompts/recognizer/v1.md`
