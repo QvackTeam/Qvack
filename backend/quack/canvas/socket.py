@@ -199,9 +199,7 @@ async def serve_canvas(
         await journal.flush()  # the client is gone: written, but nobody to acknowledge
 
 
-async def _relay(
-    redis: Redis, canvas_id: UUID, send: Any, kinds: frozenset[str] | None
-) -> None:
+async def _relay(redis: Redis, canvas_id: UUID, send: Any, kinds: frozenset[str] | None) -> None:
     """Messages of `canvas:{id}` to this socket (only `kinds` when given); a Redis failure ends
     the relay, not the socket."""
     pubsub = redis.pubsub()
