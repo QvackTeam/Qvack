@@ -64,7 +64,7 @@ function readColors(host: HTMLElement): Colors {
     const px = document.createElement("canvas");
     px.width = px.height = 1;
     const c = px.getContext("2d");
-    if (!c) return "168,148,116";
+    if (!c) return "237,185,102";
     c.fillStyle = css;
     c.fillRect(0, 0, 1, 1);
     const d = c.getImageData(0, 0, 1, 1).data;

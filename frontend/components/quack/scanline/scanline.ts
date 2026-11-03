@@ -12,7 +12,7 @@ export type ScanlineOptions = {
 };
 
 export const DEFAULT_SCANLINE_OPTIONS: ScanlineOptions = {
-  color: "#a89474",
+  color: "#edb966",
   step: 3,
   lineWidth: 0.45,
   threshold: 0.08,

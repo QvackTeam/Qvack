@@ -60,7 +60,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       <div className="m-auto w-full max-w-[420px]">
         <Duck className="size-14" />
         {/* крупный заголовок-«вывеска»: антиква капсом, штриховка, как логотип референса */}
-        <h1 className="display-caps text-striped mt-6 text-[clamp(2.75rem,12vw,4.5rem)] leading-[0.95] text-ribbon [--stripe-line:3px] [--stripe-step:4px]">
+        <h1 className="display-caps text-striped mt-6 uppercase text-[clamp(2.75rem,12vw,4.5rem)] leading-[0.95] text-ribbon [--stripe-line:3px] [--stripe-step:4px]">
           {signup ? t.signupTitle : t.loginTitle}
         </h1>
         <p className="mt-4 text-body text-paper-dim">{signup ? t.signupBody : t.loginBody}</p>

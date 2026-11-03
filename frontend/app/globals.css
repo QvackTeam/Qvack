@@ -4,36 +4,36 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Два цвета: тёмно-коричневый фон и бежевый акцент (как на sondaven.com) */
+/* Тёплый графит: почти чёрный фон с тёплым оттенком и один янтарный акцент (по мотивам modal.com) */
 :root {
-  --cloth: #2c2824;
-  --cloth-deep: #25211e;
-  --cloth-raised: #332e29;
-  --cloth-hover: #3a342e;
-  /* швы — бежевый с альфой: одинаково ложатся на любую поверхность */
-  --seam: #a8947440;
-  --seam-soft: #a894741f;
-  --paper: #e2d5bd;
-  --paper-dim: #b8a583; /* светлее ориентира #a89474: ≥4.5:1 и на cloth-hover */
-  --rule: #7f735f;
-  --duck: #a89474;
-  --ribbon: #a89474;
-  --ribbon-hover: #bfae8e;
-  --ribbon-soft: #a8947429;
-  --on-ribbon: #2c2824;
+  --cloth: #141311;
+  --cloth-deep: #100f0d;
+  --cloth-raised: #181714;
+  --cloth-hover: #211f1b;
+  /* границы — тёплый белый с альфой: одинаково ложатся на любую поверхность */
+  --seam: #fff4e124;
+  --seam-soft: #fff4e114;
+  --paper: #e8e4dc;
+  --paper-dim: #aaa497; /* ≥4.5:1 и на cloth-hover */
+  --rule: #736e63;
+  --duck: #edb966;
+  --ribbon: #edb966;
+  --ribbon-hover: #f3c985;
+  --ribbon-soft: #edb96626;
+  --on-ribbon: #1a1408;
 
-  /* статусы приглушены к бежевой палитре */
-  --st-solid: #9bb08a;
-  --st-review: #8fa8bb;
-  --st-confused: #d98a8c;
-  --st-new: #928775;
+  /* состояния тем; зелёный и синий не пересекаются с акцентом */
+  --st-solid: #8fc79a;
+  --st-review: #86a9c9;
+  --st-confused: #ef8c7a;
+  --st-new: #8d877b;
 
-  /* индикаторы графа: свои цвета, не пересекаются с цветами состояний тем */
+  /* индикаторы графа: свои цвета, не пересекаются с цветами состояний тем и с акцентом */
   --ind-new: #4f9dff;
   --ind-relevant: #a68bff;
   --ind-deadline: #2ec4b6;
   --ind-weak: #e75cc4;
-  --ind-review: #ff9f43;
+  --ind-review: #c6e35a;
 
   /* движение */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -41,9 +41,9 @@
   --dur-m: 0.6s;
   --dur-l: 1.2s;
 
-  /* шрифты (next/font задаёт --font-forum и --font-montserrat) */
-  --font-display: var(--font-forum), "Times New Roman", serif;
-  --font-label: var(--font-montserrat), system-ui, sans-serif;
+  /* шрифты (next/font задаёт --font-manrope и --font-jetbrains) */
+  --font-display: var(--font-manrope), system-ui, sans-serif;
+  --font-label: var(--font-jetbrains), ui-monospace, monospace;
 
   /* shadcn */
   --background: var(--cloth);
@@ -64,7 +64,7 @@
   --border: var(--seam);
   --input: var(--seam);
   --ring: var(--ribbon);
-  --radius: 2px; /* карточки и панели почти квадратные */
+  --radius: 6px; /* карточки и панели */
   --sidebar: var(--cloth-deep);
   --sidebar-foreground: var(--paper);
   --sidebar-primary: var(--ribbon);
@@ -107,13 +107,13 @@
   --color-ind-weak: var(--ind-weak);
   --color-ind-review: var(--ind-review);
 
-  --font-sans: var(--font-golos);
-  --font-mono: var(--font-jetbrains);
-  --font-display: var(--font-forum), "Times New Roman", serif;
-  --font-label: var(--font-montserrat), system-ui, sans-serif;
-  --font-serif: var(--font-forum), "Times New Roman", serif;
+  --font-sans: var(--font-manrope), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+  --font-display: var(--font-manrope), system-ui, sans-serif;
+  --font-label: var(--font-jetbrains), ui-monospace, monospace;
+  --font-serif: var(--font-manrope), system-ui, sans-serif;
   --font-hand: var(--font-caveat);
-  --font-heading: var(--font-forum), "Times New Roman", serif;
+  --font-heading: var(--font-manrope), system-ui, sans-serif;
 
   /* Три кегля на весь экран + дисплей для названия домена */
   --text-small: 0.8125rem;
@@ -162,8 +162,8 @@
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
   /* control — поля и строки; option — пункты меню; pill — кнопки и теги */
-  --radius-control: 3px;
-  --radius-option: 2px;
+  --radius-control: 6px;
+  --radius-option: 4px;
   --radius-pill: 9999px;
 
   --animate-found: found 1.6s var(--ease-out) 2;
@@ -210,8 +210,6 @@
   html {
     @apply font-sans;
     font-feature-settings: "kern";
-    /* у Forum один вес: без синтетического жирного */
-    font-synthesis-weight: none;
   }
   body {
     @apply bg-cloth text-paper text-body;
@@ -236,7 +234,7 @@
 }
 
 [data-flash] {
-  border-radius: 2px;
+  border-radius: 6px;
   animation: flash 1.5s ease-out forwards;
 }
 @keyframes flash {
@@ -250,23 +248,21 @@
   letter-spacing: -0.01em;
 }
 
-/* мелкая подпись: капс с разрядкой; размер — через [--caps-size:0.75rem] */
+/* мелкая подпись: моно, обычный регистр; размер — через [--caps-size:0.75rem]. Имя осталось от прежнего капса */
 @utility caps {
   font-family: var(--font-label);
   font-size: var(--caps-size, 0.6875rem);
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1.3;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
 }
 
-/* заголовок антиквой капсом (названия, пункты меню) */
+/* заголовок (названия, пункты меню). Имя осталось от прежнего капса; нужен капс — добавь uppercase */
 @utility display-caps {
   font-family: var(--font-display);
-  font-weight: 400;
-  line-height: 1.05;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
 
 /* полосатый текст: вертикальные штрихи + рваный край (фильтр #quack-ragged лежит в layout.tsx) */
@@ -286,7 +282,7 @@
 
 /* лёгкий шум поверх цвета фона: bg-cloth grain (слой background-image, текст не трогает) */
 @utility grain {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.66 0 0 0 0 0.58 0 0 0 0 0.45 0.12 0 0 0 -0.025'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.93 0 0 0 0 0.89 0 0 0 0 0.82 0.12 0 0 0 -0.025'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-size: 180px 180px;
 }
 

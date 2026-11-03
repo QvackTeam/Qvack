@@ -1,15 +1,16 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
-import { Caveat, Forum, Golos_Text, JetBrains_Mono, Montserrat } from "next/font/google";
+import { Caveat, JetBrains_Mono, Manrope } from "next/font/google";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 import { getDict, getLocale } from "@/lib/i18n/server";
 import { LocaleProvider } from "@/lib/i18n/provider";
 
-const golos = Golos_Text({
-  variable: "--font-golos",
+// Основной шрифт: текст и заголовки
+const manrope = Manrope({
+  variable: "--font-manrope",
   subsets: ["latin", "cyrillic"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "500", "600", "700"],
 });
 
 const jetbrains = JetBrains_Mono({
@@ -24,27 +25,13 @@ const caveat = Caveat({
   weight: ["400", "500", "600"],
 });
 
-// Антиква для заголовков и меню (один вес, капсом)
-const forum = Forum({
-  variable: "--font-forum",
-  subsets: ["latin", "cyrillic"],
-  weight: ["400"],
-});
-
-// Широкий гротеск для мелких подписей капсом
-const montserrat = Montserrat({
-  variable: "--font-montserrat",
-  subsets: ["latin", "cyrillic"],
-  weight: ["500", "600"],
-});
-
 export async function generateMetadata(): Promise<Metadata> {
   const t = getDict(await getLocale());
   return { title: "Quack!", description: t.meta.description };
 }
 
 export const viewport: Viewport = {
-  themeColor: "#2c2824",
+  themeColor: "#141311",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -53,7 +40,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${golos.variable} ${jetbrains.variable} ${forum.variable} ${montserrat.variable} ${caveat.variable} h-full antialiased`}
+      className={`${manrope.variable} ${jetbrains.variable} ${caveat.variable} h-full antialiased`}
     >
       <body className="h-full overflow-hidden">
         {/* фильтр рваного края для утилиты text-striped */}
