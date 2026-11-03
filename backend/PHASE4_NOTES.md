@@ -1210,6 +1210,22 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: п.3.
 
+### D-C-125. WP23.1: артефакт — документ с версиями; конспект блоками, защита правок ученика
+- Класс: B
+- WP / место: WP23.1, §6.4 «Артефакты»; `quack/artifacts/documents.py`, `quack/artifacts/notes_routes.py`
+- Контекст: WP23.1, `Т-§17.1`–`Т-§17.2`, П-11.1 задают версии, поля блока и «дополнение» к блоку ученика, но не называют: как хранятся блоки в `content.artifact_versions.content`, сколько артефактов одного вида у темы, как помечается дополнение, что делает запись генератора с блоками прошлой версии.
+- Решение:
+  1. Один артефакт вида на тему (`notes`, `cards`) или хаб (`cheatsheet`): `artifact_id = uuid5(QUACK_UUID_NS, "artifact:{kind}:{learner_id}:{topic|hub}")`. Строка создаётся при первом чтении (`INSERT … ON CONFLICT DO NOTHING`), чтобы ученик мог написать первый блок по id. Принадлежность темы или хаба — по `topic.created` / `topic.proposed` / `hub.created` в журнале ученика (закон 1, `Т-§20.7`).
+  2. `content = {"blocks": [...]}`. Поля блока — имена `Т-§17.2`: `block_id`, `kind`, `content`, `owner`, `sources`, `skills`, `generatedBy`; дополнение — `supplementTo` (id блока ученика), имени в документах нет.
+  3. Сохранение: блокировка строки артефакта, новая версия, `current_version` и `artifact.updated {…, text}` — одна транзакция (`Т-§2.3`). `text` — содержимое блоков через пустую строку. Ключ — `artifact.updated:{artifact_id}:{version}`. Те же блоки ещё раз ничего не пишут (закон 5). Актор: `learner` для правок, роль с версией (`artifact_writer@1`) для генератора; `created_by` — то же.
+  4. Запись генератора (WP23.2): блок с `block_id` системного блока заменяет его на месте; с `block_id` блока ученика — встаёт сразу после него дополнением, блок ученика не меняется; без `block_id` — в конец. Системные блоки, которые генератор не назвал, уходят: он возвращает всю системную часть. Блоки ученика остаются всегда; неотвеченное дополнение остаётся, пока к тому же блоку не пришло новое.
+  5. Ученик: `PUT` правит блок (он становится `owner = learner`, дополнение перестаёт быть дополнением) или по новому `block_id` дописывает блок `custom` (§2.3 строка 14). `accept` сливает дополнение с его блоком (содержимое через пустую строку, `sources` и `skills` объединяются). `DELETE` удаляет блок вместе с его неотвеченными дополнениями. `accept` не дополнения — `422 VALIDATION_ERROR` (§4.5: новых кодов нет).
+- Почему: WP23.1, `Т-§17.1`–`Т-§17.2`, П-11.1, §0.4.3.
+- Обратимость: модель блока и одна функция слияния.
+- Тесты: `tests/artifacts/test_documents_wp23.py`; маршруты в `tests/test_app_assembly.py` (`T-A1`).
+- Осталось: сообщение `artifact_updated {artifact_id}` в `GET /v1/learner/stream` (§4) и маршруты карточек и cheat sheet — WP23.4–23.5. Тест маршрутов подменяет вход; после #123 (D-C-119) перевести на `session_cookie`. Старые маршруты заметок Фазы 3 (`/v1/artifacts/notes`, `GET /v1/artifacts`, `/v1/artifacts/search`) удаляются отдельно (§2.3 строка 14): на них держится `quack/artifacts/router.py` вместе с практикой.
+- Требует подтверждения владельцем: нет.
+
 ### D-C-120. `observation.diagnosed` пишется только при найденной ошибке
 - Класс: B (тип C по §6.3; владелец поручил C решить по документам, 2026-11-03)
 - WP / место: WP21.4 п.3, WP5.1, §6.3; `Т-§7.1`, `Т-§15.4`, `Т-§7.6`, П-9.7; будущий код C `quack/canvas/` (быстрый слой)
@@ -1257,6 +1273,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP23.1, документы артефактов (C, `phase-4-c-wp23-artifacts`): красный прогон отдельно не снят (облегчённый TDD по указанию владельца, 2026-11-03). Зелёный: `tests/artifacts/test_documents_wp23.py` + `tests/test_app_assembly.py` — 25 passed.
 - WP13.1, согласие на старте сессии (D-B-151): `uv run pytest tests/session/test_session_terms.py` — 2 failed (старт без согласия `201`, без cookie `201`), коммит `f5029a2`. Зелёный: 2 passed; `tests/session` и `tests/llm/test_labels.py` зелёные; `tests/e2e` — 13 failed (`403` на старте, правка у C).
 - WP11.3, WP11.6 на полях A #117 (D-B-145, D-B-146): `uv run pytest tests/practice/test_check_symbolic_job.py tests/practice/test_check_model.py` — 1 failed (`unsupported` ничего не писал) и ошибка сбора (нет `known_misconceptions`), коммит `72e96fb`. Зелёный: `tests/practice`, `tests/events`, `tests/graph/test_read_stub.py`, `tests/jobs/test_rules_p4.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` — 234 passed.
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
@@ -1316,6 +1333,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Правки тестов
 
+- `tests/test_app_assembly.py` (C, WP23.1): в `EXPECTED_ROUTES` и `_declared_routes` добавлены четыре маршрута конспекта §6.4 (§8.15 п.2 — новый маршрут контракта).
 - `tests/session/test_head_guards.py::test_boundary_names_the_missing_prerequisites_once` (D-B-153, до зелёного): проверка «id не в тексте» смотрела на id предпосылки с меткой и не ловила утечку id предпосылки без метки (подмена прошла); теперь проверяются оба id и точный текст. Тест усилен, не ослаблен.
 - `tests/practice/test_check_symbolic_job.py::test_unsupported_form_writes_nothing_yet` → `test_unsupported_form_writes_check_failed_for_the_model` (B, D-B-146): прежний тест закреплял временное поведение до ответа A («`unsupported` нет в каталоге»); A добавил значение в #117, тест проверяет новое поведение: `check.failed {reason: unsupported}` под ключом `check_failed_key`. Тест не ослаблен.
 

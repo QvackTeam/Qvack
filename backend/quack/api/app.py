@@ -20,6 +20,7 @@ from quack.api.learner_stream import router as learner_stream_router
 from quack.api.openapi import install_openapi, render_openapi
 from quack.api.ratelimit import enforce_action_rate_limit
 from quack.api.resources import AppResources, create_app_resources
+from quack.artifacts.notes_routes import router as notes_router
 from quack.artifacts.router import router as artifacts_router
 from quack.auth.consents import has_current_terms
 from quack.auth.google import AuthlibGoogleOIDC, GoogleOIDC
@@ -188,6 +189,7 @@ def create_app(
     app.include_router(domains_router)
     app.include_router(session_router, dependencies=[Depends(enforce_action_rate_limit)])
     app.include_router(artifacts_router)
+    app.include_router(notes_router)
     app.include_router(learner_stream_router)
     app.include_router(auth_router)
     return app
