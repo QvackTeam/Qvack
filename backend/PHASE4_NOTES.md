@@ -100,6 +100,7 @@ HTTP-адаптер шлюза (допуск, учёт, трасса, размы
 | WP2 (A) | A | **S3 заморожен (G1)** в `phase-4-a-s3-freeze` (D-A-119): 65 типов §6.3, общие модели B в ядре (Q-A-1 (а)), ключи, пометки обработчиков и правил; Q-A-2, Q-A-3 закрыты | `tests/events`: 82 passed (без инфраструктуры) |
 | WP6.4 (A), S4 | A | сигнатуры, модели ответов и заглушка `FixedGraphReader` (D-A-111); `MisconceptionFact.statement` (D-B-145) — `phase-4-a-g1`; реализация — G2 | `tests/graph/test_read_stub.py`: 10 passed |
 | WP7.1 (A), S6 | A | виды задач и таблица правил по событию (D-A-110); строка `known_check` и отмена поручений (D-A-115) — `phase-4-a-g1`; строки с данными сверх события и диспетчер — G2 | `tests/jobs/test_rules_p4.py`: 27 passed |
+| S5 (A), WP3.2 таблица | A | строки обработчиков проектора на 38 типов в `phase-4-a-s5` (D-A-125); обработчики — G2 | `tests/graph/test_projector_rows.py`: 3 passed |
 | S1 (A), `JobContext` | A | поля §4.2 `db`, `storage`, `embeddings`, `deletions` в `phase-4-a-g1` (D-A-114) | `tests/jobs/test_job_context.py`: 2 passed |
 | WP3.1 (A) | A | схема Neo4j Фазы 4 в `quack/db/neo4j.py`: уникальность `id` для Hub, Option, Material, Chunk, Digest, Profile; range по `learnerId` на метках, где его ещё нет; составной `(learnerId, retDueAtMs)` на Skill; пять векторных индексов с фильтрующими свойствами и `embedding_dim`; сосуществует с индексами Фазы 3 до WP1.3. Остальное WP3 (обработчики, фазы А–В) — дальше | `tests/graph/test_schema_wp31.py` + `test_infra.py`: 4 passed (Neo4j 2026.06.0) |
 | WP1.1–1.2 (A) | A | выполнен в `phase-4-a-wp1` (шов S2): базовая миграция dbmate, `Db`, `append_events`, параметры §6.7 потока A. WP1.4 (`.squawk.toml`, S16) — к G2; WP1.3 — к G3/G4 | `tests/db`: 19 passed |
@@ -442,6 +443,19 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 
 ### D-A-123. Вопросы C к владельцу — решены C в D-C-122, A согласен
 - Класс: B. C решил свои четыре вопроса по поручению владельца в D-C-122 (`phase-4-c-wp21-ws`), раньше этой записи. A сверил с документами и согласен со всеми пунктами: (1) блок набора формул — инструмент слоя ученика, не вид блока (`П-9.4`, `Т-§15.3`); (2) поправка §0.4.7/§7.4 снята — как D-A-120; (3) расхождения по `JWT_SECRET` в `Д-§7` нет; (4) переполнение куска — `chunk_max_batches = ceil(stroke_chunk_seconds · 1000 / stroke_batch_ms)` из двух параметров `Т-§15.2`, без новых чисел. Отдельных решений A по этим вопросам нет.
+
+### D-A-125. S5: строки обработчиков проектора для событий B и C
+- Класс: B. WP3.2 (таблица), §6.3, §7.2 S5 (G1); `quack/graph/projector_rows.py`
+- Контекст: S5 — «строки обработчиков проектора для событий B и C (карточка с самооценкой, диагноз, второе мнение, разметка хода)» к G1; сами обработчики `handle(event, view) → mutations` — WP3.2 (G2). Таблица WP3.2 называет изменения графа, но не всегда — какие поля и на каком навыке.
+- Решение: `ROWS` — строка на каждый из 38 типов с обработчиком (§6.3): писатели, читаемые поля (пути в нагрузке), изменения графа, источник. Тест-контракт: строки = типы с пометкой «проектор» в реестре, а каждый читаемый путь есть в модели нагрузки — писатель не переименует поле, которое читает проектор, без красного теста. Где документ молчит:
+  1. **Карточка с самооценкой** (`answer.submitted {source: card, self_assessment}`): свидетельство Т4 на навыках разметки карточки, уровень 1, исход — по самооценке (да → `correct`, нет → `incorrect`). Т4 «только подкрепляет уровень 1», отрицательное Т4 «не учитывается» (`Т-§7.2`) — это правило свёртки (WP4), а не повод не писать факт (закон 6, провенанс).
+  2. **Диагноз канваса** (`observation.diagnosed`): в нагрузке нет навыка, а свидетельству он нужен. Навык — у названного заблуждения (`diagnosis.misconception_id` → его навык); иначе — навыки, которые проверяет задача (`task_id` → `TESTS`), свидетельство `level = 0` на каждом (WP5.1). Нет ни задачи, ни известного заблуждения — свидетельства нет (не к чему привязать); гипотеза словами без навыка узла не создаёт. Поле навыка в событие не добавляется — каталог заморожен (D-A-119).
+  3. **Второе мнение** (`observation.second_opinion {target_seq, agreed}`): согласно — свидетельство целевого диагноза Т3 → Т2 (WP5.1); не согласно — остаётся Т3 (`Т-§7.2`: Т3 — «с которым не согласилось второе мнение»). `diagnosis` второго мнения проектор не читает.
+  4. **Разметка хода** (`turn.committed`): `Exposure` по `markup.exposures` (`skill_id`, `kind`, `approach`; `Т-§7.8` п.6), `Misconception.targetedInSessionId` по `markup.targets_misconception_id` и сессии события, временные навыки из `markup.tasks.tests.new_skill` — сводятся по нормализованному имени с `task.created` той же пачки (WP3.2, последний абзац).
+- Почему: §0.4.3 п.2, п.5; законы 4, 6, 8.
+- Обратимость: таблица данных; обработчики пишутся в WP3.2 по ней.
+- Тесты: `tests/graph/test_projector_rows.py` (3). Проверено на неверной реализации: 4 подмены (нет строки, переименованное поле, неверный вложенный путь, повтор строки) — каждая роняет тест.
+- Требует подтверждения владельцем: нет; п.1–3 — ревью B и C в PR.
 
 ### Ответы потока A (2026-11-02)
 
@@ -1294,6 +1308,7 @@ PR #77 (dbmate v2.36.0, sha256).
 - D-B-144 (грамматика API, отношения): `cd backend && uv run pytest tests/practice/test_grammar_relations.py` — 5 failed, 4 passed (отказы и так отказы), коммит `b2d0309`. Зелёный: 9 passed; с затронутыми (`tests/practice`, `tests/session/test_phase4_contracts.py`, `tests/test_contracts.py`) — 116 passed.
 
 - S3, заморозка (A, `phase-4-a-s3-freeze`, коммит `dc04d39`): `pytest tests/events/test_catalog.py -k frozen_kinds` — 5 failed (другие значения `kind` и чужая привязка `topic_id`/`hub_id` принимаются), 1 passed. Зелёный: `tests/events`, `tests/jobs` — 111 passed.
+- S5 (A, `phase-4-a-s5`, коммит `c1121a7`, D-A-125): `pytest tests/graph/test_projector_rows.py` — 1 failed (строк нет), 2 passed (проверка путей на пустой таблице и самопроверка). Первый красный падал не по делу — каталог в тесте не был загружен (`SPECS` пуст); исправлено до коммита. Зелёный — в описании PR.
 - S3, `session.started.resumed` (A, `phase-4-a-session-resumed`, коммит `5b2f6f4`, D-A-121): `pytest tests/events/test_catalog.py -k resumed` — 1 failed (`resumed` нет у модели). Зелёный — в описании PR.
 - S6, `known_check` без темы (A, `phase-4-a-g1`, ревью B #117): `pytest tests/jobs/test_rules_p4.py -k without_topic` — 1 failed (ставится `check.known_claim` с `topic_id = "None"`). Зелёный — в описании #117.
 - G1 потока A (`phase-4-a-g1`, коммит `692f4f3`): `pytest tests/jobs tests/graph/test_read_stub.py tests/events/test_catalog.py` — 7 failed (`JobContext` без полей §4.2 и порядок закрытия; `known_check` без задачи; нет `cancelled_requests`; `MisconceptionFact` без `statement` — 2; `check.failed {reason: unsupported}` отклонён), 104 passed. Зелёный — в описании PR.
