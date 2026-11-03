@@ -484,8 +484,15 @@ class Settings(BaseSettings):
             "prerequisites": 10,
         }
     )
-    # WP16.3 (Т-§4.3).
+    # WP16.3 (Т-§4.3, Т-§4.2, Т-§4.6; D-B-205): candidates per subject; the confidence of
+    # `same_idea` by the category of the model; of `REQUIRES` by origin (material > model).
     candidate_k: int = 15
+    same_idea_confidence: dict[str, float] = Field(
+        default_factory=lambda: {"low": 0.4, "medium": 0.75, "high": 0.9}
+    )
+    reconcile_requires_confidence: dict[str, float] = Field(
+        default_factory=lambda: {"material": 0.85, "model": 0.65}
+    )
     # WP16.3 (Т-§4.10; D-B-185): a duplicate candidate scores cosine + weight × shared neighbours.
     hygiene_min_score: float = 0.9
     hygiene_neighbour_weight: float = 0.1
