@@ -8,7 +8,7 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
-from quack.graph.read import GraphReader, LevelFact, MisconceptionFact, SliceFocus
+from quack.graph.read import EvidenceFact, GraphReader, LevelFact, MisconceptionFact, SliceFocus
 from tests.support import graph_read as fx
 
 
@@ -114,3 +114,39 @@ def test_memory_picture_facts_of_wp14_2() -> None:
     assert quiet.gap_type_confidence is None and quiet.last_lapse_at_ms is None  # law 8
     (misconception,) = sl.misconceptions
     assert misconception.triggers == list(fx.MISCONCEPTION_TRIGGERS)
+
+
+def test_skill_history_says_what_help_was_given() -> None:
+    """D-B-163 (D-A-127): `skill_history` gives the help of each evidence — none, a hint with
+    its step 1–3 or a shown solution (`Т-§10.4`; Evidence `assistance`, `hintStep`, `Т-§3.4.3`)."""
+    (hinted,) = asyncio.run(_reader().skill_history(fx.SKILL_FAILED))
+    assert hinted.assistance == "hint" and hinted.hint_step == fx.HINT_STEP
+    (plain,) = asyncio.run(_reader().skill_history(fx.SKILL_PROVEN))
+    assert plain.assistance == "none" and plain.hint_step is None  # law 8
+    shown = hinted.model_dump() | {"assistance": "shown_solution", "hint_step": None}
+    assert EvidenceFact.model_validate(shown).assistance == "shown_solution"
+    with pytest.raises(ValidationError):  # Т-§7.6: hint steps are 1–3
+        EvidenceFact.model_validate(hinted.model_dump() | {"hint_step": 4})
+
+
+def test_extraction_candidates_of_wp15() -> None:
+    """WP15 п.2, п.6 (D-A-135): skills of the session's topics plus the nearest by the episode
+    vector, up to `k`; for re-extraction only the skills of a topic or the given skills; the
+    known misconceptions of the candidates (`Т-§7.6`)."""
+    reader, session = _reader(), UUID(int=1)
+    found = asyncio.run(reader.extraction_candidates(fx.LEARNER, session, [0.1, 0.2], k=15))
+    assert {c.skill_id for c in found.skills} == {fx.SKILL_PROVEN, fx.SKILL_FAILED, fx.SKILL_QUIET}
+    assert all(c.name and c.topic_id for c in found.skills)
+    assert [m.misconception_id for m in found.misconceptions] == [fx.MISCONCEPTION]
+    by_topic = asyncio.run(
+        reader.extraction_candidates(fx.LEARNER, session, None, k=15, topic_id=fx.TOPIC_OPEN)
+    )
+    assert {c.skill_id for c in by_topic.skills} == {fx.SKILL_FAILED, fx.SKILL_QUIET}
+    only = asyncio.run(
+        reader.extraction_candidates(fx.LEARNER, session, None, k=15, skill_ids=[fx.SKILL_QUIET])
+    )
+    assert [c.skill_id for c in only.skills] == [fx.SKILL_QUIET]
+    assert only.misconceptions == []  # the misconception is about another skill
+    assert (
+        len(asyncio.run(reader.extraction_candidates(fx.LEARNER, session, None, k=1)).skills) == 1
+    )

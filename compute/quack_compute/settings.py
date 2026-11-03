@@ -22,6 +22,11 @@ class ComputeSettings:
     compute_task_timeout_s: float = 60.0
     # Д-§4.2: the only place compute writes temporary files.
     compute_tmp_dir: str = "/srv/quack/tmp"
+    # Д-§4.2: the directory «чистится по возрасту раз в час». Who and what age the documents do
+    # not say — Phase 4 decision D-C-133: compute sweeps it itself every hour, an entry older than
+    # one sweep interval is left over from a finished job.
+    tmp_sweep_interval_s: int = 3600
+    tmp_max_age_s: int = 3600
     # WP22.3 п.1, sheet contour search — the documents give no numbers; Phase 4 decision D-C-110:
     # blur kernel, Canny thresholds, polygon precision as a share of the contour perimeter and
     # the least area of the sheet as a share of the photo.
