@@ -189,11 +189,15 @@ def default_llm_roles() -> dict[str, RoleConfig]:
 
 
 class ModelPrice(BaseModel):
-    """Т-§11.4: dollars per 1M tokens of one model (ТЗ Ф4 WP10.4)."""
+    """Т-§11.4: dollars per 1M tokens of one model (ТЗ Ф4 WP10.4). `per_minute` — dollars per
+    minute of audio and `per_image` — dollars per picture, for the calls that report no tokens
+    (`voice`, `illustrator`; D-B-198). Every field is 0 unless the owner sets it."""
 
-    input: float
-    cached_input: float
-    output: float
+    input: float = 0.0
+    cached_input: float = 0.0
+    output: float = 0.0
+    per_minute: float = 0.0
+    per_image: float = 0.0
 
 
 class Settings(BaseSettings):
@@ -518,15 +522,30 @@ class Settings(BaseSettings):
     # WP16.5 (Т-§13.6 п.1): the allowed libraries, name → path under `viz_static_base_url`; the
     # documents name D3, Plotly, KaTeX but no files or versions (D-B-177 [ПРОВЕРИТЬ], C: WP9.2).
     viz_libraries: dict[str, str] = Field(default_factory=dict)
+    # WP8.2 (WP16.6): the short check of «я это уже знаю» — at most this many tasks, one per
+    # skill of the topic (the document says «1–3»). D-B-193.
+    known_check_max_tasks: int = 3
     # WP10.6 (ТЗ Ф4 §2.3 строка 20): UUIDv5 namespace of the learner pseudonym in traces.
     # Phase 4 decision D-B-105: a fixed namespace, never changed after the first trace.
     langsmith_pseudonym_ns: str = "6f1c2a9e-4b7d-5e3a-9c21-0d8e7f6a5b43"
+    # WP10.6 (Д-§7: the key only in `api` and `workers`; Д-§11: off in tests and `loadtest`).
+    # An empty key means tracing off. D-B-201, D-B-202.
+    langsmith_api_key: SecretStr = SecretStr("")
+    langsmith_endpoint: str = "https://api.smith.langchain.com"
+    langsmith_project: str = "quack"
+    langsmith_timeout_s: float = 5.0
+    # Days after which LangSmith drops a trace (a setting of the LangSmith project, set by the
+    # owner; the number is the one the owner sets there, [ПРОВЕРИТЬ] the plan's value).
+    langsmith_retention_days: int = 14
     # WP15 (Т-§9.4): root-cause confidence category of extractor@3 → number. D-B-106.
     root_cause_confidence_map: dict[Literal["low", "medium", "high"], float] = Field(
         default_factory=lambda: {"low": 0.3, "medium": 0.6, "high": 0.9}
     )
     # WP10.3 (Т-§11.8 п.1): fallback two-step teacher turn, off until the live run says so.
     teacher_two_step: bool = False
+    # WP16.7 (Т-§18.2): attempts of Т1 (the latest) the Brier score of `ops metrics` replays the
+    # memory for; each one replays the learner's log. Phase 4 decision D-B-195.
+    metrics_brier_max_attempts: int = 200
 
     # --- stream C ---
     # WP8.3: probe timeout of /health/ready and /healthz (was HEALTH_CHECK_TIMEOUT_SEC).
@@ -689,6 +708,14 @@ class Settings(BaseSettings):
                 raise ValueError(f"missing required secrets for ENV=prod: {', '.join(missing)}")
         return self
 
+    @model_validator(mode="after")
+    def _require_prices_in_prod(self) -> Settings:
+        """ТЗ Ф4 §2.3 row 9, WP10.4: the processes that call models (`api`, `workers`) do not
+        start in prod without the price table; `dev`/`test` run with zero prices (D-B-198)."""
+        if self.env == "prod" and self.process_role in ("api", "workers") and not self.llm_prices:
+            raise ValueError("LLM_PRICES is required for ENV=prod (price table of Т-§11.4)")
+        return self
+
     @property
     def sqlalchemy_dsn(self) -> str:
         """POSTGRES_DSN rewritten for the SQLAlchemy asyncpg dialect."""
@@ -709,11 +736,17 @@ class Settings(BaseSettings):
         return self.meta_api_base_url
 
     def model_for_role(self, role: str, *, hard: bool = False) -> str:
-        """`hard` — a hard call of a role with `hard_model` (Т-§11.1, D-B-166)."""
+        """An explicit `llm_role_models` entry, else the role row of `llm_roles` (Т-§11.1,
+        D-B-188), else the default model; `hard` — a hard call of a role with `hard_model`
+        (D-B-166)."""
         hard_model = self.llm_roles[role].hard_model if role in self.llm_roles else None
         if hard and hard_model is not None:
             return hard_model
-        return self.llm_role_models.get(role, self.llm_default_model)
+        if role in self.llm_role_models:
+            return self.llm_role_models[role]
+        if role in self.llm_roles:
+            return self.llm_roles[role].model
+        return self.llm_default_model
 
     def secret_values(self) -> list[str]:
         """Values the logger must mask (Д-§7)."""
@@ -724,6 +757,7 @@ class Settings(BaseSettings):
                 secret.get_secret_value()
                 for secret in (
                     self.email_api_key,
+                    self.langsmith_api_key,
                     self.google_oidc_client_id,
                     self.google_oidc_client_secret,
                     self.s3_endpoint,

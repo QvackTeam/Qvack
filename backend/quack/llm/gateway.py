@@ -16,7 +16,7 @@ import random
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -28,6 +28,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.events.hashing import canonical_json
 from quack.llm.errors import (
@@ -41,6 +42,20 @@ from quack.llm.errors import (
     ProviderRateLimitedError,
     ProviderUnavailableError,
     UnavailableReason,
+)
+from quack.llm.media import (
+    BoxPrompt,
+    Illustration,
+    IllustrationRequest,
+    ImageResponse,
+    MaskEncoding,
+    MediaProvider,
+    Segmentation,
+    SegmentRequest,
+    TranscribeMode,
+    TranscribeRequest,
+    Transcription,
+    parse_segmentation,
 )
 from quack.llm.pressure import (
     circuit_open_in_redis,
@@ -63,6 +78,8 @@ from quack.llm.streaming import (
     StreamRequest,
 )
 from quack.llm.strict_schema import to_strict_json_schema
+from quack.llm.tracing import NullTracer, Tracer, TraceRecord, learner_pseudonym
+from quack.llm.usage import UsageRow, call_cost_usd, check_usd_budgets, insert_usage
 from quack.logging import get_logger
 from quack.prompts.registry import PromptRegistry, PromptTemplate
 
@@ -119,6 +136,8 @@ class _CallContext:
     idempotency_key: str
     # WP5.7: the effort of the call, written to the ledger.
     reasoning_effort: str | None = None
+    # WP10.4: rows written so far for this call; a row after the first is a retry.
+    rows: list[int] = field(default_factory=lambda: [0])
 
 
 class LLMGateway:
@@ -130,7 +149,15 @@ class LLMGateway:
         prompts: PromptRegistry | None = None,
         *,
         redis: Redis | None = None,
+        db: Db | None = None,
+        tracer: Tracer | None = None,
     ) -> None:
+        # WP10.6: a trace of each attempt; without a tracer — none (tests, `loadtest`).
+        self.tracer: Tracer = tracer or NullTracer()
+        # WP10.4 (D-B-197): with `db` the call is accounted in `ops.llm_usage` with its cost
+        # and the budgets are in dollars; without it (the SQLAlchemy stack of Phases 1–3,
+        # until WP1.3) the row goes to `ops.llm_ledger` and the budgets are in tokens.
+        self.db = db
         self.session_factory = session_factory
         self.provider = provider
         self.settings = settings
@@ -143,6 +170,10 @@ class LLMGateway:
 
     async def aclose(self) -> None:
         """Release the provider's HTTP client at process stop (§4.2, seam S1)."""
+        try:
+            await self.tracer.aclose()
+        except Exception:
+            log.warning("llm_tracer_close_failed")
         close = getattr(self.provider, "aclose", None)
         if callable(close):
             result = close()
@@ -196,7 +227,7 @@ class LLMGateway:
                 usage=None,
             )
         exempt = role in self.settings.session_budget_exempt_roles
-        await self._check_budgets(learner_id, None if exempt else session_id)
+        await self._admit_budget(role, learner_id, None if exempt else session_id)
         effort = reasoning_effort or self.settings.llm_role_reasoning.get(role)
         ctx = _CallContext(
             role, prompt, model, learner_id, session_id, turn_id, idempotency_key, effort
@@ -318,6 +349,134 @@ class LLMGateway:
         ctx = _CallContext(role, prompt, model, learner_id, session_id, turn_id, key)
         return _GatewayStream(self, ctx)
 
+    # --- non-text roles (ТЗ Ф4 WP10.1, D-B-187) ---
+
+    async def segment(
+        self,
+        image: ImageInput,
+        *,
+        learner_id: UUID,
+        session_id: UUID | None = None,
+        turn_id: UUID | None = None,
+        concept: str | None = None,
+        box: BoxPrompt | None = None,
+        mask_encoding: MaskEncoding = "lossless",
+        include_confidence: bool = True,
+    ) -> LLMResult[Segmentation]:
+        """Role `segmenter` (`sam-3.1`): objects of the image by a short name `concept` or by
+        a `box` (exactly one of them), with boxes, masks and confidence (up to 16)."""
+        if (concept is None) == (box is None):
+            raise ValueError("segment: exactly one of concept and box")
+        provider = self._media_provider()
+        model = self.settings.model_for_role("segmenter")
+
+        def build(timeout: float) -> SegmentRequest:
+            return SegmentRequest(
+                model, image, timeout, concept, box, mask_encoding, include_confidence
+            )
+
+        response, usage = await self._media_call(
+            "segmenter",
+            learner_id,
+            session_id,
+            turn_id,
+            lambda timeout: provider.segment(build(timeout)),
+        )
+        value = parse_segmentation(response.content, mask_encoding)
+        return LLMResult(value, False, _media_hash("segmenter"), response.model, usage)
+
+    async def transcribe(
+        self,
+        wav: bytes,
+        *,
+        learner_id: UUID,
+        session_id: UUID | None = None,
+        turn_id: UUID | None = None,
+        mode: TranscribeMode = "PUSH_TO_TALK",
+        language_bias: str | None = None,
+        keywords: Sequence[str] = (),
+    ) -> LLMResult[Transcription]:
+        """Role `voice` (`muse-voice-transcribe-1.0`): the transcript of a WAV (mono, 16-bit
+        PCM, 16 or 24 kHz, up to 10 min and 32 MB); the caller converts the browser audio."""
+        provider = self._media_provider()
+        model = self.settings.model_for_role("voice")
+        response, usage = await self._media_call(
+            "voice",
+            learner_id,
+            session_id,
+            turn_id,
+            lambda timeout: provider.transcribe(
+                TranscribeRequest(model, wav, timeout, mode, language_bias, tuple(keywords))
+            ),
+        )
+        value = Transcription(
+            text=response.content,
+            audio_duration_ms=response.audio_duration_ms,
+            turns=list(response.turns),
+        )
+        return LLMResult(value, False, _media_hash("voice"), response.model, usage)
+
+    async def illustrate(
+        self,
+        prompt: str,
+        *,
+        learner_id: UUID,
+        session_id: UUID | None = None,
+        turn_id: UUID | None = None,
+        size: str | None = None,
+    ) -> LLMResult[Illustration]:
+        """Role `illustrator` (`muse-image-1.0`): a conceptual illustration, not mathematics
+        (П-4.5); bytes of the image or a reference."""
+        provider = self._media_provider()
+        model = self.settings.model_for_role("illustrator")
+        response, usage = await self._media_call(
+            "illustrator",
+            learner_id,
+            session_id,
+            turn_id,
+            lambda timeout: provider.illustrate(IllustrationRequest(model, prompt, timeout, size)),
+        )
+        value = Illustration(image=response.image, url=response.url, mime=response.mime)
+        return LLMResult(value, False, _media_hash("illustrator"), response.model, usage)
+
+    def _media_provider(self) -> MediaProvider:
+        if not all(hasattr(self.provider, n) for n in ("segment", "transcribe", "illustrate")):
+            raise TypeError(f"{type(self.provider).__name__} has no non-text roles")
+        return self.provider  # type: ignore[return-value]
+
+    async def _media_call[R: ProviderResponse](
+        self,
+        role: str,
+        learner_id: UUID,
+        session_id: UUID | None,
+        turn_id: UUID | None,
+        invoke: Callable[[float], Awaitable[R]],
+    ) -> tuple[R, LLMUsage]:
+        """The path of a non-text call: budgets, slot of the model, attempts (retries, 429 with
+        the pressure flag, 400 without retry, breaker), one ledger row per attempt. There is no
+        prompt, no outbox and no schema repair: a repeated call is a repeated charge."""
+        model = self.settings.model_for_role(role)
+        timeout = self.settings.llm_role_timeout_s.get(role, self.settings.llm_timeout_sec)
+        exempt = role in self.settings.session_budget_exempt_roles
+        await self._admit_budget(role, learner_id, None if exempt else session_id)
+        template = PromptTemplate(role, 0, "", _media_hash(role))
+        ctx = _CallContext(role, template, model, learner_id, session_id, turn_id, "")
+        request = ProviderRequest(
+            model=model,
+            prompt="",
+            json_schema={},
+            schema_name=role,
+            temperature=0.0,
+            timeout_sec=timeout,
+        )
+        totals = [0, 0, 0, 0]
+        async with self._admitted(role, model):
+            response = await self._attempts_with(
+                ctx, request, totals, lambda _request: invoke(timeout)
+            )
+        await self._ledger(ctx, response, totals[3], "ok", None)
+        return response, LLMUsage(totals[0], totals[1], totals[2], totals[3])
+
     # --- admission: semaphores per model (WP5.1) ---
 
     def _semaphore(self, model: str) -> asyncio.Semaphore:
@@ -352,6 +511,15 @@ class LLMGateway:
     async def _attempts(
         self, ctx: _CallContext, request: ProviderRequest, totals: list[int]
     ) -> ProviderResponse:
+        return await self._attempts_with(ctx, request, totals, self.provider.complete_structured)
+
+    async def _attempts_with[R: ProviderResponse](
+        self,
+        ctx: _CallContext,
+        request: ProviderRequest,
+        totals: list[int],
+        invoke: Callable[[ProviderRequest], Awaitable[R]],
+    ) -> R:
         settings = self.settings
         started = time.monotonic()
         failures = rate_limited = 0
@@ -361,7 +529,7 @@ class LLMGateway:
             attempt_started = time.monotonic()
             try:
                 async with asyncio.timeout(request.timeout_sec):
-                    response = await self.provider.complete_structured(request)
+                    response = await invoke(request)
             except ProviderRateLimitedError as exc:
                 self._circuit_neutral(ctx.model)
                 ttl = await self._rate_limited(ctx, exc, _latency(attempt_started))
@@ -504,6 +672,12 @@ class LLMGateway:
             return None
         return dict(row.response_json), str(row.model)
 
+    async def _admit_budget(self, role: str, learner_id: UUID, session_id: UUID | None) -> None:
+        if self.db is None:
+            await self._check_budgets(learner_id, session_id)
+        else:
+            await check_usd_budgets(self.db, self.settings, role, learner_id, session_id)
+
     async def _check_budgets(self, learner_id: UUID, session_id: UUID | None) -> None:
         async with self.session_factory() as session:
             daily = int(
@@ -568,6 +742,55 @@ class LLMGateway:
         status: str,
         error_code: str | None,
     ) -> None:
+        retried = ctx.rows[0] > 0
+        ctx.rows[0] += 1
+        if self.db is not None:
+            await self._usage(ctx, response, latency_ms, status, retried)
+            await self._trace(ctx, response, latency_ms, status, error_code)
+            return
+        await self._write_ledger(ctx, response, latency_ms, status, error_code)
+        await self._trace(ctx, response, latency_ms, status, error_code)
+
+    async def _trace(
+        self,
+        ctx: _CallContext,
+        response: ProviderResponse,
+        latency_ms: int,
+        status: str,
+        error_code: str | None,
+    ) -> None:
+        """WP10.6: a trace of the attempt after its ledger row. A failure of the tracer — a log
+        line, never an error of the call."""
+        try:
+            await self.tracer.trace(
+                TraceRecord(
+                    role=ctx.role,
+                    prompt=ctx.prompt.ref,
+                    pseudonym=learner_pseudonym(
+                        self.settings.langsmith_pseudonym_ns, ctx.learner_id
+                    ),
+                    model=response.model or ctx.model,
+                    status=status,
+                    error_code=error_code,
+                    input_tokens=response.input_tokens,
+                    output_tokens=response.output_tokens,
+                    cached_tokens=response.cached_tokens,
+                    reasoning_tokens=response.reasoning_tokens,
+                    latency_ms=latency_ms,
+                    ended_at=_now(),
+                )
+            )
+        except Exception:
+            log.warning("llm_trace_failed", role=ctx.role)
+
+    async def _write_ledger(
+        self,
+        ctx: _CallContext,
+        response: ProviderResponse,
+        latency_ms: int,
+        status: str,
+        error_code: str | None,
+    ) -> None:
         async with self.session_factory() as session, session.begin():
             await session.execute(
                 text(
@@ -598,6 +821,48 @@ class LLMGateway:
                     "err": error_code,
                 },
             )
+
+    async def _usage(
+        self,
+        ctx: _CallContext,
+        response: ProviderResponse,
+        latency_ms: int,
+        status: str,
+        retried: bool,
+    ) -> None:
+        """A row of `ops.llm_usage` with the cost (Т-§11.4, D-B-197). Voice has no tokens: the
+        price is by the audio length; the illustrator: by the picture (D-B-198)."""
+        assert self.db is not None
+        model = response.model or ctx.model
+        audio_ms = int(getattr(response, "audio_duration_ms", 0))
+        images = 1 if isinstance(response, ImageResponse) and status == "ok" else 0
+        cost = call_cost_usd(
+            self.settings,
+            model,
+            input_tokens=response.input_tokens,
+            cached_tokens=response.cached_tokens,
+            output_tokens=response.output_tokens,
+            audio_ms=audio_ms,
+            images=images,
+        )
+        row = UsageRow(
+            learner_id=ctx.learner_id,
+            session_id=ctx.session_id,
+            role=ctx.role,
+            model=model,
+            prompt_version=ctx.prompt.ref,
+            effort=ctx.reasoning_effort,
+            input_tokens=response.input_tokens,
+            cached_input_tokens=response.cached_tokens,
+            output_tokens=response.output_tokens,
+            reasoning_tokens=response.reasoning_tokens,
+            cost_usd=cost,
+            incomplete=status == "incomplete",
+            retried=retried,
+            latency_ms=latency_ms,
+            status=status,
+        )
+        await insert_usage(self.db, row.learner_id, row)
 
     async def _finish_outbox(
         self,
@@ -647,7 +912,10 @@ class _GatewayStream:
         gw, settings = self._gw, self._gw.settings
         provider: StreamingLLMProvider = self._gw.provider  # type: ignore[assignment]
         ctx = replace(
-            self._ctx, model=request.base.model, reasoning_effort=request.base.reasoning_effort
+            self._ctx,
+            model=request.base.model,
+            reasoning_effort=request.base.reasoning_effort,
+            rows=[0],
         )
         failures = 0
         while True:
@@ -724,6 +992,11 @@ class _GatewayStream:
             await set_pressure_flag(
                 gw.redis, ctx.model, gw.settings.pressure_header_ttl_s, "headers", _now()
             )
+
+
+def _media_hash(role: str) -> str:
+    """`prompt_hash` of the ledger row of a non-text role: there is no prompt (version 0)."""
+    return hashlib.sha256(f"{role}@media".encode()).hexdigest()
 
 
 def _parse[T: BaseModel](model: type[T], content: str) -> tuple[T | None, str]:
