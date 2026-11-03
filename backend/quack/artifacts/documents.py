@@ -18,7 +18,7 @@ is in the event log (law 1; the hot path does not wait for Neo4j, Т-§20.7).
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 from uuid import UUID, uuid4, uuid5
 
@@ -27,6 +27,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, TypeAdapter
 from redis.asyncio import Redis
 
 from quack.db import Db
+from quack.events.errors import IdempotencyConflictError
 from quack.events.event_types import ArtifactUpdated
 from quack.events.log import NewEvent, append_events
 from quack.graph.ids import QUACK_UUID_NS
@@ -143,6 +144,10 @@ _INSERT_VERSION = (
     "VALUES (%(artifact_id)s, %(version)s, %(learner_id)s, %(content)s, %(skill_version)s, "
     "%(created_by)s)"
 )
+_EVENT_BY_KEY = (
+    "SELECT payload FROM core.events "
+    "WHERE learner_id = %(learner_id)s AND idempotency_key = %(idempotency_key)s"
+)
 _SET_CURRENT = (
     "UPDATE content.artifacts SET current_version = %(version)s "
     "WHERE learner_id = %(learner_id)s AND artifact_id = %(artifact_id)s"
@@ -253,6 +258,7 @@ async def edit_block(
     artifact_id: UUID,
     block_id: UUID,
     content: str,
+    idempotency_key: str,
     redis: Redis | None = None,
 ) -> Artifact:
     """`PUT /v1/artifacts/{id}/blocks/{block_id}`: the learner edits a block (it becomes
@@ -271,11 +277,17 @@ async def edit_block(
             Block(block_id=block_id, kind=LEARNER_BLOCK_KIND, content=content, owner="learner"),
         ]
 
-    return await _save_learner(db, learner_id, artifact_id, change, redis)
+    return await _save_learner(db, learner_id, artifact_id, change, idempotency_key, redis)
 
 
 async def accept_supplement(
-    db: Db, *, learner_id: UUID, artifact_id: UUID, block_id: UUID, redis: Redis | None = None
+    db: Db,
+    *,
+    learner_id: UUID,
+    artifact_id: UUID,
+    block_id: UUID,
+    idempotency_key: str,
+    redis: Redis | None = None,
 ) -> Artifact:
     """`POST /v1/artifacts/{id}/blocks/{block_id}/accept`: the supplement is merged into the
     learner's block it adds to (П-11.1). `NotASupplement`, `ArtifactNotFound`."""
@@ -300,11 +312,17 @@ async def accept_supplement(
             result.append(block)
         return result
 
-    return await _save_learner(db, learner_id, artifact_id, change, redis)
+    return await _save_learner(db, learner_id, artifact_id, change, idempotency_key, redis)
 
 
 async def delete_block(
-    db: Db, *, learner_id: UUID, artifact_id: UUID, block_id: UUID, redis: Redis | None = None
+    db: Db,
+    *,
+    learner_id: UUID,
+    artifact_id: UUID,
+    block_id: UUID,
+    idempotency_key: str,
+    redis: Redis | None = None,
 ) -> Artifact:
     """`DELETE /v1/artifacts/{id}/blocks/{block_id}`: a new version without the block; deleting
     a learner block drops its unanswered supplements with it."""
@@ -317,7 +335,7 @@ async def delete_block(
             if block.block_id != block_id and block.supplement_to != block_id
         ]
 
-    return await _save_learner(db, learner_id, artifact_id, change, redis)
+    return await _save_learner(db, learner_id, artifact_id, change, idempotency_key, redis)
 
 
 async def version_blocks(
@@ -334,18 +352,63 @@ async def version_blocks(
 
 
 async def _save_learner(
-    db: Db, learner_id: UUID, artifact_id: UUID, change: Any, redis: Redis | None
+    db: Db,
+    learner_id: UUID,
+    artifact_id: UUID,
+    change: Any,
+    idempotency_key: str,
+    redis: Redis | None,
 ) -> Artifact:
-    return await _save(
-        db,
-        learner_id=learner_id,
-        artifact_id=artifact_id,
-        change=change,
-        created_by="learner",
-        actor="learner",
-        skill_version=None,
-        redis=redis,
+    """A learner save under the request's `idempotency_key` (§6.4, T-E2): a repeat returns the
+    version the first one wrote and writes nothing; the same key with another request —
+    `IdempotencyConflictError` (409)."""
+    key = f"artifact.edit:{idempotency_key}"
+    async with db.transaction():
+        replayed = await _replay(db, learner_id, artifact_id, change, key)
+        if replayed is not None:
+            return replayed
+        return await _save(
+            db,
+            learner_id=learner_id,
+            artifact_id=artifact_id,
+            change=change,
+            created_by="learner",
+            actor="learner",
+            skill_version=None,
+            redis=redis,
+            event_key=key,
+        )
+
+
+async def _replay(
+    db: Db, learner_id: UUID, artifact_id: UUID, change: Any, key: str
+) -> Artifact | None:
+    """The version written under `key`, when the same request applied to the version before it
+    gives it again; None — the key is new."""
+    found = await db.fetch_one(_EVENT_BY_KEY, {"learner_id": learner_id, "idempotency_key": key})
+    if found is None:
+        return None
+    payload = found["payload"]
+    version = int(payload["version"])
+    conflict = IdempotencyConflictError(key, "", "")
+    if payload["artifact_id"] != str(artifact_id):
+        raise conflict
+    before: tuple[Block, ...] = ()
+    if version > 1:
+        before = await version_blocks(
+            db, learner_id=learner_id, artifact_id=artifact_id, version=version - 1
+        )
+    written = await version_blocks(
+        db, learner_id=learner_id, artifact_id=artifact_id, version=version
     )
+    try:
+        again = tuple(change(list(before)))
+    except (ArtifactNotFound, NotASupplement):
+        raise conflict from None
+    if again != written:
+        raise conflict
+    artifact = await find_artifact(db, learner_id=learner_id, artifact_id=artifact_id)
+    return replace(artifact, version=version, blocks=written)
 
 
 async def _save(
@@ -358,6 +421,7 @@ async def _save(
     actor: str,
     skill_version: int | None,
     redis: Redis | None,
+    event_key: str | None = None,
 ) -> Artifact:
     """Lock the artifact, apply `change` to the current blocks and, when they differ, write the
     next version, move `current_version` and append `artifact.updated` — one transaction
@@ -405,7 +469,7 @@ async def _save(
                     type="artifact.updated",
                     payload=payload,
                     actor=actor,
-                    idempotency_key=f"artifact.updated:{artifact_id}:{version}",
+                    idempotency_key=event_key or f"artifact.updated:{artifact_id}:{version}",
                     domain_id=artifact.domain_id,
                 )
             ],

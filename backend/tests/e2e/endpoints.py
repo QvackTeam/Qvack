@@ -34,6 +34,9 @@ def mutating_routes(app: FastAPI) -> set[tuple[str, str]]:
     }
 
 
+_NO_ID = UUID(int=0)
+
+
 @dataclass(frozen=True)
 class Ids:
     """Objects of one learner that the bodies and paths refer to."""
@@ -47,6 +50,9 @@ class Ids:
     diagnostic_session_id: UUID
     diagnostic_task_id: UUID
     structure_version: int
+    # WP23.1: the block the walk writes and the supplement the system adds to it.
+    learner_block_id: UUID = _NO_ID
+    block_id: UUID = _NO_ID
 
 
 def path_for(path: str, ids: Ids) -> str:
@@ -56,6 +62,7 @@ def path_for(path: str, ids: Ids) -> str:
         session_id=ids.session_id,
         task_id=ids.task_id,
         artifact_id=ids.artifact_id,
+        block_id=ids.block_id,
     )
 
 
@@ -121,6 +128,11 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
             "text": ["Edited", "Edited again"][v],
         },
         ("DELETE", "/v1/artifacts/notes/{artifact_id}"): {},
+        ("PUT", "/v1/artifacts/{artifact_id}/blocks/{block_id}"): {
+            "content": ["My words", "Other words"][v]
+        },
+        ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"): {},
+        ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"): {},
         ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): {"domain_id": str(ids.domain_id)},
     }
     body = dict(bodies[(method, path)])

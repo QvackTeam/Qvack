@@ -483,9 +483,15 @@
           "content": {
             "title": "Content",
             "type": "string"
+          },
+          "idempotency_key": {
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
           }
         },
         "required": [
+          "idempotency_key",
           "content"
         ],
         "title": "BlockEdit",
@@ -1531,6 +1537,22 @@
           "seq"
         ],
         "title": "HintResponse",
+        "type": "object"
+      },
+      "KeyedRequest": {
+        "additionalProperties": false,
+        "description": "§6.4: a changing path carries `idempotency_key` (T-E2).",
+        "properties": {
+          "idempotency_key": {
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotency_key"
+        ],
+        "title": "KeyedRequest",
         "type": "object"
       },
       "LearnerMeResponse": {
@@ -4127,6 +4149,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyedRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -4321,6 +4353,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyedRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {

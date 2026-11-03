@@ -10,6 +10,8 @@ from uuid import UUID, uuid4
 import httpx
 from sqlalchemy import text
 
+from quack.artifacts.documents import SystemBlock, write_system_blocks
+from quack.events.log import NewEvent, append_events
 from tests.e2e.endpoints import (
     NO_IDEMPOTENCY_KEY,
     Ids,
@@ -43,6 +45,9 @@ IDEMPOTENT_WALK: tuple[tuple[str, str], ...] = (
     ("POST", "/v1/artifacts/notes"),
     ("PATCH", "/v1/artifacts/notes/{artifact_id}"),
     ("DELETE", "/v1/artifacts/notes/{artifact_id}"),
+    ("PUT", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
+    ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"),
+    ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
     ("POST", "/v1/sessions/{session_id}/finish"),
     ("POST", "/v1/domains/{domain_id}/archive"),
 )
@@ -50,6 +55,8 @@ IDEMPOTENT_WALK: tuple[tuple[str, str], ...] = (
 NO_OTHER_BODY = {
     ("POST", "/v1/domains/{domain_id}/diagnostic/start"),
     ("DELETE", "/v1/artifacts/notes/{artifact_id}"),
+    ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"),
+    ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"),
     ("POST", "/v1/sessions/{session_id}/finish"),
 }
 
@@ -123,10 +130,12 @@ async def test_mutating_endpoints_are_idempotent(system_for_walk: System) -> Non
             )
             assert other.status_code == 409, f"{method} {path}: {other.status_code} {other.text}"
             assert other.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
-        ids = await _advance(system, ids, method, path, _payload(first_response))
+        ids = await _advance(system, learner, ids, method, path, _payload(first_response))
 
 
-async def _advance(system: System, ids: Ids, method: str, path: str, payload: Any) -> Ids:
+async def _advance(
+    system: System, learner: Learner, ids: Ids, method: str, path: str, payload: Any
+) -> Ids:
     """Take the ids the walk needs next from a response."""
     if (method, path) == ("POST", "/v1/domains"):
         return replace(ids, domain_id=UUID(payload["domain_id"]))
@@ -154,7 +163,55 @@ async def _advance(system: System, ids: Ids, method: str, path: str, payload: An
         return replace(ids, task_id=UUID(payload["task_id"]))
     if (method, path) == ("POST", "/v1/artifacts/notes"):
         return replace(ids, artifact_id=UUID(payload["artifact_id"]))
+    if (method, path) == ("DELETE", "/v1/artifacts/notes/{artifact_id}"):
+        return await _notes_of_phase4_topic(system, learner, ids)
+    if (method, path) == ("PUT", "/v1/artifacts/{artifact_id}/blocks/{block_id}"):
+        # WP23.1: the system adds a supplement to the learner's block; the walk accepts it.
+        notes = await write_system_blocks(
+            system.resources.db,
+            learner_id=learner.learner_id,
+            kind="notes",
+            owner_id=ids.topic_id,
+            blocks=[SystemBlock(block_id=ids.block_id, kind="summary", content="More")],
+            created_by="artifact_writer@1",
+        )
+        return replace(ids, block_id=notes.blocks[1].block_id)
+    if path.endswith("/accept"):
+        return replace(ids, block_id=ids.learner_block_id)
     return ids
+
+
+async def _notes_of_phase4_topic(system: System, learner: Learner, ids: Ids) -> Ids:
+    """WP23.1 reads topics from the Phase 4 log (`topic.created`), which the Phase 3 structure
+    of the walk does not write (D-C-112): one topic is recorded there for the notes routes."""
+    topic_id, domain_id = uuid4(), uuid4()
+    await append_events(
+        system.resources.db,
+        learner.learner_id,
+        [
+            NewEvent(
+                type="topic.created",
+                payload={
+                    "topic_id": topic_id,
+                    "domain_id": domain_id,
+                    "name": "Limits",
+                    "origin": "session",
+                },
+                actor="code",
+                idempotency_key=f"te2:topic:{topic_id}",
+                domain_id=domain_id,
+            )
+        ],
+    )
+    notes = ok(await system.client.get(f"/v1/topics/{topic_id}/notes", headers=learner.headers))
+    block_id = uuid4()
+    return replace(
+        ids,
+        topic_id=topic_id,
+        artifact_id=UUID(notes["artifact_id"]),
+        learner_block_id=block_id,
+        block_id=block_id,
+    )
 
 
 NOTE_WORD = "quokkasecret"

@@ -166,6 +166,7 @@ async def test_learner_block_is_never_rewritten(pg_db: Db) -> None:
         artifact_id=v1.artifact_id,
         block_id=a.block_id,
         content="A, my words",
+        idempotency_key="k1",
     )
     assert v2.version == 2
     assert (v2.blocks[0].owner, v2.blocks[0].content, v2.blocks[0].kind) == (
@@ -216,7 +217,12 @@ async def test_accept_merges_and_delete_removes(pg_db: Db) -> None:
     notes = await get_artifact(pg_db, learner_id=learner_id, kind="notes", owner_id=topic_id)
     mine = uuid4()
     v1 = await edit_block(
-        pg_db, learner_id=learner_id, artifact_id=notes.artifact_id, block_id=mine, content="X"
+        pg_db,
+        learner_id=learner_id,
+        artifact_id=notes.artifact_id,
+        block_id=mine,
+        content="X",
+        idempotency_key="k2",
     )
     assert [(b.block_id, b.kind, b.owner) for b in v1.blocks] == [(mine, "custom", "learner")]
 
@@ -231,14 +237,26 @@ async def test_accept_merges_and_delete_removes(pg_db: Db) -> None:
     supplement_y, supplement_z = v2.blocks[1].block_id, v2.blocks[2].block_id
     with pytest.raises(NotASupplement):
         await accept_supplement(
-            pg_db, learner_id=learner_id, artifact_id=notes.artifact_id, block_id=mine
+            pg_db,
+            learner_id=learner_id,
+            artifact_id=notes.artifact_id,
+            block_id=mine,
+            idempotency_key="k3",
         )
     v3 = await accept_supplement(
-        pg_db, learner_id=learner_id, artifact_id=notes.artifact_id, block_id=supplement_y
+        pg_db,
+        learner_id=learner_id,
+        artifact_id=notes.artifact_id,
+        block_id=supplement_y,
+        idempotency_key="k4",
     )
     assert [(b.content, b.owner) for b in v3.blocks] == [("X\n\nY", "learner"), ("Z", "system")]
     v4 = await delete_block(
-        pg_db, learner_id=learner_id, artifact_id=notes.artifact_id, block_id=supplement_z
+        pg_db,
+        learner_id=learner_id,
+        artifact_id=notes.artifact_id,
+        block_id=supplement_z,
+        idempotency_key="k5",
     )
     assert [b.content for b in v4.blocks] == ["X\n\nY"]
     assert v4.version == 4
@@ -249,7 +267,11 @@ async def test_accept_merges_and_delete_removes(pg_db: Db) -> None:
     assert [b.content for b in old] == ["X", "Y", "Z"]
     with pytest.raises(ArtifactNotFound):
         await delete_block(
-            pg_db, learner_id=learner_id, artifact_id=notes.artifact_id, block_id=uuid4()
+            pg_db,
+            learner_id=learner_id,
+            artifact_id=notes.artifact_id,
+            block_id=uuid4(),
+            idempotency_key="k6",
         )
 
 
@@ -288,6 +310,7 @@ async def test_other_learner_sees_nothing(pg_db: Db) -> None:
             artifact_id=notes.artifact_id,
             block_id=uuid4(),
             content="mine",
+            idempotency_key="k7",
         )
 
 
@@ -318,7 +341,8 @@ async def test_notes_routes(pg_db: Db, notes_client: Callable[[UUID], httpx.Asyn
         assert (notes["version"], notes["blocks"], notes["kind"]) == (0, [], "notes")
         base = f"/v1/artifacts/{notes['artifact_id']}/blocks"
         mine = uuid4()
-        put = await client.put(f"{base}/{mine}", json={"content": "my note"})
+        edit = {"content": "my note", "idempotency_key": "put-1"}
+        put = await client.put(f"{base}/{mine}", json=edit)
         assert put.status_code == 200
         assert put.json()["blocks"] == [
             {
@@ -332,6 +356,12 @@ async def test_notes_routes(pg_db: Db, notes_client: Callable[[UUID], httpx.Asyn
                 "supplementTo": None,
             }
         ]
+        # §6.4, T-E2: the repeat answers the same and writes nothing; another body — 409.
+        again = await client.put(f"{base}/{mine}", json=edit)
+        assert again.json() == put.json()
+        conflict = await client.put(f"{base}/{mine}", json={**edit, "content": "other"})
+        assert conflict.status_code == 409
+        assert conflict.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
         await write_system_blocks(
             pg_db,
             learner_id=learner_id,
@@ -342,12 +372,22 @@ async def test_notes_routes(pg_db: Db, notes_client: Callable[[UUID], httpx.Asyn
         )
         listed = (await client.get(f"/v1/topics/{topic_id}/notes")).json()
         supplement = listed["blocks"][1]["block_id"]
-        assert (await client.post(f"{base}/{mine}/accept")).status_code == 422
-        accepted = await client.post(f"{base}/{supplement}/accept")
+        key = {"idempotency_key": "accept-1"}
+        wrong = await client.post(f"{base}/{mine}/accept", json={"idempotency_key": "accept-0"})
+        assert wrong.status_code == 422
+        accepted = await client.post(f"{base}/{supplement}/accept", json=key)
+        assert (await client.post(f"{base}/{supplement}/accept", json=key)).json() == (
+            accepted.json()
+        )
         assert [b["content"] for b in accepted.json()["blocks"]] == ["my note\n\nmore"]
-        deleted = await client.delete(f"{base}/{mine}")
+        drop = {"idempotency_key": "delete-1"}
+        deleted = await client.request("DELETE", f"{base}/{mine}", json=drop)
         assert (deleted.json()["version"], deleted.json()["blocks"]) == (4, [])
-        assert (await client.delete(f"{base}/{mine}")).status_code == 404
+        repeat = await client.request("DELETE", f"{base}/{mine}", json=drop)
+        assert repeat.json() == deleted.json()
+        gone = await client.request("DELETE", f"{base}/{mine}", json={"idempotency_key": "d2"})
+        assert gone.status_code == 404
     async with notes_client(other) as client:
         assert (await client.get(f"/v1/topics/{topic_id}/notes")).status_code == 404
-        assert (await client.put(f"{base}/{uuid4()}", json={"content": "x"})).status_code == 404
+        foreign = {"content": "x", "idempotency_key": "put-1"}
+        assert (await client.put(f"{base}/{uuid4()}", json=foreign)).status_code == 404

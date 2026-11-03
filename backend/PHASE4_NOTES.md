@@ -1220,6 +1220,7 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
   3. Сохранение: блокировка строки артефакта, новая версия, `current_version` и `artifact.updated {…, text}` — одна транзакция (`Т-§2.3`). `text` — содержимое блоков через пустую строку. Ключ — `artifact.updated:{artifact_id}:{version}`. Те же блоки ещё раз ничего не пишут (закон 5). Актор: `learner` для правок, роль с версией (`artifact_writer@1`) для генератора; `created_by` — то же.
   4. Запись генератора (WP23.2): блок с `block_id` системного блока заменяет его на месте; с `block_id` блока ученика — встаёт сразу после него дополнением, блок ученика не меняется; без `block_id` — в конец. Системные блоки, которые генератор не назвал, уходят: он возвращает всю системную часть. Блоки ученика остаются всегда; неотвеченное дополнение остаётся, пока к тому же блоку не пришло новое.
   5. Ученик: `PUT` правит блок (он становится `owner = learner`, дополнение перестаёт быть дополнением) или по новому `block_id` дописывает блок `custom` (§2.3 строка 14). `accept` сливает дополнение с его блоком (содержимое через пустую строку, `sources` и `skills` объединяются). `DELETE` удаляет блок вместе с его неотвеченными дополнениями. `accept` не дополнения — `422 VALIDATION_ERROR` (§4.5: новых кодов нет).
+  6. Все три маршрута ученика принимают `idempotency_key` (§6.4 «изменяющие — `idempotency_key`», `T-E2`). Ключ события — `artifact.edit:{key}`. Повтор: тот же запрос, применённый к версии перед записанной, даёт её же — ответ этой версией, без записи; иначе — `409 IDEMPOTENCY_CONFLICT`. Запрос, который ничего не изменил, события не пишет, и его повтор просто снова ничего не меняет.
 - Почему: WP23.1, `Т-§17.1`–`Т-§17.2`, П-11.1, §0.4.3.
 - Обратимость: модель блока и одна функция слияния.
 - Тесты: `tests/artifacts/test_documents_wp23.py`; маршруты в `tests/test_app_assembly.py` (`T-A1`).
@@ -1273,7 +1274,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
-- WP23.1, документы артефактов (C, `phase-4-c-wp23-artifacts`): красный прогон отдельно не снят (облегчённый TDD по указанию владельца, 2026-11-03). Зелёный: `tests/artifacts/test_documents_wp23.py` + `tests/test_app_assembly.py` — 25 passed.
+- WP23.1, документы артефактов (C, `phase-4-c-wp23-artifacts`): красный прогон отдельно не снят (облегчённый TDD по указанию владельца, 2026-11-03). Зелёный: `tests/artifacts/test_documents_wp23.py` + `tests/test_app_assembly.py` — 25 passed; с ключами — `tests/e2e/test_isolation_and_idempotency.py` + `tests/artifacts/test_documents_wp23.py` — 9 passed.
 - WP13.1, согласие на старте сессии (D-B-151): `uv run pytest tests/session/test_session_terms.py` — 2 failed (старт без согласия `201`, без cookie `201`), коммит `f5029a2`. Зелёный: 2 passed; `tests/session` и `tests/llm/test_labels.py` зелёные; `tests/e2e` — 13 failed (`403` на старте, правка у C).
 - WP11.3, WP11.6 на полях A #117 (D-B-145, D-B-146): `uv run pytest tests/practice/test_check_symbolic_job.py tests/practice/test_check_model.py` — 1 failed (`unsupported` ничего не писал) и ошибка сбора (нет `known_misconceptions`), коммит `72e96fb`. Зелёный: `tests/practice`, `tests/events`, `tests/graph/test_read_stub.py`, `tests/jobs/test_rules_p4.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` — 234 passed.
 - WP18, маршруты (C, `phase-4-c-sessions`): тесты и роутер писались в одной итерации, красный прогон отдельно не снят. Зелёный: в Linux против `quack-test-*` — `tests/auth` 14 passed; локально `test_app_assembly.py` + `test_contracts.py` — 26 passed. `test_sql_static.py` красный до слияния #101 (записи A для двух запросов до входа).
@@ -1333,6 +1334,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Правки тестов
 
+- `tests/e2e/test_isolation_and_idempotency.py`, `tests/e2e/endpoints.py` (C, WP23.1): три маршрута блоков — в обходе `T-E2`; тема для них записывается в журнал Фазы 4 (`topic.created`), которого структура Фазы 3 в обходе не пишет (D-C-112); `accept` и `DELETE` — в `NO_OTHER_BODY` (тело — только ключ).
 - `tests/test_app_assembly.py` (C, WP23.1): в `EXPECTED_ROUTES` и `_declared_routes` добавлены четыре маршрута конспекта §6.4 (§8.15 п.2 — новый маршрут контракта).
 - `tests/session/test_head_guards.py::test_boundary_names_the_missing_prerequisites_once` (D-B-153, до зелёного): проверка «id не в тексте» смотрела на id предпосылки с меткой и не ловила утечку id предпосылки без метки (подмена прошла); теперь проверяются оба id и точный текст. Тест усилен, не ослаблен.
 - `tests/practice/test_check_symbolic_job.py::test_unsupported_form_writes_nothing_yet` → `test_unsupported_form_writes_check_failed_for_the_model` (B, D-B-146): прежний тест закреплял временное поведение до ответа A («`unsupported` нет в каталоге»); A добавил значение в #117, тест проверяет новое поведение: `check.failed {reason: unsupported}` под ключом `check_failed_key`. Тест не ослаблен.
