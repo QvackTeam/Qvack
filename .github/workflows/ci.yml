@@ -76,6 +76,39 @@ jobs:
       - run: uv run pyright
       - run: uv run pytest -q
 
+  # Д-§5.2 п.2, ТЗ Ф4 WP1.4/WP9.3 (D-C-142): squawk over the migrations a pull request adds or
+  # changes; blocking ALTERs and indexes without CONCURRENTLY fail the check. The version is
+  # pinned (>= 2.51.0: the comment for files without a transaction). Rules outside that scope are
+  # excluded: lock/statement timeouts, re-runnable statements, dropping columns or schemas.
+  squawk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SQUAWK_VERSION: "2.71.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      - name: squawk on new migrations
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "no base commit to compare with; nothing to check"
+            exit 0
+          fi
+          files=$(git diff --name-only --diff-filter=AM "$BASE" HEAD -- 'backend/db/migrations/*.sql')
+          if [ -z "$files" ]; then
+            echo "no new migrations"
+            exit 0
+          fi
+          excluded=require-lock-timeout,require-statement-timeout,prefer-robust-stmts,ban-drop-column,ban-drop-schema
+          # shellcheck disable=SC2086
+          uvx --from "squawk-cli==${SQUAWK_VERSION}" squawk \
+            --config backend/.squawk.toml --exclude="$excluded" $files
+
   compute:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -123,7 +156,7 @@ jobs:
     # ТЗ Фазы 4 WP9.3, Д-§5.1: both images to GHCR with the tags <short sha> and <branch>, only
     # after the other jobs passed. The server pulls by <short sha> (deploy.sh <sha>).
     if: github.event_name == 'push'
-    needs: [backend, compute, images]
+    needs: [backend, squawk, compute, images]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
