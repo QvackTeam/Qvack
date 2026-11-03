@@ -41,7 +41,9 @@ class Need:
     of a label in a domain, `(domain_id, label)` (e.g. skills by normalized name, Т-§4.4);
     `events` — events of the learner by `seq` (folds and handlers read events «через
     представление», WP3.2); `event_refs` — `(seq, payload field, label)`: the node named by a
-    field of that event, with its neighbourhood (the task of an answer for its verdict).
+    field of that event, with its neighbourhood (the task of an answer for its verdict). The
+    neighbourhood of a task also opens its options and the evidence on it with their relations
+    (traps for `RESISTED`, the evidence of a verdict for a dispute, D-A-134).
     """
 
     nodes: frozenset[NodeRef] = frozenset()
@@ -199,7 +201,21 @@ class _View:
             value = event.payload.get(field_name) if event is not None else None
             if isinstance(value, str):
                 refs.add((label, value))
-        self._near: frozenset[NodeRef] = need.neighbourhoods | refs
+        near = set(need.neighbourhoods) | refs
+        for label, node_id in list(near):
+            live = batch._resolve(label, node_id) if label == "Task" else None
+            if live is not None:
+                near |= {
+                    (r.to_label, r.to_id)
+                    for r in batch._rels_of("Task", live, out=True)
+                    if r.rel_type == "HAS_OPTION"
+                }
+                near |= {
+                    (r.from_label, r.from_id)
+                    for r in batch._rels_of("Task", live, out=False)
+                    if r.rel_type == "ON_TASK"
+                }
+        self._near: frozenset[NodeRef] = frozenset(near)
 
     def _check_node(self, label: str, node_id: str) -> None:
         ref = (label, node_id)

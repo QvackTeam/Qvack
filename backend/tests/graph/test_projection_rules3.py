@@ -753,7 +753,7 @@ ANSWER_SEQ = 70
 
 
 def _answer(seq: int = ANSWER_SEQ, **payload: Any) -> StoredEvent:
-    body = {"task_id": TASK, "part": None, "answer": {"kind": "choice", "option_id": "A"},
+    body = {"task_id": TASK, "part": None, "answer": {"kind": "choice", "value": "A"},
             "source": "chat"} | payload  # fmt: skip
     return _event(seq, "answer.submitted", body, domain_id=UUID(DOMAIN), session_id=SESSION)
 
@@ -976,3 +976,19 @@ def test_dispute_of_evidence_misconception_or_verdict() -> None:
     assert nodes[("Evidence", _ev(0))]["status"] == "disputed"
     assert nodes[("Evidence", derived)]["status"] == "disputed"
     assert nodes[("Misconception", MISCONCEPTION)]["status"] == "disputed"
+
+
+def test_model_verdict_hypothesis_is_a_manifestation_of_a_new_misconception() -> None:
+    """Т-§9.1: a hypothesis of a model verdict — a manifestation with its own tier; the
+    misconception is `unknown` until its fold, `ABOUT` the first skill (D-A-134)."""
+    verdict = _verdict(verification="model", method="model",
+                       misconception_hypothesis="adds the denominators")  # fmt: skip
+    nodes, rels = _run([_answer(), verdict], *_verdict_graph())
+    new = deterministic_id(LEARNER, VERDICT_SEQ, "misconception")
+    assert nodes[("Misconception", new)] == {
+        "learnerId": L, "domainId": DOMAIN, "statement": "adds the denominators",
+        "status": "unknown", "triggers": [], "targetedInSessionId": "", "searchable": True,
+    }  # fmt: skip
+    assert ("Misconception", new, "ABOUT", "Skill", SKILL) in rels
+    assert ("Evidence", _ev(0), "MANIFESTS", "Misconception", new) in rels
+    assert nodes[("Evidence", _ev(0))]["tier"] == 2
