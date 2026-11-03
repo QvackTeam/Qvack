@@ -256,3 +256,47 @@ async def test_learner_stream_reports_changes_without_redis(
         assert (await next_sse_event(lines))[0] == "projection_advanced"
         artifact = await _p4_change(pg_db, learner, None, "artifact.updated")
         assert await next_sse_event(lines) == ("artifact_updated", {"artifact_id": str(artifact)})
+
+
+async def test_learner_stream_reports_revised_verdicts(
+    stream_settings: Settings,
+    pg_engine: AsyncEngine,
+    db: SessionFactory,
+    pg_db: Db,
+    neo4j: AsyncDriver,
+) -> None:
+    """ТЗ Ф4 §4.8, `Т-§5.6`, D-B-167: `task.key_disputed {task_id}` → `verdict_revised
+    {answer_seq}` for each answer of the task that already has a verdict, not for the rest."""
+    learner = await create_learner(pg_db)
+    await ensure_user(db, learner)
+    headers = session_cookie(await session_token(pg_db, learner, stream_settings))
+    task_id = uuid4()
+
+    def event(type_: str, payload: dict[str, Any]) -> P4Event:
+        return P4Event(type=type_, payload=payload, actor="code", idempotency_key=str(uuid4()))
+
+    answer = {"task_id": str(task_id), "answer": {"kind": "number", "value": "2"}, "source": "chat"}
+    judged, unjudged = await p4_append(
+        pg_db,
+        learner,
+        [event("answer.submitted", answer), event("answer.submitted", answer)],
+    )
+    verdict = {"part": "main", "outcome": "correct", "method": "exact", "verification": "code"}
+    await p4_append(
+        pg_db, learner, [event("verdict.recorded", {"answer_seq": judged.seq, **verdict})]
+    )
+    resources = build_app_resources(
+        stream_settings, pg_engine, neo4j, BrokenRedis(), db=pg_db, session_factory=db
+    )
+    app = create_app(stream_settings, resources=resources)
+    async with (
+        _client(app) as client,
+        client.stream("GET", "/v1/learner/stream", headers=headers) as r,
+    ):
+        lines = r.aiter_lines()
+        assert (await next_sse_event(lines))[0] == "projection_advanced"
+        await p4_append(pg_db, learner, [event("task.key_disputed", {"task_id": str(task_id)})])
+        assert await next_sse_event(lines) == ("verdict_revised", {"answer_seq": judged.seq})
+        with pytest.raises(TimeoutError):  # the answer without a verdict is not revised
+            await next_sse_event(lines, timeout_s=0.3)
+    assert unjudged.seq != judged.seq
