@@ -607,9 +607,7 @@ async def test_visible_jobs_of_the_session_only(jobs_db: Db) -> None:
 # --- the plaque signal (T-D10; Т-§13.8, D-C-141) ------------------------------------------
 
 
-async def test_visible_and_plaque(
-    jobs_db: Db, redis: Redis
-) -> None:
+async def test_visible_and_plaque(jobs_db: Db, redis: Redis) -> None:
     learner, session = await create_learner(jobs_db), uuid4()
     pubsub = redis.pubsub()
     await pubsub.subscribe(learner_signal_channel(learner))
@@ -636,3 +634,27 @@ async def test_visible_and_plaque(
         assert await next_message(0.3) is None  # one publication per change
     finally:
         await pubsub.aclose()
+
+
+# --- periodic jobs (T-D9; WP7.5) ----------------------------------------------------------
+
+
+async def test_periodic_keys(jobs_db: Db) -> None:
+    """T-D9: the key names the period — ticks within one day put each daily job once, the
+    weekly one once a week; the next day puts the daily ones again."""
+    from quack.jobs.periodic_p4 import schedule_periodic
+
+    monday = datetime(2026, 11, 2, 0, 5, tzinfo=UTC)
+    assert await schedule_periodic(jobs_db, monday) == 4
+    assert await schedule_periodic(jobs_db, monday + timedelta(hours=23)) == 0
+    assert await schedule_periodic(jobs_db, monday + timedelta(days=1)) == 3  # same week
+    keys = sorted(r["job_key"] for r in await _rows(jobs_db))
+    assert keys == [
+        "calibration:2026-45",
+        "deletions-reconcile:2026-11-02",
+        "deletions-reconcile:2026-11-03",
+        "exports-cleanup:2026-11-02",
+        "exports-cleanup:2026-11-03",
+        "manifests-cleanup:2026-11-02",
+        "manifests-cleanup:2026-11-03",
+    ]

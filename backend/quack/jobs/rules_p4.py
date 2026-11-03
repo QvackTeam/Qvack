@@ -122,7 +122,7 @@ class JobPlan:
     kind: str
     job_key: str
     priority_class: PriorityClass
-    learner_id: UUID
+    learner_id: UUID | None  # None — a periodic job of no learner (WP7.5)
     lock_key: str | None = None
     coalesce_key: str | None = None
     required_seq: int | None = None
