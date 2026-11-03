@@ -67,6 +67,9 @@ class Ids:
     structure_version: int
     material_id: UUID = NO_MATERIAL
     canvas_id: UUID = NO_MATERIAL
+    # WP23.1: the block the walk writes and the supplement the system adds to it.
+    learner_block_id: UUID = NO_MATERIAL
+    block_id: UUID = NO_MATERIAL
 
 
 def path_for(path: str, ids: Ids) -> str:
@@ -78,6 +81,7 @@ def path_for(path: str, ids: Ids) -> str:
         artifact_id=ids.artifact_id,
         material_id=ids.material_id,
         canvas_id=ids.canvas_id,
+        block_id=ids.block_id,
     )
 
 
@@ -155,6 +159,11 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
             "text": ["Edited", "Edited again"][v],
         },
         ("DELETE", "/v1/artifacts/notes/{artifact_id}"): {},
+        ("PUT", "/v1/artifacts/{artifact_id}/blocks/{block_id}"): {
+            "content": ["My words", "Other words"][v]
+        },
+        ("POST", "/v1/artifacts/{artifact_id}/blocks/{block_id}/accept"): {},
+        ("DELETE", "/v1/artifacts/{artifact_id}/blocks/{block_id}"): {},
         ("POST", "/v1/canvases/{canvas_id}/pairing"): {},
         ("POST", "/v1/topics/{topic_id}/cheatsheet/refresh"): {"domain_id": str(ids.domain_id)},
     }
