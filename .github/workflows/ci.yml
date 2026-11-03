@@ -3,10 +3,13 @@
 # only job with `packages: write`; it runs on pushes only, never on a pull request (Д-§5.3).
 name: ci
 
+# Layers (backend/TESTS.md, D-C-146): `fast` runs on every event and needs no services; the
+# full `backend` job (Postgres, Neo4j, Redis) runs on pull requests and on pushes to main and
+# phase-4, not on pushes to the stream branches.
 on:
   pull_request:
   push:
-    branches: [main, phase-4]
+    branches: [main, phase-4, phase-4-a, phase-4-b, phase-4-c]
 
 permissions:
   contents: read
@@ -18,7 +21,34 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Fast layer: no services. Infrastructure tests skip (QUACK_TEST_REQUIRE_INFRA is not set and
+  # nothing listens on the test ports), everything else runs. Every event, every branch.
+  fast:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          working-directory: backend
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+      - run: uv run pytest -q
+
+  # Full layer: the same tests with real Postgres 16, Neo4j and Redis; nothing is skipped.
+  # Pull requests and pushes to main and phase-4 only (not pushes to stream branches).
   backend:
+    if: >-
+      github.event_name == 'pull_request'
+      || github.ref == 'refs/heads/main'
+      || github.ref == 'refs/heads/phase-4'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -71,9 +101,6 @@ jobs:
           sudo install -m 0755 "$RUNNER_TEMP/dbmate" /usr/local/bin/dbmate
           dbmate --version
       - run: uv sync --frozen
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pyright
       - run: uv run pytest -q
 
   # Д-§5.2 п.2, ТЗ Ф4 WP1.4/WP9.3 (D-C-142): squawk over the migrations a pull request adds or
@@ -109,43 +136,102 @@ jobs:
           uvx --from "squawk-cli==${SQUAWK_VERSION}" squawk \
             --config backend/.squawk.toml --exclude="$excluded" $files
 
+  # Always reports (a required check), but the heavy steps run only when compute/ or the
+  # workflow itself changed.
   compute:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: compute
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+          fetch-depth: 0
+      - name: Changed paths
+        id: changes
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # compute/ or the workflow changed?
+          # No base commit (a new branch, a forced push): run everything.
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "no base commit; running everything"
+            echo "compute=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE" HEAD | grep -Eq '^(compute/|\.github/workflows/)'; then
+            echo "compute=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "nothing relevant changed; the heavy steps are skipped"
+            echo "compute=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changes.outputs.compute == 'true'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           working-directory: compute
-      - run: uv sync --frozen
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pyright
+      - if: steps.changes.outputs.compute == 'true'
+        working-directory: compute
+        run: uv sync --frozen
+      - if: steps.changes.outputs.compute == 'true'
+        working-directory: compute
+        run: uv run ruff check .
+      - if: steps.changes.outputs.compute == 'true'
+        working-directory: compute
+        run: uv run ruff format --check .
+      - if: steps.changes.outputs.compute == 'true'
+        working-directory: compute
+        run: uv run pyright
       # WP24: render tests need Chromium of Playwright (Д-§5.1).
-      - run: uv run playwright install --with-deps chromium
-      - run: uv run pytest -q
+      - if: steps.changes.outputs.compute == 'true'
+        working-directory: compute
+        run: uv run playwright install --with-deps chromium
+      - if: steps.changes.outputs.compute == 'true'
+        working-directory: compute
+        run: uv run pytest -q
 
   images:
     # Build both images for linux/amd64 without publishing (publishing is the DevOps track).
+    # Pull requests and pushes to main and phase-4; on a pull request only when backend/ or
+    # compute/ (or the workflow) changed. The job always reports.
+    if: >-
+      github.event_name == 'pull_request'
+      || github.ref == 'refs/heads/main'
+      || github.ref == 'refs/heads/phase-4'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+          fetch-depth: 0
+      - name: Changed paths
+        id: changes
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # backend/, compute/ or the workflow changed?
+          # No base commit (a new branch, a forced push): run everything.
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "no base commit; running everything"
+            echo "images=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$BASE" HEAD | grep -Eq '^(backend/|compute/|\.github/workflows/)'; then
+            echo "images=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "nothing relevant changed; the heavy steps are skipped"
+            echo "images=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changes.outputs.images == 'true'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: steps.changes.outputs.images == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: backend
           platforms: linux/amd64
           push: false
           tags: quack-backend:ci
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - if: steps.changes.outputs.images == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: compute
           platforms: linux/amd64
@@ -155,8 +241,10 @@ jobs:
   publish:
     # ТЗ Фазы 4 WP9.3, Д-§5.1: both images to GHCR with the tags <short sha> and <branch>, only
     # after the other jobs passed. The server pulls by <short sha> (deploy.sh <sha>).
-    if: github.event_name == 'push'
-    needs: [backend, squawk, compute, images]
+    if: >-
+      github.event_name == 'push'
+      && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/phase-4')
+    needs: [backend, fast, squawk, compute, images]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

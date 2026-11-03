@@ -2323,6 +2323,22 @@ T-DB5 — тесты `append_events` Фазы 1 на psycopg: `tests/db/test_app
 - Тесты: `tests/artifacts/test_topic_refresh_wp23.py`.
 - Требует подтверждения владельцем: нет.
 
+### D-C-146. CI в два слоя и разбор набора тестов — `backend/TESTS.md`
+- Класс: B (C по §7.3: `.github/**`, `backend/TESTS.md`; мандат владельца: перестроить CI и решить, какие тесты не нужны)
+- WP / место: WP9.3, WP1.3, §4.1, §8, §8.15; `.github/workflows/ci.yml`, `backend/TESTS.md`, `tests/test_ci_layers.py`
+- Контекст: полный прогон (~8 мин, службы Postgres, Neo4j, Redis) шёл на каждый push в `main` и `phase-4` и на каждый PR, а ветки потоков не проверялись совсем; `compute` и `images` собирались при любой правке; в наборе 1739 тестов в 174 файлах, из них много принадлежит коду Фазы 3, который Фаза 4 заменяет.
+- Решение:
+  1. Триггеры: `pull_request`; `push` в `main`, `phase-4`, `phase-4-a`, `phase-4-b`, `phase-4-c`. `pull_request_target`, `workflow_run`, права токена и закрепление действий по SHA — без изменений.
+  2. Job `fast` (без служб, на каждое событие): `uv sync --frozen`, `ruff check`, `ruff format --check`, `pyright`, `pytest -q` без `QUACK_TEST_REQUIRE_INFRA`: тесты на службах пропускаются, остальное идёт (~1100 тестов). Job `backend` (полный, `QUACK_TEST_REQUIRE_INFRA=1`) — только на pull request и push в `main`, `phase-4`; `ruff` и `pyright` из него убраны (они в `fast`).
+  3. `compute` и `images` всегда сообщают результат (обязательные проверки), но тяжёлые шаги идут только если `git diff --name-only` относительно базы PR (`github.event.pull_request.base.sha`) или `github.event.before` задел `compute/` (для `images` — `backend/` или `compute/`) либо `.github/workflows/`; без базы (новая ветка) идёт всё. `images` не идёт на push в ветки потоков.
+  4. `publish` ждёт `backend`, `fast`, `squawk`, `compute`, `images` и работает только на push в `main` и `phase-4` (раньше — на любой push; теперь ветки потоков в триггерах, и без этого условия они бы публиковали образы).
+  5. Тесты разобраны на A (Фаза 4, оставить), P (свойство остаётся, перенос на `Db`), S (стенды), X (e2e и сборка API — не тронуты), B (код Фазы 3, снимается вместе с кодом, список — `TESTS.md` §4), C (удалено сейчас). Удалены только C: `test_stream_c_defaults_equal_phase_2_values`, `test_rate_limit_constants_are_gone`, `test_stub_has_math_queues`, файл `session/test_fixtures.py`; причины и покрытие — `TESTS.md` §5. B не удалены: код Фазы 3 ещё в рантайме (проверено: все его модули достижимы из `quack.cli` и `quack.api.app`).
+  6. Политика (`TESTS.md` §1): тест остаётся, если ловит шов, изоляцию, идемпотентность, гонку, ошибку проверки ответа или недетерминизм; не остаются проверки значений по умолчанию, «надгробия», самопроверки помощников и второй тест того же поведения.
+- Почему: `Д-§5.2`, `Д-§5.3`; ТЗ Ф4 WP9.3, WP1.3, §8.15 п.1–2.
+- Обратимость: условия `if` и список триггеров в одном файле; удалённые тесты — в истории git.
+- Тесты: `tests/test_ci_layers.py` (8 тестов), `tests/test_ci_squawk.py`.
+- Требует подтверждения владельцем: нет. Обязательными проверками ветки (branch protection) надо сделать `fast`, `backend`, `squawk`, `compute`, `images` — настройка репозитория, не файл.
+
 ### D-C-145. §4.8: `projection_advanced {applied_seq, topics}` и отметки Фазы 4 (#188)
 - Класс: B
 - WP / место: §4.8, WP7; `quack/api/learner_stream.py`
@@ -2726,6 +2742,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Правки тестов
 
+- D-C-146 (C, разбор набора): удалены без замены в коде (политика `TESTS.md` §1) — `tests/test_thresholds_in_settings.py::test_stream_c_defaults_equal_phase_2_values` (значения по умолчанию `Settings`; лимиты проверяют `tests/test_app_assembly.py::test_actions_and_turns_rate_limits`, `::test_search_limits_come_from_settings`, `::test_health_probe_timeout_comes_from_settings`, `tests/domains/test_curation_thresholds.py`), `::test_rate_limit_constants_are_gone` (надгробие; лимитёр — `tests/test_ratelimit.py`), `tests/storage/test_compute_client_math.py::test_stub_has_math_queues` (частный случай `tests/storage/test_compute_client_s10.py::test_stub_covers_every_wp24_endpoint`), `tests/session/test_fixtures.py::test_parse_sse_round_trips_format_sse` (самопроверка помощника; формат кадра — `tests/test_infra.py::test_sse_format`). Остальные тесты Фазы 3 снимутся вместе с кодом, список — `backend/TESTS.md` §4.
 - A, 2026-11-03 (D-A-186, D-A-187): тесты потока A названы ID ТЗ §8: `test_every_projector_row_has_a_handler` → `test_handler_table` (T-P4; таблицу событий дают группы того же модуля), `test_schema_is_created_in_neo4j` → `test_schema_created_on_start` (T-P7, плюс повторный старт), `test_success_on_a_trap_task_resists_its_misconceptions` → `test_resist_and_manifest_sources` (T-MS2, плюс проявления ловушки Т1 и гипотезы модели Т3). Утверждения прежние или сильнее.
 - A, 2026-11-03 (#182): тесты WP7 названы ID ТЗ §8: `test_every_rule_row_names_known_kinds` → `test_rule_table` (T-D1), `test_session_ended_and_turn_limit_and_intent_change` → `test_episode_boundaries` (T-D2), `test_episode_without_content_is_covered_by_the_dispatcher` → `test_episode_without_content` (T-D3), `test_coalesce_raises_required_seq_and_keeps_one_job` → `test_coalesce_greatest` (T-D4), `test_cancel_queued_and_running` → `test_cancel_requested` (T-D6), `test_retry_with_growing_pause_then_failed_with_agent_completed` → `test_failed_writes_agent_completed` (T-D8), `test_status_change_of_a_visible_job_publishes_jobs_changed` → `test_visible_and_plaque` (T-D10). `test_max_jobs_per_learner` (T-D5), `test_skipped_budget` (T-D7) уже так названы. T-D9 (`test_periodic_keys`) в #182 нет — периодические задачи Фазы 4 ещё не сделаны.
 
