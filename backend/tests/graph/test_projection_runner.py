@@ -160,7 +160,7 @@ async def test_materials_and_vectors_reach_neo4j(
         "none",
         0,
     )
-    assert state["asOfSeq"] == 6
+    assert state["asOfSeq"] == 0  # no evidence or exposure rests on it yet
     async with neo4j.session() as session:
         found = await session.run(
             "MATCH (t:Topic {id: $t}) RETURN properties(t) AS t", t=str(topic)

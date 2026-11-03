@@ -306,7 +306,6 @@ def fold_skill(
     params: FoldParams,
     *,
     skill_domain: str = "",
-    as_of_seq: int = 0,
 ) -> SkillFold:
     p = params
     ordered = sorted(evidence, key=_key)
@@ -427,7 +426,8 @@ def fold_skill(
         "consolidationLevel": consolidation["level"],
         "consolidationSinceMs": consolidation["since"],
         "bypassCount": consolidation["bypass"],
-        "asOfSeq": as_of_seq,
+        # The last event the state rests on — from the inputs, so batching does not change it.
+        "asOfSeq": max([e.seq for e in ordered] + [x.seq for x in shows], default=0),
     }
     computed = {
         x.e.id: {"weight": round(x.weight, 6), "novelty": x.novelty, "delayed": x.delayed}

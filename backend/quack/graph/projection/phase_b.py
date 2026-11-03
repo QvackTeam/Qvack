@@ -5,7 +5,9 @@ on the slice, and only the changed values reach Neo4j (the diff, `Т-§8.1` «о
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Protocol
 
+from quack.config import Settings
 from quack.graph.projection.misconception_fold import (
     FoldSign,
     MisconceptionParams,
@@ -14,6 +16,7 @@ from quack.graph.projection.misconception_fold import (
 from quack.graph.projection.mutations import SetProps
 from quack.graph.projection.skill_fold import FoldEvidence, FoldExposure, FoldParams, fold_skill
 from quack.graph.projection.topic_fold import TopicGoal, TopicParams, TopicSkill, fold_topic
+from quack.graph.projection.types import SubGraph
 from quack.graph.projection.view import BatchSlice
 
 
@@ -58,9 +61,7 @@ def _evidence(batch: BatchSlice, evidence: str) -> FoldEvidence | None:
     )
 
 
-def fold_dirty_skills(
-    batch: BatchSlice, skills: set[str], params: FoldParams, as_of_seq: int
-) -> None:
+def fold_dirty_skills(batch: BatchSlice, skills: set[str], params: FoldParams) -> None:
     for skill in sorted(skills):
         props = batch.node("Skill", skill)
         if props is None:
@@ -80,7 +81,6 @@ def fold_dirty_skills(
             exposures,
             params,
             skill_domain=_str(props.get("domainId")),
-            as_of_seq=as_of_seq,
         )
         changes = [SetProps("Skill", skill, fold.skill)]
         changes += [SetProps("Evidence", e, p) for e, p in sorted(fold.evidence.items())]
@@ -162,3 +162,44 @@ def fold_dirty_topics(batch: BatchSlice, topics: set[str], params: TopicParams) 
             skills.append(TopicSkill(r.to_id, skill, sorted(confirmed)))
         goals = _goals(batch, topic, _str(props.get("domainId")), params)
         batch.apply([SetProps("Topic", topic, fold_topic(props, skills, goals, params))])
+
+
+class FoldLoader(Protocol):
+    """Where phases B–C read what the first slice did not hold: Neo4j in the batch loop, nothing
+    for a slice that already holds the whole graph (tests, rebuild in memory)."""
+
+    async def fold_inputs(self, skills: set[str], misconceptions: set[str]) -> SubGraph: ...
+
+    async def topic_inputs(
+        self, topics: set[str], skills: set[str], hubs: set[str]
+    ) -> tuple[SubGraph, set[str]]: ...
+
+
+class WholeSlice:
+    """The slice is the whole graph: nothing more to read."""
+
+    async def fold_inputs(self, skills: set[str], misconceptions: set[str]) -> SubGraph:
+        return SubGraph()
+
+    async def topic_inputs(
+        self, topics: set[str], skills: set[str], hubs: set[str]
+    ) -> tuple[SubGraph, set[str]]:
+        return SubGraph(), topics
+
+
+async def run_folds(batch: BatchSlice, settings: Settings, loader: FoldLoader) -> None:
+    """Phase B (WP4, WP5.2) — folds of the skills and misconceptions the batch touched; phase C
+    (WP6.1, WP6.2) — the topics of what changed (Т-§2.4)."""
+    skills, misconceptions = batch.dirty_skills(), batch.dirty_misconceptions()
+    if skills or misconceptions:
+        batch.extend(await loader.fold_inputs(skills, misconceptions))
+        fold_dirty_skills(batch, skills, FoldParams.from_settings(settings))
+        fold_dirty_misconceptions(
+            batch, misconceptions, MisconceptionParams.from_settings(settings)
+        )
+    topics, touched, hubs = batch.topic_seeds()
+    if topics or touched or hubs:
+        loaded, topics = await loader.topic_inputs(topics, touched, hubs)
+        batch.extend(loaded)
+        levels = {k: list(v) for k, v in settings.control_type_levels.items()}
+        fold_dirty_topics(batch, topics, TopicParams(control_type_levels=levels))

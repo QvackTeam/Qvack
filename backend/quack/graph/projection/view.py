@@ -292,6 +292,13 @@ class BatchSlice:
                 skills |= {r.to_id for r in self.rels(n.label, n.id, "ABOUT", out=True)}
         for skill in skills:
             topics |= {r.from_id for r in self.rels("Skill", skill, "COVERS", out=False)}
+        for hub in hubs:
+            topics |= {r.to_id for r in self.rels("Hub", hub, "INCLUDES", out=True)}
+            if (self._nodes.get(("Hub", hub)) or {}).get("kind") == "domain_all":
+                for d in self.rels("Hub", hub, "HAS_HUB", out=False):
+                    topics |= {
+                        r.to_id for r in self.rels("Domain", d.from_id, "HAS_TOPIC", out=True)
+                    }
         return topics, skills, hubs
 
     def snapshot(self) -> SubGraph:
