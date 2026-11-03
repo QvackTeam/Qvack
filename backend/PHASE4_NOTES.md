@@ -1498,6 +1498,21 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: в WP21.4 (C) — строка без ошибки не пишет `observation.diagnosed`; диагноз с ошибкой пишет `gap_type ≠ none`.
 - Требует подтверждения владельцем: нет (поручено решить C).
 
+### D-C-131. WP21.3: распознавание строк пера, набранные формулы, стёртые строки
+- Класс: B
+- WP / место: WP21.3, WP21.2; `quack/canvas/recognition.py`, `quack/canvas/socket.py`
+- Контекст: WP21.3 и `Т-§15.3` задают путь «строка → изображение (compute) → `recognizer` → `canvas.line_committed`», `typed_formula` → LaTeX и `canvas.line_erased`. Откуда брать штрихи строки, формат картинки, поведение при отказе, ключи событий и форма `line_recognized` не названы.
+- Решение:
+  1. Штрихи строки — из пачек, пришедших в этот сокет (`LineBook`); стёртые штрихи в строку не входят. Рамка рендера — по точкам штрихов (соглашение клиентского `bbox` документы не фиксируют), `bbox` клиента переносится в событие как есть.
+  2. Картинка — WebP от compute `/v1/image/render-strokes` (контракт WP24); `ImageInput("image/webp")` (D-B-170). Принимает ли Spark WebP — [ПРОВЕРИТЬ] на стенде (DoD п.6a), иначе PNG в рендере compute.
+  3. Вызов роли — из обработчика сокета напрямую, в фоновой задаче (сокет продолжает подтверждать пачки); ключ события и вызова — `canvas.line_committed:{canvas}:{line}`: повтор `line_ready` с теми же штрихами даёт тот же ответ через outbox и ничего не пишет (закон 5). Актор — `recognizer@1`.
+  4. Отказ compute или модели: ничего не пишется, клиенту — `line_recognized {line_id, recognized: false}`, клиент может повторить `line_ready`. Успех — `line_recognized {line_id, recognized: true, kind, text, sympy, confidence, crossed_out}` всем устройствам канваса (П-9.7 «касание строки показывает, как она прочитана»).
+  5. `typed_formula {block_id, latex}` — `canvas.line_committed {source: typed, line_id: block_id, kind: latex, recognition_confidence: 1}`; ключ содержит хэш текста: новый текст блока — новое событие, тот же — ничего.
+  6. Все штрихи распознанной строки стёрты — `canvas.line_erased {canvas_id, line_id, text}`, ключ — строка.
+- Почему: WP21.3, `Т-§15.1`, `Т-§15.3`, D-B-170, §0.4.3.
+- Обратимость: один модуль; рендер — один запрос compute.
+- Тесты: `tests/canvas/test_recognition_wp21.py`.
+- Требует подтверждения владельцем: нет.
 ### D-C-126. WP23.2: роль `artifact_writer@1` — схема выхода и слой 2 промпта
 - Класс: B (поля схемы); слой 1 — BLOCKED-C-203
 - WP / место: WP23.2–23.5, §7.2 S8, §7.3 п.2, §7.6; `quack/artifacts/writer.py`, `quack/prompts/artifact_writer/v1.md`, регистрация — `tests/llm/prompt_contracts.py` (B, правка в этом PR с ревью B)
