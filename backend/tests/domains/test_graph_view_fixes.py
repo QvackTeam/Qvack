@@ -30,10 +30,11 @@ from quack.events.models import NewEvent
 from quack.graph.memory import prop_float
 from quack.graph.neo4j_store import Neo4jGraphStore
 from quack.graph.worker import ProjectorWorker
+from tests.support.auth import session_cookie
 
 
 def _auth_headers(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+    return session_cookie(token)
 
 
 def _eval_events(
