@@ -1418,6 +1418,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Тесты: `tests/canvas/test_strokes_wp21.py`.
 - Требует подтверждения владельцем: нет (п.3 — D-C-122 п.4).
 
+### D-C-130. §4.8: `artifact_updated` и `material_parsed` в канале ученика
+- Класс: B
+- WP / место: §4.8; `quack/api/learner_stream.py`
+- Контекст: §4.8 добавляет в `GET /v1/learner/stream` виды `projection_advanced {topics}`, `jobs_changed {session_id}`, `verdict_revised {answer_seq}`, `artifact_updated {artifact_id}`, `material_parsed {material_id}`. Откуда канал берёт их, не сказано.
+- Решение:
+  1. `artifact_updated` и `material_parsed` — из журнала Фазы 4: новые `artifact.updated` / `material.parsed` после открытия канала. Канал подписан на сигнал `learner:{id}`, который `append_events` публикует после коммита (`Т-§2.3`), и по нему дочитывает журнал от своего курсора; без Redis — тем же опросом раз в `learner_stream_poll_ms`. События до открытия канала не повторяются.
+  2. `verdict_revised {answer_seq}` (`Т-§5.6`) — по ответу B в #151 (D-B-167): отдельного события пересмотра нет, его запускает `task.key_disputed {task_id}`. Канал по `task_id` находит ответы `answer.submitted` этой задачи, у которых уже есть `verdict.recorded`, и на каждый шлёт `verdict_revised`. `task.markup_disputed` вердикт не пересматривает — сообщения нет.
+  3. `jobs_changed` (очередь A, `Т-§13.8`) и `topics` у `projection_advanced` (проектор A, `Т-§2.4`) — не события журнала; источник называет A (вопрос — в #151).
+- Почему: §4.8, `Т-§1.6`, `Т-§2.3`.
+- Обратимость: одна таблица видов и одно чтение.
+- Тесты: `tests/test_learner_stream.py` (Redis и опрос).
 ### D-C-127. WP20.4: предвыборка кусков по графу и векторный поиск по `chunk_emb`
 - Класс: B
 - WP / место: WP20.4; `quack/graph/read/materials.py`, `quack/config.py` (`vector_search_reserve`)
