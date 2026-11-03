@@ -4,7 +4,7 @@ import { Maximize2, Minus, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { layoutGraph, loadPositions, savePositions } from "@/lib/graph/layout";
+import { GAP_Y, layoutGraph, loadPositions, savePositions } from "@/lib/graph/layout";
 import { onGraph, type GraphModel, type GraphTopic } from "@/lib/graph/types";
 import { useT } from "@/lib/i18n/provider";
 import type { Domain, TopicState } from "@/lib/mock/types";
@@ -15,7 +15,7 @@ export type GraphHandle = { focusTopic: (id: string) => void };
 
 type View = { k: number; tx: number; ty: number };
 type Pt = { x: number; y: number };
-type Colors = Record<"paper" | "dim" | "ribbon" | "cloth" | TopicState, string> & { label: string; body: string };
+type Colors = Record<"paper" | "dim" | "ribbon" | "cloth" | TopicState, string> & { label: string; body: string; ribbonRgb: string };
 
 const K_MIN = 0.04;
 const K_MAX = 2.4;
@@ -45,10 +45,23 @@ function readColors(host: HTMLElement): Colors {
     el.remove();
     return v;
   };
+  // Gradient stops need a colour with alpha; whatever CSS gave us is turned into plain r, g, b once
+  const rgb = (css: string) => {
+    const px = document.createElement("canvas");
+    px.width = px.height = 1;
+    const c = px.getContext("2d");
+    if (!c) return "168,148,116";
+    c.fillStyle = css;
+    c.fillRect(0, 0, 1, 1);
+    const d = c.getImageData(0, 0, 1, 1).data;
+    return `${d[0]},${d[1]},${d[2]}`;
+  };
+  const ribbon = probe("text-ribbon", "color");
   return {
+    ribbonRgb: rgb(ribbon),
     paper: probe("text-paper", "color"),
     dim: probe("text-paper-dim", "color"),
-    ribbon: probe("text-ribbon", "color"),
+    ribbon,
     cloth: probe("text-cloth", "color"),
     solid: probe("text-st-solid", "color"),
     review: probe("text-st-review", "color"),
@@ -111,7 +124,16 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     return { free, outside, width: free.length || outside.length ? COL_W : 0 };
   }, [layout, topicMap, model]);
   const lookup = useMemo(() => new Map([...topicMap, ...model.otherDomain.map((o): [string, GraphTopic] => [o.topic.id, o.topic])]), [topicMap, model]);
-  const scene = useRef({ layout, model, topicMap, hubMap, colW: column.width });
+  const links = useMemo(() => {
+    const byHub = new Map<string, string[]>();
+    const hubsOf = new Map<string, string[]>();
+    for (const l of model.includes) {
+      byHub.set(l.hubId, [...(byHub.get(l.hubId) ?? []), l.topicId]);
+      hubsOf.set(l.topicId, [...(hubsOf.get(l.topicId) ?? []), l.hubId]);
+    }
+    return { byHub, hubsOf, edges: model.requires.filter((e) => layout.nodes.has(e.topicId) && layout.nodes.has(e.requiresId)) };
+  }, [model, layout]);
+  const scene = useRef({ layout, model, topicMap, hubMap, colW: column.width, links });
 
   const draw = useCallback(() => {
     const c = canvas.current;
@@ -120,7 +142,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     if (!c || !col || !w || !h) return;
     const ctx = c.getContext("2d");
     if (!ctx) return;
-    const { layout: L, model: m, topicMap: topics, hubMap: hubs, colW } = scene.current;
+    const { layout: L, model: m, topicMap: topics, hubMap: hubs, colW, links } = scene.current;
     const dpr = window.devicePixelRatio || 1;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
@@ -131,28 +153,61 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     const near = (x: number, y: number, pad: number) => x > -pad && x < w + pad && y > -pad && y < h + pad;
     const hovered = hoverKey.current;
 
-    // Topic to hub: soft, see-through lines. Stage 3 turns them into bundles
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = col.ribbon;
-    ctx.globalAlpha = 0.1;
-    ctx.beginPath();
-    for (const l of m.includes) {
-      const b = pos(`h:${l.hubId}`);
-      if (!b) continue;
-      const a = pos(l.topicId);
-      const cy = colY.current.get(l.topicId);
-      // A topic in the column links to its hub the same way, starting at the column edge
-      const ax = a ? sx(a.x) : colW, ay = a ? sy(a.y) : cy;
-      if (ay === undefined || (!a && !colW)) continue;
-      const bx = sx(b.x), by = sy(b.y);
-      if (!near(ax, ay, 400) && !near(bx, by, 400)) continue;
-      ctx.moveTo(ax, ay);
-      ctx.quadraticCurveTo(ax, by + (ay - by) * 0.35, bx, by);
+    // Topic to hub: soft, see-through curves. They are brighter the closer the topic is to the hub, dimmer at the foot.
+    // Close to the hub they gather into one brighter stem. Hovering a hub lights its lines and mutes the rest;
+    // hovering a topic lights its curves to its hubs.
+    const hoverHub = hovered?.startsWith("h:") ? hovered.slice(2) : null;
+    const hoverTopic = hovered && !hovered.startsWith("h:") ? hovered : null;
+    const litHubs = new Set(hoverTopic ? (links.hubsOf.get(hoverTopic) ?? []) : []);
+    const ringR = clamp(13 * Math.pow(k, 0.6), 5, 15);
+    ctx.lineWidth = 1.2;
+    for (const [hubId, members] of links.byHub) {
+      const hp = pos(`h:${hubId}`);
+      if (!hp) continue;
+      const hx = sx(hp.x), hy = sy(hp.y);
+      const lit = hoverHub === hubId;
+      const mute = hoverHub !== null && !lit;
+      // The foot of the stem sits below the hub on screen; the curves end there
+      const sxp = hx, syp = hy + Math.max(ringR + 6, 0.5 * GAP_Y * k);
+      let any = false;
+      for (const topicId of members) {
+        const a = pos(topicId);
+        const cy = colY.current.get(topicId);
+        const ax = a ? sx(a.x) : colW, ay = a ? sy(a.y) : cy;
+        if (ay === undefined || (!a && !colW)) continue;
+        if (!near(ax, ay, 300) && !near(hx, hy, 300)) continue;
+        any = true;
+        const dist = Math.max(0, ay - hy) / Math.max(k, 1e-6) / GAP_Y; // in layers
+        const close = Math.exp(-dist / 4);
+        let alpha = 0.06 + 0.24 * close;
+        if (lit) alpha = 0.5 + 0.3 * close;
+        else if (hoverTopic === topicId) alpha = 0.85;
+        if (mute) alpha *= 0.3;
+        const mid = (ay + syp) / 2;
+        const g = ctx.createLinearGradient(0, ay, 0, syp);
+        g.addColorStop(0, `rgba(${col.ribbonRgb},${(alpha * 0.3).toFixed(3)})`);
+        g.addColorStop(1, `rgba(${col.ribbonRgb},${alpha.toFixed(3)})`);
+        ctx.strokeStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.bezierCurveTo(ax, mid, sxp, mid, sxp, syp);
+        ctx.stroke();
+      }
+      if (any) {
+        ctx.strokeStyle = col.ribbon;
+        ctx.globalAlpha = (lit || litHubs.has(hubId) ? 0.9 : 0.38) * (mute ? 0.3 : 1);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(hx, hy + ringR);
+        ctx.lineTo(sxp, syp);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 1.2;
+      }
     }
-    ctx.stroke();
 
     // Topic to topic: straight and solid, from the prerequisite up to the topic that needs it
-    const edges = m.requires.filter((e) => L.nodes.has(e.topicId) && L.nodes.has(e.requiresId));
+    const edges = links.edges;
     const line = (keep: (a: string, b: string) => boolean) => {
       ctx.beginPath();
       for (const e of edges) {
@@ -168,11 +223,12 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       ctx.stroke();
     };
     ctx.strokeStyle = col.dim;
-    ctx.globalAlpha = 0.4;
+    ctx.globalAlpha = 0.6;
+    ctx.lineWidth = 1.4;
     line(() => true);
     if (hovered && !hovered.startsWith("h:")) {
       ctx.strokeStyle = col.paper;
-      ctx.globalAlpha = 0.85;
+      ctx.globalAlpha = 0.95;
       line((a, b) => a === hovered || b === hovered);
     }
     ctx.globalAlpha = 1;
@@ -210,7 +266,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       if (!p) continue;
       const x = sx(p.x), y = sy(p.y);
       if (!near(x, y, 40)) continue;
-      const r = n.key === hovered ? rH + 2 : rH;
+      const r = n.key === hovered || litHubs.has(n.id) ? rH + 2 : rH;
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fillStyle = col.cloth;
@@ -361,7 +417,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   // A new layout: known nodes stay, whatever moved glides to its place
   useEffect(() => {
     const was = scene.current.layout.unlinked;
-    scene.current = { layout, model, topicMap, hubMap, colW: column.width };
+    scene.current = { layout, model, topicMap, hubMap, colW: column.width, links };
     savePositions(LEARNER, model.domainId, layout);
     const first = shown.current.size === 0;
     from.current = new Map(shown.current);
@@ -384,7 +440,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       posTween.current = null;
     } else posTween.current = performance.now();
     schedule();
-  }, [layout, model, topicMap, hubMap, column.width, schedule]);
+  }, [layout, model, topicMap, hubMap, column.width, links, schedule]);
 
   // Where each column item stands (for the lines to hubs). Measured after the column is laid out and whenever it scrolls
   const measureColumn = useCallback(() => {
