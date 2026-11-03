@@ -11,7 +11,7 @@ what they read and are implemented in G2 with the dispatcher (WP7.1).
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID
@@ -170,15 +170,29 @@ type Planner = Callable[[StoredEvent, Settings, Any], list[JobPlan]]
 
 
 @dataclass(frozen=True)
+class RuleFacts:
+    """Data beyond the event for the G2 rows (WP7.1; D-A-136), gathered by the dispatcher:
+    `session.ended` — the home topics of the skills of the session's exposures and evidence;
+    `task.closed` — the home topics of the task's skills when a hint was shown on it."""
+
+    topic_ids: tuple[UUID, ...] = ()
+
+
+type FactsPlanner = Callable[[StoredEvent, Any, RuleFacts], list[JobPlan]]
+
+
+@dataclass(frozen=True)
 class RuleRow:
-    """A row of the WP7.1 table. `plan` None — the row needs data beyond the event (`needs`)
-    and is implemented in G2 by the dispatcher."""
+    """A row of the WP7.1 table. `plan` — the row plans from the event alone; `plan_facts` —
+    from the event and the data beyond it the dispatcher gathers (`needs`, `RuleFacts`); neither
+    — the row is still to be implemented in G2."""
 
     event_type: str
     job_kinds: tuple[str, ...]
     condition: str
     plan: Planner | None = None
     needs: str = ""
+    plan_facts: FactsPlanner | None = None
 
 
 def _episode_closed(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
@@ -394,6 +408,52 @@ def _episode_reassigned(event: StoredEvent, _s: Settings, p: Any) -> list[JobPla
     ]
 
 
+def _deadline_cheatsheet(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
+    """Т-§17.7, WP23.5 (D-A-139): every `hub.deadline_set` puts one `artifact.cheatsheet` job
+    on the hub; the job reads the journal and itself checks `cheatsheet_offer_days` and the
+    state of the offer (consent `agent.requested` / `artifact.updated`), per C's D-C-138."""
+    key = f"artifact:{p.hub_id}"
+    return [
+        _plan(
+            event,
+            "artifact.cheatsheet",
+            lock_key=key,
+            coalesce_key=key,
+            graph=True,
+            payload={"hub_id": str(p.hub_id)},
+        )
+    ]
+
+
+def _topic_refresh(
+    event: StoredEvent, topic: UUID, key_tail: str, payload: dict[str, Any]
+) -> JobPlan:
+    """Т-§17.7: `artifact:{topic}` for the lock — one writer of a topic at a time (WP7.1); the
+    job key cuts doubles — one refresh of a topic per session, one traps block per task
+    (D-A-136). The coalesce key adds the branch (`session:…` / `task:…`): with one key for
+    both, `enqueue_job` would overwrite the payload of the waiting job (D-A-138)."""
+    key = f"artifact:{topic}"
+    plan = _plan(
+        event,
+        "artifact.topic_refresh",
+        lock_key=key,
+        coalesce_key=f"{key}:{key_tail}",
+        graph=True,
+        payload={"topic_id": str(topic), **payload},
+    )
+    return replace(plan, job_key=f"artifact.topic_refresh:{topic}:{key_tail}")
+
+
+def _session_topics_refresh(event: StoredEvent, _p: Any, facts: RuleFacts) -> list[JobPlan]:
+    tail = f"session:{event.session_id}"
+    return [_topic_refresh(event, t, tail, {"reason": "session"}) for t in facts.topic_ids]
+
+
+def _hinted_topics_refresh(event: StoredEvent, p: Any, facts: RuleFacts) -> list[JobPlan]:
+    payload = {"reason": "hints", "task_id": str(p.task_id)}
+    return [_topic_refresh(event, t, f"task:{p.task_id}", payload) for t in facts.topic_ids]
+
+
 RULES: tuple[RuleRow, ...] = (
     RuleRow("episode.closed", ("extract.episode",), "has_content", _episode_closed),
     RuleRow("task.closed", ("analyst.run",), "always", _task_closed),
@@ -452,19 +512,21 @@ RULES: tuple[RuleRow, ...] = (
         "session.ended",
         ("artifact.topic_refresh",),
         "the session has exposures or evidence on the topic (Т-§17.7)",
-        needs="exposures/evidence of the session by topic",
+        needs="home topics of the skills of the session's exposures and evidence",
+        plan_facts=_session_topics_refresh,
     ),
     RuleRow(
         "task.closed",
         ("artifact.topic_refresh",),
         "hints were needed (Т-§17.7)",
-        needs="hint.shown of the task",
+        needs="hint.shown of the task; home topics of the task's skills",
+        plan_facts=_hinted_topics_refresh,
     ),
     RuleRow(
         "hub.deadline_set",
         ("artifact.cheatsheet",),
-        "the deadline is closer than cheatsheet_offer_days (Т-§17.7)",
-        needs="hub deadline and the offer state",
+        "always; the job checks cheatsheet_offer_days and the offer state (Т-§17.7, D-C-138)",
+        _deadline_cheatsheet,
     ),
     RuleRow(
         "*",
@@ -480,7 +542,9 @@ RULES: tuple[RuleRow, ...] = (
     ),
 )
 
-ROWS_NEED_FACTS: tuple[RuleRow, ...] = tuple(r for r in RULES if r.plan is None)
+ROWS_NEED_FACTS: tuple[RuleRow, ...] = tuple(
+    r for r in RULES if r.plan is None and r.plan_facts is None
+)
 
 
 def cancelled_requests(event: StoredEvent) -> list[UUID]:
@@ -490,6 +554,18 @@ def cancelled_requests(event: StoredEvent) -> list[UUID]:
         return []
     payload = TurnCommitted.model_validate(event.payload)
     return list(payload.markup.plan_update.cancel_request_ids)
+
+
+def plan_with_facts(event: StoredEvent, settings: Settings, facts: RuleFacts) -> list[JobPlan]:
+    """Jobs of the event-only rows plus the G2 rows that read `facts`."""
+    plans = plan_jobs(event, settings)
+    rows = [r for r in RULES if r.event_type == event.type and r.plan_facts is not None]
+    if rows:
+        payload = registry.validate_payload(event.type, event.payload, event.schema_version)
+        for row in rows:
+            assert row.plan_facts is not None
+            plans.extend(row.plan_facts(event, payload, facts))
+    return plans
 
 
 def plan_jobs(event: StoredEvent, settings: Settings) -> list[JobPlan]:
