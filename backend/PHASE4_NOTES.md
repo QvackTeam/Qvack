@@ -1280,7 +1280,8 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Контекст: §4.8 добавляет в `GET /v1/learner/stream` виды `projection_advanced {topics}`, `jobs_changed {session_id}`, `verdict_revised {answer_seq}`, `artifact_updated {artifact_id}`, `material_parsed {material_id}`. Откуда канал берёт их, не сказано.
 - Решение:
   1. `artifact_updated` и `material_parsed` — из журнала Фазы 4: новые `artifact.updated` / `material.parsed` после открытия канала. Канал подписан на сигнал `learner:{id}`, который `append_events` публикует после коммита (`Т-§2.3`), и по нему дочитывает журнал от своего курсора; без Redis — тем же опросом раз в `learner_stream_poll_ms`. События до открытия канала не повторяются.
-  2. `jobs_changed` (очередь A, `Т-§13.8`), `verdict_revised` (пересмотр вердикта B, `Т-§5.6`) и `topics` у `projection_advanced` (проектор A, `Т-§2.4`) — не события журнала C. Их источник называют A и B; вопрос — в PR этого решения.
+  2. `verdict_revised {answer_seq}` (`Т-§5.6`) — по ответу B в #151 (D-B-167): отдельного события пересмотра нет, его запускает `task.key_disputed {task_id}`. Канал по `task_id` находит ответы `answer.submitted` этой задачи, у которых уже есть `verdict.recorded`, и на каждый шлёт `verdict_revised`. `task.markup_disputed` вердикт не пересматривает — сообщения нет.
+  3. `jobs_changed` (очередь A, `Т-§13.8`) и `topics` у `projection_advanced` (проектор A, `Т-§2.4`) — не события журнала; источник называет A (вопрос — в #151).
 - Почему: §4.8, `Т-§1.6`, `Т-§2.3`.
 - Обратимость: одна таблица видов и одно чтение.
 - Тесты: `tests/test_learner_stream.py` (Redis и опрос).

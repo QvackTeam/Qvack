@@ -7,8 +7,9 @@ without Redis (or after the subscription breaks) `ops.projector_offsets` is poll
 
 ТЗ Ф4 §4.8 adds kinds read from the Phase 4 event log: `artifact_updated {artifact_id}` and
 `material_parsed {material_id}` — new `artifact.updated` / `material.parsed` after the stream
-opened, read on the signal `learner:{id}` that `append_events` publishes after commit, or by
-the same polling without Redis (D-C-130)."""
+opened — and `verdict_revised {answer_seq}` for the judged answers of a task whose key was
+disputed (`task.key_disputed`, D-B-167). They are read on the signal `learner:{id}` that
+`append_events` publishes after commit, or by the same polling without Redis (D-C-130)."""
 
 from __future__ import annotations
 
@@ -47,9 +48,19 @@ CHANGE_EVENTS: dict[str, tuple[str, str]] = {
     "material.parsed": ("material_parsed", "material_id"),
 }
 _LAST_SEQ = "SELECT coalesce(max(seq), 0) AS seq FROM core.events WHERE learner_id = %(learner_id)s"
+# Т-§5.6, D-B-167: a revision of the key — `task.key_disputed {task_id}`; every answer of the
+# task that already has a verdict gets `verdict_revised {answer_seq}`.
+KEY_DISPUTED = "task.key_disputed"
 _CHANGES = (
     "SELECT seq, type, payload FROM core.events WHERE learner_id = %(learner_id)s "
     "AND seq > %(after)s AND type = ANY(%(types)s) ORDER BY seq"
+)
+_JUDGED_ANSWERS = (
+    "SELECT DISTINCT a.seq AS answer_seq FROM core.events a JOIN core.events v "
+    "ON v.learner_id = a.learner_id AND v.type = 'verdict.recorded' "
+    "AND (v.payload ->> 'answer_seq')::bigint = a.seq "
+    "WHERE a.learner_id = %(learner_id)s AND a.type = 'answer.submitted' "
+    "AND a.payload ->> 'task_id' = %(task_id)s ORDER BY a.seq"
 )
 
 router = APIRouter(prefix="/v1", tags=["learner"])
@@ -73,13 +84,23 @@ async def _changes(
 ) -> tuple[list[bytes], int]:
     """§4.8 messages of the change events after `after`, and the new cursor."""
     rows = await resources.db.fetch_all(
-        _CHANGES, {"learner_id": learner_id, "after": after, "types": list(CHANGE_EVENTS)}
+        _CHANGES,
+        {"learner_id": learner_id, "after": after, "types": [*CHANGE_EVENTS, KEY_DISPUTED]},
     )
     messages: list[bytes] = []
     for row in rows:
+        after = max(after, int(row["seq"]))
+        if row["type"] == KEY_DISPUTED:
+            judged = await resources.db.fetch_all(
+                _JUDGED_ANSWERS,
+                {"learner_id": learner_id, "task_id": row["payload"]["task_id"]},
+            )
+            messages.extend(
+                format_sse("verdict_revised", {"answer_seq": int(j["answer_seq"])}) for j in judged
+            )
+            continue
         kind, field = CHANGE_EVENTS[row["type"]]
         messages.append(format_sse(kind, {field: row["payload"][field]}))
-        after = max(after, int(row["seq"]))
     return messages, after
 
 
