@@ -310,3 +310,123 @@ def test_edge_between_merged_skills_is_not_a_loop() -> None:
             "confidence": 0.9}  # fmt: skip
     _, rels = _run([_event(6, "edge.added", edge)], [_SKILL, _ALIAS], [_ALIAS_OF])
     assert ("Skill", SKILL, "REQUIRES", "Skill", SKILL) not in rels
+
+
+# --- learner edits, profile, materials, digest, misconceptions (T-P4, group 2) ---------------
+
+MATERIAL = str(UUID(int=0xC2))
+CHUNK = str(UUID(int=0xC1))
+MISCONCEPTION = str(UUID(int=0x61))
+SESSION = UUID(int=0x5E)
+AT_MS = int(AT.timestamp() * 1000)
+PROFILE = deterministic_id(LEARNER, 0, "profile")
+_MATERIAL = _node("Material", MATERIAL, domainId=DOMAIN, mime="application/pdf",
+                  sessionId=str(SESSION), pagesCount=0)  # fmt: skip
+_MISCONCEPTION = _node("Misconception", MISCONCEPTION, domainId=DOMAIN, statement="old",
+                       triggers=[], targetedInSessionId=str(SESSION))  # fmt: skip
+
+
+def test_known_claimed_marks_the_topic() -> None:
+    nodes, _ = _run([_event(20, "known.claimed", {"topic_id": TOPIC})], [_DOMAIN, _TOPIC])
+    assert nodes[("Topic", TOPIC)] == _TOPIC.props | {"knownClaimedAtMs": AT_MS}
+
+
+def test_preference_set_writes_the_profile() -> None:
+    """Т-§9.5: explicit preferences `pref*` on the learner's only Profile (WP5.3)."""
+    nodes, rels = _run(
+        [
+            _event(21, "preference.set", {"key": "language", "value": "ru"}),
+            _event(22, "preference.set", {"key": "canvas_quiet", "value": True}),
+        ]
+    )
+    assert nodes[("Profile", PROFILE)] == {
+        "learnerId": L,
+        "prefLanguage": "ru",
+        "prefCanvasQuiet": True,
+    }
+    assert ("Learner", L, "HAS_PROFILE", "Profile", PROFILE) in rels
+
+
+def test_material_uploaded_parsed_and_chunk_indexed() -> None:
+    """`chunk_emb` filters by learnerId, domainId, searchable (Т-§3.4.6)."""
+    upload = {"material_id": MATERIAL, "object_key": "k", "mime": "application/pdf",
+              "session_id": str(SESSION)}  # fmt: skip
+    chunk = {"chunk_id": CHUNK, "material_id": MATERIAL, "page": 4, "text": "a/b + c/d",
+             "notation": ["a/b"], "teaches": [SKILL], "uses": [SKILL_OLD]}  # fmt: skip
+    nodes, rels = _run(
+        [
+            _event(23, "material.uploaded", upload, domain_id=UUID(DOMAIN)),
+            _event(
+                24,
+                "material.parsed",
+                {"material_id": MATERIAL, "pages_count": 12},
+                domain_id=UUID(DOMAIN),
+            ),
+            _event(25, "chunk.indexed", chunk, domain_id=UUID(DOMAIN)),
+        ],
+        [_DOMAIN, _SKILL, _ALIAS],
+        [_ALIAS_OF],
+    )
+    assert nodes[("Material", MATERIAL)] == _MATERIAL.props | {"pagesCount": 12}
+    assert nodes[("Chunk", CHUNK)] == {
+        "learnerId": L, "domainId": DOMAIN, "page": 4, "text": "a/b + c/d",
+        "notation": ["a/b"], "searchable": True,
+    }  # fmt: skip
+    assert ("Material", MATERIAL, "HAS_CHUNK", "Chunk", CHUNK) in rels
+    assert ("Chunk", CHUNK, "TEACHES", "Skill", SKILL) in rels
+    assert ("Chunk", CHUNK, "USES", "Skill", SKILL) in rels  # through the alias
+
+
+def test_chunk_without_text_is_not_searchable() -> None:
+    chunk = {"chunk_id": CHUNK, "material_id": MATERIAL, "page": 1, "text": " ",
+             "notation": [], "teaches": [], "uses": []}  # fmt: skip
+    nodes, _ = _run([_event(26, "chunk.indexed", chunk, domain_id=UUID(DOMAIN))], [_MATERIAL])
+    assert nodes[("Chunk", CHUNK)]["searchable"] is False
+
+
+_STRUCTURED = {"frontier": [], "gap_hypotheses": [], "uncertainty": None, "moves": [],
+               "forecast": []}  # fmt: skip
+
+
+def test_digest_written_replaces_the_digest_of_the_domain() -> None:
+    """`Т-§13.5`: the latest digest of a domain; the teacher manner goes to the profile (WP5.3)."""
+    digest = {"domain_id": DOMAIN, "text": "t1", "as_of_seq": 30,
+              "structured": _STRUCTURED,
+              "plan_divergence": False, "manner": "short answers"}  # fmt: skip
+    nodes, rels = _run(
+        [
+            _event(31, "digest.written", digest),
+            _event(41, "digest.written", digest | {"text": "t2", "as_of_seq": 40, "manner": "m2"}),
+        ],
+        [_DOMAIN],
+    )
+    digests = {key: props for key, props in nodes.items() if key[0] == "Digest"}
+    assert list(digests.values()) == [
+        {"learnerId": L, "domainId": DOMAIN, "text": "t2", "asOfSeq": 40}
+    ]
+    ((_, digest_id),) = digests
+    assert ("Domain", DOMAIN, "HAS_DIGEST", "Digest", digest_id) in rels
+    assert nodes[("Profile", PROFILE)]["learnedManner"] == "m2"
+
+
+def test_misconception_described_and_session_ended() -> None:
+    described = {"misconception_id": MISCONCEPTION, "statement": "adds denominators",
+                 "triggers": ["unlike denominators"]}  # fmt: skip
+    nodes, _ = _run(
+        [
+            _event(42, "misconception.described", described),
+            _event(
+                43,
+                "session.ended",
+                {"session_id": str(SESSION), "reason": "learner"},
+                domain_id=UUID(DOMAIN),
+                session_id=SESSION,
+            ),
+        ],
+        [_DOMAIN, _MISCONCEPTION],
+    )
+    assert nodes[("Misconception", MISCONCEPTION)] == _MISCONCEPTION.props | {
+        "statement": "adds denominators",
+        "triggers": ["unlike denominators"],
+        "targetedInSessionId": "",  # law 8: «not targeted» is an explicit value
+    }
