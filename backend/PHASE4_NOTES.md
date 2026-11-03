@@ -1044,6 +1044,17 @@ FAIL `teacher` h05 — дефект сценария (ждёт знак «?», �
 - Дополнение (п.6, 2026-11-03): переизвлечение по `episode.reassigned` и `skill.split` — кандидаты только из `restrict` (навыки названной темы; разделённый навык и его части, как в задаче диспетчера `restrict_skill_ids`), ближайшие по вектору не добавляются (`Т-§2.8`, `Т-§4.11`); у нового наблюдения свой `trigger_seq` в ключе. Тест — в `test_candidate_skills`, отдельного красного прогона нет (владелец разрешил облегчить TDD, 2026-11-03).
 - Требует подтверждения владельцем: нет
 
+
+### D-B-165. Проверка и запись наблюдения извлекателя (WP15 п.4–5)
+- Класс: B
+- WP / место: WP15 п.4, п.5, п.8, WP7.3, `Т-§7.6`, `Т-§7.5`, закон 7; `quack/agents/extract_episode.py` (`source_text`, `episode_check_context`, `record_extraction`) на швах A D-A-124 (#133)
+- Контекст: `check_extracted` A ждёт текст каждого события эпизода, уровни задач по номерам событий и пары «навык + уровень» с вердиктом code. Не названы: какой текст события — «исходный» для цитаты; какие события — «события задачи»; откуда пара навыка и уровня у вердикта (в `verdict.recorded` их нет); что писать, если извлекатель ничего не вернул.
+- Решение: (а) текст события — слова ученика и учителя: реплика, ответ (`latex`, `value`, рассуждение), отклик на элемент, «непонятно», строка канваса, стёртая строка, исправленное чтение, голос, текст хода; у событий без слов (вердикт, подсказка, закрытие) текст пустой — на них можно сослаться, процитировать нельзя. Подписи строк входа («learner wrote on the canvas») цитатой не считаются. (б) Событие задачи — событие с `task_id` (кроме хода, который её предлагает) и вердикт через свой ответ; его потолок — наибольший уровень в `tests` задачи. (в) Вердикт code в эпизоде запрещает `evidence` по каждой паре `tests` его задачи; разметка задач приходит на вход отображением `task_id → [(skill_id, level)]` — его собирает вызывающий (задача `extract.episode`) из `content.tasks`. (г) `observation.extracted` пишется и при пустом выходе (эпизод прочитан; `nothing_to_extract` пишет сам диспетчер, WP7.2); актор и `extractor` — версия промпта роли (`extractor@3`), `causation_seq = trigger_seq`; ключ — `observation_key` A; событие и строка `ops.coverage` — одна транзакция.
+- Почему: §0.4.3 п.2 (WP15 п.4–5, `Т-§7.6`), п.5.
+- Обратимость: один модуль.
+- Тесты: `T-X1` — `tests/agents/test_extract_episode.py::test_extracted_elements_checked_on_the_episode`, `test_record_extraction`, `test_record_extraction_commits_nothing_on_failure`.
+- Не решено \[ПРОВЕРИТЬ\]: потолок уровня — по задаче целиком, не по части (`part`) ответа; задача `extract.episode` (сборка окна из журнала, кандидаты из S4, `task_tests` из `content.tasks`) — следующим шагом WP15.
+- Требует подтверждения владельцем: нет
 ### Поток C
 
 ### D-C-101. Имена рабочих веток
@@ -1315,6 +1326,7 @@ PR #77 (dbmate v2.36.0, sha256).
 
 ## Красные прогоны
 
+- WP15 п.4–5, проверка и запись (D-B-165): тесты и код в одной итерации (TDD облегчён владельцем); на неверной реализации — 8 подмен (без транзакции, `causation_seq`, `observation_seq`, вердикт code, окно вместо эпизода, `min` вместо `max`, текст ответа, текст строки канваса), каждая роняет тест. Зелёный: `tests/agents`, `tests/graph/test_extracted_check.py`, `tests/jobs/test_coverage.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` с `QUACK_TEST_REQUIRE_INFRA=1` — 34 passed.
 - WP15 п.1–3, окно, вход и вызов `extractor@3` (D-B-162): `uv run pytest tests/agents/test_extract_episode.py` — 4 failed (`NotImplementedError`), коммит `ac6bed8`; на неверной реализации — 12 подмен, каждая роняет тест (после усиления тестов, см. «Правки тестов»). Зелёный: 4 passed; с `QUACK_TEST_REQUIRE_INFRA=1` вместе с `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/llm/test_labels.py` — 74 passed.
 - WP21.1, ключ запроса пространства (C, `phase-4-c-wp21-boards`, коммит `3318d8a`, ревью B #116): `pytest tests/canvas/test_boards_wp21.py` — 1 failed (`test_one_request_per_task`: ключ `canvas:{canvas_id}:solution_space`, `actor = system`, без `domain_id`), 4 passed. Зелёный на `f693231`: `tests/canvas`, `tests/e2e/test_isolation_and_idempotency.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py` — 24 passed.
 - WP21.1, доска и канвасы (C, `phase-4-c-wp21-boards`, коммит `0012acb`): в Linux `pytest tests/canvas/test_boards_wp21.py` — ошибка сбора (нет `quack.canvas.board`); на неверной реализации (запрос пространства для любой задачи без него) — 1 failed. Зелёный: `tests/canvas`, `tests/e2e`, `tests/test_app_assembly.py`, `tests/test_contracts.py`, `tests/db/test_sql_static.py`, `tests/materials` — 61 passed. Правка теста красного коммита: домен в тестах создаётся событием `domain.created` (проверка домена — D-C-118 п.4).

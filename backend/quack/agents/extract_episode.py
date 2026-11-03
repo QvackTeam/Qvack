@@ -15,18 +15,22 @@ input of `extractor@3` and the call of the role. D-B-162.
   the skills of the named topic or of the split (Т-§2.8, Т-§4.11); the new observation has its
   own `trigger_seq` in the key.
 
-The check of the elements (п.4) and the write of `observation.extracted` with coverage (п.5)
-stand on the seams of stream A.
+- **Check** (п.4, п.8): `check_extracted` of stream A (D-A-124) on the context built here —
+  the text of each episode event, the levels of its task, the pairs «skill + level» with a
+  code verdict in the episode.
+- **Write** (п.5): `observation.extracted` with key `obs:{episode_seq}:{extractor@3}:{trigger_seq}`
+  and the `ops.coverage` row in one transaction (WP7.3, law 7). D-B-165.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
 from quack.agents.schemas import ExtractorOutputV3
 from quack.config import Settings
+from quack.db import Db
 from quack.events.event_types import (
     AnswerSubmitted,
     CanvasLineCommitted,
@@ -44,8 +48,15 @@ from quack.events.event_types import (
     TypoDeclared,
     VoiceTranscribed,
 )
-from quack.events.log import StoredEvent
+from quack.events.keys import observation_key
+from quack.events.log import NewEvent, StoredEvent, append_events
 from quack.events.values import CheckFailed, Verdict
+from quack.graph.evidence_validation import (
+    CheckedElements,
+    EpisodeCheckContext,
+    EpisodeSource,
+)
+from quack.jobs.coverage import mark_covered
 from quack.llm.gateway import LLMGateway
 from quack.llm.labels import LabelMap
 
@@ -309,7 +320,7 @@ def label_errors(output: ExtractorOutputV3, labels: LabelMap) -> str | None:
 
 def extraction_key(episode_seq: int, prompt: str, trigger_seq: int) -> str:
     """WP15 п.5: `obs:{episode_seq}:{extractor@3}:{trigger_seq}` — the call carries the same key."""
-    return f"obs:{episode_seq}:{prompt}:{trigger_seq}"
+    return observation_key(episode_seq, prompt, trigger_seq)
 
 
 async def call_extractor(
@@ -339,3 +350,128 @@ async def call_extractor(
         check=lambda output: label_errors(output, labels),
     )
     return result.value
+
+
+def source_text(event: StoredEvent) -> str:
+    """The words of an event that a quote may come from (Т-§7.6: a substring of the source
+    event): what the learner wrote, said or typed and the teacher's reply. Events without words
+    (verdicts, hints, closures) give "": they may be cited, but not quoted."""
+    data = event.payload
+    match event.type:
+        case "message.sent":
+            parts = [MessageSent.model_validate(data).text]
+        case "answer.submitted":
+            answer = AnswerSubmitted.model_validate(data)
+            parts = [answer.answer.latex, answer.answer.value, answer.text]
+        case "element.responded":
+            response = ElementResponded.model_validate(data)
+            parts = [str(response.response), response.text]
+        case "item.flagged_unclear":
+            parts = [ItemFlaggedUnclear.model_validate(data).text]
+        case "canvas.line_committed":
+            parts = [CanvasLineCommitted.model_validate(data).text]
+        case "canvas.line_erased":
+            parts = [CanvasLineErased.model_validate(data).text]
+        case "handwriting.corrected":
+            parts = [HandwritingCorrected.model_validate(data).text]
+        case "voice.transcribed":
+            parts = [VoiceTranscribed.model_validate(data).text]
+        case "turn.committed":
+            parts = [TurnCommitted.model_validate(data).text]
+        case _:
+            parts = []
+    return "\n".join(str(part) for part in parts if part)
+
+
+def _event_task(event: StoredEvent, answers: Mapping[int, UUID]) -> UUID | None:
+    if event.type == "verdict.recorded":
+        return answers.get(Verdict.model_validate(event.payload).answer_seq)
+    if event.type != "turn.committed" and "task_id" in event.payload:
+        return UUID(str(event.payload["task_id"]))
+    return None
+
+
+def episode_check_context(
+    window: EpisodeWindow,
+    labels: LabelMap,
+    task_tests: Mapping[UUID, Sequence[tuple[UUID, int]]],
+) -> EpisodeCheckContext:
+    """What `check_extracted` checks the elements against (WP15 п.4, п.8; D-B-165).
+
+    `task_tests` — task id → its `tests` pairs (skill id, level) from the stored markup. An
+    event of a task caps the level at the highest level of the task; a code verdict in the
+    episode bars `evidence` for each pair of its task. Only the episode is citable (`Т-§7.5`)."""
+    answers = {
+        e.seq: AnswerSubmitted.model_validate(e.payload).task_id
+        for e in [*window.before, *window.episode]
+        if e.type == "answer.submitted"
+    }
+    episode: dict[int, EpisodeSource] = {}
+    task_levels: dict[int, int] = {}
+    code_verdicts: set[tuple[UUID, int]] = set()
+    for event in window.episode:
+        at_ms = int(event.occurred_at.timestamp() * 1000)
+        episode[event.seq] = EpisodeSource(event.seq, source_text(event), at_ms)
+        task_id = _event_task(event, answers)
+        tests = task_tests.get(task_id, ()) if task_id is not None else ()
+        if tests:
+            task_levels[event.seq] = max(level for _, level in tests)
+        if (
+            event.type == "verdict.recorded"
+            and Verdict.model_validate(event.payload).verification == "code"
+        ):
+            code_verdicts.update(tests)
+    return EpisodeCheckContext(
+        skill_labels=labels.labels("skill"),
+        misconception_labels=labels.labels("misconception"),
+        episode=episode,
+        task_levels=task_levels,
+        code_verdicts=frozenset(code_verdicts),
+    )
+
+
+async def record_extraction(
+    db: Db,
+    learner_id: UUID,
+    *,
+    prompt: str,
+    episode_seq: int,
+    trigger_seq: int,
+    checked: CheckedElements,
+    session_id: UUID | None = None,
+    domain_id: UUID | None = None,
+) -> StoredEvent:
+    """WP15 п.5: `observation.extracted` and its coverage row in one transaction (WP7.3,
+    law 7); an empty output is still an observation — the episode was read (D-B-165). A retry
+    returns the stored event and points the row at it again (law 5)."""
+    async with db.transaction():
+        (stored,) = await append_events(
+            db,
+            learner_id,
+            [
+                NewEvent(
+                    type="observation.extracted",
+                    payload={
+                        "episode_seq": episode_seq,
+                        "extractor": prompt,
+                        "trigger_seq": trigger_seq,
+                        "elements": [e.model_dump(mode="json") for e in checked.elements],
+                        "rejected": [r.model_dump(mode="json") for r in checked.rejected],
+                    },
+                    actor=prompt,
+                    idempotency_key=observation_key(episode_seq, prompt, trigger_seq),
+                    session_id=session_id,
+                    domain_id=domain_id,
+                    causation_seq=trigger_seq,
+                )
+            ],
+        )
+        await mark_covered(
+            db,
+            learner_id,
+            episode_seq=episode_seq,
+            extractor=prompt,
+            status="extracted",
+            observation_seq=stored.seq,
+        )
+    return stored

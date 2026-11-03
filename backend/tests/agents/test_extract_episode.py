@@ -1,5 +1,6 @@
-"""The extractor by episodes, WP15 п.1–3 (ТЗ Ф4; Т-§7.5, Т-§7.6; `T-X1` window part): the
-window, the input of `extractor@3` with labels, the call of the role (D-B-162)."""
+"""The extractor by episodes, WP15 (ТЗ Ф4; Т-§7.5, Т-§7.6; `T-X1`): the window, the input of
+`extractor@3` with labels, the call of the role (D-B-162); the check context and the write of
+`observation.extracted` with coverage (D-B-165)."""
 
 from __future__ import annotations
 
@@ -8,8 +9,10 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID, uuid4
 
+import pytest
 from pydantic import BaseModel
 
+from quack.agents import extract_episode
 from quack.agents.extract_episode import (
     GAP_TYPE_TABLE,
     NONE_LINE,
@@ -17,14 +20,17 @@ from quack.agents.extract_episode import (
     KnownMisconception,
     call_extractor,
     candidate_skill_ids,
+    episode_check_context,
     extraction_key,
     extraction_window,
     extractor_variables,
     label_errors,
+    record_extraction,
     window_labels,
 )
 from quack.agents.schemas import ExtractedElement, ExtractorOutputV3
 from quack.config import Settings
+from quack.db import Db
 from quack.events.event_types import (
     AnswerSubmitted,
     CanvasLineCommitted,
@@ -47,8 +53,10 @@ from quack.events.records import (
     TurnTaskRecord,
 )
 from quack.events.values import AnswerSpec, LearnerAnswer, MathValue, Verdict
+from quack.graph.evidence_validation import CheckedElements, check_extracted
 from quack.llm.gateway import LLMGateway, LLMResult
 from quack.prompts.registry import PromptRegistry
+from tests.db.fixtures import create_learner
 
 SETTINGS = Settings()
 LEARNER = uuid4()
@@ -396,3 +404,136 @@ async def test_call_extractor() -> None:
     )
     assert check(wrong) == "unknown labels: M4, S7; use only the given labels"
     assert check(ExtractorOutputV3(elements=[_element(skill=None, skill_unclear=True)])) is None
+
+
+def _cited(events: list[int], quote: str = "", **kw: Any) -> ExtractedElement:
+    base: dict[str, Any] = {
+        "kind": "evidence",
+        "skill": "S1",
+        "new_skill": None,
+        "skill_unclear": False,
+        "level": 2,
+        "outcome": "correct",
+        "help": "none",
+        "hint_step": None,
+        "gap_type": "none",
+        "misconception": None,
+        "new_misconception": None,
+        "root_cause": None,
+        "quote": quote,
+        "events": events,
+    }
+    base.update(kw)
+    return ExtractedElement.model_validate(base)
+
+
+def test_extracted_elements_checked_on_the_episode() -> None:
+    """`T-X1` (check): elements citing events outside the episode are rejected; a quote must be
+    the words of its event; the level is capped by the task markup; a code verdict of the
+    episode bars `evidence` on its pair «skill + level» (WP15 п.4, п.8)."""
+    log, start = _episode()
+    window = extraction_window(log.events, start, len(log.events), SETTINGS)
+    candidates = [CandidateSkill(SKILL, "D'Alembert test"), CandidateSkill(OTHER_SKILL, "Root")]
+    labels = window_labels(window, candidates, [], SETTINGS)
+    ctx = episode_check_context(window, labels, {TASK: [(SKILL, 3), (OTHER_SKILL, 2)]})
+    answer, verdict, canvas, voice = start + 2, start + 3, start + 4, start + 5
+    assert ctx.episode[canvas].text == "sqrt[n]{n!} -> ?"
+    assert ctx.episode[answer].text == "5\nI used the root test"
+    assert ctx.episode[verdict].text == ""  # citable, not quotable
+    assert ctx.task_levels == {answer: 3, verdict: 3}  # the turn offering it is no task event
+    assert ctx.code_verdicts == {(SKILL, 3), (OTHER_SKILL, 2)}
+
+    checked = check_extracted(
+        [
+            _cited([1], "question 1"),  # a context turn before the episode
+            _cited([canvas], "n!", outcome="incorrect", gap_type="when_to_apply"),
+            _cited([canvas], "learner wrote on the canvas", outcome="incorrect", gap_type="slip"),
+            _cited([answer], "root test", level=5, outcome="incorrect", gap_type="confusion"),
+            _cited([answer, verdict], "", level=3),  # the code verdict already judged it
+            _cited([voice], "hmm the root", skill="S2", level=1),
+        ],
+        ctx,
+    )
+    assert [(r.index, r.reason) for r in checked.rejected] == [
+        (0, "source_outside_episode"),
+        (2, "quote_not_in_source"),
+        (3, "level_above_task"),
+        (4, "code_verdict_exists"),
+    ]
+    assert [(e.skill_id, e.events) for e in checked.elements] == [
+        (SKILL, [canvas]),
+        (OTHER_SKILL, [voice]),
+    ]
+
+
+async def test_record_extraction(pg_db: Db) -> None:
+    """WP15 п.5, WP7.3: `observation.extracted` with key `obs:{episode_seq}:{extractor@3}:
+    {trigger_seq}` and its coverage row in one transaction; a retry is the same event and row;
+    a re-extraction (new trigger) is a new event and the row points at it."""
+    learner_id = await create_learner(pg_db)
+    log, start = _episode()
+    window = extraction_window(log.events, start, len(log.events), SETTINGS)
+    labels = window_labels(window, [CandidateSkill(SKILL, "D'Alembert test")], [], SETTINGS)
+    ctx = episode_check_context(window, labels, {})
+    canvas = start + 4
+    checked = check_extracted([_cited([canvas], "n!"), _cited([1], "question 1")], ctx)
+
+    async def write(trigger_seq: int, elements: CheckedElements = checked) -> StoredEvent:
+        return await record_extraction(
+            pg_db,
+            learner_id,
+            prompt="extractor@3",
+            episode_seq=40,
+            trigger_seq=trigger_seq,
+            checked=elements,
+        )
+
+    first = await write(41)
+    again = await write(41)
+    assert again.seq == first.seq
+    assert first.idempotency_key == "obs:40:extractor@3:41"
+    assert first.actor == "extractor@3"
+    assert first.causation_seq == 41
+    assert first.payload["episode_seq"] == 40
+    assert first.payload["trigger_seq"] == 41
+    assert [e["events"] for e in first.payload["elements"]] == [[canvas]]
+    assert [r["reason"] for r in first.payload["rejected"]] == ["source_outside_episode"]
+
+    async def coverage() -> list[tuple[str, int | None]]:
+        rows = await pg_db.fetch_all(
+            "SELECT status, observation_seq FROM ops.coverage WHERE learner_id = %(l)s",
+            {"l": learner_id},
+        )
+        return [(r["status"], r["observation_seq"]) for r in rows]
+
+    assert await coverage() == [("extracted", first.seq)]
+    # an empty output is still an observation: the episode was read
+    redo = await write(55, CheckedElements([], []))
+    assert redo.seq != first.seq and redo.payload["elements"] == []
+    assert await coverage() == [("extracted", redo.seq)]
+
+
+async def test_record_extraction_commits_nothing_on_failure(
+    pg_db: Db, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Law 7: the coverage row fails → the observation is not written either."""
+    learner_id = await create_learner(pg_db)
+
+    async def broken(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("coverage write failed")
+
+    monkeypatch.setattr(extract_episode, "mark_covered", broken)
+    with pytest.raises(RuntimeError):
+        await record_extraction(
+            pg_db,
+            learner_id,
+            prompt="extractor@3",
+            episode_seq=40,
+            trigger_seq=41,
+            checked=CheckedElements([], []),
+        )
+    rows = await pg_db.fetch_all(
+        "SELECT seq FROM core.events WHERE learner_id = %(l)s AND type = 'observation.extracted'",
+        {"l": learner_id},
+    )
+    assert rows == []
