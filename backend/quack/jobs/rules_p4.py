@@ -411,14 +411,16 @@ def _episode_reassigned(event: StoredEvent, _s: Settings, p: Any) -> list[JobPla
 def _topic_refresh(
     event: StoredEvent, topic: UUID, key_tail: str, payload: dict[str, Any]
 ) -> JobPlan:
-    """Т-§17.7: `artifact:{topic}` for lock and coalescing (WP7.1); the job key cuts doubles —
-    one refresh of a topic per session, one traps block per task (D-A-136)."""
+    """Т-§17.7: `artifact:{topic}` for the lock — one writer of a topic at a time (WP7.1); the
+    job key cuts doubles — one refresh of a topic per session, one traps block per task
+    (D-A-136). The coalesce key adds the branch (`session:…` / `task:…`): with one key for
+    both, `enqueue_job` would overwrite the payload of the waiting job (D-A-138)."""
     key = f"artifact:{topic}"
     plan = _plan(
         event,
         "artifact.topic_refresh",
         lock_key=key,
-        coalesce_key=key,
+        coalesce_key=f"{key}:{key_tail}",
         graph=True,
         payload={"topic_id": str(topic), **payload},
     )

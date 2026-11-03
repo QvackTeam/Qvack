@@ -279,7 +279,8 @@ def test_artifact_topic_refresh_after_the_session_and_after_hints() -> None:
     refresh = [p for p in plans if p.kind == "artifact.topic_refresh"]
     assert [p.payload["topic_id"] for p in refresh] == [str(first), str(second)]
     plan = refresh[0]
-    assert plan.lock_key == plan.coalesce_key == f"artifact:{first}"
+    assert plan.lock_key == f"artifact:{first}"
+    assert plan.coalesce_key == f"artifact:{first}:session:{ended.session_id}"
     assert plan.job_key == f"artifact.topic_refresh:{first}:session:{ended.session_id}"
     assert (plan.priority_class, plan.required_seq) == ("P2", 40)
     assert plan.payload == {"trigger_seq": 40, "topic_id": str(first), "reason": "session"}
@@ -296,6 +297,10 @@ def test_artifact_topic_refresh_after_the_session_and_after_hints() -> None:
     ]
     assert trap.job_key == f"artifact.topic_refresh:{first}:task:{task}"
     assert trap.lock_key == f"artifact:{first}"
+    # The branches must not coalesce into one queued job: `enqueue_job` would overwrite the
+    # payload of the waiting one (#154, C): the session and the hints branches differ by key.
+    assert trap.coalesce_key == f"artifact:{first}:task:{task}"
+    assert trap.coalesce_key != plan.coalesce_key
     assert trap.payload == {
         "trigger_seq": 41,
         "topic_id": str(first),
