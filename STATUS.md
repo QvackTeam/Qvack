@@ -131,7 +131,7 @@
 | WP15 | Извлекатель по эпизодам | влит | `extract.episode`, `extractor@3`, проверка и запись (#132, #133, #155, #180) | потолок уровня по части ответа (проверить на стенде) | D-B-165 | T-X1, T-X2, T-X3, T-X4 |
 | WP16.1 | Аналитик границы | влит | `analyst.run`, `analyst.deep` (#166, #180) | — | — | T-AG1 |
 | WP16.2 | Описание заблуждения | влит | `misconception.describe` (#165, #180) | — | — | T-AG2 |
-| WP16.3 | Сверка и гигиена графа | частично | `graph.hygiene` (#180) | режим сверки `builder` после разбора материала (T-AG3) — ждёт WP20.2 (C) | WP20.2 | T-AG3, T-AG4 |
+| WP16.3 | Сверка и гигиена графа | частично | `graph.hygiene` (#180); сверка `agents/reconcile.py::reconcile_domain` (D-B-205, D-B-206) | вызов из `material.parse` (WP20.2, C) | WP20.2 | T-AG3, T-AG4 |
 | WP16.4 | Определение домена | влит | `POST /v1/domains/classify` (#157) | — | — | T-AG5 |
 | WP16.5 | Строитель визуализаций | частично | `agent.viz`: генерация, рендер, одна попытка исправления (#168) | `GET /v1/viz/{id}` с CSP (объявление в `quack/artifacts/router.py`); `deploy/static/viz/` с закреплёнными D3/Plotly/KaTeX | — | T-AG6 |
 | WP16.6 | Поручения и доставка | влит | Обработчики `task.solution_space`, `agent.solution_space`, `agent.task_generation`, `check.known_claim`, `agent.illustration`, регистрация #173 (#208, D-B-191…193, D-B-196) | `agent.artifact` — C | — | T-AG7 |
@@ -200,7 +200,7 @@
 1. **WP16.5** — `GET /v1/viz/{id}` с CSP после ответа владельца (issue #201); `deploy/static/viz/` — C.
 2. **WP10.6, хвост** — подключение трассера в сборке процессов (C, #209), удаление трасс из WP25 (A).
 3. **WP10.7** — живой прогон `scripts/meta_smoke.py` на все роли, стриминг с инструментом, нетекстовые роли (D-B-187 [ПРОВЕРИТЬ]); DoD п.6a.
-4. **WP16.3** — режим сверки `builder` после `material.parse` (после WP20.2 потока C).
+4. **WP16.3, хвост** — вызов `reconcile_domain` из `material.parse` (C, WP20.2).
 5. **WP10.4, хвост** — `db=` в `LLMGateway` при WP1.3 (A/C), снятие `ops.llm_ledger` и outbox на SQLAlchemy.
 6. **WP16.7, хвост** — эталонные наборы LangSmith, качество извлечения `Т-§7.11`; регистрация команд — C.
 7. **WP8.3 со стороны B** — `db=ctx.db` в читатель при первом отчёте «до и после» (issue #190); Q-A-4.
