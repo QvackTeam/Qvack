@@ -188,8 +188,9 @@ class ToolContext:
     memory read (`quack.graph.read`, seam S4), the names of skills, the canvas lines of the
     session by their numbers `L1…` (the numbers of slot 5, D-B-163) and its voice segments, the
     domain of the session (a mistake elsewhere is "another subject"), the
-    material search (seam S12; `None` while Modal is down). Evidence and chunks the tools show
-    get labels `E…`, `P…` for this turn: a later tool call may name them."""
+    material search (seam S12; `None` while Modal is down; already bound to `learner_id` of this
+    turn by the assembly, isolation §4.3 rests on that binding). Evidence and chunks the tools
+    show get labels `E…`, `P…` for this turn: a later tool call may name them."""
 
     learner_id: UUID
     labels: LabelMap
