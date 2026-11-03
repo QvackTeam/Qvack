@@ -37,6 +37,9 @@ JOB_KINDS: tuple[str, ...] = (
     "misconception.describe",
     "analyst.run",
     "analyst.deep",
+    "check.symbolic",
+    "task.check",
+    "check.model",
 )
 
 # WP5.3/T-Q10: the roles whose models a kind calls; a kind waits while any of them is pressured.
@@ -55,6 +58,9 @@ KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
     "misconception.describe": ("misconception_describer",),
     "analyst.run": ("analyst",),
     "analyst.deep": ("analyst_deep",),
+    "check.symbolic": (),
+    "task.check": ("task_checker",),
+    "check.model": ("verdict_proof", "verdict_free"),
 }
 
 
