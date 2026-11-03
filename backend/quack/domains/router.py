@@ -43,6 +43,8 @@ from quack.domains.schemas import (
     UpdateTopicStatusResponse,
 )
 from quack.llm.gateway import LLMGateway
+from quack.practice import domain_classify
+from quack.practice.domain_classify import ClassifyDomainRequest, DomainSuggestion
 
 # Every route authenticates at router level, so a request without a session gets 401 before
 # body validation (ТЗ Фазы 3 WP1.2, T-A2), and its mutating requests count in the `actions`
@@ -95,6 +97,20 @@ async def create_domain_endpoint(
 ) -> CreateDomainResponse:
     resources = get_resources(request)
     return await service.create_domain(resources, learner_id, req)
+
+
+# ТЗ Ф4 WP16.4, §7.3 п.3: the body is stream B's (`quack.practice.domain_classify`, D-B-173).
+@_protected.post("/domains/classify", response_model=DomainSuggestion, status_code=200)
+async def classify_domain_endpoint(
+    req: ClassifyDomainRequest,
+    request: Request,
+    learner_id: CurrentLearnerId,
+    llm: CurrentLLMGateway,
+) -> DomainSuggestion:
+    resources = get_resources(request)
+    return await domain_classify.classify_domain(
+        resources.db, llm, resources.settings, learner_id=learner_id, request=req
+    )
 
 
 @_protected.get("/domains", response_model=DomainListResponse, status_code=200)

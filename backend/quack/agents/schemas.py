@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from quack.practice.markup import NewSkill
+from quack.practice.role_outputs import DomainClassifierOutput as DomainClassifierOutput
 from quack.practice.role_outputs import GapType
 
 type Level = Annotated[int, Field(ge=1, le=6)]
@@ -170,14 +171,8 @@ class TodayPlannerOutput(_Strict):
 # --- domain_classifier@1 (Т-§4.9, WP16.4) ---
 
 
-class DomainClassifierOutput(_Strict):
-    """`existing` with a domain label, `new` with a name, or `unclear`; `confidence` is
-    compared with `domain_autolink_confidence` (Т-§4.9 ориентир)."""
-
-    decision: Literal["existing", "new", "unclear"]
-    domain: str | None
-    new_name: str | None
-    confidence: float = Field(ge=0.0, le=1.0)
+# The output lives in `quack.practice.role_outputs`: the API body that calls the role is in
+# `practice`, which cannot import `agents` (§4.1, D-B-173).
 
 
 # --- viz_builder@1 (Т-§13.6, WP16.5) ---
