@@ -600,11 +600,13 @@ def _subjects(
     return topics, specs
 
 
-_LEARNER_ZONE = "SELECT settings->>'timezone' AS tz FROM core.learners WHERE learner_id = %(l)s"
+_LEARNER_ZONE = (
+    "SELECT settings->>'timezone' AS tz FROM core.learners WHERE learner_id = %(learner_id)s"
+)
 
 
 async def _learner_zone(db: Db, learner_id: UUID) -> ZoneInfo | None:
-    row = await db.fetch_one(_LEARNER_ZONE, {"l": learner_id})
+    row = await db.fetch_one(_LEARNER_ZONE, {"learner_id": learner_id})
     try:
         return ZoneInfo(row["tz"]) if row and row["tz"] else None
     except (ZoneInfoNotFoundError, ValueError):
