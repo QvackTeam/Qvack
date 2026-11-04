@@ -674,6 +674,8 @@ class Settings(BaseSettings):
     # WP23 (Т-§17)
     cards_per_topic_max: int = 15
     cheatsheet_fit_rounds: int = 2
+    # Т-§17.8 (WP23.6): longest instruction of a learner skill, in characters (D-C-216)
+    learner_skill_max_chars: int = 2000
     # Т-§17.4 (WP23.3): formulas of one block that code sends to compute; the rest stay unchecked
     artifact_formulas_per_block_max: int = 5
     # Т-§17.4 (WP23.3): longest side of a formula sent to compute (the `MathInput` limit)
