@@ -31,7 +31,7 @@
 - Почему: ТЗ Ф4 WP8.2, §6.3 (`topic.split`, `skill.split`), D-A-131, D-A-196; патч B из #245.
 - Обратимость: полная до первых событий в проде (значения перечней можно убрать).
 - Тесты: `tests/jobs/test_rules_p4.py::test_topic_split_request_is_a_graph_job_of_the_domain`, `tests/graph/test_projection_rules3.py::test_split_of_a_one_skill_topic_in_one_batch_needs_the_topics_first`; счётчик видов в `test_every_kind_of_the_spec…` 24 → 25 (+5 периодических).
-- Требует подтверждения владельцем: да (класс C, действует до ответа)
+- Требует подтверждения владельцем: да — **подтверждено владельцем 2026-11-04** (чат сессии; отмечено в #245)
 
 ### D-A-225. WP1.3 шаг 5, часть 1: что из кода Фазы 3 остаётся до части 2
 - Класс: A
