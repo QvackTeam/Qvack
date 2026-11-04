@@ -47,23 +47,6 @@
   - `tests/test_app_assembly.py`: `test_search_limits_come_from_settings` переведён с `/v1/artifacts/search` на `/v1/search` (лимиты те же), проба `T-A3` `/v1/artifacts` → `/v1/me`.
 - Требует подтверждения владельцем: нет
 
-### D-C-160. WP1.3 шаг 2 / WP9: стенд на dbmate - `ops migrate` = `dbmate up`, `PHASE4_PROCESSES=true`, чистый старт
-- Класс: C (инфраструктура зоны C; схема и миграции A не менялись)
-- WP / место: WP1.3 шаг 2, WP9.1, WP9.2, WP9.4, issue #223 (план #215); `quack/ops/commands.py::migrate`, `quack/cli.py`, `backend/Dockerfile`, `compose.yaml`, `deploy/deploy.sh`, `deploy/README.md`
-- Контекст: ТЗ WP1.1 говорит «`ops migrate` запускает `dbmate up` с ролью `quack_migrator`»; D-A-103 держит две схемы до WP1.3; в образе `quack-backend` бинарника dbmate не было (STATUS называл WP9.2 влитым с `dbmate`); как быть со стендом, где уже лежит схема Alembic, и с ролью миграций, документы не говорят.
-- Решение:
-  1. `ops migrate` запускает бинарник `dbmate --migrations-dir <backend>/db/migrations --no-dump-schema up`; DSN идёт в `DATABASE_URL` (не в аргументы), к нему добавляется `sslmode=disable`, если режима нет (lib/pq по умолчанию требует TLS, сеть `backend` без TLS). Каталог миграций - `/app/db/migrations` в образе.
-  2. Образ: бинарник dbmate `v2.36.0` с проверкой sha256 (те же версия и сумма, что в `ci.yml` и `ct.sh`; тест сверяет три места), `COPY db ./db`; `alembic.ini` и `migrations/` из образа убраны.
-  3. compose: `PHASE4_PROCESSES: "true"` у `api`, `projector`, `workers` (общий `x-db-env`); сервис `migrate` идёт первым, остальные ждут `service_completed_successfully` (так и было).
-  4. `deploy.sh`: список миграций образа читается из `/app/db/migrations`; у образа Фазы 3 каталога нет, список пуст, любой файл нового образа считается новым - миграция запустится. Порядок шагов не менялся: роли, дамп, `migrate`, затем `projector`, `compute`+`workers`, `api`.
-  5. Чистый старт (ТЗ Ф4 §2.3 строка 1): если в базе есть `public.alembic_version`, `ops migrate` завершается кодом 1 с пояснением и ничего не меняет, выкатка останавливается до запуска сервисов, старая версия остаётся. Базу стенда с данными Фаз 1-3 пересоздают вручную (том `postgres-data`).
-  6. Роли `quack_app`/`quack_migrator` не переводятся: DSN сервисов остаются под `quack` (deploy/README, «что пока не готово»). Перевод - когда A снимет SQLAlchemy (шаг 5).
-  7. Не закрыто этим шагом: `ops status` (проверка выкатки, `Д-§6.1` шаг 8), `can-rollback`, `restore-check`, `seed-learners`, `alerts` читают таблицы Фазы 3 (`core.learner_seq`, `ops.dlq`, `ops.llm_ledger`); на схеме Фазы 4 `ops status` вернёт код 2. Их перенос на `Db` - шаг 3 C (`quack/ops/*`, #215).
-- Почему: ТЗ Ф4 WP1.1, WP9, §2.3; D-A-103, D-A-200; Д-§5.1, Д-§6.1, Д-§7.
-- Обратимость: код и compose - откатом коммита; пересозданная база стенда - нет.
-- Тесты: `tests/test_stand_dbmate.py` (compose, образ, порядок в `deploy.sh`, `ops migrate`), `test_compose_contract`, `test_deploy_env`, `test_ci_layers`.
-- Требует подтверждения владельцем: нет (пересоздание базы стенда - действие владельца стенда)
-
 ### D-C-159. WP21.5: пометки и вмешательства — шлюз вмешательств, ключ `canvas_quiet`, сообщения `mark` и `hint`
 - Класс: C (поведение быстрого слоя канваса, Т-§15.5; формат событий и схем БД не меняется); `stuck_erase_times` — число из документа («стёрто трижды») в `Settings`
 - WP / место: WP21.5, T-CV5; `quack/canvas/interventions.py` (новый), `quack/canvas/socket.py`, `quack/canvas/boards.py` (`put_mark`, `remove_mark`, `put_hint`), `quack/config.py`
@@ -199,6 +182,22 @@
 - Тесты: `T-AR4` `test_cheatsheet_one_page`, `test_cheatsheet_stops_after_fit_rounds`; `tests/artifacts/test_cheatsheet_offer.py`, `test_cheatsheet_wp23_5.py`, `test_cheatsheet_routes_wp23_5.py`. Три теста с `xfail(strict)` ждут D-A-196 (запись согласия).
 - Требует подтверждения владельцем: да (класс C)
 
+### D-C-160. WP1.3 шаг 2 / WP9: стенд на dbmate - `ops migrate` = `dbmate up`, `PHASE4_PROCESSES=true`, чистый старт
+- Класс: C (инфраструктура зоны C; схема и миграции A не менялись)
+- WP / место: WP1.3 шаг 2, WP9.1, WP9.2, WP9.4, issue #223 (план #215); `quack/ops/commands.py::migrate`, `quack/cli.py`, `backend/Dockerfile`, `compose.yaml`, `deploy/deploy.sh`, `deploy/README.md`
+- Контекст: ТЗ WP1.1 говорит «`ops migrate` запускает `dbmate up` с ролью `quack_migrator`»; D-A-103 держит две схемы до WP1.3; в образе `quack-backend` бинарника dbmate не было (STATUS называл WP9.2 влитым с `dbmate`); как быть со стендом, где уже лежит схема Alembic, и с ролью миграций, документы не говорят.
+- Решение:
+  1. `ops migrate` запускает бинарник `dbmate --migrations-dir <backend>/db/migrations --no-dump-schema up`; DSN идёт в `DATABASE_URL` (не в аргументы), к нему добавляется `sslmode=disable`, если режима нет (lib/pq по умолчанию требует TLS, сеть `backend` без TLS). Каталог миграций - `/app/db/migrations` в образе.
+  2. Образ: бинарник dbmate `v2.36.0` с проверкой sha256 (те же версия и сумма, что в `ci.yml` и `ct.sh`; тест сверяет три места), `COPY db ./db`; `alembic.ini` и `migrations/` из образа убраны.
+  3. compose: `PHASE4_PROCESSES: "true"` у `api`, `projector`, `workers` (общий `x-db-env`); сервис `migrate` идёт первым, остальные ждут `service_completed_successfully` (так и было).
+  4. `deploy.sh`: список миграций образа читается из `/app/db/migrations`; у образа Фазы 3 каталога нет, список пуст, любой файл нового образа считается новым - миграция запустится. Порядок шагов не менялся: роли, дамп, `migrate`, затем `projector`, `compute`+`workers`, `api`.
+  5. Чистый старт (ТЗ Ф4 §2.3 строка 1): если в базе есть `public.alembic_version`, `ops migrate` завершается кодом 1 с пояснением и ничего не меняет, выкатка останавливается до запуска сервисов, старая версия остаётся. Базу стенда с данными Фаз 1-3 пересоздают вручную (том `postgres-data`).
+  6. Роли `quack_app`/`quack_migrator` не переводятся: DSN сервисов остаются под `quack` (deploy/README, «что пока не готово»). Перевод - когда A снимет SQLAlchemy (шаг 5).
+  7. Не закрыто этим шагом: `ops status` (проверка выкатки, `Д-§6.1` шаг 8), `can-rollback`, `restore-check`, `seed-learners`, `alerts` читают таблицы Фазы 3 (`core.learner_seq`, `ops.dlq`, `ops.llm_ledger`); на схеме Фазы 4 `ops status` вернёт код 2. Их перенос на `Db` - шаг 3 C (`quack/ops/*`, #215).
+- Почему: ТЗ Ф4 WP1.1, WP9, §2.3; D-A-103, D-A-200; Д-§5.1, Д-§6.1, Д-§7.
+- Обратимость: код и compose - откатом коммита; пересозданная база стенда - нет.
+- Тесты: `tests/test_stand_dbmate.py` (compose, образ, порядок в `deploy.sh`, `ops migrate`), `test_compose_contract`, `test_deploy_env`, `test_ci_layers`.
+- Требует подтверждения владельцем: нет (пересоздание базы стенда - действие владельца стенда)
 ### D-C-167. `ops extraction-eval`: команда оценки извлечения (S15, WP16.7)
 - Класс: C (регистрация функции B, ТЗ §7.3 п.5; формат отчёта и метрики — D-B-209)
 - WP / место: WP16.7, S15; `quack/cli.py` (`_extraction_eval`)
