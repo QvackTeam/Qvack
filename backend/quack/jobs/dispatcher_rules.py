@@ -16,7 +16,7 @@ from uuid import UUID
 
 from quack.events.models import StoredEvent
 from quack.jobs import kinds
-from quack.jobs.queue import JobSpec
+from quack.jobs.types import JobSpec
 
 
 @dataclass(frozen=True)

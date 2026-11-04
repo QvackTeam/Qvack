@@ -26,8 +26,8 @@ from quack.events.append import append_events
 from quack.events.models import NewEvent
 from quack.graph.phase_a import normalize_name
 from quack.graph.slice import SliceDeps, read_consistent_slice
-from quack.jobs.queue import ClaimedJob, JobDeferred
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob, JobDeferred
 from quack.llm.gateway import LLMGateway
 from quack.logging import get_logger
 
