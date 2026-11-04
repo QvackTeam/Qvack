@@ -95,7 +95,7 @@
 | WP10.1 | Таблица ролей | влит | 26 ролей в `Settings.llm_roles` (#84, D-B-101, D-B-134); `model_for_role` по строке роли (D-B-188); адаптеры `segment`, `transcribe`, `illustrate` в шлюзе (#208, D-B-187) | проверка форм запросов `sam-3.1`, голоса, `muse-image-1.0` на стенде (DoD п.6a) | — | T-AI1 |
 | WP10.2 | Стриминг структурированного вывода | влит | `ResponsesClient.stream_structured`, разбор потока (#143, S13) | — | — | T-AI2 |
 | WP10.3 | Цикл с инструментами | влит | `run_tool_loop`, встраивание в шлюз (#143, D-B-152) | — | — | T-AI3, T-AI4, T-AI5, T-AI6 |
-| WP10.4 | Учёт и бюджеты в долларах | частично | `quack/llm/usage.py`: строка `ops.llm_usage` со стоимостью на попытку, бюджеты в долларах, отказ старта в prod без цен (#208, D-B-197…199) | шлюз пишет `llm_usage` только с `db=` — передать при WP1.3 (A/C); цены `LLM_PRICES` — владелец | WP1.3 | T-AI7 (G4) |
+| WP10.4 | Учёт и бюджеты в долларах | частично | `quack/llm/usage.py`: строка `ops.llm_usage` со стоимостью на попытку, бюджеты в долларах, отказ старта в prod без цен (#208, D-B-197…199); пул денег и режимы `normal`/`tight`/`judges_only`, `GET /v1/llm/access` (#234, D-B-211) | шлюз пишет `llm_usage` только с `db=` — передать при WP1.3 (A/C); `LLM_POOL_BUDGET_USD` через compose — C (#235); цены `LLM_PRICES` и размер пула — владелец | WP1.3 | T-AI7 (G4) |
 | WP10.5 | Промпты | влит | 16 ролей B, слой 1 (8 — черновики стенда), `manifest.json`, `PROMPT_CONTRACTS.md` (#84) | одобрение владельцем слоя 1 восьми ролей и переноса правил формата в слой 2 | D-B-132, D-B-143 | T-M5, T-O5 |
 | WP10.6 | Трассировка LangSmith | частично | `quack/llm/tracing.py`: трасса на каждую попытку шлюза (роль, `роль@N`, псевдоним UUIDv5), `httpx POST /runs`; подмена `tests/support/tracer.py` (#208, D-B-200…202) | `tracer=create_tracer(settings)` в сборке `api`/`workers` (C, #209); формат `/runs` и удаление по псевдониму — проверить на стенде; вызов `delete_learner` из WP25 (A) | — | T-AI8 (G4) |
 | WP10.7 | Живой прогон | частично | `scripts/meta_smoke.py`: 26 ролей, 6 промптов Ф3, стрим с инструментом, отчёт `--out` (D-B-203, D-B-204) | живой прогон с ключом — владелец (DoD п.6a); схема `material_parser` после C | — | — |
@@ -193,6 +193,7 @@
 
 ### Поток B
 
+0. **WP1.3, шаг 3 B** — черновик #222 (модули B на `Db`, код хода Фазы 3 снят, D-B-210): A согласен, ждёт согласия C на `artifacts/practice.py` (#215). **Шаг 4** (`LLMGateway(db=)`, снятие ledger и outbox) — после шага 2 C (стенд на dbmate, `PHASE4_PROCESSES=true`) и `db=` в `api/resources.py` (C).
 1. **WP16.5** — `GET /v1/viz/{id}` с CSP после ответа владельца (issue #201); `deploy/static/viz/` — C.
 2. **WP10.6, хвост** — подключение трассера в сборке процессов (C, #209), удаление трасс из WP25 (A).
 3. **WP10.7, хвост** — живой прогон владельцем: `META_API_KEY=… POSTGRES_DSN=… uv run python scripts/meta_smoke.py --out …` (DoD п.6a, D-B-187 [ПРОВЕРИТЬ]).

@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
 
 from quack.api.auth import CurrentSession, get_current_session, require_terms
 from quack.api.errors import ApiError
@@ -17,6 +18,7 @@ from quack.events.errors import IdempotencyConflictError
 from quack.graph.read import create_graph_reader
 from quack.graph.read.summary import SessionNotFoundError, SessionSummary, session_summary
 from quack.jobs.queue_p4 import visible_jobs
+from quack.llm.access import AccessMode, access_mode, is_meta_judge, may_call_models
 from quack.llm.gateway import LLMGateway
 from quack.session import lifecycle, sessions, stream, turns
 from quack.session.action_turn import TurnContextSource, turn_frames
@@ -171,6 +173,32 @@ async def session_summary_route(
         raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
 
 
+class LLMAccess(BaseModel):
+    """D-B-211: `mode` of the money pool; `judge` — the learner said «I am a Meta judge»;
+    `blocked` — the client shows the banner with the one button (`preference_key` = true)."""
+
+    mode: AccessMode
+    judge: bool
+    blocked: bool
+    preference_key: str
+
+
+@router.get("/llm/access")
+async def llm_access(
+    learner_id: LearnerId, resources: Resources, settings: SettingsDep
+) -> LLMAccess:
+    """Owner decision D-B-211: what the client shows before the learner acts. The remainder of
+    the pool itself is not shown (operational data)."""
+    mode = await access_mode(resources.db, settings)
+    judge = await is_meta_judge(resources.db, settings, learner_id)
+    return LLMAccess(
+        mode=mode,
+        judge=judge,
+        blocked=mode == "judges_only" and not judge,
+        preference_key=settings.meta_judge_preference_key,
+    )
+
+
 @router.post("/sessions/{session_id}/heartbeat")
 async def heartbeat(
     session_id: UUID, learner_id: LearnerId, resources: Resources, settings: SettingsDep
@@ -241,6 +269,15 @@ async def post_action(
     a session the inactivity sweep ended comes back first (WP13.10). The learner is the one of
     the session cookie (Т-§19.1)."""
     learner_id = current.learner_id
+    if not await may_call_models(resources.db, settings, learner_id):
+        # D-B-211: the pool is in `judges_only`; the client shows the banner with one button —
+        # `PATCH /v1/learner/preferences {key: meta_judge, value: true}` — and repeats.
+        raise ApiError(
+            "LLM_DEGRADED",
+            "the models are kept for the Meta judges now",
+            status_code=403,
+            details={"reason": "judges_only", "preference_key": settings.meta_judge_preference_key},
+        )
     try:
         open_session = await sessions.get_session(
             resources.db, learner_id=learner_id, session_id=session_id

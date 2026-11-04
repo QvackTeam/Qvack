@@ -23,6 +23,21 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-B-211. Пул денег на модели: щедрые лимиты, ужатие у $100, у $50 — только судьи Meta (WP10.4)
+- Класс: C — решение владельца 2026-11-04 (в чате потока B)
+- WP / место: WP10.4; `quack/llm/access.py`, `quack/llm/usage.py::check_usd_budgets`, `quack/config.py` (блок B), `quack/session/router.py` (`GET /v1/llm/access`, проверка в `post_action`)
+- Контекст: пользователей немного (друзья и знакомые), ограничивать их не нужно. Нужен запас денег, чтобы судьи Meta могли проверить прод. В ТЗ есть только бюджеты на ученика (Т-§11.4: $0,5 за сессию, $3 в день)
+- Решение:
+  - **Пул.** `LLM_POOL_BUDGET_USD` (0 — пула нет, режим всегда `normal`). Остаток = пул − сумма `cost_usd` всех строк `ops.llm_usage`; кэш процесса `llm_pool_cache_s` = 30 с.
+  - **Режимы.** `normal`: $5 за сессию, $20 в день. `tight` (остаток ≤ `llm_pool_tight_remaining_usd` = 100): $0,5 и $3 (`tight_*`, значения Т-§11.4). `judges_only` (остаток ≤ `llm_pool_judges_only_remaining_usd` = 50): ученик без отметки судьи получает `LLMBudgetExceededError("pool")` на любую роль, включая учителя. Задачи откладываются до следующих суток, как при `daily`.
+  - **Отметка судьи.** Существующий `PATCH /v1/learner/preferences {key: "meta_judge", value: true}` (событие `preference.set`). Одна кнопка, без проверок; последнее значение ключа решает.
+  - **Для клиента.** `GET /v1/llm/access` → `{mode, judge, blocked, preference_key}`; остаток не отдаётся. `POST …/actions` при `blocked` отвечает `403 LLM_DEGRADED`, `details.reason = "judges_only"`, до записи действия. Отдельный код ошибки — в `api/errors.py` у C.
+  - **Бюджеты на ученика**, как и прежде, считаются только по фоновым ролям P2/P3; учитель ограничен лишь режимом `judges_only`.
+- Почему: решение владельца; Т-§11.4 (бюджеты в долларах), §2.3 стр. 9
+- Обратимость: пул 0 выключает всё; пороги и лимиты — настройки
+- Тесты: `tests/llm/test_usage_usd.py::test_pool_tightens_then_keeps_the_models_for_judges`, `tests/session/test_session_jobs_route.py::test_llm_access_and_judges_only_gate`
+- Требует подтверждения владельцем: да — размер пула `LLM_POOL_BUDGET_USD` в окружении `production`. Без `LLM_PRICES` траты равны 0 и пул не убывает, поэтому D-B-198 (запрет старта в prod без цен) остаётся
+
 ### D-B-209. Качество извлечения на эталонном наборе: сопоставление, каппа, ворота версий (WP16.7, хвост)
 - Класс: B
 - WP / место: WP16.7, Т-§7.11, Т-§18.1, Т-§18.3; `quack/agents/extraction_eval.py`, `Settings.extraction_eval_runs` = 5
