@@ -7,7 +7,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
-from sqlalchemy import text
 
 from tests.e2e.endpoints import mutating_routes
 from tests.e2e.journey import ok, onboard
@@ -27,20 +26,12 @@ from tests.session.helpers import parse_sse
 
 
 async def _events(system: System, learner_id: UUID) -> int:
-    """Events of the learner in both logs: the Phase 3 one and, for the routes of WP18
-    (consents), the Phase 4 one (D-C-115) until the whole API moves over (D-C-112)."""
-    async with system.session_factory() as session:
-        phase3 = int(
-            await session.scalar(
-                text("SELECT count(*) FROM core.events WHERE learner_id = :l"), {"l": learner_id}
-            )
-            or 0
-        )
+    """Events of the learner in the log."""
     row = await system.resources.db.fetch_one(
         "SELECT count(*) AS n FROM core.events WHERE learner_id = %(learner_id)s",
         {"learner_id": learner_id},
     )
-    return phase3 + (0 if row is None else int(row["n"]))
+    return 0 if row is None else int(row["n"])
 
 
 async def _send(
