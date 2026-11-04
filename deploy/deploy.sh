@@ -56,7 +56,9 @@ EOF
 # exist under the new prefix.
 current_backend_image() { sed -n "s/^QUACK_BACKEND_IMAGE=//p" "$RELEASE_FILE" | tail -n 1; }
 registry_of_image() { docker run --rm --entrypoint cat "$1" /app/event_registry.json; }
-migrations_of_image() { docker run --rm --entrypoint ls "$1" /app/migrations/versions | grep -v __pycache__ | sort; }
+# dbmate files of the image (WP1.1). An image of Phase 3 has no such directory: its list is empty,
+# so every file of the new one counts as new and the schema is migrated (D-C-160).
+migrations_of_image() { { docker run --rm --entrypoint ls "$1" /app/db/migrations 2>/dev/null || true; } | sort; }
 
 # Prints "events_changed=<0|1> rules_changed=<0|1>" for old -> new registries (Д-§6.1 step 2).
 compare_registries() {
@@ -149,7 +151,8 @@ if ((!ROLLBACK && NEW_MIGRATIONS)); then
     restore_release
     die "pre-migration dump failed; nothing was changed"
   fi
-  # 4. Migrations. A failed migration leaves the services on the old version.
+  # 4. Migrations: `dbmate up` before api, projector and workers start (WP1.3, D-C-160). A failed
+  # migration leaves the services on the old version.
   if ! dc run --rm migrate; then
     restore_release
     die "migration failed; services stay on ${PREVIOUS:-nothing}"

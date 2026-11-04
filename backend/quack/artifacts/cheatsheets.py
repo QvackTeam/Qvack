@@ -12,7 +12,6 @@ from redis.exceptions import RedisError
 
 from quack.api.resources import AppResources
 from quack.artifacts.deps import WorkerDeps, worker_deps
-from quack.artifacts.practice import LLM_ERRORS
 from quack.artifacts.schemas import (
     ArtifactGenOutput,
     ArtifactView,
@@ -35,6 +34,7 @@ from quack.jobs import kinds
 from quack.jobs.queue import ClaimedJob, enqueue_job
 from quack.jobs.runner import JobContext, register_job_handler
 from quack.logging import get_logger
+from quack.practice.evaluation import LLM_ERRORS
 
 log = get_logger(__name__)
 

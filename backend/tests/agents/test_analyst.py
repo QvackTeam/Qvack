@@ -246,8 +246,8 @@ async def test_analyst_job_reads_memory_for_the_session(pg_db: Db) -> None:
 
     from quack.agents.analyst import analyst_job
     from quack.events.log import NewEvent, append_events
-    from quack.jobs.queue import ClaimedJob
     from quack.jobs.runner import JobContext
+    from quack.jobs.types import ClaimedJob
     from tests.support import graph_read as fx
 
     learner_id = await create_learner(pg_db)
