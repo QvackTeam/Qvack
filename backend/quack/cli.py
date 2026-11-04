@@ -8,6 +8,7 @@ import contextlib
 import json
 import os
 import signal
+import subprocess
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -30,7 +31,7 @@ from quack.llm.responses_client import ResponsesClient
 from quack.logging import configure_logging, get_logger
 from quack.ops.alerts import run_alerts
 from quack.ops.backup import run_backup
-from quack.ops.commands import migrate, purge_deleted, replay_dlq
+from quack.ops.commands import AlembicSchemaFound, migrate, purge_deleted, replay_dlq
 from quack.ops.db_roles import DbRolesRefused, RolePasswords, apply_db_roles
 from quack.ops.restore_check import restore_check
 from quack.ops.seed import SeedRefusedError, seed_learners, write_learners
@@ -75,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("worker", help="projector + workers in one process (development only)")
     ops = sub.add_parser("ops", help="operational commands")
     ops_sub = ops.add_subparsers(dest="op", required=True)
-    ops_sub.add_parser("migrate", help="alembic upgrade head")
+    ops_sub.add_parser("migrate", help="dbmate up on backend/db/migrations")
     ops_sub.add_parser("verify-schema", help="create/verify Neo4j constraints and indexes")
     rebuild = ops_sub.add_parser("rebuild", help="rebuild learner projections from the log")
     target = rebuild.add_mutually_exclusive_group(required=False)
@@ -445,7 +446,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "workers":
         return asyncio.run(_workers(settings))
     if args.op == "migrate":
-        migrate(settings)
+        try:
+            migrate(settings)
+        except (AlembicSchemaFound, subprocess.CalledProcessError, FileNotFoundError) as exc:
+            log.error("ops_migrate_failed", error=str(exc))
+            return 1
         return 0
     if args.op == "event-registry":
         write_event_registry(Path(args.out))
