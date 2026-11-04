@@ -192,7 +192,7 @@
 
 ### Поток B
 
-0. **WP1.3, шаг 4 B** — `LLMGateway(db=)` без `session_factory`, снятие ledger и outbox (D-B-197): после #239 (шаг 2 C) и `db=` в `api/resources.py` (C, шаг 3 C). Шаг 3 B — #222 (D-B-210).
+0. **WP1.3, шаг 4 B** — шлюз только на `Db` (D-B-212): PR фазы 4 B wave 6. Остаток C: `ops/status.py`, `ops/commands.py` читают `ops.llm_ledger`/`core.llm_outbox` — перевести на `ops.llm_usage`.
 1. **WP16.5** — `GET /v1/viz/{id}` с CSP после ответа владельца (issue #201); `deploy/static/viz/` — C.
 2. **WP10.6, хвост** — подключение трассера в сборке процессов (C, #209), удаление трасс из WP25 (A).
 3. **WP10.7, хвост** — живой прогон владельцем: `META_API_KEY=… POSTGRES_DSN=… uv run python scripts/meta_smoke.py --out …` (DoD п.6a, D-B-187 [ПРОВЕРИТЬ]).

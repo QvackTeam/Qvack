@@ -153,11 +153,12 @@ def auth() -> AuthHeaders:
 def worker_deps(
     settings: Settings,
     db: SessionFactory,
+    pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
     fake_provider: FakeProvider,
 ) -> WorkerDeps:
-    return WorkerDeps(settings, db, LLMGateway(db, fake_provider, settings), neo4j, redis)
+    return WorkerDeps(settings, db, LLMGateway(fake_provider, settings, db=pg_db), neo4j, redis)
 
 
 # --- Seeding through the real append_events -------------------------------------------

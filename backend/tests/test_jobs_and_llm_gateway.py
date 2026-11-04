@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.jobs import kinds
 from quack.jobs.queue import (
@@ -28,7 +29,6 @@ from quack.jobs.queue import (
     reap_stale_jobs,
 )
 from quack.llm.errors import (
-    LLMBudgetExceededError,
     LLMSchemaError,
     LLMUnavailableError,
     ProviderUnavailableError,
@@ -369,24 +369,17 @@ def prompts(tmp_path: Path) -> PromptRegistry:
     return PromptRegistry(tmp_path)
 
 
-def _gateway(db: SessionFactory, provider: FakeProvider, prompts: PromptRegistry, **over: Any):
+def _gateway(pg_db: Db, provider: FakeProvider, prompts: PromptRegistry, **over: Any):
     settings = Settings(env="test", **over)
-    return LLMGateway(db, provider, settings, prompts)
+    return LLMGateway(provider, settings, prompts, db=pg_db)
 
 
-async def _session_row(db: SessionFactory, learner: UUID, tokens: int = 0) -> UUID:
-    sid = uuid4()
-    await _exec(
-        db,
-        "INSERT INTO core.sessions (id, learner_id, domain_id, mode, status, started_at, "
-        "last_activity_at, start_seq, tokens_used) VALUES (:id, :l, :d, 'learn', 'active', "
-        "now(), now(), 1, :t)",
-        id=sid,
-        l=learner,
-        d=uuid4(),
-        t=tokens,
+async def _usage(pg_db: Db, learner: UUID) -> list[dict[str, Any]]:
+    return await pg_db.fetch_all(
+        "SELECT role, prompt_version, input_tokens, output_tokens, cached_input_tokens, status "
+        "FROM ops.llm_usage WHERE learner_id = %(l)s ORDER BY id",
+        {"l": learner},
     )
-    return sid
 
 
 async def _generate(gw: LLMGateway, learner: UUID, sid: UUID | None, key: str):
@@ -402,14 +395,13 @@ async def _generate(gw: LLMGateway, learner: UUID, sid: UUID | None, key: str):
     )
 
 
-async def test_gateway_call_writes_ledger_outbox_and_session_tokens(
-    db: SessionFactory, prompts: PromptRegistry
+async def test_gateway_call_writes_a_usage_row_and_a_repeat_pays_again(
+    pg_db: Db, prompts: PromptRegistry
 ) -> None:
     provider = FakeProvider()
-    gw = _gateway(db, provider, prompts)
+    gw = _gateway(pg_db, provider, prompts)
     learner = uuid4()
-    sid = await _session_row(db, learner)
-    result = await _generate(gw, learner, sid, "obs:1")
+    result = await _generate(gw, learner, None, "obs:1")
     assert result.value == Answer(label="ok", confidence=0.9)
     assert result.from_cache is False
     assert result.prompt_hash == prompts.load("extractor", 1).sha256
@@ -417,127 +409,45 @@ async def test_gateway_call_writes_ledger_outbox_and_session_tokens(
     request = provider.calls[0]
     assert request.prompt == "Classify: x^2"
     assert request.json_schema == to_strict_json_schema(Answer)  # WP5.7: the strict schema
-    [ledger] = await _q(db, "SELECT * FROM ops.llm_ledger")
-    assert ledger["role"] == "extractor" and ledger["prompt_version"] == 1
-    assert ledger["input_tokens"] == 100 and ledger["output_tokens"] == 20
-    assert ledger["cached_tokens"] == 10 and ledger["status"] == "ok"
-    assert ledger["prompt_hash"] == result.prompt_hash
-    [outbox] = await _q(db, "SELECT * FROM core.llm_outbox")
-    assert outbox["status"] == "completed" and outbox["response_json"] == result.value.model_dump()
-    [sess] = await _q(db, "SELECT tokens_used FROM core.sessions WHERE id = :id", id=sid)
-    assert sess["tokens_used"] == 120
+    [row] = await _usage(pg_db, learner)
+    assert (row["role"], row["prompt_version"], row["status"]) == ("extractor", "extractor@1", "ok")
+    assert (row["input_tokens"], row["output_tokens"], row["cached_input_tokens"]) == (100, 20, 10)
+    # D-B-212: no replay by the idempotency key — the repeat calls the model and pays again.
+    await _generate(gw, learner, None, "obs:1")
+    assert len(provider.calls) == 2 and len(await _usage(pg_db, learner)) == 2
 
 
-async def test_gateway_replay_is_served_from_outbox(
-    db: SessionFactory, prompts: PromptRegistry
-) -> None:
-    provider = FakeProvider()
-    gw = _gateway(db, provider, prompts)
-    learner = uuid4()
-    first = await _generate(gw, learner, None, "obs:2")
-    again = await _generate(gw, learner, None, "obs:2")
-    assert again.from_cache is True
-    assert again.value == first.value
-    assert len(provider.calls) == 1
-    assert len(await _q(db, "SELECT id FROM ops.llm_ledger")) == 1
-    other_learner = await _generate(gw, uuid4(), None, "obs:2")
-    assert other_learner.from_cache is False and len(provider.calls) == 2
-
-
-async def test_gateway_daily_budget(db: SessionFactory, prompts: PromptRegistry) -> None:
-    provider = FakeProvider()
-    gw = _gateway(db, provider, prompts, daily_token_limit_per_learner=1000)
-    learner = uuid4()
-    await _exec(
-        db,
-        "INSERT INTO ops.llm_ledger (id, learner_id, role, prompt_version, prompt_hash, model, "
-        "input_tokens, output_tokens, latency_ms, status, created_at) VALUES "
-        "(:id, :l, 'teacher', 1, 'h', 'm', 900, 100, 5, 'ok', now())",
-        id=uuid4(),
-        l=learner,
-    )
-    # Yesterday's usage does not count.
-    await _exec(
-        db,
-        "INSERT INTO ops.llm_ledger (id, learner_id, role, prompt_version, prompt_hash, model, "
-        "input_tokens, output_tokens, latency_ms, status, created_at) VALUES "
-        "(:id, :l, 'teacher', 1, 'h', 'm', 5000, 0, 5, 'ok', now() - interval '2 days')",
-        id=uuid4(),
-        l=learner,
-    )
-    with pytest.raises(LLMBudgetExceededError) as exc:
-        await _generate(gw, learner, None, "obs:3")
-    assert exc.value.scope == "daily"
-    assert provider.calls == []
-    fresh = uuid4()
-    await _exec(
-        db,
-        "INSERT INTO ops.llm_ledger (id, learner_id, role, prompt_version, prompt_hash, model, "
-        "input_tokens, output_tokens, latency_ms, status, created_at) VALUES "
-        "(:id, :l, 'teacher', 1, 'h', 'm', 5000, 0, 5, 'ok', now() - interval '2 days')",
-        id=uuid4(),
-        l=fresh,
-    )
-    assert (await _generate(gw, fresh, None, "obs:4")).from_cache is False
-
-
-async def test_gateway_session_budget(db: SessionFactory, prompts: PromptRegistry) -> None:
-    provider = FakeProvider()
-    # WP5.6: `extractor` is exempt from the session budget; this test checks the budget itself.
-    gw = _gateway(db, provider, prompts, session_token_limit=500, session_budget_exempt_roles=())
-    learner = uuid4()
-    sid = await _session_row(db, learner, tokens=500)
-    with pytest.raises(LLMBudgetExceededError) as exc:
-        await _generate(gw, learner, sid, "obs:5")
-    assert exc.value.scope == "session"
-    assert provider.calls == []
-
-
-async def test_gateway_cached_result_is_returned_even_over_budget(
-    db: SessionFactory, prompts: PromptRegistry
-) -> None:
-    provider = FakeProvider()
-    learner = uuid4()
-    await _generate(_gateway(db, provider, prompts), learner, None, "obs:6")
-    tight = _gateway(db, provider, prompts, daily_token_limit_per_learner=1)
-    assert (await _generate(tight, learner, None, "obs:6")).from_cache is True
-
-
-async def test_gateway_provider_unavailable(db: SessionFactory, prompts: PromptRegistry) -> None:
+async def test_gateway_provider_unavailable(pg_db: Db, prompts: PromptRegistry) -> None:
     provider = FakeProvider([ProviderUnavailableError("503")])
-    gw = _gateway(db, provider, prompts, llm_retry_attempts=0)  # one failure, no WP5.2 retry
+    gw = _gateway(pg_db, provider, prompts, llm_retry_attempts=0)  # one failure, no WP5.2 retry
     learner = uuid4()
     with pytest.raises(LLMUnavailableError):
         await _generate(gw, learner, None, "obs:7")
-    [ledger] = await _q(db, "SELECT status, error_code FROM ops.llm_ledger")
-    assert ledger["status"] == "error" and ledger["error_code"] == "unavailable"
-    [outbox] = await _q(db, "SELECT status FROM core.llm_outbox")
-    assert outbox["status"] == "failed"
-    # A retry with the same key calls the provider again (nothing was completed).
-    assert (await _generate(gw, learner, None, "obs:7")).from_cache is False
+    [row] = await _usage(pg_db, learner)
+    assert row["status"] == "error"
+    # A retry with the same key calls the provider again.
+    assert (await _generate(gw, learner, None, "obs:7")).value.label == "ok"
 
 
-async def test_gateway_repairs_schema_once(db: SessionFactory, prompts: PromptRegistry) -> None:
+async def test_gateway_repairs_schema_once(pg_db: Db, prompts: PromptRegistry) -> None:
     provider = FakeProvider(['{"label": 1}', '{"label": "fixed", "confidence": 0.5}'])
-    gw = _gateway(db, provider, prompts)
+    gw = _gateway(pg_db, provider, prompts)
     result = await _generate(gw, uuid4(), None, "obs:8")
     assert result.value.label == "fixed"
     assert len(provider.calls) == 2
     assert provider.calls[1].repair_hint is not None
     bad = FakeProvider(["not json", '{"label": 2}'])
     with pytest.raises(LLMSchemaError):
-        await _generate(_gateway(db, bad, prompts), uuid4(), None, "obs:9")
+        await _generate(_gateway(pg_db, bad, prompts), uuid4(), None, "obs:9")
     assert len(bad.calls) == 2
 
 
-async def test_gateway_semaphore_limits_concurrency(
-    db: SessionFactory, prompts: PromptRegistry
-) -> None:
+async def test_gateway_semaphore_limits_concurrency(pg_db: Db, prompts: PromptRegistry) -> None:
     # §8.9 п.4: semaphores per model (WP5.1), same point: concurrency is bounded by the limit.
     provider = FakeProvider(delay=0.05)
     limits = {"api": {"muse-spark": 2}}
     gw = _gateway(
-        db,
+        pg_db,
         provider,
         prompts,
         process_role="api",

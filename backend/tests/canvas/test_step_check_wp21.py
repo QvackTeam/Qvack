@@ -151,7 +151,7 @@ async def test_step_check_cascade(
     [opinion] = await events(pg_db, learner, "observation.second_opinion")
     assert opinion["payload"] == {"target_seq": question["seq"], "agreed": False, "diagnosis": None}
     assert opinion["actor"] == "second_opinion@1"
-    s.provider.respond(SECOND, lambda _r: _verdict("incorrect"))
+    # D-B-212: no outbox, a repeat asks the model again; the same answer is the same event.
     assert await second_opinion(s.env, unsure, asked, rows) is False  # same key, same answer
     assert len(await events(pg_db, learner, "observation.second_opinion")) == 1
 
