@@ -54,6 +54,18 @@ def test_fast_job_has_no_services_and_no_infra_requirement() -> None:
         assert command in script
 
 
+def test_fast_job_checks_the_event_registry_gaps() -> None:
+    """WP9.3, Д-§5.2 п.6 (#232, D-C-166): the step «реестр событий» is `registry_gaps` of
+    Phase 4; it needs no services, so it sits in the fast layer, and a gap fails the job."""
+    steps = [s for s in _jobs()["fast"]["steps"] if "registry_gaps" in str(s.get("run", ""))]
+    (step,) = steps
+    assert "реестр событий" in step["name"]
+    run = step["run"]
+    assert "quack.runtime.event_registry import registry_gaps" in run
+    assert "sys.exit(1 if gaps else 0)" in run
+    assert "quack.ops.registry" not in _steps_text(_jobs()["fast"])
+
+
 def test_full_job_has_services_and_requires_infra() -> None:
     job = _jobs()["backend"]
     assert {"postgres", "neo4j", "redis"} <= set(job["services"])

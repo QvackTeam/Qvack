@@ -27,8 +27,8 @@ from quack.config import Settings
 from quack.db.db import Db
 from quack.events.event_types import AgentCompleted, AgentRequested
 from quack.events.log import NewEvent, StoredEvent, append_events
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.llm.gateway import LLMGateway
 from quack.practice.repo import event_by_key
 from quack.storage.keys import viz_key

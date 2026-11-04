@@ -46,17 +46,17 @@
 | :-- | :-- | :-: | :-- | :-- | :-- | :-- |
 | WP1.1 | dbmate и базовая схема | влит | `db/migrations/…baseline.sql` + 3 расширяющие миграции (#78, #142) | — | — | T-DB1 |
 | WP1.2 | `Db` и репозитории | влит | `quack.db.Db`, `append_events`, блокировки на psycopg (#78, #107) | — | — | T-DB2, T-DB4, T-DB5 |
-| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1: процессы Фазы 4 за `phase4_processes` (D-A-200, D-A-206, #224); шаг 3 A: `graph/read` на `Db`, `sweep_inactive` в `periodic_p4` (D-A-210…212, #225), `quack/domains/**` на `Db`, интервью и диагностика удалены (D-A-207…209, #226); план — #215 | шаг 2 сделан: стенд на dbmate, `PHASE4_PROCESSES=true` (C, D-C-160, #223); `ops status` и остальные `ops/*` на `Db` - шаг 3 C; шаг 3 B (#222) и C; шаг 5 A — снять код Фазы 3 (перечень D-A-212), `graph.curate` Фазы 3, флаг, `sqlalchemy`/`asyncpg`/`alembic`; владелец `quack/ops/*` — #215 | #223 | T-DB3 (G4) |
+| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1: процессы Фазы 4 за `phase4_processes` (D-A-200, D-A-206, #224); шаг 3 A: `graph/read` на `Db`, `sweep_inactive` в `periodic_p4` (D-A-210…212, #225), `quack/domains/**` на `Db`, интервью и диагностика удалены (D-A-207…209, #226); план — #215 | шаг 2 сделан: стенд на dbmate, `PHASE4_PROCESSES=true` (C, D-C-160, #239); `ops status` и др. читают таблицы Фазы 3 до шага 3 C; шаг 3 B — #222 (D-B-210, модули B на `Db`); шаг 3 C; шаг 4 B (шлюз на `Db`); шаг 5 A — снять код Фазы 3 (перечень D-A-212), `graph.curate` Фазы 3, флаг, `sqlalchemy`/`asyncpg`/`alembic`; владелец `quack/ops/*` — #215 | #223 | T-DB3 (G4) |
 | WP1.4 | squawk | влит | `backend/.squawk.toml` (#185), job `squawk` в CI (#189) | — | — | T-DB7 |
 | WP2.1 | Модели payload и реестр | влит | 65 типов, S3 заморожен (#80, #94, #119, #130) | — | D-A-121 (класс C) | T-EV1, T-EV2, T-EV3 |
 | WP2.2 | Ход и последствия вместе | влит | Пачка хода одним `append_events` (#109, `session/turn_commit.py`) | — | — | T-EV4 |
 | WP2.3 | Тексты для поиска | влит | Поля `text` типов каталога, сверка с индексом (`tests/events/test_catalog.py`) | — | — | — |
-| WP2.4 | Реестр в образе, полнота | частично | `test_registry_completeness` (#185); реестр Фазы 4, откат и пробелы — `quack/runtime/event_registry.py` (D-A-218, T-EV5) | регистрация в `cli.py` вместо `ops/registry.py` и шаг CI «реестр событий» — C (#232, WP9.3) | #232 | T-EV5 |
+| WP2.4 | Реестр в образе, полнота | частично | `test_registry_completeness` (#185); реестр Фазы 4, откат и пробелы — `quack/runtime/event_registry.py` (D-A-218, T-EV5) | `ops event-registry`, `can-rollback` в `cli.py` на реестре Фазы 4, шаг CI «реестр событий» в `fast` (C, #232, D-C-165, D-C-166); `ops/registry.py` удаляется в шаге 5 WP1.3 | — | T-EV5 |
 | WP3.1 | Схема графа | влит | Ограничения и индексы Neo4j Фазы 4 (#114) | — | — | T-P7 |
 | WP3.2 | Обработчики фазы А | влит | Обработчики 38 строк S5 (#135, #185) | — | — | T-P2, T-P3, T-P4, T-P5 |
 | WP3.3 | Фазы А–В, срез | влит | Фазы А–В, запись разницей, остановка потока (#185) | в процесс `projector` не подключён (WP1.3) | — | T-P6 |
 | WP3.4 | Режимы | влит | Пачки = пересборка (#185) | — | — | T-P1 |
-| WP3.5 | Пересборка | влит | Пересборка на rules@3, `--stale-rules` в `graph/projection` (#185) | `ops rebuild` в `cli.py` ещё на коде Фазы 3 (WP1.3) | — | T-P8 |
+| WP3.5 | Пересборка | влит | Пересборка на rules@3, `--stale-rules` в `graph/projection` (#185) | `ops rebuild` в `cli.py` при `phase4_processes` на `graph/projection` (C, #232, D-C-165); без флага — код Фазы 3 до шага 2 WP1.3 (#223) | — | T-P8 |
 | WP3.6 | Версия правил | влит | `RULES_VERSION = rules@3` в `projection/runner.py` | старая константа rules@2 в `graph/ids.py` уходит с WP1.3 | — | — |
 | WP4.1 | Свидетельство и ярус | влит | `projection/skill_fold.py` (#185, D-A-182) | — | — | T-F2 |
 | WP4.2 | Вычисляемые свойства | влит | Веса, окно «горит», новизна, delayed (#185) | — | — | T-F3, T-F9 |
@@ -135,7 +135,7 @@
 | WP16.4 | Определение домена | влит | `POST /v1/domains/classify` (#157) | — | — | T-AG5 |
 | WP16.5 | Строитель визуализаций | частично | `agent.viz`: генерация, рендер, одна попытка исправления (#168) | `GET /v1/viz/{id}` с CSP (объявление в `quack/artifacts/router.py`); `deploy/static/viz/` с закреплёнными D3/Plotly/KaTeX | — | T-AG6 |
 | WP16.6 | Поручения и доставка | влит | Обработчики `task.solution_space`, `agent.solution_space`, `agent.task_generation`, `check.known_claim`, `agent.illustration`, регистрация #173 (#208, D-B-191…193, D-B-196) | `agent.artifact` — C | — | T-AG7 |
-| WP16.7 | Проигрывание, судья, метрики (P2) | частично | Функции `session/replay.py::replay_session`, `agents/metrics.py::metrics`, `agents/judge.py` (#208, D-B-194, D-B-195); качество извлечения `agents/extraction_eval.py` (D-B-209) | регистрация `ops replay-session`/`ops metrics`/оценки извлечения (C, S15); выгрузка наборов LangSmith — оператор | — | — |
+| WP16.7 | Проигрывание, судья, метрики (P2) | частично | Функции `session/replay.py::replay_session`, `agents/metrics.py::metrics`, `agents/judge.py` (#208, D-B-194, D-B-195); качество извлечения `agents/extraction_eval.py` (D-B-209) | регистрация `ops replay-session`/`ops metrics` (C, S15); команда `ops extraction-eval` готова (C, D-C-167); выгрузка наборов LangSmith — оператор | — | — |
 | WP16.8 | Подготовка «Сегодня» | влит | `today.prepare` (#180) | — | — | T-RV2 |
 
 ### 4.3. Поток C: вход, каналы, материалы, артефакты, compute, эксплуатация, сквозная проверка
@@ -193,7 +193,7 @@
 
 ### Поток B
 
-0. **WP1.3, шаг 3 B** — черновик #222 (модули B на `Db`, код хода Фазы 3 снят, D-B-210): A согласен, ждёт согласия C на `artifacts/practice.py` (#215). **Шаг 4** (`LLMGateway(db=)`, снятие ledger и outbox) — после шага 2 C (стенд на dbmate, `PHASE4_PROCESSES=true`) и `db=` в `api/resources.py` (C).
+0. **WP1.3, шаг 4 B** — `LLMGateway(db=)` без `session_factory`, снятие ledger и outbox (D-B-197): после #239 (шаг 2 C) и `db=` в `api/resources.py` (C, шаг 3 C). Шаг 3 B — #222 (D-B-210).
 1. **WP16.5** — `GET /v1/viz/{id}` с CSP после ответа владельца (issue #201); `deploy/static/viz/` — C.
 2. **WP10.6, хвост** — подключение трассера в сборке процессов (C, #209), удаление трасс из WP25 (A).
 3. **WP10.7, хвост** — живой прогон владельцем: `META_API_KEY=… POSTGRES_DSN=… uv run python scripts/meta_smoke.py --out …` (DoD п.6a, D-B-187 [ПРОВЕРИТЬ]).
