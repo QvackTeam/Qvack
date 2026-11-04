@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-B-221. Красные места сквозных тестов T-E1/T-E7/T-E9/T-E11 (#279)
+- Класс: B
+- WP / место: WP13, WP14.4, WP16.8, WP26.1; `quack/practice/repo.py` (`session_events_of_action`), `quack/session/turn_source.py` (`assemble`, `_search`), `quack/session/tools.py`, `quack/session/sessions.py` (`StartSession.today_item`), `quack/practice/today_plan.py`
+- Контекст: C (#279) пометил пять мест в коде B как `xfail(strict=True)` в своих сквозных тестах (PR #278)
+- Решение: (1) **T-E1.** Ход читает события сессии до действия и то, что действие вызвало (`causation_seq = action_seq`): вердикт пишется сразу после ответа с `causation_seq` ответа. Теперь `answered.solved` верно и `task.closed` пишется. (2) **T-E11, Meta.** Не меняю: по `Т-§20.7` при отказе Meta у учителя «ошибка с кнопкой повтора» — кадр `error` `LLM_DEGRADED` (`retryable`), хода нет (`Т-§12.1`); техдок выше ТЗ (§0.4.1), а тест C ждёт пометку `llm_unavailable` и расходится с `Т-§20.7`. C: поправить ожидание строки `meta` в `test_failure_modes_t207` на кадр `error` без хода. (3) **T-E11, Neo4j.** Сборка хода ловит `ServiceUnavailable` на чтении профиля, целей и памяти тем: слоты 3, 4, 7 пустые, `degraded_mode = memory_unavailable` (`Т-§20.7`). (4) **T-E7.** `MemoryTurnContextSource(embeddings=…)`; `source_of` передаёт `resources.embeddings`; `ToolContext.search` — эмбеддинг запроса (Modal) и `materials_search` по домену хода, привязка к ученику; Modal упал — инструмент отвечает «search temporarily unavailable». (5) **T-E9.** `POST /v1/sessions` берёт подготовленный план пункта «Сегодня»: поле `today_item` (навык пункта) или тема пункта последнего `today.shown` домена; id сессии — `prepared_session_id` (`uuid5`), план уже лежит под ним; повторный запуск того же пункта получает новую сессию. `prepared_session_id` перенесён в `quack/practice/today_plan.py` (слои §4.1)
+- Почему: §0.4.3 п.2, `Т-§20.7`, `Т-§14.4`
+- Обратимость: четыре небольших изменения
+- Тесты: `tests/session/test_turn_source.py` (3: вердикт действия, Neo4j, поиск), `tests/session/test_sessions_db.py` (1: план «Сегодня»); `tests/session`, `agents`, `practice`, `db`, `e2e`, контракты — 568 passed
+- Требует подтверждения владельцем: нет
+
 ### D-B-220. Ответы на вопросы C к владельцу (#270) по документам
 - Класс: B (по поручению владельца: «сверься с доками и реши сама»)
 - WP / место: #270, `Д-§7`, `Д-§8.3`, `Т-§22.8`, WP18.2
