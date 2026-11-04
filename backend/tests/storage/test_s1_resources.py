@@ -45,13 +45,11 @@ from tests.support.storage import BrokenObjectStore, InMemoryObjectStore
 
 
 def test_app_resources_fields() -> None:
-    # §4.2 contract; `engine` and `session_factory` leave in WP1.3 (stream A).
+    # §4.2 contract; `engine` and `session_factory` left in WP1.3 (D-C-170).
     names = {f.name for f in dataclasses.fields(AppResources)}
     assert names == {
         "settings",
         "db",
-        "engine",
-        "session_factory",
         "neo4j",
         "redis",
         "llm",
