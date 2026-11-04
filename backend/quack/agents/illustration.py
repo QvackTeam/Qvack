@@ -12,8 +12,8 @@ from uuid import UUID
 
 from quack.agents.delivery import completed_key, deliver
 from quack.events.event_types import AgentRequested
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.practice.repo import agent_request, event_by_key
 from quack.storage.keys import new_ulid
 from quack.storage.objects import learner_prefix

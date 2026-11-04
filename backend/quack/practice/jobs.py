@@ -11,8 +11,8 @@ from uuid import UUID
 from quack.events.event_types import AnswerSubmitted, TaskCreated
 from quack.events.keys import check_failed_key, verdict_key
 from quack.graph.read import SliceFocus, create_graph_reader
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.practice.answers import help_in_session
 from quack.practice.model_check import (
     LevelState,

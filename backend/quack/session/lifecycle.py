@@ -20,8 +20,8 @@ from quack.api.resources import AppResources
 from quack.config import Settings
 from quack.db.redis import presence_key
 from quack.events.errors import IdempotencyConflictError
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.session import sessions
 from quack.session.schemas import HeartbeatResponse, SessionDetail, SessionListResponse
 from quack.session.sessions import SessionConflictError, SessionView, StartSession

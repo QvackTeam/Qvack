@@ -21,8 +21,8 @@ from quack.agents.today import ALL_LEVELS
 from quack.events.event_types import AgentRequested
 from quack.events.values import AnswerType, Level
 from quack.graph.read import GraphReader, MisconceptionFact, SliceFocus, create_graph_reader
-from quack.jobs.queue import ClaimedJob, JobFailedPermanently
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob, JobFailedPermanently
 from quack.practice.repo import agent_request, event_by_seq
 from quack.practice.task_generation import (
     GENERATOR_ROLE,

@@ -16,7 +16,7 @@ from quack.config import Settings
 from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.db.redis import presence_key
-from quack.jobs.queue import ClaimedJob
+from quack.jobs.types import ClaimedJob
 from quack.session.lifecycle import sweep_inactive_sessions
 from tests.session.helpers import Learner, make_learner
 from tests.support.resources import build_job_context
