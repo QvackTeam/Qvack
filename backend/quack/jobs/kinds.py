@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from quack.jobs.queue import JobDeferred, JobFailedPermanently, JobSpec
+from quack.jobs.types import JobDeferred, JobFailedPermanently, JobSpec
 
 __all__ = [
     "JOB_KINDS",

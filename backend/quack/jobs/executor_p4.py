@@ -29,8 +29,8 @@ from redis.asyncio import Redis
 from quack.config import Settings
 from quack.db import Db
 from quack.jobs import queue_p4 as q
-from quack.jobs.queue import JobDeferred, JobFailedPermanently
 from quack.jobs.rules_p4 import KIND_LLM_ROLES
+from quack.jobs.types import JobDeferred, JobFailedPermanently
 from quack.logging import get_logger
 
 log = get_logger(__name__)

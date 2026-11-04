@@ -14,8 +14,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from quack.db import Db
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.logging import get_logger
 from quack.storage.objects import ObjectStore
 

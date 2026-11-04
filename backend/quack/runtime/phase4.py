@@ -25,8 +25,8 @@ from quack.jobs.dispatcher import supervise
 from quack.jobs.dispatcher_p4 import DispatcherP4
 from quack.jobs.executor_p4 import JobWorker
 from quack.jobs.periodic_p4 import schedule_periodic
-from quack.jobs.queue import ClaimedJob as Phase3Job
 from quack.jobs.runner import JobContext, JobHandler
+from quack.jobs.types import ClaimedJob as Phase3Job
 from quack.logging import get_logger
 
 log = get_logger(__name__)
