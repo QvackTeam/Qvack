@@ -12,7 +12,6 @@ export function StubsIndex() {
   const items: { href: string; title: string; api: string }[] = [
     { href: "/login", title: s.auth.loginTitle, api: "POST /v1/auth/login" },
     { href: "/signup", title: s.auth.signupTitle, api: "POST /v1/auth/register" },
-    { href: "/domains/new", title: s.newDomain.title, api: "POST /v1/domains, …/structure/propose" },
     { href: "/domains/matan/structure", title: s.structure.title(tx.stubs.newDomain.namePh), api: "…/structure/confirm, PATCH …/structure, …/archive" },
     { href: "/domains/matan/diagnostic", title: s.diagnostic.title, api: "…/diagnostic/start|answer|finish" },
     { href: "/practice/radius", title: s.practice.title("…"), api: "…/tasks/next|hint|submit" },

@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useMocks, useT } from "@/lib/i18n/provider";
 import type { Domain } from "@/lib/mock/types";
@@ -74,7 +74,6 @@ function MockData({ children }: { children: React.ReactNode }) {
 function ApiData({ children }: { children: React.ReactNode }) {
   const t = useT();
   const router = useRouter();
-  const pathname = usePathname();
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summaries, setSummaries] = useState<S["DomainSummary"][]>([]);
@@ -197,11 +196,6 @@ function ApiData({ children }: { children: React.ReactNode }) {
     }, LAG_RETRY_MS);
     return () => clearTimeout(timer);
   }, [graphs, loadGraph]);
-
-  // No subjects yet: the first screen is creating one
-  useEffect(() => {
-    if (ready && !error && summaries.length === 0 && (pathname === "/" || pathname === "/domain")) router.replace("/domains/new");
-  }, [ready, error, summaries.length, pathname, router]);
 
   const labels = useMemo(
     () => ({
