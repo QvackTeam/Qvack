@@ -1,5 +1,5 @@
 """`agent.topic_split`, WP8.2 (ТЗ Ф4; Т-§4.11; issue #245): a topic of several skills becomes
-`topic.split` (the biggest part keeps the id); a topic of one skill gets `skill.split` first;
+`topic.split` (the biggest part keeps the id); a topic of one skill gets `topic.split` first, then `skill.split` (D-A-226);
 a repeat writes nothing; an answer that does not pass the check writes nothing. D-B-213."""
 
 from __future__ import annotations
@@ -118,19 +118,21 @@ async def test_several_skills_become_topic_split_and_a_repeat_writes_nothing(pg_
     assert done["payload"]["ok"] is True
 
 
-async def test_one_skill_is_split_first_then_the_topic(pg_db: Db) -> None:
+async def test_one_skill_topic_is_split_first_then_the_skill(pg_db: Db) -> None:
+    """D-A-226: the topics first (the first part keeps the topic and the old skill), then the
+    skill into one narrower skill per part, each in the topic of its part."""
     learner_id = await create_learner(pg_db)
     builder = _Builder([SplitPart(name="Tests", skills=[]), SplitPart(name="Sums", skills=[])])
 
     written = await _run(pg_db, learner_id, builder, SKILLS[:1])
 
-    assert written == ["skill.split", "topic.split"]
-    skill, topic, _ = await _types(pg_db, learner_id)
-    new_skills = [p["skill_id"] for p in skill["payload"]["into"]]
+    assert written == ["topic.split", "skill.split"]
+    topic, skill, _ = await _types(pg_db, learner_id)
+    parts = topic["payload"]["into"]
+    assert [p["skill_ids"] for p in parts] == [[str(SKILLS[0])], []]
+    assert parts[0]["topic_id"] == str(TOPIC) and parts[1]["topic_id"] != str(TOPIC)
     assert skill["payload"]["skill_id"] == str(SKILLS[0])
-    assert [p["topic_id"] for p in skill["payload"]["into"]] == [str(TOPIC)] * 2
-    assert [p["skill_ids"] for p in topic["payload"]["into"]] == [[s] for s in new_skills]
-    assert str(TOPIC) not in [p["topic_id"] for p in topic["payload"]["into"]]
+    assert [p["topic_id"] for p in skill["payload"]["into"]] == [p["topic_id"] for p in parts]
 
 
 async def test_a_split_that_misses_a_skill_writes_nothing(pg_db: Db) -> None:

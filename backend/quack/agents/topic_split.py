@@ -8,11 +8,11 @@ named parts; code checks that every skill is in exactly one part (labels, Т-§4
 
 - a topic of several skills: `topic.split`; the part with the most skills keeps the id of the
   topic (hubs and plans that name it stay valid), the others are new topics;
-- a topic of one skill (Т-§4.11 «если навык у темы один, сначала `skill.split`»): `skill.split`
-  of that skill into one narrower skill per part, all in the old topic, then `topic.split` with
-  new topics, each taking its skill. The old skill keeps its evidence and the dispatcher
-  re-extracts its episodes (Т-§2.8); the old topic is left without a part and is hidden by the
-  projector.
+- a topic of one skill (Т-§4.11): `topic.split` first — the first part keeps the id of the topic
+  and the old skill, the other parts are new empty topics — then `skill.split` of that skill into
+  one narrower skill per part, each in its topic (D-A-226: the projector skips a skill part whose
+  topic is not there yet). The old skill keeps its evidence and the dispatcher re-extracts its
+  episodes (Т-§2.8).
 
 Ids of new topics and skills are `uuid5` of the normalized name (Т-§4.4). Keys of the events
 follow the request, so a repeat writes nothing even if the model words the parts differently.
@@ -96,7 +96,7 @@ def build_events(
     session_id: UUID | None,
     causation_seq: int,
 ) -> list[NewEvent]:
-    """`skill.split` (a topic of one skill) and `topic.split`, keyed by the request."""
+    """`topic.split` (and, for a topic of one skill, `skill.split` after it), keyed by the request."""
 
     def new(event_type: str, payload: SkillSplit | TopicSplit) -> NewEvent:
         return NewEvent(
@@ -110,41 +110,50 @@ def build_events(
         )
 
     events: list[NewEvent] = []
-    topic_parts: list[TopicPart]
     if len(skill_ids) == 1:
-        new_skills = [node_id(learner_id, domain_id, "skill", p.name) for p in parts]
+        # D-A-226 (#245): `skill.split` skips a part whose topic does not exist yet, and
+        # `topic.split` cannot cover a skill that is not there — so the topics come first:
+        # the first part keeps the id of the topic and the old skill, the others are empty new
+        # topics; then the skill is split into one narrower skill per part, each in its topic.
+        part_topics = [
+            topic_id if i == 0 else node_id(learner_id, domain_id, "topic", p.name)
+            for i, p in enumerate(parts)
+        ]
+        topic_parts = [
+            TopicPart(
+                topic_id=part_topics[i],
+                name=p.name,
+                skill_ids=list(skill_ids) if i == 0 else [],
+            )
+            for i, p in enumerate(parts)
+        ]
+        events.append(new("topic.split", TopicSplit(topic_id=topic_id, into=topic_parts)))
         events.append(
             new(
                 "skill.split",
                 SkillSplit(
                     skill_id=skill_ids[0],
                     into=[
-                        SkillPart(skill_id=sid, name=p.name, topic_id=topic_id)
-                        for sid, p in zip(new_skills, parts, strict=True)
+                        SkillPart(
+                            skill_id=node_id(learner_id, domain_id, "skill", p.name),
+                            name=p.name,
+                            topic_id=part_topics[i],
+                        )
+                        for i, p in enumerate(parts)
                     ],
                 ),
             )
         )
-        topic_parts = [
-            TopicPart(
-                topic_id=node_id(learner_id, domain_id, "topic", p.name),
-                name=p.name,
-                skill_ids=[sid],
-            )
-            for sid, p in zip(new_skills, parts, strict=True)
-        ]
-    else:
-        keeper = max(range(len(parts)), key=lambda i: (len(parts[i].skill_ids), -i))
-        topic_parts = [
-            TopicPart(
-                topic_id=topic_id
-                if i == keeper
-                else node_id(learner_id, domain_id, "topic", p.name),
-                name=p.name,
-                skill_ids=[*p.skill_ids, *(unnamed if i == keeper else ())],
-            )
-            for i, p in enumerate(parts)
-        ]
+        return events
+    keeper = max(range(len(parts)), key=lambda i: (len(parts[i].skill_ids), -i))
+    topic_parts = [
+        TopicPart(
+            topic_id=topic_id if i == keeper else node_id(learner_id, domain_id, "topic", p.name),
+            name=p.name,
+            skill_ids=[*p.skill_ids, *(unnamed if i == keeper else ())],
+        )
+        for i, p in enumerate(parts)
+    ]
     events.append(new("topic.split", TopicSplit(topic_id=topic_id, into=topic_parts)))
     return events
 
