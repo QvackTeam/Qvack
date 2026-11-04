@@ -41,6 +41,11 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pyright
+      # Д-§5.2 п.6, WP9.3 (D-C-166): every type the catalog gives a projector or a dispatcher has one.
+      - name: Event registry (реестр событий)
+        run: >-
+          uv run python -c "from quack.runtime.event_registry import registry_gaps as g;
+          import sys; gaps = g(); print(*gaps, sep='\n'); sys.exit(1 if gaps else 0)"
       - run: uv run pytest -q
 
   # Full layer: the same tests with real Postgres 16, Neo4j and Redis; nothing is skipped.

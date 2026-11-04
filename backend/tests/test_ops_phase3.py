@@ -28,7 +28,7 @@ from quack.events.models import NewEvent
 from quack.graph.worker import ProjectorWorker
 from quack.jobs import kinds
 from quack.jobs.queue import enqueue_job
-from quack.ops.registry import can_rollback, event_registry, registry_gaps
+from quack.ops.registry import can_rollback, event_registry, registry_gaps, write_event_registry
 from quack.ops.seed import SeedRefusedError, seed_learners, write_learners
 from quack.ops.status import collect_status
 from tests.support.auth import session_cookie
@@ -347,11 +347,11 @@ async def test_ops_status_without_postgres_exits_2(
 REGISTRY_FIXTURE = Path(__file__).parent / "fixtures" / "event_registry.json"
 
 
-async def test_event_registry_and_can_rollback(
-    db: SessionFactory, settings: Settings, tmp_path: Path
-) -> None:
+def test_event_registry_and_can_rollback_of_phase3(tmp_path: Path) -> None:
+    """The library of Phase 3 (`quack.ops.registry`, until WP1.3 step 5). The commands moved to
+    the registry of Phase 4 (#232): `tests/test_ops_p4_registry.py`."""
     out = tmp_path / "registry.json"
-    assert cli.main(["ops", "event-registry", "--out", str(out)]) == 0
+    write_event_registry(out)
     current = json.loads(out.read_text(encoding="utf-8"))
     expected = json.loads(REGISTRY_FIXTURE.read_text(encoding="utf-8"))
     assert current == expected == event_registry()
@@ -373,21 +373,6 @@ async def test_event_registry_and_can_rollback(
     assert seen["can_rollback"] is False and seen["new_pairs_seen"] == [p]
     other_rules = can_rollback({**current, "rules_version": "rules@1"}, set())
     assert other_rules["rules_changed"] is True and other_rules["can_rollback"] is False
-
-    # Through the CLI with ops.event_types_seen of the database: exit 0 / 1.
-    await _exec(
-        db,
-        "INSERT INTO ops.event_types_seen (type, schema_version) VALUES ('turn.extracted', 2)",
-    )
-    previous_file = tmp_path / "previous.json"
-    previous_file.write_text(json.dumps(previous), encoding="utf-8")
-    parser = cli.build_parser()
-    args = parser.parse_args(["ops", "can-rollback", "--to-registry", str(out)])
-    args.previous = current
-    assert await cli._ops(settings, args) == 0
-    args = parser.parse_args(["ops", "can-rollback", "--to-registry", str(previous_file)])
-    args.previous = previous
-    assert await cli._ops(settings, args) == 1
 
 
 def test_event_registry_has_handlers_and_rules(monkeypatch: pytest.MonkeyPatch) -> None:

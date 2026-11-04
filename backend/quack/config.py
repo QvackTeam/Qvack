@@ -474,9 +474,20 @@ class Settings(BaseSettings):
     tool_timeout_ms: int = 2000
     # WP10.3: model steps of one tool loop before it is cut. Phase 4 decision D-B-117.
     tool_loop_max_steps: int = 4
-    # WP10.4 (Т-§11.4).
-    session_agent_budget_usd: float = 0.5
-    learner_daily_budget_usd: float = 3.0
+    # WP10.4 (Т-§11.4); owner decision D-B-211: generous per-learner budgets while the pool
+    # is full, the values of Т-§11.4 once it runs low (`tight_*`).
+    session_agent_budget_usd: float = 5.0
+    learner_daily_budget_usd: float = 20.0
+    tight_session_agent_budget_usd: float = 0.5
+    tight_learner_daily_budget_usd: float = 3.0
+    # D-B-211: the money for models, in dollars (`LLM_POOL_BUDGET_USD`); 0 — no pool, the mode
+    # is always `normal`. The remainder is the pool minus every cost in `ops.llm_usage`.
+    llm_pool_budget_usd: float = 0.0
+    llm_pool_tight_remaining_usd: float = 100.0
+    llm_pool_judges_only_remaining_usd: float = 50.0
+    llm_pool_cache_s: float = 30.0
+    # D-B-211: the preference (`preference.set`) by which a learner says «I am a Meta judge».
+    meta_judge_preference_key: str = "meta_judge"
     # WP13.4 (Т-§12.2).
     spoiler_holdback_chars: int = 120
     # WP14.5 (Т-§10.1).
