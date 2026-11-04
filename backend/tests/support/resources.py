@@ -126,5 +126,5 @@ def build_job_context(
         storage=storage or InMemoryObjectStore(),
         embeddings=embeddings or FakeEmbeddingClient(settings.embedding_dim),
         deletions=deletions or FakeDeletionJournal(),
-        **{name: legacy.get(name) for name in retired_fields},
+        **cast(dict[str, Any], {name: legacy.get(name) for name in retired_fields}),
     )
