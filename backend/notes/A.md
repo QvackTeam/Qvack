@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-A-240. DoD п.3: тесты §8 потока A под именами ТЗ (T-ED1–ED4, T-RV1, T-RV4, T-DL1–DL3)
+- Класс: A
+- WP / место: WP8, WP17, WP25; `tests/domains/test_edits.py`, `tests/domains/test_deletions.py` (новый), `tests/graph/test_projection_runner.py`, `tests/graph/test_read_neo4j_extras.py`
+- Контекст: DoD п.3 — «все тесты §8 существуют». У A поведение было покрыто под другими именами, а T-ED1–ED4, T-RV1, T-RV4, T-DL1–DL3 по имени или номеру не находились. Проверки, которых не было: удаление при недоступном журнале через маршруты (503, данные целы), перенос из удалённого домена, повтор повтора удаления
+- Решение: (1) `tests/domains/test_edits.py` (файл §8.6): `test_dispute_cascade`, `test_typo_reclassifies`, `test_topic_edits`, `test_known_claimed_no_state_change` на Postgres и Neo4j через `project_learner`. (2) `tests/domains/test_deletions.py`: `test_journal_first` (три маршрута удаления при недоступном журнале — 503 `SERVICE_UNAVAILABLE`, счётчики ученика не изменились), `test_topic_domain_account_bounds` (выведенное `transfer` на навык другого домена исчезает после удаления домена-источника). (3) Переименованы `test_reconcile_and_replay_deletions` → `test_reconcile_and_replay` (T-DL3, плюс второй повтор) и `test_today_prep_mode_and_grade` → `test_prep_mode_and_grade` (T-RV4). Номер T-RV1 проставлен у `test_review_candidates_reasons_scope_and_isolation`; там же проверено, что после даты дедлайн не весит (`Т-§14.8`: оценка вводится после даты, вес снимается, темы — в обычное повторение). (4) В `test_delete_domain` — данные целы после отказа журнала
+- Почему: ТЗ §10 п.3, §8.6, §8.10, §8.12; `Т-§14.8`, `Т-§19.5`, `Д-§8.5`
+- Обратимость: полная (только тесты)
+- Тесты: перечисленные; красного прогона нет — реализация влита раньше тестов с этими именами (§0.4.4 п.11: так и записано). Остаток T-RV4 «слот 6» — B (WP17.4, строка STATUS)
+- Требует подтверждения владельцем: нет
+
 ### D-A-239. WP2.3 / WP3.4: наложение сессии на `rules@3`
 - Класс: A
 - WP / место: WP2.3, WP3.4; `quack/graph/overlay_build.py` (новый), `quack/graph/overlay.py` (только докстринг), `quack/graph/projection/runner.py`, `quack/events/log.py`, `tests/test_session_overlay.py`
