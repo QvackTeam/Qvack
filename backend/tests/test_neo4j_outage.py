@@ -16,6 +16,7 @@ from quack.api.errors import ErrorResponse
 from quack.config import Settings
 from quack.db import Db
 from quack.db.postgres import SessionFactory
+from tests.db.fixtures import create_learner
 from tests.support.auth import learner_headers, login_hook
 from tests.support.broken import BrokenNeo4jDriver
 from tests.support.resources import build_app_resources
@@ -37,8 +38,8 @@ async def api(
         yield client
 
 
-async def _learner_with_domain(api: httpx.AsyncClient) -> tuple[dict[str, str], str]:
-    headers = learner_headers(uuid4())
+async def _learner_with_domain(api: httpx.AsyncClient, db: Db) -> tuple[dict[str, str], str]:
+    headers = learner_headers(await create_learner(db))
     created = await api.post(
         "/v1/domains", json={"name": "Algebra", "idempotency_key": uuid4().hex}, headers=headers
     )
@@ -52,12 +53,12 @@ def _assert_service_unavailable(response: httpx.Response, what: str) -> None:
     assert body.error.code == "SERVICE_UNAVAILABLE", what
 
 
-async def test_neo4j_outage_is_service_unavailable(api: httpx.AsyncClient) -> None:
+async def test_neo4j_outage_is_service_unavailable(api: httpx.AsyncClient, pg_db: Db) -> None:
     """Graph and topic card with Neo4j down → 503 (T-H1, the part of stream C)."""
-    headers, domain_id = await _learner_with_domain(api)
+    headers, domain_id = await _learner_with_domain(api, pg_db)
     graph = await api.get(f"/v1/domains/{domain_id}/graph", headers=headers)
     _assert_service_unavailable(graph, "graph")
-    topic = await api.get(f"/v1/domains/{domain_id}/topics/{uuid4()}", headers=headers)
+    topic = await api.get(f"/v1/topics/{uuid4()}", headers=headers)
     _assert_service_unavailable(topic, "topic")
 
 

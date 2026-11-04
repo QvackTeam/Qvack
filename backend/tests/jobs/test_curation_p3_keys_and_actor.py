@@ -17,8 +17,8 @@ from sqlalchemy import text
 from quack.config import Settings
 from quack.db.postgres import SessionFactory
 from quack.db.redis import PROJECTOR_WAKEUP_CHANNEL
-from quack.domains.curation import curate_domain_graph
 from quack.domains.schemas import CuratorMerge, CuratorOutput
+from quack.jobs.curation_p3 import curate_domain_graph
 from quack.jobs.queue import ClaimedJob
 from tests.support.resources import build_job_context
 
