@@ -14,6 +14,7 @@ import { DomainGraph, type GraphHandle } from "./domain-graph";
 import { LayeredGraph } from "./graph/layered-graph";
 import { NumText } from "./num-text";
 import { EmptyDomain } from "./empty-domain";
+import { NEW_DOMAIN_TEXT_KEY } from "./live/domain-setup-live";
 import { TodayCards } from "./today-cards";
 import { TopicList } from "./topic-list";
 import { TopicSearch } from "./topic-search";
@@ -159,7 +160,15 @@ export function DomainView() {
           <EmptyDomain titleDat="" />
         </div>
         <div className="px-4 pb-4 md:px-7 md:pb-5">
-          <Composer label={tx.domain.composerLabelNew} onSend={startSession} />
+          <Composer
+            label={tx.domain.composerLabelNew}
+            onSend={(text) => {
+              try {
+                sessionStorage.setItem(NEW_DOMAIN_TEXT_KEY, text);
+              } catch {}
+              router.push("/domains/new");
+            }}
+          />
         </div>
       </>
     );
@@ -247,7 +256,7 @@ export function DomainView() {
               <TodayCards recs={recs} nameOf={nameOf} onHover={setHot} className="hidden md:grid" />
             </>
           ) : (
-            <EmptyDomain titleDat={domain.titleDat} setupHref={domain.status === "onboarding" ? `/domains/${domain.id}/structure` : undefined} />
+            <EmptyDomain titleDat={domain.titleDat} />
           )}
         </div>
       </div>
