@@ -156,7 +156,7 @@
 | WP18.4 | Согласия | влит | `POST /v1/consents`, `require_terms` (#97, #106, #111) | — | — | T-AU6 |
 | WP19 | Объектное хранилище и загрузки | влит | `S3ObjectStore`, ключи с ULID, тип по содержимому (#90) | проверка региона Contabo и path-style на стенде (D-C-109) | — | T-ST1, T-ST2, T-ST3 |
 | WP20.1 | Загрузка | влит | `POST /v1/domains/{id}/materials`, `GET /v1/materials/{id}` (#98, #113) | — | — | T-MT1 (часть) |
-| WP20.2 | Разбор | не начат | Роль `material_parser` в `Settings`, события `material.*` | задача `material.parse`: страницы, куски, структура под блокировкой домена, слой 2 `material_parser@1` | WP1.3 (A), builder (B) | T-MT1 |
+| WP20.2 | Разбор | частично | Роль `material_parser` в `Settings`, события `material.*`; `material.parse` в два шага (страницы, куски, разметка; структура под `domain:{id}` через `reconcile_domain`, хаб «из материала»), слой 2 и черновик слоя 1 `material_parser@1` (D-C-200…D-C-203) | силлабус (дедлайны), задачи семинара, скан без текстового слоя (D-C-202 п.4) | задачи семинара — разметка WP12.5 (B) | T-MT1 |
 | WP20.3 | Эмбеддинги на Modal | влит | `modal/embeddings.py`, клиент (#115) | инструкция запроса и окно простоя — подтвердить владельцем | D-C-117 | T-MT2, T-MT4 |
 | WP20.4 | Векторный поиск, предвыборка | влит | `materials_prefetch`, `materials_search` (#140) | — | — | T-MT3 |
 | WP20.5 | Полнотекстовый поиск | влит | `GET /v1/search`, `materials/search.py` (#98, #113) | теста `T-DB6` (EXPLAIN GIN) в `tests/db` не нашёл | — | T-MT5, T-DB6 |

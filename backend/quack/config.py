@@ -629,6 +629,14 @@ class Settings(BaseSettings):
     deletions_s3_secret_key: SecretStr = SecretStr("")
     # WP20 (Т-§10.5, ТЗ §2.3 п.17)
     materials_k: int = 5
+    # WP20.2 (Т-§3.4.5 «около 1–2 КБ», Т-§4.3 «параллельно для больших материалов»;
+    # Phase 4 decision D-C-201): chunk size in characters, chunks per `material_parser` call,
+    # calls in flight, marks kept per chunk.
+    material_chunk_chars: int = Field(default=1500, ge=200)
+    material_chunk_max_chars: int = Field(default=2000, ge=200)
+    material_parser_batch: int = Field(default=8, ge=1)
+    material_parser_concurrency: int = Field(default=4, ge=1)
+    material_marks_per_chunk: int = Field(default=6, ge=1)
     # Т-§3.4.6, Т-§10.5: the reserve taken inside SEARCH before post-filters and the final k.
     vector_search_reserve: int = 30
     embedding_dim: int = 768

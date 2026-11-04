@@ -41,6 +41,7 @@ HANDLER_MODULES: tuple[str, ...] = (
     "quack.agents.task_generation",
     "quack.agents.topic_split",
     "quack.agents.illustration",
+    "quack.ops.material_parse",
 )
 
 

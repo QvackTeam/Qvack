@@ -742,6 +742,20 @@ Output fields:
 Input blocks: `problem`, `solution_space`, `skills`, `known_misconceptions`, `earlier_lines`, `line`
 Label fields: `misconception`, `root_cause`
 
+## `material_parser@1` → `MaterialParserOutput`
+
+Output fields:
+
+- `title`: string
+- `chunks`: list[object]
+- `chunks.n`: integer
+- `chunks.topic`: string | null
+- `chunks.notation`: list[string]
+- `chunks.teaches`: list[string]
+- `chunks.uses`: list[string]
+
+Input blocks: `chunks`
+
 ## Edit points after G1
 
 - teacher tool names, if tools appear (R9);
