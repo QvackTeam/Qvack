@@ -56,18 +56,18 @@
 - Требует подтверждения владельцем: нет
 
 ### D-C-180. WP1.3 шаг 3: `quack/cli.py` и `quack/ops/*` без SQLAlchemy
-- Класс: C (зона C; сняты команды Фазы 3, процессы - только Фаза 4)
-- WP / место: WP1.3 шаг 3, WP9.6, issue #215, #235; `quack/cli.py`, `quack/ops/{commands,db_roles,purge_job}.py`
+- Класс: C (зона C; сняты команды Фазы 3)
+- WP / место: WP1.3 шаг 3, WP9.6, issue #215, #235; `quack/cli.py`, `quack/ops/{commands,db_roles}.py`
 - Контекст: план #215 шаг 3: C переводит `ops` и CLI на `Db`; A снимает остальное на шаге 5. Роли БД и `LLMGateway` - в документах и у B не решены до конца.
 - Решение:
   1. Сняты команды `ops replay-dlq` и `ops purge-deleted` (таблицы `ops.dlq`, `ops.deletion_tombstones` Фазы 3 ушли; повтор и удаление Фазы 4 - у A, D-A-197..205).
-  2. `process_settings` ставит `phase4_processes = True`: в CLI нет пути процессов Фазы 3 (проектор, очередь, диспетчер Фазы 3, `ops rebuild` Фазы 3 убраны). Поле остаётся в `Settings` для `quack.runtime` до шага 5 (A).
-  3. `purge_deleted` и `PURGE_TABLES` перенесены из `commands.py` в `quack/ops/purge_job.py` без изменений: обработчик `account.purge_deleted` - единственный вызывающий; файл (и `registry.py`) A удаляет на шаге 5. CLI их не использует.
+  2. A снял флаг `phase4_processes` и код процессов Фазы 3 (D-A-223..225, шаг 5 ч.1); в CLI от Фазы 3 оставались `ops replay-dlq`, `ops purge-deleted`, движок и фабрика сессий - сняты здесь.
+  3. `purge_deleted` и `PURGE_TABLES` удалены из `commands.py` вместе с командой: обработчик `account.purge_deleted` и `purge_job.py` A уже убрал (удаление Фазы 4 - у A, D-A-197..205). `quack.ops.commands` - только `migrate`.
   4. `ops db-roles` на `Db` (`psycopg.sql`), схемы `core`, `content`, `ops` (схемы `auth` нет). Роли на DSN сервисов не переводятся (D-C-160 п.6): `ops migrate` и сервисы идут под `quack`; перевод - решение владельца после шага 5, схема Фазы 4 его допускает (все таблицы в трёх схемах, права по умолчанию для `quack_migrator`).
   5. `LLMGateway.__init__` (B) ещё требует фабрику сессий Фазы 3: `ops extraction-eval` и `ops replay-session` строят её в одном месте (`cli._gateway`, при `db=`). Это единственное упоминание движка в CLI; уйдёт, когда B уберёт параметр (шаг 4 плана). Шлюз на схеме Фазы 4 до этого читает `core.llm_outbox`, которого в ней нет - обе команды заработают целиком после шага 4.
 - Почему: ТЗ Ф4 WP1.3, §8.15 (тесты снятого кода удалены в том же PR), §4.1 (слои); план #215.
 - Обратимость: откатом коммита.
-- Тесты: `tests/test_ops_phase3.py` (`test_cli_parser_phase3`, `test_the_processes_run_on_phase_4`), `test_ops_p4_registry.py` (`test_rebuild_is_on_phase_4_without_the_flag`), `test_ops_db_roles.py`.
+- Тесты: `tests/test_ops_phase3.py` (`test_cli_parser_phase3`: команды сняты), `test_ops_db_roles.py`, `test_ops_p4_cli.py`.
 - Требует подтверждения владельцем: нет (п.4 - перевод ролей сервисов остаётся за владельцем)
 
 ### D-C-159. WP21.5: пометки и вмешательства — шлюз вмешательств, ключ `canvas_quiet`, сообщения `mark` и `hint`

@@ -282,7 +282,6 @@ class Settings(BaseSettings):
     # WP3.3: periodic jobs. Phase 3 decisions (ТЗ §6.2).
     scheduler_tick_s: float = 15.0
     session_sweep_interval_s: int = 60
-    purge_deleted_interval_s: int = 600
     # WP3.4: a job deferred to the next UTC midnight gets up to this much random jitter.
     daily_budget_defer_jitter_s: int = 900
     # WP11.1 (Т-§22.4): dispatcher inside `projector`; batch size as projector_batch_max_events.
@@ -297,10 +296,6 @@ class Settings(BaseSettings):
     # WP1.2: pool of `Db` per process; the docs give no sizes (Phase 4 decision D-A-101).
     pg_pool_min_size: int = 1
     pg_pool_max_size: int = 10
-    # WP1.3 (Phase 4 decision D-A-200): `projector` and `workers` run the code of Phase 4
-    # (rules@3, the queue and the executor on Db). Off until the deployment switches its
-    # schema to dbmate (WP9); then on, and the code of Phase 3 goes with WP1.3.
-    phase4_processes: bool = False
     # Т-§2.7, Т-§2.4.
     rebuild_concurrency: int = 2
     projector_lag_p95_ms: int = 500

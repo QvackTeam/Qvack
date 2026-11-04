@@ -28,7 +28,7 @@ from quack.db import open_db
 from quack.db.neo4j import create_driver, verify_schema
 from quack.db.postgres import create_engine, create_session_factory
 from quack.db.redis import create_redis
-from quack.graph.projection.rebuild import rebuild_learner as rebuild_learner_p4
+from quack.graph.projection.rebuild import rebuild_learner
 from quack.graph.projection.runner import RULES_VERSION
 from quack.graph.projection.store import stale_learners
 from quack.graph.read.reader import create_graph_reader
@@ -70,10 +70,8 @@ PROCESS_ROLES: dict[str, ProcessRole] = {
 
 def process_settings(settings: Settings, role: ProcessRole) -> Settings:
     """Set the role before any resource is created (§4.3) and bind `process` and `version` to
-    every log line of this process (Д-§9.1). The processes run on Phase 4 only (WP1.3 step 3,
-    D-C-180): the flag of D-A-200 is set here for the resources of `quack.runtime` (the gateway
-    accounts in `ops.llm_usage`), until stream A removes it with the Phase 3 runtime."""
-    configured = settings.model_copy(update={"process_role": role, "phase4_processes": True})
+    every log line of this process (Д-§9.1)."""
+    configured = settings.model_copy(update={"process_role": role})
     structlog.contextvars.bind_contextvars(process=role, version=configured.quack_version)
     return configured
 
@@ -266,7 +264,7 @@ async def _rebuild(settings: Settings, args: argparse.Namespace) -> int:
             rows = await db.fetch_all("SELECT learner_id FROM core.learners ORDER BY learner_id")
             learners = [UUID(str(row["learner_id"])) for row in rows]
         return await _rebuild_each(
-            learners, lambda lid: rebuild_learner_p4(db, neo4j, settings, lid, redis=redis)
+            learners, lambda lid: rebuild_learner(db, neo4j, settings, lid, redis=redis)
         )
     finally:
         await redis.aclose()

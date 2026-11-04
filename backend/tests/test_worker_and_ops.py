@@ -1,4 +1,4 @@
-"""Projector worker loop, ops rebuild / purge-deleted and the job runner
+"""Projector worker loop, ops rebuild and the job runner
 (Т-§2.4, §2.7, §2.9, spec §4.3–4.4, §7, Д-§6)."""
 
 from __future__ import annotations
@@ -19,16 +19,12 @@ from quack.events import append_events
 from quack.events.models import NewEvent, StoredEvent
 from quack.events.reader import read_learner_events
 from quack.graph import projector as projector_module
-from quack.graph.ids import CURRENT_RULES_VERSION
-from quack.graph.mutations import AdvanceWatermark
 from quack.graph.neo4j_store import Neo4jGraphStore
 from quack.graph.projector import project_in_memory
-from quack.graph.rebuild import rebuild_learner
 from quack.graph.worker import ProjectorWorker
 from quack.jobs import kinds
 from quack.jobs.queue import ClaimedJob, enqueue_job
 from quack.jobs.runner import JobContext, JobRunner, register_job_handler
-from quack.ops.purge_job import purge_deleted
 from tests.scenario import build_scenario
 from tests.support.resources import build_job_context
 
@@ -137,79 +133,6 @@ async def test_poison_event_stops_learner_until_replay(
     await _drain(worker)
     wm = await Neo4jGraphStore(neo4j, str(learner)).load_watermark(str(learner))
     assert wm is not None and wm.applied_seq == stored[-1].seq
-
-
-async def test_rules_mismatch_skips_until_rebuild(
-    settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
-    neo4j: AsyncDriver,
-    redis: Redis,
-) -> None:
-    learner, stored = await _seed(db)
-    store = Neo4jGraphStore(neo4j, str(learner))
-    await store.apply([AdvanceWatermark(str(learner), 0, "rules@0")])
-    worker = _worker(settings, pg_engine, db, neo4j, redis)
-    outcome = await worker.process_learner(learner)
-    assert outcome is not None and outcome.status == "skipped_rules"
-
-    result = await rebuild_learner(settings, pg_engine, db, neo4j, redis, learner)
-    assert result.status == "rebuilt" and result.applied_seq == stored[-1].seq
-    async with db() as session:
-        events = await read_learner_events(session, learner)
-    expected = await project_in_memory(learner, events, settings.fold, batch_size=3)
-    assert (await store.dump()).snapshot() == expected.snapshot()
-    wm = await store.load_watermark(str(learner))
-    assert wm is not None and wm.projector_version == CURRENT_RULES_VERSION
-    assert (await worker.process_learner(learner)) is not None
-
-
-async def test_chunked_rebuild_respects_presence(
-    settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
-    neo4j: AsyncDriver,
-    redis: Redis,
-) -> None:
-    learner, _ = await _seed(db)
-    tiny = settings.model_copy(update={"rebuild_max_tx_ops": 10})
-    await redis.set(f"presence:learner:{learner}", str(uuid4()), ex=90)
-    busy = await rebuild_learner(tiny, pg_engine, db, neo4j, redis, learner)
-    assert busy.status == "active_session"
-    assert (await Neo4jGraphStore(neo4j, str(learner)).dump()).nodes == {}
-    await redis.delete(f"presence:learner:{learner}")
-    done = await rebuild_learner(tiny, pg_engine, db, neo4j, redis, learner)
-    assert done.status == "rebuilt" and done.operations > 10
-    async with db() as session:
-        events = await read_learner_events(session, learner)
-    expected = await project_in_memory(learner, events, settings.fold, batch_size=100)
-    assert (await Neo4jGraphStore(neo4j, str(learner)).dump()).snapshot() == expected.snapshot()
-
-
-async def test_purge_deleted_removes_all_learner_data(
-    pg_engine: AsyncEngine, db: SessionFactory, neo4j: AsyncDriver, settings: Settings
-) -> None:
-    learner, _ = await _seed(db)
-    other, _ = await _seed(db)
-    worker = ProjectorWorker(settings, pg_engine, db, neo4j, None)
-    await _drain(worker)
-    async with db() as session, session.begin():
-        await session.execute(
-            text(
-                "INSERT INTO ops.deletion_tombstones (learner_id, requested_at, status) "
-                "VALUES (:l, now(), 'pending_purge')"
-            ),
-            {"l": learner},
-        )
-    purged = await purge_deleted(pg_engine, db, neo4j, chunk_size=20)
-    assert purged == [learner]
-    for table in ("core.events", "core.learner_seq", "core.sessions", "core.domains"):
-        assert await _q(db, f"SELECT 1 FROM {table} WHERE learner_id = :l", l=learner) == []
-    assert await _q(db, "SELECT 1 FROM core.events WHERE learner_id = :l", l=other) != []
-    assert (await Neo4jGraphStore(neo4j, str(learner)).dump()).nodes == {}
-    assert (await Neo4jGraphStore(neo4j, str(other)).dump()).nodes != {}
-    [tomb] = await _q(db, "SELECT status, purged_at FROM ops.deletion_tombstones")
-    assert tomb["status"] == "purged" and tomb["purged_at"] is not None
 
 
 async def test_job_runner_executes_and_retries(settings: Settings, db: SessionFactory) -> None:

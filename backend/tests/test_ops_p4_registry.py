@@ -16,7 +16,7 @@ from pydantic import SecretStr
 from quack import cli
 from quack.config import Settings
 from quack.graph.projection.rebuild import RebuildOutcome
-from quack.runtime.event_registry import event_registry
+from quack.runtime.event_registry import event_registry, registry_gaps
 
 A, B, C = (UUID(int=n) for n in (1, 2, 3))
 
@@ -125,6 +125,12 @@ def test_main_reads_the_previous_registry_of_can_rollback(
     assert seen == [event_registry()]
 
 
+def test_every_catalog_type_has_a_handler_and_a_rule() -> None:
+    """Д-§5.2 п.6, T-O6 (replaces the check of the registry of Phase 3): the «Проектор» and
+    «Диспетчер» columns of the catalog against the code."""
+    assert registry_gaps() == []
+
+
 # --- WP3.5: `ops rebuild` on rules@3 -----------------------------------------------------
 
 
@@ -146,7 +152,7 @@ class _Rebuilds:
             self.stale.append((neo4j, version))
             return self.stale_ids
 
-        monkeypatch.setattr(cli, "rebuild_learner_p4", rebuild_p4)
+        monkeypatch.setattr(cli, "rebuild_learner", rebuild_p4)
         monkeypatch.setattr(cli, "stale_learners", stale_learners)
 
 
@@ -157,7 +163,7 @@ def _rebuild_args(*extra: str) -> Any:
 async def test_rebuild_phase4_one_learner(monkeypatch: pytest.MonkeyPatch) -> None:
     wiring = _Wiring(monkeypatch, [])
     rebuilds = _Rebuilds(monkeypatch, wiring)
-    settings = _settings(phase4_processes=True)
+    settings = _settings()
     assert await cli._ops(settings, _rebuild_args("--learner", str(A))) == 0
     ((args, kw),) = rebuilds.calls
     assert args == (wiring.db, wiring.neo4j, settings, A)
@@ -169,7 +175,7 @@ async def test_rebuild_phase4_stale_rules(monkeypatch: pytest.MonkeyPatch) -> No
     wiring = _Wiring(monkeypatch, [])
     rebuilds = _Rebuilds(monkeypatch, wiring)
     rebuilds.stale_ids = [str(B), str(C)]
-    assert await cli._ops(_settings(phase4_processes=True), _rebuild_args("--stale-rules")) == 0
+    assert await cli._ops(_settings(), _rebuild_args("--stale-rules")) == 0
     assert rebuilds.stale == [(wiring.neo4j, "rules@3")]
     assert [args[3] for args, _ in rebuilds.calls] == [B, C]
 
@@ -177,7 +183,7 @@ async def test_rebuild_phase4_stale_rules(monkeypatch: pytest.MonkeyPatch) -> No
 async def test_rebuild_phase4_all_reads_core_learners(monkeypatch: pytest.MonkeyPatch) -> None:
     wiring = _Wiring(monkeypatch, [{"learner_id": A}, {"learner_id": str(B)}])
     rebuilds = _Rebuilds(monkeypatch, wiring)
-    assert await cli._ops(_settings(phase4_processes=True), _rebuild_args("--all")) == 0
+    assert await cli._ops(_settings(), _rebuild_args("--all")) == 0
     (query,) = wiring.db.queries
     assert "core.learners" in query and "ORDER BY learner_id" in query
     assert [args[3] for args, _ in rebuilds.calls] == [A, B]
@@ -191,7 +197,7 @@ async def test_rebuild_phase4_outcomes_set_the_exit_code(
         wiring = _Wiring(monkeypatch, [{"learner_id": A}, {"learner_id": B}])
         rebuilds = _Rebuilds(monkeypatch, wiring)
         rebuilds.statuses = {A: status}
-        code = await cli._ops(_settings(phase4_processes=True), _rebuild_args("--all"))
+        code = await cli._ops(_settings(), _rebuild_args("--all"))
         assert code == 1, status
         assert len(rebuilds.calls) == 2  # B was rebuilt after A did not
 
@@ -199,17 +205,8 @@ async def test_rebuild_phase4_outcomes_set_the_exit_code(
 async def test_rebuild_needs_a_target(monkeypatch: pytest.MonkeyPatch) -> None:
     wiring = _Wiring(monkeypatch, [])
     rebuilds = _Rebuilds(monkeypatch, wiring)
-    assert await cli._ops(_settings(phase4_processes=True), _rebuild_args()) == 2
+    assert await cli._ops(_settings(), _rebuild_args()) == 2
     assert rebuilds.calls == []
-
-
-async def test_rebuild_is_on_phase_4_without_the_flag(monkeypatch: pytest.MonkeyPatch) -> None:
-    """WP1.3 step 3: no Phase 3 path of `ops rebuild` is left, with the flag or without it."""
-    wiring = _Wiring(monkeypatch, [])
-    rebuilds = _Rebuilds(monkeypatch, wiring)
-    assert await cli._ops(_settings(), _rebuild_args("--learner", str(A))) == 0
-    ((args, _),) = rebuilds.calls
-    assert args[0] is wiring.db and args[3] == A
 
 
 # --- WP16.7, S15: `ops extraction-eval` ---------------------------------------------------

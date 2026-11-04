@@ -46,7 +46,7 @@
 | :-- | :-- | :-: | :-- | :-- | :-- | :-- |
 | WP1.1 | dbmate и базовая схема | влит | `db/migrations/…baseline.sql` + 3 расширяющие миграции (#78, #142) | — | — | T-DB1 |
 | WP1.2 | `Db` и репозитории | влит | `quack.db.Db`, `append_events`, блокировки на psycopg (#78, #107) | — | — | T-DB2, T-DB4, T-DB5 |
-| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1: процессы Фазы 4 за `phase4_processes` (D-A-200, D-A-206, #224); шаг 3 A: `graph/read` на `Db`, `sweep_inactive` в `periodic_p4` (D-A-210…212, #225), `quack/domains/**` на `Db`, интервью и диагностика удалены (D-A-207…209, #226); план — #215 | шаг 2 сделан: стенд на dbmate, `PHASE4_PROCESSES=true` (C, D-C-160, #239); шаг 3 C, ops и CLI: `ops status`, `restore-check`, `seed-learners`, `alerts`, `db-roles` на `Db`, `cli.py` без движка, команды `replay-dlq` и `purge-deleted` сняты (D-C-180, D-C-181, ветка phase-4-c-step3-ops); шаг 3 B — #222 (D-B-210, модули B на `Db`); шаг 3 C, остаток: `artifacts`, `api/resources.py`; шаг 4 B (шлюз на `Db`); шаг 5 A — снять код Фазы 3 (перечень D-A-212), `graph.curate` Фазы 3, флаг, `sqlalchemy`/`asyncpg`/`alembic`; владелец `quack/ops/*` — #215 | #223 | T-DB3 (G4) |
+| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1 — процессы Фазы 4 (D-A-200, #224); шаг 2 — стенд на dbmate (C, #239); шаг 3 A — `graph/read`, `domains/**` на `Db` (D-A-207…212, #225, #226); шаг 3 B — #222; шаг 5 ч.1 — флаг `phase4_processes` снят, `graph.curate` и `account.purge_deleted` Фазы 3, `ops/registry.py`, `jobs/periodic.py`, `graph/rebuild.py` удалены (D-A-223…225) | шаг 3 C — `artifacts/*`, `api/*` на `Db` (к G3, #215); ops и CLI сделаны: `ops status`, `restore-check`, `seed-learners`, `alerts`, `db-roles`, `cli.py` без движка, `replay-dlq` и `purge-deleted` сняты (C, D-C-180, D-C-181, ветка phase-4-c-step3-ops); шаг 4 B — шлюз без `session_factory`; шаг 5 ч.2 — `graph/worker.py`, `jobs/dispatcher*.py` (после тестов C), `jobs/queue.py`, `db/postgres.py`, зависимости `sqlalchemy`/`asyncpg`/`alembic` (T-DB3) | шаг 3 C, шаг 4 B | T-DB3 (G4) |
 | WP1.4 | squawk | влит | `backend/.squawk.toml` (#185), job `squawk` в CI (#189) | — | — | T-DB7 |
 | WP2.1 | Модели payload и реестр | влит | 65 типов, S3 заморожен (#80, #94, #119, #130) | — | D-A-121 (класс C) | T-EV1, T-EV2, T-EV3 |
 | WP2.2 | Ход и последствия вместе | влит | Пачка хода одним `append_events` (#109, `session/turn_commit.py`) | — | — | T-EV4 |
@@ -56,7 +56,7 @@
 | WP3.2 | Обработчики фазы А | влит | Обработчики 38 строк S5 (#135, #185) | — | — | T-P2, T-P3, T-P4, T-P5 |
 | WP3.3 | Фазы А–В, срез | влит | Фазы А–В, запись разницей, остановка потока (#185) | в процесс `projector` не подключён (WP1.3) | — | T-P6 |
 | WP3.4 | Режимы | влит | Пачки = пересборка (#185) | — | — | T-P1 |
-| WP3.5 | Пересборка | влит | Пересборка на rules@3, `--stale-rules` в `graph/projection` (#185) | `ops rebuild` в `cli.py` при `phase4_processes` на `graph/projection` (C, #232, D-C-165); путь Фазы 3 в `ops rebuild` снят (D-C-180) | — | T-P8 |
+| WP3.5 | Пересборка | влит | Пересборка на rules@3, `--stale-rules` в `graph/projection` (#185) | `ops rebuild` в `cli.py` на `graph/projection` (C, #232, D-C-165, D-C-180) | — | T-P8 |
 | WP3.6 | Версия правил | влит | `RULES_VERSION = rules@3` в `projection/runner.py` | старая константа rules@2 в `graph/ids.py` уходит с WP1.3 | — | — |
 | WP4.1 | Свидетельство и ярус | влит | `projection/skill_fold.py` (#185, D-A-182) | — | — | T-F2 |
 | WP4.2 | Вычисляемые свойства | влит | Веса, окно «горит», новизна, delayed (#185) | — | — | T-F3, T-F9 |
@@ -186,10 +186,9 @@
 
 ### Поток A
 
-1. **WP1.3, шаг 3** — A-часть сделана (#225, #226). Ждём B (#222) и C (#223, шаг 3 C).
-2. **WP1.3, шаг 5** — после шагов 3–4 всех потоков: снять код Фазы 3 зоны A (старые проектор, очередь, диспетчер, каталог, `db/postgres.py`), флаг `phase4_processes`, зависимости `sqlalchemy`, `asyncpg`, `alembic` (T-DB3).
-5. **WP8.2** — разбиение темы из чата (с WP13); `check.known_claim` зарегистрирован B.
-6. **Владелец:** `D-A-196` (класс C) — на подтверждение владельцу.
+1. **WP1.3, шаг 5 ч.2** — после шага 3 C (`artifacts/*`, `api/*`, `cli`, `ops/*` на `Db`; тесты `tests/artifacts` и `tests/support/dispatch.py` без Фазы 3) и шага 4 B (шлюз без `session_factory`): снять `graph/worker.py`, `jobs/dispatcher.py`, `jobs/dispatcher_rules.py`, `jobs/queue.py`, `events/append|reader|catalog|projections`, `db/postgres.py`, `db/locks.py`, зависимости `sqlalchemy`, `asyncpg`, `alembic` (T-DB3); `supervise` — в `runtime/phase4.py`.
+2. **WP8.2** — разбиение темы из чата (с WP13 B).
+3. **Владелец:** `D-A-196` (класс C); `D-A-221` (правило весов свидетельств).
 
 ### Поток B
 
