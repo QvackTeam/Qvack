@@ -79,8 +79,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const inSession = /^\/(session|topic|hub|canvas)\//.test(pathname);
   // Доска канваса занимает весь экран: ни панели доменов, ни панели сессий
   const fullscreen = pathname.startsWith("/canvas/");
-  // Живой режим: пока данные грузятся (или «/» без предметов — сейчас уведёт на создание) — пустой центр; ошибка — плашка
-  const busy = API_MODE && (!data.ready || (!data.error && data.domains.length === 0 && (pathname === "/" || pathname === DOMAIN_PATH)));
+  // Живой режим: пока данные грузятся (или «/» без предметов — сейчас уведёт в чат) — пустой центр; ошибка — плашка
+  const busy = API_MODE && (!data.ready || (!data.error && data.domains.length === 0 && pathname === "/"));
+  // Предметов нет: вместо пустых «Всех графов» — чат по умолчанию (вид домена с уткой и полем ввода)
+  const toChat = API_MODE && data.ready && !data.error && data.domains.length === 0 && pathname === "/";
+  useEffect(() => {
+    if (toChat) router.replace(DOMAIN_PATH);
+  }, [toChat, router]);
   const failed = API_MODE && !busy && !!data.error;
 
   const [domainId, setDomainId] = useState(domains[0].id);
@@ -199,7 +204,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div inert={!!drawer} className="flex h-dvh">
           {!fullscreen && (
             <aside aria-label={t.shell.subjects} className="hidden w-62 shrink-0 border-r border-seam-soft md:block">
-              <DomainSidebar domains={domains} activeId={activeId} onSelect={selectDomain} />
+              <DomainSidebar domains={data.domains} activeId={activeId} onSelect={selectDomain} />
             </aside>
           )}
 
@@ -279,7 +284,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <X />
               </IconButton>
               {side === "domains" ? (
-                <DomainSidebar domains={domains} activeId={activeId} onSelect={selectDomain} />
+                <DomainSidebar domains={data.domains} activeId={activeId} onSelect={selectDomain} />
               ) : (
                 panel()
               )}
