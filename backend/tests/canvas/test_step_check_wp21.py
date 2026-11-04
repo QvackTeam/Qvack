@@ -7,12 +7,9 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncEngine
-
 from quack.canvas.step_check import StepEnv, canvas_lines, check_step, second_opinion
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.event_types import HandwritingCorrected
 from quack.events.log import NewEvent, append_events
 from quack.llm.provider import ProviderRequest
@@ -67,8 +64,6 @@ class Setup:
 
 async def _setup(
     pg_db: Db,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     settings: Settings,
     *,
     task: bool = True,
@@ -78,7 +73,7 @@ async def _setup(
     scenario = ComputeScenario()
     provider = ScriptedLLMProvider()
     resources = build_app_resources(
-        settings, pg_engine, None, None, db=pg_db, session_factory=db, provider=provider,
+        settings, None, None, db=pg_db, provider=provider,
         compute=scripted_compute(scenario),
     )  # fmt: skip
     env = StepEnv(
@@ -94,14 +89,12 @@ async def _setup(
     return Setup(env, provider, scenario), learner
 
 
-async def test_step_check_cascade(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_step_check_cascade(pg_db: Db, settings: Settings) -> None:
     """T-CV4: a discrepancy of the transition is a confirmed error (`method: symbolic`, the
     model names the gap); a confirmed transition writes nothing; an unsure model diagnosis is a
     `question` with the second opinion `observation.second_opinion {target_seq, agreed}`; a
     disagreeing second opinion leaves no error mark."""
-    s, learner = await _setup(pg_db, pg_engine, db, settings)
+    s, learner = await _setup(pg_db, settings)
     canvas_id, session_id = s.env.canvas_id, s.env.session_id
     answers = {
         "x=3": _diagnosis(gap_type="execution", confidence=0.7),
@@ -156,13 +149,11 @@ async def test_step_check_cascade(
     assert len(await events(pg_db, learner, "observation.second_opinion")) == 1
 
 
-async def test_second_opinion_agrees_and_repeats_nothing(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_second_opinion_agrees_and_repeats_nothing(pg_db: Db, settings: Settings) -> None:
     """T-CV4: an agreeing second opinion is `agreed: true`; the key is the diagnosis, so the
     dispatcher's job `second_opinion.diagnosis` cannot add a second one; with the model down
     nothing is written and the mark stays a question."""
-    s, learner = await _setup(pg_db, pg_engine, db, settings)
+    s, learner = await _setup(pg_db, settings)
     first = line(s.env.canvas_id, "l1", "x=3")
     await commit(pg_db, learner, s.env.session_id, first)
     s.provider.respond(DIAGNOSER, lambda _r: _diagnosis(confidence=0.4))
@@ -192,12 +183,12 @@ def _unavailable(schema: str) -> Any:
 
 
 async def test_model_diagnosis_without_confirmation_gives_no_mark(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
+    pg_db: Db, settings: Settings
 ) -> None:
     """Q-A-3 п.1: a sure model diagnosis (`confidence >= mark_min_confidence`) is written as
     `error`/`model`, but without a symbolic discrepancy or a second opinion it is no mark; no
     error found - no event (D-C-120); the model down - nothing is written."""
-    s, learner = await _setup(pg_db, pg_engine, db, settings)
+    s, learner = await _setup(pg_db, settings)
     sure = line(s.env.canvas_id, "l1", "x=3")
     s.provider.respond(DIAGNOSER, lambda _r: _diagnosis(confidence=0.95))
     outcome = await check_step(s.env, sure, [])
@@ -218,11 +209,11 @@ async def test_model_diagnosis_without_confirmation_gives_no_mark(
 
 
 async def test_symbolic_error_without_the_model_keeps_its_error(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
+    pg_db: Db, settings: Settings
 ) -> None:
     """D-C-158 п.1: a confirmed discrepancy stays an error when the model is down or finds
     none; the gap is then `execution`."""
-    s, learner = await _setup(pg_db, pg_engine, db, settings)
+    s, learner = await _setup(pg_db, settings)
     first, second = line(s.env.canvas_id, "l1", "2x=4"), line(s.env.canvas_id, "l2", "x=3")
     s.scenario.push_for(TRANSITION, follows(False))
     s.provider.respond(DIAGNOSER, lambda _r: _diagnosis(error=False, gap_type="none"))
@@ -233,14 +224,12 @@ async def test_symbolic_error_without_the_model_keeps_its_error(
     assert diagnosed["payload"]["diagnosis"]["root_cause_skill_id"] is None
 
 
-async def test_impossible_transition_goes_to_the_model(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_impossible_transition_goes_to_the_model(pg_db: Db, settings: Settings) -> None:
     """Т-§15.4 п.1, п.3: a text line, a line compute cannot parse (`status: failed`, `follows:
     null`) and a fall of compute all hand the line to the model; the previous lines and the
     solution space reach the prompt; crossed out lines and canvases without a task are not
     checked."""
-    s, learner = await _setup(pg_db, pg_engine, db, settings)
+    s, learner = await _setup(pg_db, settings)
     first = line(s.env.canvas_id, "l1", "let x be the unknown", kind="text")
     second = line(s.env.canvas_id, "l2", "x=3")
     s.provider.respond(DIAGNOSER, lambda _r: _diagnosis(error=False, gap_type="none"))
@@ -261,18 +250,16 @@ async def test_impossible_transition_goes_to_the_model(
     assert (await check_step(s.env, struck, [first])).mark is None
     assert len(s.provider.calls) == before + 2
 
-    free, _ = await _setup(pg_db, pg_engine, db, settings, task=False)
+    free, _ = await _setup(pg_db, settings, task=False)
     assert (await check_step(free.env, line(free.env.canvas_id, "l1", "x=1"), [])).mark is None
     assert free.provider.calls == []
     assert await events(pg_db, learner, "observation.diagnosed") == []
 
 
-async def test_lines_of_the_canvas_follow_the_log(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_lines_of_the_canvas_follow_the_log(pg_db: Db, settings: Settings) -> None:
     """The lines a step is compared with: the last commit of a line, the learner's correction
     applied, the erased ones left out, in the order they first appeared."""
-    s, learner = await _setup(pg_db, pg_engine, db, settings)
+    s, learner = await _setup(pg_db, settings)
     canvas_id, session_id = s.env.canvas_id, s.env.session_id
     for row in (
         line(canvas_id, "a", "1"),

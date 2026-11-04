@@ -7,13 +7,10 @@ from collections.abc import Sequence
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy.ext.asyncio import AsyncEngine
-
 from quack.artifacts.documents import get_artifact
 from quack.artifacts.topic_refresh import refresh_topic_notes, worked_phrasings, writer_input
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.log import NewEvent, append_events
 from quack.graph.read import TopicMemory, TopicRequires
 from quack.graph.read.materials import ChunkHit
@@ -155,9 +152,7 @@ async def test_writer_input_has_the_four_layers(pg_db: Db, settings: Settings) -
     ) is None  # fmt: skip
 
 
-async def test_refresh_writes_valid_blocks_and_retries_once(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_refresh_writes_valid_blocks_and_retries_once(pg_db: Db, settings: Settings) -> None:
     """Т-§17.3: an unknown label is a violation — one more generation, then the element is
     dropped; labels become ids; a repeated job writes no new version."""
     learner = await create_learner(pg_db)
@@ -167,9 +162,7 @@ async def test_refresh_writes_valid_blocks_and_retries_once(
     bad = {"updates": None, "kind": "why", "content": "Because…", "sources": ["P9"], "skills": []}
     provider = ScriptedLLMProvider()
     provider.respond("ArtifactWriterOutput", lambda _r: {"blocks": [good, bad], "cards": []})
-    resources = build_app_resources(
-        settings, pg_engine, None, None, db=pg_db, session_factory=db, provider=provider
-    )
+    resources = build_app_resources(settings, None, None, db=pg_db, provider=provider)
     reader = TopicReader(topic_id, 1)
     version = await refresh_topic_notes(
         resources.db, resources.llm, reader, _prefetch, settings,

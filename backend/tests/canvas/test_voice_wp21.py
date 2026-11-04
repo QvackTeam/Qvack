@@ -20,7 +20,6 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.auth import SESSION_COOKIE
@@ -28,7 +27,6 @@ from quack.auth.sessions import open_session
 from quack.canvas.voice import MAX_AUDIO_S, normalize_wav
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.log import NewEvent, append_events
 from quack.llm.errors import ProviderUnavailableError
 from quack.storage.uploads import UploadRejected
@@ -197,15 +195,13 @@ def provider() -> ScriptedLLMProvider:
 @pytest.fixture
 async def client(
     pg_db: Db,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     settings: Settings,
     store: InMemoryObjectStore,
     provider: ScriptedLLMProvider,
 ) -> AsyncIterator[httpx.AsyncClient]:
     resources = build_app_resources(
-        settings, pg_engine, None, None,
-        db=pg_db, session_factory=db, provider=provider, storage=store,
+        settings, None, None,
+        db=pg_db, provider=provider, storage=store,
     )  # fmt: skip
     app = create_app(settings, resources=resources)
     async with httpx.AsyncClient(

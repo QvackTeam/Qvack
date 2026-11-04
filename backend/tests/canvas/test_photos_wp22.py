@@ -8,7 +8,6 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.auth import SESSION_COOKIE
@@ -56,9 +55,9 @@ def store() -> InMemoryObjectStore:
 
 @pytest.fixture
 async def client(
-    pg_db: Db, pg_engine: AsyncEngine, settings: Settings, store: InMemoryObjectStore
+    pg_db: Db, settings: Settings, store: InMemoryObjectStore
 ) -> AsyncIterator[httpx.AsyncClient]:
-    resources = build_app_resources(settings, pg_engine, None, None, db=pg_db, storage=store)
+    resources = build_app_resources(settings, None, None, db=pg_db, storage=store)
     app = create_app(settings, resources=resources)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"

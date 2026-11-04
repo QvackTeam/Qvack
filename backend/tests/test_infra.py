@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 from neo4j import AsyncDriver
 from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.errors import ApiError
@@ -180,13 +179,11 @@ def _app_with_test_routes(app: FastAPI) -> FastAPI:
 
 def test_api_error_format_and_request_id(
     settings: Settings,
-    pg_engine: AsyncEngine,
     pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
 ) -> None:
-    # `pg_engine`: the health check of the app still reads Postgres through it (D-A-230).
-    res = build_app_resources(settings, pg_engine, neo4j, redis, db=pg_db)
+    res = build_app_resources(settings, neo4j, redis, db=pg_db)
     app = _app_with_test_routes(create_app(settings, resources=res))
     with TestClient(app) as client:
         response = client.get("/test/boom", headers={"X-Request-ID": "req-123"})

@@ -8,7 +8,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.artifacts.documents import ArtifactNotFound, Block, edit_block, get_artifact
 from quack.artifacts.hub_cheatsheet import (
@@ -22,7 +21,6 @@ from quack.artifacts.hub_cheatsheet import (
 from quack.compute_client.contracts import RenderPdfResponse
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.graph.read import HubGoal, HubTopicGoal, TopicMemory
 from quack.graph.read.materials import ChunkHit
 from quack.graph.read.models import MisconceptionFact, SkillFact
@@ -109,13 +107,13 @@ def _pages(*counts: int) -> list[RenderPdfResponse]:
 
 
 class Stand:
-    def __init__(self, settings: Settings, engine: AsyncEngine, db: SessionFactory, pg: Db) -> None:
+    def __init__(self, settings: Settings, pg: Db) -> None:
         self.settings = settings
         self.provider = ScriptedLLMProvider()
         self.writer = Writer(self.provider)
         self.scenario = ComputeScenario()
         self.resources = build_app_resources(
-            settings, engine, None, None, db=pg, session_factory=db, provider=self.provider,
+            settings, None, None, db=pg, provider=self.provider,
             compute=scripted_compute(self.scenario),
         )  # fmt: skip
 
@@ -133,8 +131,8 @@ class Stand:
 
 
 @pytest.fixture
-def stand(settings: Settings, pg_engine: AsyncEngine, db: SessionFactory, pg_db: Db) -> Stand:
-    return Stand(settings, pg_engine, db, pg_db)
+def stand(settings: Settings, pg_db: Db) -> Stand:
+    return Stand(settings, pg_db)
 
 
 # --- T-AR4: one page --------------------------------------------------------------------
@@ -362,9 +360,7 @@ def test_job_is_registered() -> None:
     assert JOB_HANDLERS["artifact.cheatsheet"].__module__ == "quack.artifacts.hub_cheatsheet"
 
 
-async def test_a_job_without_consent_generates_nothing(
-    settings: Settings, db: SessionFactory, pg_db: Db
-) -> None:
+async def test_a_job_without_consent_generates_nothing(settings: Settings, pg_db: Db) -> None:
     """D-C-144: the offer is a state; `hub.deadline_set` alone (a job without `request_id`)
     must not write a cheat sheet nobody agreed to."""
     learner = await create_learner(pg_db)
@@ -373,7 +369,7 @@ async def test_a_job_without_consent_generates_nothing(
     writer = Writer(provider)
     scenario = ComputeScenario()
     ctx = build_job_context(
-        settings, db, None, None, db=pg_db, provider=provider, compute=scripted_compute(scenario)
+        settings, None, None, db=pg_db, provider=provider, compute=scripted_compute(scenario)
     )
     job = ClaimedJob(
         id=uuid4(), kind="artifact.cheatsheet", learner_id=learner, lock_key=f"artifact:{hub}",

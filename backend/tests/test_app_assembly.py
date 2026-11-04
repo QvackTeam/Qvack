@@ -20,15 +20,12 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app, write_openapi
 from quack.api.errors import ErrorResponse
 from quack.api.openapi import render_openapi
 from quack.config import Settings
 from quack.db import Db, open_db
-from quack.db.postgres import SessionFactory
 from quack.db.redis import ratelimit_key
 from tests.e2e.routes import declared_routers, expected_routes
 from tests.support.auth import session_cookie, session_token
@@ -56,8 +53,6 @@ type AppFactory = Callable[..., FastAPI]
 @pytest.fixture
 def make_app(
     settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
@@ -67,9 +62,7 @@ def make_app(
 
     def make(*, redis_client: Any = redis, **overrides: Any) -> FastAPI:
         cfg = settings.model_copy(update=overrides)
-        resources = build_app_resources(
-            cfg, pg_engine, neo4j, redis_client, db=pg_db, session_factory=db
-        )
+        resources = build_app_resources(cfg, neo4j, redis_client, db=pg_db)
         return create_app(cfg, resources=resources)
 
     return make
@@ -79,18 +72,13 @@ type SignIn = Callable[[], Awaitable[tuple[str, dict[str, str]]]]
 
 
 @pytest.fixture
-def sign_in(db: SessionFactory, pg_db: Db, settings: Settings) -> SignIn:
+def sign_in(pg_db: Db, settings: Settings) -> SignIn:
     """A new learner with a Phase 4 session (ТЗ Ф4 WP18.3): `(learner_id, headers)`.
-    `/v1/auth/register` is removed (D-A-113); the `core.learners` row is what the log of Phase 4
-    needs (domains, preferences, D-A-207), the `auth.users` row is the Phase 3 account."""
+    `/v1/auth/register` is removed (D-A-113); the `core.learners` row is the account (domains,
+    preferences, D-A-207; `auth.users` of Phase 3 is not read any more)."""
 
     async def make() -> tuple[str, dict[str, str]]:
         learner_id = uuid4()
-        async with db() as session, session.begin():
-            await session.execute(
-                text("INSERT INTO auth.users (id, email, password_hash) VALUES (:id, :e, '!')"),
-                {"id": learner_id, "e": f"{learner_id}@test.invalid"},
-            )
         await pg_db.execute(
             "INSERT INTO core.learners (learner_id, email) VALUES (%(id)s, %(email)s)",
             {"id": learner_id, "email": f"{learner_id}@test.invalid"},
@@ -336,14 +324,12 @@ class _SlowNeo4j:
 @pytest.mark.parametrize(("timeout_s", "neo4j_state"), [(0.05, "error"), (2.0, "ok")])
 async def test_health_probe_timeout_comes_from_settings(
     settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     redis: Redis,
     timeout_s: float,
     neo4j_state: str,
 ) -> None:
     cfg = settings.model_copy(update={"health_check_timeout_s": timeout_s})
-    resources = build_app_resources(cfg, pg_engine, _SlowNeo4j(), redis, session_factory=db)
+    resources = build_app_resources(cfg, _SlowNeo4j(), redis)
     async with _client(create_app(cfg, resources=resources)) as client:
         response = await client.get("/health/ready")
     assert response.json()["checks"]["neo4j"] == neo4j_state, response.text
@@ -352,15 +338,10 @@ async def test_health_probe_timeout_comes_from_settings(
 # --- WP8.3: /healthz -----------------------------------------------------------------------
 
 
-async def test_healthz_depends_only_on_postgres(
-    settings: Settings, pg_engine: AsyncEngine, db: SessionFactory, pg_db: Db
-) -> None:
+async def test_healthz_depends_only_on_postgres(settings: Settings, pg_db: Db) -> None:
     """T-A8: Neo4j and Redis broken → `/healthz` 200; Postgres unreachable → 503. No auth.
-    Postgres is asked through the `Db` of the resources (WP1.3), not the SQLAlchemy engine,
-    which stays alive in the second half of the test."""
-    resources = build_app_resources(
-        settings, pg_engine, BrokenNeo4jDriver(), BrokenRedis(), db=pg_db, session_factory=db
-    )
+    Postgres is asked through the `Db` of the resources (WP1.3)."""
+    resources = build_app_resources(settings, BrokenNeo4jDriver(), BrokenRedis(), db=pg_db)
     async with _client(create_app(settings, resources=resources)) as client:
         ok = await client.get("/healthz")
     assert (ok.status_code, ok.json()) == (200, {"status": "ok"}), ok.text
@@ -371,11 +352,9 @@ async def test_healthz_depends_only_on_postgres(
     try:
         broken = build_app_resources(
             settings,
-            pg_engine,
             BrokenNeo4jDriver(),
             BrokenRedis(),
             db=dead_db,
-            session_factory=db,
         )
         async with _client(create_app(settings, resources=broken)) as client:
             down = await client.get("/healthz")

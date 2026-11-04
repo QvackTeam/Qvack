@@ -11,7 +11,6 @@ from uuid import uuid4
 import httpx
 import pytest
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.auth import SESSION_COOKIE, require_terms
@@ -33,11 +32,9 @@ def auth_settings(settings: Settings) -> Settings:
 
 
 @pytest.fixture
-async def client(
-    pg_db: Db, pg_engine: AsyncEngine, auth_settings: Settings
-) -> AsyncIterator[httpx.AsyncClient]:
+async def client(pg_db: Db, auth_settings: Settings) -> AsyncIterator[httpx.AsyncClient]:
     mail, oidc = FakeEmailSender(), FakeOIDC()
-    resources = build_app_resources(auth_settings, pg_engine, None, None, db=pg_db, email=mail)
+    resources = build_app_resources(auth_settings, None, None, db=pg_db, email=mail)
     app = create_app(auth_settings, resources=resources, google_oidc=oidc)
 
     @app.get("/test/terms", dependencies=[Depends(require_terms)])
