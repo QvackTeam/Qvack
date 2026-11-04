@@ -1,4 +1,4 @@
-"""Skills of the learner (ТЗ Ф4 WP23.6; Т-§17.8, П-11.6; D-C-214).
+"""Skills of the learner (ТЗ Ф4 WP23.6; Т-§17.8, П-11.6; D-C-216).
 
 A skill is the learner's own instruction: a name, a text and bindings. It is stored in
 `content.learner_skills` as `(skill_id, version)`; every change is a new version, so what an

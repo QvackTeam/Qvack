@@ -294,19 +294,19 @@ STREAM = Stream(
             no_key="each call opens a new canvas",
             body=lambda ids, v: {},
         ),
-        # ТЗ Ф4 WP23.6 (D-C-214): `content.learner_skills` has no key column and no event; the
+        # ТЗ Ф4 WP23.6 (D-C-216): `content.learner_skills` has no key column and no event; the
         # request sets absolute values, so a repeat changes nothing (no new version).
         Route(
             "PATCH",
             "/v1/learner-skills/{skill_id}",
-            no_key="no event; sets absolute values, a repeat writes no new version (D-C-214)",
+            no_key="no event; sets absolute values, a repeat writes no new version (D-C-216)",
             body_key="none",
             body=lambda ids, v: {"instruction": ["Be brief.", "Be long."][v]},
         ),
         Route(
             "DELETE",
             "/v1/learner-skills/{skill_id}",
-            no_key="no event; deletes the skill with its versions, a repeat finds none (D-C-214)",
+            no_key="no event; deletes the skill with its versions, a repeat finds none (D-C-216)",
             body_key="none",
             body=lambda ids, v: {},
         ),

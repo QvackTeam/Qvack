@@ -1,5 +1,5 @@
 """Routes of the learner's skills and the system templates (ТЗ Ф4 WP23.6, §6.4 «Артефакты»;
-Т-§17.8, П-11.6; D-C-214).
+Т-§17.8, П-11.6; D-C-216).
 
 `GET/POST /v1/learner-skills`, `PATCH/DELETE /v1/learner-skills/{id}` — the learner's own
 instructions; `GET /v1/system-templates` — the prompt files of the system, read only.

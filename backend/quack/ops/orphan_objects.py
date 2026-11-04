@@ -1,4 +1,4 @@
-"""`ops orphan-objects --since <t> [--apply]` (Д-§8.3 step 8, ТЗ Ф4 WP9.6, D-C-211, D-C-213).
+"""`ops orphan-objects --since <t> [--apply]` (Д-§8.3 step 8, ТЗ Ф4 WP9.6, D-C-211, D-C-215).
 
 After Postgres is restored from a dump, `quack-learners` may hold files that the restored log
 does not know: uploads whose events were lost. They belong to no record, and account deletion by

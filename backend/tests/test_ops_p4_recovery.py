@@ -106,7 +106,7 @@ async def _insert_reference(db: Db, learner: UUID, source: str) -> str:
 
 def test_every_reference_source_has_a_test_case() -> None:
     """A new place that names a file is added to `REFERENCE_SOURCES` and to
-    `_insert_reference`; the set below is the contract of D-C-213."""
+    `_insert_reference`; the set below is the contract of D-C-215."""
     assert {
         "materials",
         "material_pages",
@@ -139,7 +139,7 @@ async def test_a_live_file_named_by_any_source_is_never_deleted(
 
 async def test_orphan_objects_lists_what_postgres_does_not_know(pg_db: Db) -> None:
     """T-OPS4: an object newer than the mark without a reference is listed; with a reference,
-    not; an older one is not looked at. Without `apply` nothing is deleted (D-C-213)."""
+    not; an older one is not looked at. Without `apply` nothing is deleted (D-C-215)."""
     learner = await create_learner(pg_db)
     store = InMemoryObjectStore()
     kept = await _insert_reference(pg_db, learner, "materials")

@@ -488,7 +488,7 @@ async def _replay_deletions(settings: Settings, args: argparse.Namespace) -> int
 
 async def _orphan_objects(settings: Settings, args: argparse.Namespace) -> int:
     """WP9.6, Д-§8.3 step 8: files of learners newer than the dump with no record are listed;
-    they are deleted only with `--apply` (D-C-213)."""
+    they are deleted only with `--apply` (D-C-215)."""
     db = await open_db(settings)
     store = create_object_store(settings)
     try:

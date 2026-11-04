@@ -1,5 +1,5 @@
 """WP23.6: skills of the learner and the system templates (ТЗ Ф4 WP23.6; Т-§17.8, П-11.6;
-D-C-214)."""
+D-C-216)."""
 
 from __future__ import annotations
 

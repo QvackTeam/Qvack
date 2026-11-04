@@ -23,7 +23,7 @@
 
 <!-- записи ниже, новые сверху -->
 
-### D-C-214. WP23.6: скиллы ученика (`/v1/learner-skills`), системные шаблоны (`/v1/system-templates`), привязка к артефактам
+### D-C-216. WP23.6: скиллы ученика (`/v1/learner-skills`), системные шаблоны (`/v1/system-templates`), привязка к артефактам
 - Класс: C (в документах не заданы: форма `bindings`, правила имён, какие промпты считаются «системными шаблонами», идемпотентность без события)
 - WP / место: WP23.6, Т-§17.8, П-11.6; `quack/artifacts/learner_skills.py`, `skills_routes.py`, `topic_refresh.py`, `hub_cheatsheet.py`, `config.py`
 - Контекст: таблица `content.learner_skills` и вызов `/имя` в чате (B, `turn_inputs.load_learner_skill`, ищет последнюю версию по имени) уже есть; слот `learner_skill` писателя был заглушкой `None.`.
@@ -33,7 +33,7 @@
 - Тесты: `tests/artifacts/test_learner_skills_wp23_6.py`; реестр маршрутов `tests/e2e/routes/c.py`.
 - Требует подтверждения владельцем: да (какие роли показывать как системные шаблоны; «один скилл на тип артефакта»).
 
-### D-C-213. WP9.6: `orphan-objects` по умолчанию ничего не удаляет (`--apply`), перечень источников ссылок в одном списке
+### D-C-215. WP9.6: `orphan-objects` по умолчанию ничего не удаляет (`--apply`), перечень источников ссылок в одном списке
 - Класс: C (безопасность ops-команды; уточняет D-C-211, текст Д-§8.3 шаг 8 «Они удаляются» не меняется по сути)
 - WP / место: WP9.6, Д-§8.3; `quack/ops/orphan_objects.py`, `quack/cli.py`, `deploy/README.md`
 - Контекст: D-C-211 удалял файлы по умолчанию, а `--dry-run` надо было вспомнить; ссылки на файлы были тремя строками SQL, тест лишь на часть из них. Пропущенный источник ссылки стоит файла ученика.
@@ -42,6 +42,25 @@
 - Обратимость: код. Новое место ссылки на ключ (таблица, колонка) - строка в `REFERENCE_SOURCES` и случай в `_insert_reference` (иначе `test_every_reference_source_has_a_test_case` красный).
 - Тесты: `tests/test_ops_p4_recovery.py` (`test_a_live_file_named_by_any_source_is_never_deleted` по шести источникам и режимам, `test_every_reference_source_has_a_test_case`, разбор аргументов: `--dry-run` отвергается).
 - Требует подтверждения владельцем: нет (сужает D-C-211); определение «ссылка» из D-C-211 по-прежнему ждёт подтверждения.
+### D-C-214. WP20.2: PDF без текстового слоя читается распознавателем
+- Класс: C (закрывает п.4 D-C-202; пороги — параметры)
+- WP / место: WP20.2 п.1, Т-§16.5; `quack/materials/parse.py::_read_scans`, `quack/config.py`
+- Контекст: ТЗ: «PDF — `/v1/pdf/pages`; изображение — распознавание `recognizer`». Скан PDF даёт страницы без текста (D-C-202 п.4), и разбор оставался пустым.
+- Решение: (1) Страница PDF, чей текст короче `material_scan_min_chars = 20` знаков, читается по своему изображению `recognizer` в режиме листа (тот же `_read_sheet`, что у фото: строки не-рисунки и не зачёркнутые). Выравнивание compute не вызывается: страница уже отрисована. (2) Читаются первые `material_scan_max_pages = 50` таких страниц файла, параллельно (`material_parser_concurrency`); остальные остаются пустыми, в журнал идёт `material_scan_truncated`. (3) Ключ идемпотентности вызова — `recognizer:material:{id}:{page}`; повтор после сбоя находит прежний ответ. Ошибки шлюза не глотаются: задача повторяется.
+- Почему: WP20.2 п.1, Т-§16.5, D-C-202 п.4, §0.4.3 (числа в `Settings`).
+- Обратимость: параметры и код.
+- Тесты: `test_a_pdf_page_without_a_text_layer_is_read_by_the_recognizer`, `test_a_scan_is_read_up_to_the_cap_of_pages`.
+- Требует подтверждения владельцем: нет (50 страниц - стартовое значение; цена скана в вызовах `recognizer`)
+
+### D-C-213. WP20.2: дедлайны силлабуса — `hub.deadline_set {source: syllabus}`
+- Класс: B (ТЗ: «из силлабуса — структура курса и дедлайны (`hub.deadline_set`, Т-§4.8)»; как парсер отдаёт даты и как они превращаются в хабы - не сказано)
+- WP / место: WP20.2 п.4, Т-§4.8; `quack/materials/parse.py` (`ParsedDeadline`, `_syllabus_events`), `quack/prompts/material_parser/v1.md`, `PROMPT_CONTRACTS.md`, `manifest.json`
+- Контекст: `material_parser@1` размечал только куски; отдельного вида материала «силлабус» в `content.materials` нет, и он не нужен: даты видны в тексте.
+- Решение: (1) Схема ответа получила поле `deadlines [{label, date, control_type, covers}]` (пустое почти всегда). `date` - ISO 8601 с годом (`YYYY-MM-DD` или `YYYY-MM-DDTHH:MM`); дату без года, историческую дату и выдуманную парсер не отдаёт (слой 2). `control_type` - один из `tasks`, `colloquium_proofs`, `oral_theory` (`no_goal` для контроля не имеет смысла). `covers` - темы словами материала. (2) Шаг 1 склеивает ответы пачек (одно имя в разных регистрах и дата - один контроль; не больше `material_deadlines_max = 20`) и кладёт в полезную нагрузку шага 2. (3) Шаг 2: темы из `covers` идут в сверку вместе с темами кусков (структура курса). На каждый контроль: `hub.created {kind: material, origin: material, control_type, name = label}`, `hub.topics_changed` (темы из `covers`, уровни по `control_type_levels`; без распознанных тем события нет) и `hub.deadline_set {source: syllabus}`. Всё в той же транзакции, что `material.parsed`; ключи `…:syllabus:{material}:{hub_id}`, `hub_id` = `uuid5` от материала, названия и даты. (4) Время: дата без времени - конец этого дня, 23:59; время без пояса - в поясе ученика (`core.learners.settings.timezone`, иначе UTC). Дата в прошлом и нечитаемая дата пропускаются (запись `syllabus_deadline_skipped`). (5) Плашка «добавлено» с отменой - `PATCH /v1/hubs/{id}` (WP6.3), своих окон нет.
+- Почему: WP20.2 п.4, Т-§4.8, П-8.1 (дедлайн пишется сразу), Т-§19.8 (текст - данные: парсер размечает, код проверяет дату и тип).
+- Обратимость: код и слой 2 `material_parser@1` (черновик, владелец может заменить пакетом; поле `deadlines` остаётся в контракте). Задачи семинара (`task.created`) по-прежнему ждут разметку WP12.5 (B).
+- Тесты: `test_a_syllabus_gives_hubs_with_deadlines`, `test_a_material_without_dates_writes_no_deadline`, `test_deadlines_are_capped_by_the_setting`, `test_the_prompt_material_parser_v1_has_its_contract`, `tests/llm` (T-M5).
+- Требует подтверждения владельцем: нет
 
 ### D-C-212. WP9.5: `GET /internal/status` в приложении `api`
 - Класс: C
@@ -57,9 +76,9 @@
 - Класс: C (определение «есть ссылка в Postgres» для `orphan-objects` в документах не дано)
 - WP / место: WP9.6, Д-§8.3, Д-§8.7; `quack/ops/orphan_objects.py`, `quack/cli.py`, `deploy/README.md`
 - Контекст: функции A из S15 влиты (`replay_deletions`, `reconcile_deletions` в `deletion/journal.py`, `resume` в `graph/projection/runner.py`); функции `orphan_objects` у A нет, она в зоне C (ops).
-- Решение: `ops resume --learner`, `ops replay-deletions --since` (печатает `{"replayed": N}`), `ops rebuild ... --concurrency N` (по умолчанию `rebuild_concurrency`; ученики пересобираются по N одновременно, код выхода 1, если хоть один не `rebuilt`). `ops orphan-objects --since [--apply]` (с D-C-213; был `--dry-run`) смотрит объекты `learners/` новее метки: объект держат ссылки: ключ в `content.materials.object_key`, `material_pages.image_key`, `exports.object_key`; ключ в `payload` события или в `content` версии артефакта того же ученика; для кусков холста `learners/{l}/canvas/{s}/{c}/…` - строка `content.canvas_boards` (куски находятся по префиксу, ключа в базе нет). Остальное удаляется только с `--apply`, без него только список. Печатает JSON `{checked, orphans, deleted, dry_run}`. Перечень источников ссылок - `REFERENCE_SOURCES` в `orphan_objects.py` (D-C-213). Поиск ключа в событиях идёт по ученику ключа (`strpos(payload::text, key)`): дорого на большом журнале, но команда одноразовая, после восстановления, и объектов новее дампа немного.
+- Решение: `ops resume --learner`, `ops replay-deletions --since` (печатает `{"replayed": N}`), `ops rebuild ... --concurrency N` (по умолчанию `rebuild_concurrency`; ученики пересобираются по N одновременно, код выхода 1, если хоть один не `rebuilt`). `ops orphan-objects --since [--apply]` (с D-C-215; был `--dry-run`) смотрит объекты `learners/` новее метки: объект держат ссылки: ключ в `content.materials.object_key`, `material_pages.image_key`, `exports.object_key`; ключ в `payload` события или в `content` версии артефакта того же ученика; для кусков холста `learners/{l}/canvas/{s}/{c}/…` - строка `content.canvas_boards` (куски находятся по префиксу, ключа в базе нет). Остальное удаляется только с `--apply`, без него только список. Печатает JSON `{checked, orphans, deleted, dry_run}`. Перечень источников ссылок - `REFERENCE_SOURCES` в `orphan_objects.py` (D-C-215). Поиск ключа в событиях идёт по ученику ключа (`strpos(payload::text, key)`): дорого на большом журнале, но команда одноразовая, после восстановления, и объектов новее дампа немного.
 - Почему: ТЗ Ф4 WP9.6, Д-§8.3 шаги 5 и 8, Д-§8.7; T-OPS4.
-- Обратимость: код. Удаление необратимо, поэтому по умолчанию команда только сообщает (D-C-213). Если появятся новые места ссылок на ключи (таблица, колонка), их надо добавить в `orphan_objects.py`, иначе команда удалит живой файл.
+- Обратимость: код. Удаление необратимо, поэтому по умолчанию команда только сообщает (D-C-215). Если появятся новые места ссылок на ключи (таблица, колонка), их надо добавить в `orphan_objects.py`, иначе команда удалит живой файл.
 - Тесты: `tests/test_ops_p4_recovery.py`.
 - Требует подтверждения владельцем: да (риск удаления файлов ученика при неполном списке ссылок).
 
