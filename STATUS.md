@@ -195,6 +195,7 @@
 
 ### Поток B
 
+0. **WP1.3, шаг 3 B** — черновик #222 (модули B на `Db`, код хода Фазы 3 снят, D-B-210): A согласен, ждёт согласия C на `artifacts/practice.py` (#215). **Шаг 4** (`LLMGateway(db=)`, снятие ledger и outbox) — после шага 2 C (стенд на dbmate, `PHASE4_PROCESSES=true`) и `db=` в `api/resources.py` (C).
 1. **WP16.5** — `GET /v1/viz/{id}` с CSP после ответа владельца (issue #201); `deploy/static/viz/` — C.
 2. **WP10.6, хвост** — подключение трассера в сборке процессов (C, #209), удаление трасс из WP25 (A).
 3. **WP10.7, хвост** — живой прогон владельцем: `META_API_KEY=… POSTGRES_DSN=… uv run python scripts/meta_smoke.py --out …` (DoD п.6a, D-B-187 [ПРОВЕРИТЬ]).
