@@ -265,6 +265,29 @@ async def test_rules3_stale_rebuild(pg_db: Db, neo4j: AsyncDriver, settings: Set
     assert rebuilt == projected  # the junk is gone, the rest is the same graph
 
 
+async def test_chunked_rebuild_respects_presence(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings, redis: Redis
+) -> None:
+    """WP3.5 (Д-§6.3, replaces the test of the rebuild of Phase 3): a learner over
+    `rebuild_max_tx_ops` is written by parts, and only without an active session."""
+    from quack.db.redis import presence_key
+    from quack.graph.projection.rebuild import rebuild_learner
+
+    learner = await create_learner(pg_db)
+    await append_events(pg_db, learner, _materials(*[uuid4() for _ in range(5)]))
+    tiny = settings.model_copy(update={"rebuild_max_tx_ops": 2})
+    await redis.set(presence_key(learner), str(uuid4()), ex=90)
+    busy = await rebuild_learner(pg_db, neo4j, tiny, learner, redis=redis)
+    assert busy.status == "active_session"
+    nodes, _ = await _graph(neo4j, learner)
+    assert nodes == set()
+    await redis.delete(presence_key(learner))
+    done = await rebuild_learner(pg_db, neo4j, tiny, learner, redis=redis)
+    assert done.status == "rebuilt" and done.operations > 2
+    nodes, _ = await _graph(neo4j, learner)
+    assert nodes != set()
+
+
 async def test_changed_topics_are_published_after_commit(
     pg_db: Db, neo4j: AsyncDriver, settings: Settings, redis: Redis
 ) -> None:

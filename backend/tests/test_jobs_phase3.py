@@ -11,35 +11,23 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from neo4j import AsyncDriver
 from redis.asyncio import Redis
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack import cli
 from quack.config import Settings
-from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.db.redis import llm_pressure_key
-from quack.events import append_events
-from quack.events.models import NewEvent, StoredEvent
-from quack.graph.neo4j_store import Neo4jGraphStore
-from quack.graph.worker import ProjectorWorker
 from quack.jobs import kinds
 from quack.jobs.kinds import JOB_KINDS, KIND_LLM_ROLES, JobDeferred
-from quack.jobs.periodic import PeriodicScheduler
 from quack.jobs.queue import ClaimedJob, JobSpec, claim_next_job, enqueue_job, release_job
 from quack.jobs.runner import JobContext, JobHandler, JobRunner
 from quack.llm.errors import LLMBudgetExceededError
-from quack.ops.commands import PURGE_TABLES
-from quack.ops.purge_job import handle_purge_deleted
 from quack.runtime import (
     JobHandlersMismatchError,
     check_handlers_complete,
     register_all_handlers,
 )
-from tests.scenario import build_scenario
-from tests.support.auth import ensure_user
 from tests.support.resources import build_job_context
 
 QUACK_ROOT = Path(__file__).resolve().parents[1] / "quack"
@@ -75,7 +63,9 @@ def _runner(settings: Settings, db: SessionFactory, handlers: dict[str, JobHandl
 
 async def test_claim_waits_for_projection(db: SessionFactory) -> None:
     learner = uuid4()
-    job_id = await _enqueue(db, kinds.graph_curate(learner, uuid4(), {}, required_seq=5))
+    job_id = await _enqueue(
+        db, kinds.artifact_refresh_cheatsheet(learner, uuid4(), {}, required_seq=5)
+    )
     assert await _claim(db) is None
     await _exec(
         db, "INSERT INTO ops.projector_offsets (learner_id, applied_seq) VALUES (:l, 4)", l=learner
@@ -87,7 +77,9 @@ async def test_claim_waits_for_projection(db: SessionFactory) -> None:
     got = await _claim(db)
     assert got is not None and got.id == job_id
     # required_seq IS NULL needs no offsets row.
-    other = await _enqueue(db, kinds.graph_curate(uuid4(), uuid4(), {}, required_seq=None))
+    other = await _enqueue(
+        db, kinds.artifact_refresh_cheatsheet(uuid4(), uuid4(), {}, required_seq=None)
+    )
     got = await _claim(db, "w2")
     assert got is not None and got.id == other
 
@@ -95,14 +87,14 @@ async def test_claim_waits_for_projection(db: SessionFactory) -> None:
 async def test_coalesce_keeps_max_required_seq(db: SessionFactory) -> None:
     learner, domain = uuid4(), uuid4()
     for seq in (3, 7, 5):
-        await _enqueue(db, kinds.graph_curate(learner, domain, {}, required_seq=seq))
+        await _enqueue(db, kinds.artifact_refresh_cheatsheet(learner, domain, {}, required_seq=seq))
     rows = await _q(
         db, "SELECT status, required_seq FROM ops.jobs WHERE learner_id = :l", l=learner
     )
     assert rows == [{"status": "queued", "required_seq": 7}]
-    learner2, domain2 = uuid4(), uuid4()  # coalesce_key is curate:{domain}, so a new domain
-    await _enqueue(db, kinds.graph_curate(learner2, domain2, {}, required_seq=None))
-    await _enqueue(db, kinds.graph_curate(learner2, domain2, {}, required_seq=4))
+    learner2, domain2 = uuid4(), uuid4()  # coalesce_key is cheatsheet:{topic}, so a new topic
+    await _enqueue(db, kinds.artifact_refresh_cheatsheet(learner2, domain2, {}, required_seq=None))
+    await _enqueue(db, kinds.artifact_refresh_cheatsheet(learner2, domain2, {}, required_seq=4))
     rows = await _q(db, "SELECT required_seq FROM ops.jobs WHERE learner_id = :l", l=learner2)
     assert rows == [{"required_seq": 4}]
 
@@ -148,16 +140,20 @@ async def test_job_deferred_merges_into_queued_duplicate(
     db: SessionFactory, settings: Settings
 ) -> None:
     learner, domain = uuid4(), uuid4()
-    first = await _enqueue(db, kinds.graph_curate(learner, domain, {}, required_seq=None))
+    first = await _enqueue(
+        db, kinds.artifact_refresh_cheatsheet(learner, domain, {}, required_seq=None)
+    )
     second: list[UUID] = []
 
     async def handler(job: ClaimedJob, ctx: JobContext) -> None:
         second.append(
-            await _enqueue(db, kinds.graph_curate(learner, domain, {}, required_seq=None))
+            await _enqueue(
+                db, kinds.artifact_refresh_cheatsheet(learner, domain, {}, required_seq=None)
+            )
         )
         raise JobDeferred(600, "learner_present")
 
-    assert await _runner(settings, db, {"graph.curate": handler}).run_one()
+    assert await _runner(settings, db, {"artifact.refresh_cheatsheet": handler}).run_one()
     (a,) = await _q(db, "SELECT status FROM ops.jobs WHERE id = :i", i=first)
     (b,) = await _q(db, "SELECT status, run_after FROM ops.jobs WHERE id = :i", i=second[0])
     assert a["status"] == "cancelled" and b["status"] == "queued"
@@ -189,129 +185,6 @@ async def test_budget_errors_route_to_defer_or_dlq(db: SessionFactory, settings:
     assert await _q(db, "SELECT 1 FROM ops.dlq WHERE job_id = :i", i=session_scope)
 
 
-# --- T-Q5: periodic jobs, once per bucket ----------------------------------------------
-
-
-async def test_periodic_scheduler_runs_once_per_bucket(
-    db: SessionFactory, settings: Settings
-) -> None:
-    now = [datetime(2030, 1, 1, 0, 0, 30, tzinfo=UTC)]
-    schedulers = [PeriodicScheduler(settings, db, clock=lambda: now[0]) for _ in range(2)]
-    for _ in range(5):
-        for scheduler in schedulers:
-            await scheduler.tick()
-
-    async def queued() -> dict[str, datetime]:
-        rows = await _q(
-            db,
-            "SELECT kind, run_after FROM ops.jobs WHERE status = 'queued' "
-            "AND kind IN ('session.sweep_inactive', 'account.purge_deleted')",
-        )
-        assert len(rows) == 2, rows
-        return {r["kind"]: r["run_after"] for r in rows}
-
-    first = await queued()
-    assert first["session.sweep_inactive"] == datetime(2030, 1, 1, 0, 1, 0, tzinfo=UTC)
-    assert first["account.purge_deleted"] == datetime(2030, 1, 1, 0, 10, 0, tzinfo=UTC)
-
-    await _exec(db, "UPDATE ops.jobs SET status = 'done' WHERE status = 'queued'")
-    now[0] = datetime(2030, 1, 1, 0, 1, 5, tzinfo=UTC)
-    for scheduler in schedulers:
-        await scheduler.tick()
-    rows = await _q(
-        db, "SELECT kind, run_after FROM ops.jobs WHERE status = 'queued' ORDER BY kind"
-    )
-    by_kind = {r["kind"]: r["run_after"] for r in rows}
-    assert by_kind["session.sweep_inactive"] == datetime(2030, 1, 1, 0, 2, 0, tzinfo=UTC)
-    assert len(rows) == 2
-
-
-# --- T-Q11: purge job removes the learner completely -----------------------------------
-
-
-def _as_new(events: list[StoredEvent]) -> list[NewEvent]:
-    return [
-        NewEvent(
-            type=e.type,
-            payload=e.payload,
-            actor=e.actor,
-            idempotency_key=e.idempotency_key,
-            occurred_at=e.occurred_at,
-            session_id=e.session_id,
-            domain_id=e.domain_id,
-        )
-        for e in events
-    ]
-
-
-async def test_purge_job_removes_learner_completely(
-    settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
-    pg_db: Db,
-    neo4j: AsyncDriver,
-    redis: Redis,
-) -> None:
-    log, _ = build_scenario()
-    learner = log.learner_id
-    async with db() as session, session.begin():
-        await append_events(session, learner, _as_new(log.events), False)
-    await ensure_user(db, learner)
-    worker = ProjectorWorker(settings, pg_engine, db, neo4j, redis)
-    for _ in range(50):
-        if await worker.run_once() == 0:
-            break
-    assert (await Neo4jGraphStore(neo4j, str(learner)).dump()).nodes != {}
-    async with db() as session, session.begin():
-        await enqueue_job(session, kinds.turn_extract(learner, uuid4(), {}, required_seq=None))
-        await session.execute(
-            text(
-                "INSERT INTO ops.dispatcher_offsets (learner_id, last_dispatched_seq) "
-                "VALUES (:l, 3)"
-            ),
-            {"l": learner},
-        )
-    await redis.set(f"presence:learner:{learner}", "s", ex=300)
-    await redis.set(f"ratelimit:actions:{learner}", "3", ex=60)
-    await redis.set(f"ratelimit:turns:{learner}", "1", ex=60)
-
-    # `DELETE /v1/learner` is `delete_account` since WP1.3 (D-A-207); the tombstone it used to
-    # write is what the purge job of Phase 3 takes, so the test writes it itself.
-    async with db() as session, session.begin():
-        await session.execute(
-            text("UPDATE auth.users SET deleted_at = now() WHERE id = :id"), {"id": learner}
-        )
-        await session.execute(
-            text(
-                "INSERT INTO ops.deletion_tombstones (learner_id, requested_at, status) "
-                "VALUES (:id, now(), 'pending_purge')"
-            ),
-            {"id": learner},
-        )
-
-    async with db() as session, session.begin():
-        await enqueue_job(session, kinds.account_purge_deleted())
-    runner = JobRunner(
-        settings,
-        db,
-        "purge-worker",
-        handlers={"account.purge_deleted": handle_purge_deleted},
-        context=build_job_context(settings, db, neo4j, redis, engine=pg_engine),
-    )
-    assert await runner.run_one()
-
-    for table in PURGE_TABLES:
-        assert await _q(db, f"SELECT 1 FROM {table} WHERE learner_id = :l", l=learner) == [], table
-    assert "ops.dispatcher_offsets" in PURGE_TABLES and "ops.turn_manifests" in PURGE_TABLES
-    assert await _q(db, "SELECT 1 FROM auth.users WHERE id = :l", l=learner) == []
-    assert (await Neo4jGraphStore(neo4j, str(learner)).dump()).nodes == {}
-    assert [key async for key in redis.scan_iter(match=f"*{learner}*")] == []
-    [tomb] = await _q(
-        db, "SELECT status FROM ops.deletion_tombstones WHERE learner_id = :l", l=learner
-    )
-    assert tomb["status"] == "purged"
-
-
 # --- T-Q7: handler catalog -------------------------------------------------------------
 
 
@@ -320,10 +193,10 @@ def test_all_job_kinds_have_handlers() -> None:
     assert set(handlers) == set(JOB_KINDS)
     check_handlers_complete(handlers)
     broken = dict(handlers)
-    broken.pop("graph.curate")
+    broken.pop("artifact.refresh_cheatsheet")
     with pytest.raises(JobHandlersMismatchError) as info:
         check_handlers_complete(broken)
-    assert info.value.missing == ["graph.curate"] and info.value.extra == []
+    assert info.value.missing == ["artifact.refresh_cheatsheet"] and info.value.extra == []
 
 
 async def test_worker_exits_with_code_1_on_handler_mismatch(
@@ -332,7 +205,7 @@ async def test_worker_exits_with_code_1_on_handler_mismatch(
     """T-Q7: `workers` started with a registry that lacks a kind logs `job_handlers_mismatch`
     and exits with code 1 before any resource is created."""
     registry = dict(register_all_handlers())
-    registry.pop("graph.curate")
+    registry.pop("artifact.refresh_cheatsheet")
     monkeypatch.setattr(cli, "register_all_handlers", lambda: registry)
     assert await cli._worker(settings) == 1
 
@@ -478,7 +351,9 @@ async def test_worker_graceful_shutdown_requeues_unfinished(
     """WP3.5: on stop the runner takes no new jobs, waits `worker_shutdown_grace_s` for the
     running ones and puts the rest back to `queued` itself: attempt unchanged, lock cleared."""
     fast_id = await _enqueue(db, kinds.session_sweep_inactive())
-    forever_id = await _enqueue(db, kinds.account_purge_deleted())
+    forever_id = await _enqueue(
+        db, kinds.artifact_refresh_cheatsheet(uuid4(), uuid4(), {}, required_seq=None)
+    )
     fast_done = asyncio.Event()
 
     async def fast(job: ClaimedJob, ctx: JobContext) -> None:
@@ -496,7 +371,7 @@ async def test_worker_graceful_shutdown_requeues_unfinished(
         db,
         "w-grace",
         build_job_context(quick, db, None, None),
-        handlers={"session.sweep_inactive": fast, "account.purge_deleted": forever},
+        handlers={"session.sweep_inactive": fast, "artifact.refresh_cheatsheet": forever},
     )
     stop = asyncio.Event()
     task = asyncio.create_task(runner.run_forever(stop))

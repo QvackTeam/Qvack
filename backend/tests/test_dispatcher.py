@@ -220,14 +220,6 @@ def _expected(story: Story) -> list[dict[str, Any]]:
             )
         ),
         _row(
-            kinds.graph_curate(
-                story.learner,
-                story.domain,
-                {"domain_id": str(story.domain)},
-                required_seq=story.completed_seq,
-            )
-        ),
-        _row(
             kinds.artifact_refresh_cheatsheet(
                 story.learner,
                 story.topic,
@@ -276,7 +268,6 @@ async def test_dispatcher_required_seq_is_trigger_seq(
         "turn.extract": story.teacher_seq,
         "session.checkpoint": None,
         "session.finish_artifacts": story.completed_seq,
-        "graph.curate": story.completed_seq,
         "artifact.refresh_cheatsheet": story.digest_seq,
     }
 
@@ -461,7 +452,6 @@ async def test_dispatcher_skips_unknown_event(db: SessionFactory, settings: Sett
     assert await _offset(db, story.learner) == await _last_seq(db, story.learner)
     assert [row["kind"] for row in await _jobs(db, story.learner)] == [
         "session.finish_artifacts",
-        "graph.curate",
         "artifact.refresh_cheatsheet",
     ]
 
