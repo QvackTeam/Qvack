@@ -70,7 +70,7 @@ async def _claim(db: SessionFactory, worker: str = "w1", kinds_: list[str] | Non
 
 
 def test_job_kind_catalog() -> None:
-    learner, sid, topic, domain = uuid4(), uuid4(), uuid4(), uuid4()
+    learner, sid, topic = uuid4(), uuid4(), uuid4()
     extract = kinds.turn_extract(learner, sid, {}, required_seq=None)
     assert (extract.kind, extract.priority, extract.lock_key, extract.coalesce_key) == (
         "turn.extract",
@@ -95,12 +95,6 @@ def test_job_kind_catalog() -> None:
         40,
         f"topic:{topic}:cheatsheet",
         f"cheatsheet:{topic}",
-    )
-    cur = kinds.graph_curate(learner, domain, {}, required_seq=None)
-    assert (cur.priority, cur.lock_key, cur.coalesce_key) == (
-        80,
-        f"learner:{learner}:curate",
-        f"curate:{domain}",
     )
     sweep = kinds.session_sweep_inactive()
     assert (sweep.priority, sweep.lock_key, sweep.coalesce_key) == (
@@ -185,7 +179,7 @@ async def test_concurrent_claims_never_run_same_lock_twice(db: SessionFactory) -
 
 async def test_priority_then_age_ordering(db: SessionFactory) -> None:
     learner = uuid4()
-    low = await _enqueue(db, kinds.graph_curate(learner, uuid4(), {}, required_seq=None))
+    low = await _enqueue(db, kinds.session_sweep_inactive())
     high = await _enqueue(db, kinds.turn_extract(learner, uuid4(), {}, required_seq=None))
     mid = await _enqueue(db, kinds.session_checkpoint(learner, uuid4(), {}))
     order = []

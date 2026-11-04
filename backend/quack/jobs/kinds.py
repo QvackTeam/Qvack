@@ -13,9 +13,7 @@ __all__ = [
     "KIND_LLM_ROLES",
     "JobDeferred",
     "JobFailedPermanently",
-    "account_purge_deleted",
     "artifact_refresh_cheatsheet",
-    "graph_curate",
     "session_checkpoint",
     "session_finish_artifacts",
     "session_sweep_inactive",
@@ -24,9 +22,7 @@ __all__ = [
 
 # WP2.2: every kind with a registered handler; `workers` refuses to start on a mismatch (T-Q7).
 JOB_KINDS: tuple[str, ...] = (
-    "graph.curate",
     "session.sweep_inactive",
-    "account.purge_deleted",
     "artifact.topic_refresh",
     "artifact.cheatsheet",
     "agent.viz",
@@ -53,9 +49,7 @@ JOB_KINDS: tuple[str, ...] = (
 
 # WP5.3/T-Q10: the roles whose models a kind calls; a kind waits while any of them is pressured.
 KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
-    "graph.curate": ("curator",),
     "session.sweep_inactive": (),
-    "account.purge_deleted": (),
     "artifact.topic_refresh": ("artifact_writer",),
     "artifact.cheatsheet": ("artifact_writer",),
     "agent.viz": ("viz_builder", "viz_checker"),
@@ -134,35 +128,11 @@ def artifact_refresh_cheatsheet(
     )
 
 
-def graph_curate(
-    learner_id: UUID, domain_id: UUID, payload: dict[str, Any], *, required_seq: int | None
-) -> JobSpec:
-    return JobSpec(
-        kind="graph.curate",
-        priority=80,
-        lock_key=f"learner:{learner_id}:curate",
-        coalesce_key=f"curate:{domain_id}",
-        learner_id=learner_id,
-        payload=payload,
-        required_seq=required_seq,
-    )
-
-
 def session_sweep_inactive(payload: dict[str, Any] | None = None) -> JobSpec:
     return JobSpec(
         kind="session.sweep_inactive",
         priority=90,
         lock_key="global:sweep_inactive",
         coalesce_key="global:sweep_inactive",
-        payload=payload or {},
-    )
-
-
-def account_purge_deleted(payload: dict[str, Any] | None = None) -> JobSpec:
-    return JobSpec(
-        kind="account.purge_deleted",
-        priority=95,
-        lock_key="global:purge_deleted",
-        coalesce_key="global:purge_deleted",
         payload=payload or {},
     )
