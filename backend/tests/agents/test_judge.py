@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from quack.agents.judge import release_judge
 from quack.config import Settings
-from quack.db.postgres import SessionFactory
+from quack.db import Db
 from quack.llm.gateway import LLMGateway
 from quack.llm.provider import ProviderRequest
 from tests.support.llm import ScriptedLLMProvider
@@ -24,9 +24,9 @@ def _prefers(marker: str) -> object:
     return respond
 
 
-async def test_judge_symmetric_and_tie_on_disagreement(db: SessionFactory) -> None:
+async def test_judge_symmetric_and_tie_on_disagreement(pg_db: Db) -> None:
     provider = ScriptedLLMProvider()
-    judge = release_judge(LLMGateway(db, provider, SETTINGS))
+    judge = release_judge(LLMGateway(provider, SETTINGS, db=pg_db))
     learner_id = uuid4()
     provider.respond(SCHEMA, _prefers("GOOD"))  # type: ignore[arg-type]
     won = await judge(learner_id=learner_id, situation="s", old="bad", new="GOOD", key="k1")

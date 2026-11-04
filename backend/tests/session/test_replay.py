@@ -12,7 +12,6 @@ import orjson
 
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.event_types import MessageSent
 from quack.events.log import NewEvent, append_events
 from quack.graph.read import GraphReader
@@ -78,7 +77,7 @@ async def _journal(db: Db, learner_id: UUID) -> list[dict[str, Any]]:
 
 
 async def test_replay_builds_the_turn_offline_and_writes_no_event(
-    pg_db: Db, db: SessionFactory, tmp_path: Path
+    pg_db: Db, tmp_path: Path
 ) -> None:
     """The old turn (one guard retry) is replayed by `teacher@2` with a scripted model: the
     report has both texts, the violation shares, the judge's winner; the journal is unchanged."""
@@ -144,7 +143,7 @@ async def test_replay_builds_the_turn_offline_and_writes_no_event(
         learner_id=learner_id,
         session_id=session_id,
         teacher="teacher@2",
-        llm=LLMGateway(db, provider, SETTINGS),
+        llm=LLMGateway(provider, SETTINGS, db=pg_db),
         settings=SETTINGS,
         reader=reader,
         judge=_Judge(),
