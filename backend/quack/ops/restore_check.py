@@ -2,8 +2,8 @@
 
 After a restore from a dump or a disk snapshot Neo4j can be ahead of the event log: the graph saw
 events that the restored log no longer has, and new events would get the same numbers. The check
-compares, for every learner, `appliedSeq` in Neo4j with `last_seq` in `core.learner_seq`. A learner
-with `appliedSeq` above the log (or absent from the log) is a violation: the exit code is not 0 and
+compares, for every learner, `projectedSeq` in Neo4j with `seq` in `core.learners`. A learner
+with `projectedSeq` above the log (or absent from the log) is a violation: the exit code is not 0 and
 the list is printed; the cure is `ops rebuild --all` (Д-§8.7). A Neo4j that lags is not a violation,
 the projector catches up by itself.
 """
@@ -13,10 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from neo4j import AsyncDriver
-from sqlalchemy import text
 
+from quack.db import Db
 from quack.db.neo4j import read_session
-from quack.db.postgres import SessionFactory
+
+_LOG_SEQS = "SELECT learner_id, seq FROM core.learners"
 
 
 @dataclass(frozen=True)
@@ -26,16 +27,14 @@ class Violation:
     log_seq: int
 
 
-async def log_seqs(session_factory: SessionFactory) -> dict[str, int]:
-    async with session_factory() as session:
-        rows = await session.execute(text("SELECT learner_id, last_seq FROM core.learner_seq"))
-        return {str(row.learner_id): int(row.last_seq) for row in rows}
+async def log_seqs(db: Db) -> dict[str, int]:
+    return {str(row["learner_id"]): int(row["seq"]) for row in await db.fetch_all(_LOG_SEQS)}
 
 
 async def graph_seqs(driver: AsyncDriver) -> dict[str, int]:
     async with read_session(driver) as session:
         result = await session.run(
-            "MATCH (l:Learner) RETURN l.id AS id, coalesce(l.appliedSeq, 0) AS seq"
+            "MATCH (l:Learner) RETURN l.id AS id, coalesce(l.projectedSeq, 0) AS seq"
         )
         return {str(record["id"]): int(record["seq"]) async for record in result}
 
@@ -49,5 +48,5 @@ def find_violations(log: dict[str, int], graph: dict[str, int]) -> list[Violatio
     ]
 
 
-async def restore_check(session_factory: SessionFactory, driver: AsyncDriver) -> list[Violation]:
-    return find_violations(await log_seqs(session_factory), await graph_seqs(driver))
+async def restore_check(db: Db, driver: AsyncDriver) -> list[Violation]:
+    return find_violations(await log_seqs(db), await graph_seqs(driver))
