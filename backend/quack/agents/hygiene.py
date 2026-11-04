@@ -28,8 +28,8 @@ from quack.config import Settings
 from quack.db.neo4j import cypher, read_session
 from quack.events.event_types import MisconceptionMerged, SkillMerged, SkillMergeSuggested
 from quack.events.log import NewEvent, append_events
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.llm.labels import LabelMap, UnknownLabelError
 
 BUILDER_ROLE = "builder"

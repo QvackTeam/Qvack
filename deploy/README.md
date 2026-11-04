@@ -31,6 +31,8 @@
    ```
    Дальше `ALLOW_NO_DUMP` не нужен: перед миграцией скрипт делает дамп (`ops backup now`).
 
+**Схема и процессы (WP1.3, D-C-160).** Сервис `migrate` (`ops migrate`) запускает `dbmate up` на `/app/db/migrations` образа; `api`, `projector` и `workers` ждут его завершения и стартуют с `PHASE4_PROCESSES=true`. Стенд с базой Фаз 1-3 (Alembic) не мигрируется: `ops migrate` видит `public.alembic_version`, отказывает с кодом 1, выкатка останавливается, сервисы остаются на старой версии. Чистый старт: остановить стек и пересоздать базу (`docker compose down`, `docker volume rm quack_postgres-data`), затем `ALLOW_NO_DUMP=1 ./deploy/deploy.sh <sha>`. Пока `ops status` не переведён на схему Фазы 4 (шаг 3 C), проверка выкатки после `migrate` даёт код 2.
+
 Журнал выкаток — `/srv/quack/deploy.log`, текущий релиз — `/srv/quack/release.env`.
 
 ## Бэкап
@@ -54,7 +56,7 @@
 ## Что пока не готово
 
 - **Тревоги по расходу в долларах** (`team_daily_alert_usd`, нужна таблица `ops.llm_usage`, WP10.4), по объектам `quack-deletions` без строки в журнале (WP25) и по дате оплаты Contabo.
-- **Перевод `api`, `workers`, `projector` и `migrate` на роли `quack_app` и `quack_migrator`**: ждёт перехода слоя данных на dbmate (поток A), пока они работают под `quack`.
+- **Перевод `api`, `workers`, `projector` и `migrate` на роли `quack_app` и `quack_migrator`**: схема уже идёт через dbmate, но SQLAlchemy-код Фазы 3 ещё не снят (WP1.3, шаг 5, поток A), поэтому сервисы пока работают под `quack` (D-C-160).
 - **Команды восстановления** `replay-deletions` и `orphan-objects` (WP9.6): первая зависит от журнала удалений в R2 (`replay_deletions`, WP25, поток A), вторая от списка ссылок на объекты в Postgres. Сценарии восстановления — Д-§8.3.
 - **Job выкатки** в GitHub Actions и публикация образов в GHCR: WP9.3/9.4.
 - **CORS** API (`cors_origins` уже есть в конфиге, подключение к приложению — отдельный пакет).

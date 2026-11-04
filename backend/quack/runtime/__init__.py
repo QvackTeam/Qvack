@@ -30,7 +30,6 @@ from quack.storage.objects import create_object_store
 HANDLER_MODULES: tuple[str, ...] = (
     "quack.domains.curation",
     "quack.session.lifecycle",
-    "quack.session.workers",
     "quack.artifacts.cheatsheets",
     "quack.ops.purge_job",
     "quack.artifacts.topic_refresh",

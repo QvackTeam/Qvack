@@ -1,8 +1,10 @@
-"""The full learner journey over HTTP (scenario of `T-E1`, reused by `T-E4`, `T-E10`)."""
+"""Steps of the learner journey over HTTP: the onboarding (domain, structure, diagnostic).
+
+The session half of the Phase 3 journey (`/turns`, `tasks/next`, `finish`) left with the
+routes (ТЗ Ф4 §8.15; D-B-210); `T-E1` on the Phase 4 path is WP26.1."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid5
 
@@ -13,21 +15,9 @@ from quack.events.models import NewEvent
 from quack.graph.ids import QUACK_UUID_NS
 from tests.e2e.system import Learner, System
 from tests.session.helpers import parse_sse
-from tests.support.compute import math_verdict
 
 # A word of the learner's own reply, found by full-text search afterwards.
 ANSWER_WORD = "gradientwombat"
-
-
-@dataclass
-class Journey:
-    learner: Learner
-    domain_id: UUID
-    topic_id: UUID
-    session_id: UUID
-    assigned_task_id: UUID
-    practice_task_id: UUID
-    turns: list[list[tuple[str, dict[str, Any]]]] = field(default_factory=list)
 
 
 def ok(response: httpx.Response, *codes: int) -> dict[str, Any]:
@@ -142,104 +132,3 @@ async def onboard(system: System, learner: Learner, key: str) -> tuple[UUID, UUI
     topic_id = await _seed_phase3_structure(system, learner, domain_id, key)
     await system.settle()
     return domain_id, topic_id
-
-
-async def turn(
-    system: System,
-    learner: Learner,
-    session_id: UUID,
-    text: str,
-    key: str,
-    *,
-    related_task_id: UUID | None = None,
-) -> list[tuple[str, dict[str, Any]]]:
-    body: dict[str, Any] = {"text": text, "idempotency_key": key}
-    if related_task_id is not None:
-        body["related_task_id"] = str(related_task_id)
-    return sse_events(
-        await system.client.post(
-            f"/v1/sessions/{session_id}/turns", json=body, headers=learner.headers
-        )
-    )
-
-
-async def run_journey(system: System, key: str = "journey") -> Journey:
-    """`T-E1` scenario up to the final `settle()`."""
-    learner = await system.register()
-    api, h = system.client, learner.headers
-    domain_id, topic_id = await onboard(system, learner, key)
-    system.compute.push(*(math_verdict(True) for _ in range(4)))
-
-    session = ok(
-        await api.post(
-            "/v1/sessions",
-            json={
-                "domain_id": str(domain_id),
-                "topic_id": str(topic_id),
-                "idempotency_key": f"{key}:s",
-            },
-            headers=h,
-        ),
-        201,
-    )
-    session_id = UUID(session["session_id"])
-
-    turns: list[list[tuple[str, dict[str, Any]]]] = []
-    turns.append(await turn(system, learner, session_id, "Where do I start?", f"{key}:t1"))
-    assigned = first(turns[0], "task_assigned")
-    assert assigned is not None, f"no task assigned on the first turn: {turns[0]}"
-    assigned_task_id = UUID(assigned["task_id"])
-    turns.append(
-        await turn(
-            system,
-            learner,
-            session_id,
-            f"A, because of the {ANSWER_WORD} rule",
-            f"{key}:t2",
-            related_task_id=assigned_task_id,
-        )
-    )
-    turns.append(await turn(system, learner, session_id, "What next?", f"{key}:t3"))
-    last_turn = first(turns[-1], "turn_started")
-    assert last_turn is not None
-    turn_id = last_turn["turn_id"]
-
-    nxt = ok(
-        await api.post(
-            f"/v1/sessions/{session_id}/tasks/next",
-            json={
-                "topic_id": str(topic_id),
-                "turn_id": turn_id,
-                # the scripted `task_gen` answers a choice task (tests/support/llm.py)
-                "kind": "choice",
-                "idempotency_key": f"{key}:next",
-            },
-            headers=h,
-        )
-    )
-    practice_task_id = UUID(nxt["task_id"])
-    ok(
-        await api.post(
-            f"/v1/sessions/{session_id}/tasks/{practice_task_id}/hint",
-            json={"turn_id": turn_id, "idempotency_key": f"{key}:hint"},
-            headers=h,
-        )
-    )
-    ok(
-        await api.post(
-            f"/v1/sessions/{session_id}/tasks/{practice_task_id}/submit",
-            json={"turn_id": turn_id, "answer": "A", "idempotency_key": f"{key}:submit"},
-            headers=h,
-        )
-    )
-    ok(
-        await api.post(
-            f"/v1/sessions/{session_id}/finish",
-            json={"idempotency_key": f"{key}:finish"},
-            headers=h,
-        )
-    )
-    await system.settle()
-    return Journey(
-        learner, domain_id, topic_id, session_id, assigned_task_id, practice_task_id, turns
-    )

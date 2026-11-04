@@ -160,6 +160,8 @@ jobs:
         env:
           SHORT: ${{ steps.commit.outputs.short }}
         run: |
+          # deploy.sh: roles, dump, `dbmate up` (service `migrate`, D-C-160), and only then
+          # projector, workers and api (PHASE4_PROCESSES=true is set in compose.yaml).
           # shellcheck disable=SC2029  # SHORT is 7 hex characters, checked in the commit step
           ssh quack "cd /srv/quack && bash ./deploy/deploy.sh '${SHORT}'"
       - name: Journal of the rollout

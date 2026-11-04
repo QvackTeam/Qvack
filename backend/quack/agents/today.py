@@ -22,8 +22,8 @@ from quack.events.log import NewEvent, append_events
 from quack.events.records import AgentParamsRecord, PlanUpdateRecord
 from quack.events.values import Level
 from quack.graph.read import GraphReader, HubGoal, create_graph_reader
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.llm.labels import LabelMap, UnknownLabelError
 from quack.practice.repo import event_by_seq
 from quack.practice.select import select_tasks

@@ -39,6 +39,9 @@ x-db-env: &db-env
   NEO4J_USER: neo4j
   NEO4J_PASSWORD: ${NEO4J_PASSWORD:?set NEO4J_PASSWORD}
   REDIS_URL: redis://redis:6379/0
+  # WP1.3 (D-A-200, D-C-160): `api`, `projector` and `workers` run on the Phase 4 schema that
+  # `migrate` (dbmate) brings up first. Settings reads the name without a prefix.
+  PHASE4_PROCESSES: "true"
 
 x-after-migrate: &after-migrate
   depends_on:
@@ -127,6 +130,8 @@ services:
     cpus: 0.25
 
   migrate:
+    # `ops migrate` = `dbmate up` on /app/db/migrations (WP1.1, WP9); api, projector and workers
+    # wait for it to complete (D-C-160).
     <<: *backend-image
     restart: "no"
     command: ["ops", "migrate"]

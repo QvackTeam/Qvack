@@ -24,8 +24,6 @@ __all__ = [
 
 # WP2.2: every kind with a registered handler; `workers` refuses to start on a mismatch (T-Q7).
 JOB_KINDS: tuple[str, ...] = (
-    "turn.extract",
-    "session.checkpoint",
     "session.finish_artifacts",
     "artifact.refresh_cheatsheet",
     "graph.curate",
@@ -56,10 +54,7 @@ JOB_KINDS: tuple[str, ...] = (
 )
 
 # WP5.3/T-Q10: the roles whose models a kind calls; a kind waits while any of them is pressured.
-# `session.checkpoint` calls no model since WP13 (deterministic summary, law 10).
 KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
-    "turn.extract": ("extractor",),
-    "session.checkpoint": (),
     "session.finish_artifacts": ("artifacts",),
     "artifact.refresh_cheatsheet": ("artifacts",),
     "graph.curate": ("curator",),

@@ -42,8 +42,8 @@ from quack.graph.read import (
     SliceFocus,
     create_graph_reader,
 )
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.llm.gateway import LLMGateway
 from quack.llm.labels import LabelMap
 from quack.practice.repo import event_by_seq, session_events_up_to
