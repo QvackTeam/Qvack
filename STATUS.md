@@ -225,7 +225,6 @@
 | D-B-143 | Правила формата убраны из слоя 1 трёх ролей вердикта в слой 2 (класс C) |
 | D-C-117 | Инструкция запроса эмбеддингов; окно простоя и число ядер Modal |
 | D-A-152 | Вид материала контроля (пробник, список вопросов) в графе: сейчас `control_materials` пусто |
-| D-A-226 | `TurnIntent` += `split_topic` и `AgentKind` += `topic_split` в v1 (WP8.2, класс C, по #245) |
 | D-A-196 | Поля `hub_id` и `artifact` в `agent.requested` v1 (класс C, issue #191) |
 | Слой 1: 7 пунктов | Текст заготовок `verdict_proof`, `second_opinion`, `verdict_free`, `extractor`, `analyst`, `builder` и общий блок диагностики — раздел «Промпты» заметок |
 | Q-C-1 | Два теста `compute` падали при параллельном прогоне с backend (таймаут `pebble`) |
