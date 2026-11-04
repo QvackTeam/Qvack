@@ -41,6 +41,7 @@ from quack.jobs.runner import JobContext, JobHandler
 from quack.jobs.types import ClaimedJob
 from quack.runtime import register_all_handlers
 from quack.runtime.phase4 import projector_process, workers_process
+from tests.canvas.steps_support import SPACE
 from tests.db.fixtures import create_learner
 from tests.support.compute import ComputeScenario, scripted_compute
 from tests.support.llm import ScriptedLLMProvider
@@ -59,8 +60,15 @@ _BUSY_SQL = """
          LEFT JOIN ops.dispatcher_offsets d ON d.learner_id = l.learner_id
         WHERE l.seq > coalesce(d.last_dispatched_seq, 0)) AS dispatcher_lagging,
       (SELECT count(*) FROM ops.jobs
-        WHERE status = 'running' OR (status = 'queued' AND run_at <= now())) AS jobs_ready
+        WHERE kind = ANY(%(kinds)s)
+          AND (status = 'running' OR (status = 'queued' AND run_at <= now()))) AS jobs_ready
 """
+
+_READY_JOBS_SQL = (
+    "SELECT kind, status, attempts, last_error FROM ops.jobs "
+    "WHERE kind = ANY(%(kinds)s) "
+    "AND (status = 'running' OR (status = 'queued' AND run_at <= now()))"
+)
 
 # The loops poll the log and the queue this often (production: `consumer_poll_ms` = 500).
 STAND_POLL_MS = 100
@@ -124,6 +132,9 @@ class System:
     app: FastAPI
     client: httpx.AsyncClient
     job_starts: list[JobStart] = field(default_factory=list)
+    # Kinds of jobs the workers have a handler for; `settle` waits for these only: a job of a
+    # kind nobody handles yet (`canvas.rediagnose`, stream A) stays queued and is not a lag.
+    handled_kinds: list[str] = field(default_factory=lambda: sorted(job_handlers()))
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
     _tasks: list[asyncio.Task[int]] = field(default_factory=list)
 
@@ -157,7 +168,8 @@ class System:
         self.start_background()
 
     async def settle(self, timeout_s: float = 30.0) -> None:
-        """Wait until the log is projected (and dispatched) and no claimable job is left."""
+        """Wait until the log is projected and dispatched and no claimable job of a handled kind
+        is left."""
         deadline = time.monotonic() + timeout_s
         stable = 0
         last: tuple[int, int, int] = (-1, -1, -1)
@@ -167,7 +179,7 @@ class System:
                     raise AssertionError(
                         f"background task failed: {task.exception() or task.result()!r}"
                     )
-            row = await self.resources.db.fetch_one(_BUSY_SQL)
+            row = await self.resources.db.fetch_one(_BUSY_SQL, {"kinds": self.handled_kinds})
             assert row is not None
             last = (
                 int(row["projector_lagging"]),
@@ -178,9 +190,13 @@ class System:
             if stable >= SETTLE_STABLE_ROUNDS:
                 return
             if time.monotonic() > deadline:
+                ready = await self.resources.db.fetch_all(
+                    _READY_JOBS_SQL, {"kinds": self.handled_kinds}
+                )
                 raise AssertionError(
                     f"system did not settle in {timeout_s} s: projector lagging learners "
-                    f"{last[0]}, dispatcher lagging learners {last[1]}, claimable jobs {last[2]}"
+                    f"{last[0]}, dispatcher lagging learners {last[1]}, claimable jobs {last[2]}: "
+                    f"{[(r['kind'], r['status'], r['attempts'], r['last_error']) for r in ready]}"
                 )
             await asyncio.sleep(SETTLE_POLL_SEC)
 
@@ -240,6 +256,9 @@ async def build_system(
         }
     )
     llm = ScriptedLLMProvider()
+    # A task of the bank gets its solution space ahead in the background (`task.solution_space`,
+    # WP12.4): the walk creates such tasks, and the job must succeed, not retry.
+    llm.respond("SolutionSpace", lambda _request: SPACE.model_dump(mode="json"))
     compute = ComputeScenario()
     resources = build_app_resources(
         settings, neo4j, redis, db=db, provider=llm, compute=scripted_compute(compute)
