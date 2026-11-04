@@ -47,6 +47,7 @@ JOB_KINDS: tuple[str, ...] = (
     "agent.solution_space",
     "check.known_claim",
     "agent.illustration",
+    "agent.topic_split",
 )
 
 # WP5.3/T-Q10: the roles whose models a kind calls; a kind waits while any of them is pressured.
@@ -76,6 +77,7 @@ KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
     "agent.solution_space": ("solution_space",),
     "check.known_claim": ("task_generator",),
     "agent.illustration": ("illustrator",),
+    "agent.topic_split": ("builder",),
 }
 
 

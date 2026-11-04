@@ -54,6 +54,7 @@ def _turn() -> dict[str, Any]:
             "targetSkills": ["S1"],
             "verdict_stance": None,
             "branchType": None,
+            "topicLabel": None,
             "approach": "example_first",
         },
         "p2_body": {"blocks": [{"block_id": "b1", "text": TEXT, "element_id": None}]},

@@ -80,6 +80,7 @@ def _turn(blocks: list[dict[str, Any]]) -> dict[str, Any]:
         "p1_head": {
             "approach": "example_first",
             "branchType": None,
+            "topicLabel": None,
             "intent": "explain",
             "targetSkills": ["S1"],
             "verdict_stance": None,
