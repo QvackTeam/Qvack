@@ -277,6 +277,10 @@ class AgentParamsRecord(_Record):
     task_id: UUID | None = None
     misconception_id: UUID | None = None
     description: str | None = None
+    # D-A-196 (#191, WP23.2, Т-§17.7): the artifact a request of kind `artifact` builds and the
+    # hub of a cheat sheet — data, not words in `description` (law 2).
+    hub_id: UUID | None = None
+    artifact: Literal["notes", "cards", "cheatsheet"] | None = None
 
 
 class AgentRequestRecord(_Record):

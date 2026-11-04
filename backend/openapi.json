@@ -1,6 +1,19 @@
 {
   "components": {
     "schemas": {
+      "Accepted": {
+        "properties": {
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seq"
+        ],
+        "title": "Accepted",
+        "type": "object"
+      },
       "ActionFrame": {
         "anyOf": [
           {
@@ -1283,6 +1296,15 @@
         "title": "ConsentRevocation",
         "type": "object"
       },
+      "ControlType": {
+        "enum": [
+          "tasks",
+          "colloquium_proofs",
+          "oral_theory",
+          "no_goal"
+        ],
+        "type": "string"
+      },
       "CorrectedLine": {
         "properties": {
           "canvas_id": {
@@ -1384,6 +1406,40 @@
         "title": "CreateDomainResponse",
         "type": "object"
       },
+      "CreateHub": {
+        "additionalProperties": false,
+        "properties": {
+          "control_type": {
+            "default": "no_goal",
+            "enum": [
+              "tasks",
+              "colloquium_proofs",
+              "oral_theory",
+              "no_goal"
+            ],
+            "title": "Control Type",
+            "type": "string"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "idempotency_key"
+        ],
+        "title": "CreateHub",
+        "type": "object"
+      },
       "DeleteLearnerResponse": {
         "properties": {
           "requested_at": {
@@ -1402,6 +1458,26 @@
           "requested_at"
         ],
         "title": "DeleteLearnerResponse",
+        "type": "object"
+      },
+      "DeletionResponse": {
+        "description": "The id of the deletion and the term the copies still live (Д-§8.6).",
+        "properties": {
+          "copies_days": {
+            "title": "Copies Days",
+            "type": "integer"
+          },
+          "deletion_id": {
+            "format": "uuid",
+            "title": "Deletion Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deletion_id",
+          "copies_days"
+        ],
+        "title": "DeletionResponse",
         "type": "object"
       },
       "DiagnosticQuestion": {
@@ -2106,6 +2182,123 @@
         "title": "EventSearchHit",
         "type": "object"
       },
+      "EvidenceFact": {
+        "additionalProperties": false,
+        "description": "One piece of evidence for a level (Т-§8.7): quote, task, tier by code, date, id for\nthe \"disagree\" action (Т-§2.8). `assistance` / `hint_step` — the help given (Evidence\n`assistance`, `hintStep`, `Т-§3.4.3`), `skill_history` shows it (`Т-§10.4`, D-A-127).",
+        "properties": {
+          "assistance": {
+            "default": "none",
+            "enum": [
+              "none",
+              "hint",
+              "shown_solution"
+            ],
+            "title": "Assistance",
+            "type": "string"
+          },
+          "evidence_id": {
+            "format": "uuid",
+            "title": "Evidence Id",
+            "type": "string"
+          },
+          "hint_step": {
+            "anyOf": [
+              {
+                "maximum": 3.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint Step"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "occurred_at_ms": {
+            "title": "Occurred At Ms",
+            "type": "integer"
+          },
+          "outcome": {
+            "enum": [
+              "correct",
+              "incorrect",
+              "partial",
+              "unclear"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "quote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "skill_id": {
+            "format": "uuid",
+            "title": "Skill Id",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/EvidenceSource"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "evidence_id",
+          "skill_id",
+          "level",
+          "outcome",
+          "source",
+          "seq",
+          "occurred_at_ms"
+        ],
+        "title": "EvidenceFact",
+        "type": "object"
+      },
+      "EvidenceSource": {
+        "enum": [
+          "code",
+          "model",
+          "conversation"
+        ],
+        "type": "string"
+      },
       "ExportDomain": {
         "properties": {
           "domain_id": {
@@ -2411,6 +2604,29 @@
         "title": "FreeAnswerElement",
         "type": "object"
       },
+      "Grade": {
+        "additionalProperties": false,
+        "properties": {
+          "grade": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Grade",
+            "type": "string"
+          },
+          "scale": {
+            "maxLength": 40,
+            "minLength": 1,
+            "title": "Scale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grade",
+          "scale"
+        ],
+        "title": "Grade",
+        "type": "object"
+      },
       "HealthLive": {
         "properties": {
           "status": {
@@ -2602,6 +2818,137 @@
         "title": "HintResponse",
         "type": "object"
       },
+      "HubCreated": {
+        "properties": {
+          "hub_id": {
+            "format": "uuid",
+            "title": "Hub Id",
+            "type": "string"
+          },
+          "seq": {
+            "title": "Seq",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hub_id",
+          "seq"
+        ],
+        "title": "HubCreated",
+        "type": "object"
+      },
+      "HubGoal": {
+        "additionalProperties": false,
+        "description": "A goal hub of a domain for slot 4 (Т-§10.1, WP14.1): read from the graph, so merges,\nsplits and renames of topics are already applied (D-A-137).",
+        "properties": {
+          "control_type": {
+            "$ref": "#/components/schemas/ControlType"
+          },
+          "deadline_at_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deadline At Ms"
+          },
+          "hub_id": {
+            "format": "uuid",
+            "title": "Hub Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "topics": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HubTopicGoal"
+            },
+            "title": "Topics",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hub_id",
+          "name",
+          "kind",
+          "control_type"
+        ],
+        "title": "HubGoal",
+        "type": "object"
+      },
+      "HubReadiness": {
+        "additionalProperties": false,
+        "description": "`topic_readiness` (Т-§14.5): \"9 of 14 topics are ready\", direct basis only.",
+        "properties": {
+          "hub_id": {
+            "format": "uuid",
+            "title": "Hub Id",
+            "type": "string"
+          },
+          "not_ready_topic_ids": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Not Ready Topic Ids",
+            "type": "array"
+          },
+          "ready_topic_ids": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Ready Topic Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "hub_id"
+        ],
+        "title": "HubReadiness",
+        "type": "object"
+      },
+      "HubTopicGoal": {
+        "additionalProperties": false,
+        "description": "A topic of a hub with the levels the control requires of it (Т-§4.8, `INCLUDES`).",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "required_levels": {
+            "items": {
+              "$ref": "#/components/schemas/Level"
+            },
+            "title": "Required Levels",
+            "type": "array"
+          },
+          "topic_id": {
+            "format": "uuid",
+            "title": "Topic Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic_id",
+          "name",
+          "required_levels"
+        ],
+        "title": "HubTopicGoal",
+        "type": "object"
+      },
       "HubTopicLevels": {
         "additionalProperties": false,
         "properties": {
@@ -2622,6 +2969,22 @@
           "topic_id"
         ],
         "title": "HubTopicLevels",
+        "type": "object"
+      },
+      "HubView": {
+        "properties": {
+          "goal": {
+            "$ref": "#/components/schemas/HubGoal"
+          },
+          "readiness": {
+            "$ref": "#/components/schemas/HubReadiness"
+          }
+        },
+        "required": [
+          "goal",
+          "readiness"
+        ],
+        "title": "HubView",
         "type": "object"
       },
       "IntentAction": {
@@ -2679,6 +3042,15 @@
         ],
         "title": "IntentAction",
         "type": "object"
+      },
+      "ItemReason": {
+        "enum": [
+          "due",
+          "consolidation",
+          "misconception",
+          "deadline"
+        ],
+        "type": "string"
       },
       "KeyedRequest": {
         "additionalProperties": false,
@@ -3581,6 +3953,36 @@
         "title": "OpenCanvas",
         "type": "object"
       },
+      "PaceWarning": {
+        "description": "`Т-§14.6`: the hub will not be ready by its date at the current pace.",
+        "properties": {
+          "forecast": {
+            "title": "Forecast",
+            "type": "number"
+          },
+          "hub_id": {
+            "format": "uuid",
+            "title": "Hub Id",
+            "type": "string"
+          },
+          "not_ready": {
+            "title": "Not Ready",
+            "type": "integer"
+          },
+          "ready": {
+            "title": "Ready",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hub_id",
+          "ready",
+          "not_ready",
+          "forecast"
+        ],
+        "title": "PaceWarning",
+        "type": "object"
+      },
       "PairElement": {
         "additionalProperties": false,
         "description": "Пара на различение: two task elements whose markups point at each other\n(`pairTaskId`).",
@@ -3739,6 +4141,20 @@
           "ask_confidence"
         ],
         "title": "PredictionElement",
+        "type": "object"
+      },
+      "PrepMode": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "PrepMode",
         "type": "object"
       },
       "PrereqEdge": {
@@ -5115,6 +5531,82 @@
         "title": "TimedQuizElement",
         "type": "object"
       },
+      "TodayEntry": {
+        "properties": {
+          "reasons": {
+            "items": {
+              "$ref": "#/components/schemas/ItemReason"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "skill_id": {
+            "format": "uuid",
+            "title": "Skill Id",
+            "type": "string"
+          },
+          "topic_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Id"
+          }
+        },
+        "required": [
+          "skill_id",
+          "reasons",
+          "score"
+        ],
+        "title": "TodayEntry",
+        "type": "object"
+      },
+      "TodayView": {
+        "description": "Empty `items` — no plaque (`Т-§14.4`). `grade_hub_ids` — hubs whose date has passed\nand that have no grade yet: the offer to enter it (WP17.5).",
+        "properties": {
+          "grade_hub_ids": {
+            "default": [],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Grade Hub Ids",
+            "type": "array"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TodayEntry"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "minutes": {
+            "default": 0.0,
+            "title": "Minutes",
+            "type": "number"
+          },
+          "pace_warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PaceWarning"
+            },
+            "title": "Pace Warnings",
+            "type": "array"
+          }
+        },
+        "title": "TodayView",
+        "type": "object"
+      },
       "TokenFrame": {
         "additionalProperties": false,
         "description": "`token {text}`: checked body text (Т-§12.2 этап 3).",
@@ -5823,6 +6315,50 @@
           "ask_confidence"
         ],
         "title": "WhyChoiceElement",
+        "type": "object"
+      },
+      "WhyFacts": {
+        "additionalProperties": false,
+        "description": "`why` (Т-§8.7): the deciding evidence of the level and the latest `why_recent_n`.",
+        "properties": {
+          "deciding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceFact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Level"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recent": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EvidenceFact"
+            },
+            "title": "Recent",
+            "type": "array"
+          },
+          "topic_id": {
+            "format": "uuid",
+            "title": "Topic Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "topic_id"
+        ],
+        "title": "WhyFacts",
         "type": "object"
       }
     }
@@ -8068,6 +8604,97 @@
       }
     },
     "/v1/domains/{domain_id}": {
+      "delete": {
+        "operationId": "delete_domain_endpoint_v1_domains__domain_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Delete Domain Endpoint",
+        "tags": [
+          "deletion"
+        ]
+      },
       "get": {
         "operationId": "get_domain_endpoint_v1_domains__domain_id__get",
         "parameters": [
@@ -8803,6 +9430,184 @@
         ]
       }
     },
+    "/v1/domains/{domain_id}/hubs": {
+      "get": {
+        "operationId": "domain_hubs_endpoint_v1_domains__domain_id__hubs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HubGoal"
+                  },
+                  "title": "Response Domain Hubs Endpoint V1 Domains  Domain Id  Hubs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Domain Hubs Endpoint",
+        "tags": [
+          "domains"
+        ]
+      },
+      "post": {
+        "operationId": "create_hub_endpoint_v1_domains__domain_id__hubs_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateHub"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Create Hub Endpoint",
+        "tags": [
+          "domains"
+        ]
+      }
+    },
     "/v1/domains/{domain_id}/materials": {
       "get": {
         "operationId": "list_materials_v1_domains__domain_id__materials_get",
@@ -9286,6 +10091,79 @@
         ]
       }
     },
+    "/v1/domains/{domain_id}/today": {
+      "get": {
+        "operationId": "today_endpoint_v1_domains__domain_id__today_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "domain_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Domain Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodayView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Today Endpoint",
+        "tags": [
+          "review"
+        ]
+      }
+    },
     "/v1/domains/{domain_id}/topics/{topic_id}": {
       "get": {
         "operationId": "get_topic_detail_endpoint_v1_domains__domain_id__topics__topic_id__get",
@@ -9585,6 +10463,77 @@
       }
     },
     "/v1/hubs/{hub_id}": {
+      "get": {
+        "operationId": "hub_view_endpoint_v1_hubs__hub_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hub_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Hub Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HubView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Hub View Endpoint",
+        "tags": [
+          "domains"
+        ]
+      },
       "patch": {
         "description": "WP6.3, ТЗ §6.4 «Хабы»: the learner corrects the scope and the date (Т-§4.8).",
         "operationId": "edit_hub_endpoint_v1_hubs__hub_id__patch",
@@ -9685,6 +10634,212 @@
         "summary": "Edit Hub Endpoint",
         "tags": [
           "domains"
+        ]
+      }
+    },
+    "/v1/hubs/{hub_id}/grade": {
+      "post": {
+        "operationId": "grade_endpoint_v1_hubs__hub_id__grade_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hub_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Hub Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Grade"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Grade Endpoint",
+        "tags": [
+          "review"
+        ]
+      }
+    },
+    "/v1/hubs/{hub_id}/prep-mode": {
+      "post": {
+        "operationId": "prep_mode_endpoint_v1_hubs__hub_id__prep_mode_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hub_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Hub Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrepMode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Prep Mode Endpoint",
+        "tags": [
+          "review"
         ]
       }
     },
@@ -11486,6 +12641,98 @@
       }
     },
     "/v1/topics/{topic_id}": {
+      "delete": {
+        "description": "WP25: the physical deletion of a topic (privacy); «убрать с графа» is `…/hide`.",
+        "operationId": "delete_topic_endpoint_v1_topics__topic_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "topic_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Topic Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Delete Topic Endpoint",
+        "tags": [
+          "deletion"
+        ]
+      },
       "get": {
         "operationId": "get_topic_detail_short_endpoint_v1_topics__topic_id__get",
         "parameters": [
@@ -12376,6 +13623,97 @@
           }
         },
         "summary": "Update Topic Status Short Endpoint",
+        "tags": [
+          "domains"
+        ]
+      }
+    },
+    "/v1/topics/{topic_id}/why": {
+      "get": {
+        "operationId": "topic_why_endpoint_v1_topics__topic_id__why_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "topic_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Topic Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 6,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhyFacts"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Topic Why Endpoint",
         "tags": [
           "domains"
         ]

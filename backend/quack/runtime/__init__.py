@@ -42,6 +42,8 @@ HANDLER_MODULES: tuple[str, ...] = (
     "quack.practice.jobs",
     "quack.agents.today",
     "quack.agents.hygiene",
+    "quack.deletion.jobs",
+    "quack.jobs.cleanup_p4",
     "quack.agents.solution_space",
     "quack.agents.task_generation",
     "quack.agents.illustration",
@@ -63,7 +65,14 @@ async def create_job_context(settings: Settings) -> JobContext:
         engine=engine,
         neo4j=neo4j,
         redis=redis,
-        llm=LLMGateway(session_factory, provider, settings),
+        # D-B-197 (#210): with the processes of Phase 4 the gateway accounts in `ops.llm_usage`
+        # (one schema — one ledger); without them it stays on `ops.llm_ledger` of Phase 3.
+        llm=LLMGateway(
+            session_factory,
+            provider,
+            settings,
+            db=db if settings.phase4_processes else None,
+        ),
         compute=create_compute_client(settings),
         storage=create_object_store(settings),
         embeddings=create_embedding_client(settings),

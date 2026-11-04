@@ -38,26 +38,35 @@ CROSS_LEARNER_ALLOWED: dict[str, str] = {
 # D-A-164 (#182): the job queue and the dispatcher serve every learner (Т-§13.1–13.3): a job is
 # found by its global `job_key` or `coalesce_key`, a periodic job has no learner, a claim picks
 # the best job of any learner, the dispatcher walks the learners behind their mark.
-CROSS_LEARNER_ALLOWED |= {
-    f"quack/jobs/queue_p4.py:{name}": "the job queue serves every learner (Т-§13.1, Т-§13.2)"
-    for name in (
-        "_JOB_EXISTS",
-        "_COALESCE",
-        "_INSERT",
-        "_LEARNER_LOCK",
-        "_LEARNER_LOAD",
-        "_SKIP_BUDGET",
-        "_SESSION_SPEND",
-        "_HEARTBEAT",
-        "_FINISH",
-        "_REQUEUE",
-        "_SUPERSEDE",
-        "_CANCEL_SUPERSEDED",
-    )
-} | {
-    f"quack/jobs/dispatcher_p4.py:{name}": "the dispatcher walks every learner (Т-§13.3)"
-    for name in ("_PENDING_LEARNERS", "_LAG", "_IDLE_LEARNERS")
-}
+CROSS_LEARNER_ALLOWED |= (
+    {
+        f"quack/jobs/queue_p4.py:{name}": "the job queue serves every learner (Т-§13.1, Т-§13.2)"
+        for name in (
+            "_JOB_EXISTS",
+            "_COALESCE",
+            "_INSERT",
+            "_LEARNER_LOCK",
+            "_LEARNER_LOAD",
+            "_SKIP_BUDGET",
+            "_SESSION_SPEND",
+            "_HEARTBEAT",
+            "_FINISH",
+            "_REQUEUE",
+            "_SUPERSEDE",
+            "_CANCEL_SUPERSEDED",
+        )
+    }
+    | {
+        f"quack/jobs/dispatcher_p4.py:{name}": "the dispatcher walks every learner (Т-§13.3)"
+        for name in ("_PENDING_LEARNERS", "_LAG", "_IDLE_LEARNERS")
+    }
+    | {
+        # D-A-200: the projector process walks the learners behind their watermark (Т-§2.4).
+        "quack/graph/projection/process.py:_PENDING": "the projector walks every learner",
+        # D-A-204: `manifests.cleanup` deletes the old manifests of every learner (Т-§3.6).
+        "quack/jobs/cleanup_p4.py:_DELETE_OLD": "the periodic cleanup of every learner",
+    }
+)
 # D-B-195 (WP16.7): `ops metrics` measures the whole system over a window (Т-§18.2, Т-§18.3);
 # D-B-194: the operator's `ops replay-session` names only the session.
 CROSS_LEARNER_ALLOWED |= {
