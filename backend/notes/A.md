@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-A-241. WP7.1 / шов S6: обработчик `embedding.compute` — регистрация вида над телом C
+- Класс: A
+- WP / место: WP7.1 (S6), WP20.3; `quack/jobs/embedding_p4.py` (новый), `quack/jobs/kinds.py`, `quack/runtime/__init__.py`, `tests/jobs/test_embedding_p4.py`
+- Контекст: диспетчер ставит `embedding.compute` (строка `*` WP7.1, D-A-117), тело задачи у C (`quack/embeddings/compute.py`), а регистрации нет: тело C относит её и форму параметров к шву S6 (A). Задачи вида без обработчика `JobWorker` не берёт — они копились в очереди, векторы не считались, векторный поиск WP20.4 был пуст. Ещё четыре вида плана без обработчика — `canvas.rediagnose`, `second_opinion.diagnosis` (WP21.3–21.4), `agent.artifact` (WP23.2), `export.data` (WP23.7) — обработчики задач по S6 у B и C (§7.2), тела у C; передано C issue
+- Решение: `@register_job_handler("embedding.compute")` в ядре `quack.jobs`: параметры `{nodes: [{node_kind, node_id, text}]}` → `EmbeddingNode` → `compute_embeddings(ctx.db, ctx.embeddings, …)`. Modal недоступен (`EmbeddingsUnavailable`) → `JobDeferred(job_backoff_max_sec)`: задача ждёт в очереди, попытка не тратится. Вид — в `JOB_KINDS` (ролей моделей нет), модуль — в `HANDLER_MODULES`
+- Почему: ТЗ §6.5, §7.2 (S6), WP20.3; §4.4, строка «Modal» («задачи эмбеддингов ждут в очереди»); закон 5 (повтор не пишет дважды — тело C пропускает готовые ключи)
+- Обратимость: полная
+- Тесты: `tests/jobs/test_embedding_p4.py` (Modal недоступен — отложена на `job_backoff_max_sec`; два прогона — одно `embedding.ready`), `tests/test_jobs_phase3.py` (T-Q7: `JOB_KINDS` = обработчики)
+- Требует подтверждения владельцем: нет
+
 ### D-A-240. DoD п.3: тесты §8 потока A под именами ТЗ (T-ED1–ED4, T-RV1, T-RV4, T-DL1–DL3)
 - Класс: A
 - WP / место: WP8, WP17, WP25; `tests/domains/test_edits.py`, `tests/domains/test_deletions.py` (новый), `tests/graph/test_projection_runner.py`, `tests/graph/test_read_neo4j_extras.py`
