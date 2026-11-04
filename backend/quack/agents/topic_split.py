@@ -96,7 +96,7 @@ def build_events(
     session_id: UUID | None,
     causation_seq: int,
 ) -> list[NewEvent]:
-    """`topic.split` (and, for a topic of one skill, `skill.split` after it), keyed by the request."""
+    """`topic.split` (for a topic of one skill, then `skill.split`), keyed by the request."""
 
     def new(event_type: str, payload: SkillSplit | TopicSplit) -> NewEvent:
         return NewEvent(
