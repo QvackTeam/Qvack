@@ -19,7 +19,7 @@ export function LandingPage() {
     >
       <Backdrop scrollRef={scrollRef} />
       <LandingNav scrollRef={scrollRef} />
-      <Hero />
+      <Hero scrollRef={scrollRef} />
       <Compare scrollRef={scrollRef} />
       <Pluses />
       <Features />

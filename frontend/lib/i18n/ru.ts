@@ -226,6 +226,7 @@ export const ru: Dict = {
     tagline: "Больше, чем обычная подготовка к учёбе",
     cta: "Начать",
     scroll: "Листай вниз",
+    hero: { brand: "Quack!", title: "Learning Hub", duck: "Тыкни утку" },
     compare: {
       lecture: {
         title: "Презентации препода",
