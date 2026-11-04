@@ -1,57 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 import { useLocale, useMocks, useT } from "@/lib/i18n/provider";
 import { getStubData } from "@/lib/mock/stubs";
 import { cn } from "@/lib/utils";
 import { API_MODE } from "@/lib/api/client";
-import { DiagnosticLive, NewDomainLive, StructureLive } from "../live/domain-setup-live";
+import { DiagnosticLive, StructureLive } from "../live/domain-setup-live";
 import { BackLink, PageShell, PageSection } from "../page-parts";
 import { Inline } from "../rich-text";
 import { StateDot } from "../topic-card";
-import { AREA, DANGER_BTN, FIELD, Field, PRIMARY_BTN, SECONDARY_BTN, StubHeader, StubNote } from "./stub-parts";
+import { DANGER_BTN, FIELD, PRIMARY_BTN, SECONDARY_BTN, StubHeader, StubNote } from "./stub-parts";
 
 const clean = (s: string) => s.replace(/­/g, "");
-
-/** New subject: name, goals, background, focus. Then the duck proposes topics. */
-function NewDomainMock() {
-  const tx = useT();
-  const t = tx.stubs.newDomain;
-  const router = useRouter();
-  const id = useId();
-  return (
-    <PageShell>
-      <BackLink href="/">{tx.shell.subjects}</BackLink>
-      <StubHeader title={t.title} body={t.body} />
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          // Stub: the proposed structure is shown for an existing mock subject
-          router.push("/domains/matan/structure");
-        }}
-      >
-        <Field id={`${id}-name`} label={t.name}>
-          <input id={`${id}-name`} required placeholder={t.namePh} className={FIELD} />
-        </Field>
-        <Field id={`${id}-goals`} label={t.goals}>
-          <textarea id={`${id}-goals`} placeholder={t.goalsPh} className={AREA} />
-        </Field>
-        <Field id={`${id}-bg`} label={t.background}>
-          <textarea id={`${id}-bg`} placeholder={t.backgroundPh} className={AREA} />
-        </Field>
-        <Field id={`${id}-focus`} label={t.focus} help={t.focusHelp}>
-          <input id={`${id}-focus`} placeholder={t.focusPh} className={FIELD} />
-        </Field>
-        <button type="submit" className={cn(PRIMARY_BTN, "mt-6")}>
-          {t.submit}
-        </button>
-      </form>
-      <StubNote className="mt-10" endpoints={["POST /v1/domains", "POST /v1/domains/{id}/structure/propose"]} />
-    </PageShell>
-  );
-}
 
 /** Proposed structure: skip or add topics, confirm, archive the subject */
 function StructureMock({ domainId }: { domainId: string }) {
@@ -261,10 +222,6 @@ function DiagnosticMock({ domainId }: { domainId: string }) {
 }
 
 // With the backend the same screens are live (components/quack/live); on mocks they stay stubs
-export function NewDomainStub() {
-  return API_MODE ? <NewDomainLive /> : <NewDomainMock />;
-}
-
 export function StructureStub({ domainId }: { domainId: string }) {
   return API_MODE ? <StructureLive domainId={domainId} /> : <StructureMock domainId={domainId} />;
 }

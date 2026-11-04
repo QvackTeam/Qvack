@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, LayoutGrid, Plus } from "lucide-react";
+import { ChevronRight, LayoutGrid } from "lucide-react";
 import Link from "next/link";
 import type { Domain } from "@/lib/mock/types";
 import { scrollToId } from "@/lib/scroll";
@@ -100,15 +100,6 @@ export function DomainSidebar({
             </li>
           );
         })}
-        <li>
-          <Link
-            href="/domains/new"
-            className="caps mt-2 ml-3 inline-flex min-h-10 items-center gap-2 rounded-pill border border-seam px-4 text-paper-dim transition-colors hover:border-rule hover:bg-cloth-hover hover:text-paper"
-          >
-            <Plus aria-hidden className="size-3.5" />
-            {t.shell.newSubject}
-          </Link>
-        </li>
       </ul>
 
       <ProfileMenu active={pathname.startsWith("/settings")} />
