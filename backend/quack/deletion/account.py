@@ -19,6 +19,7 @@ from quack.db.db import LockKeyspace
 from quack.db.redis import presence_key
 from quack.deletion.domain import DeletionBusy, DeletionDone
 from quack.graph.projection.store import delete_learner_graph
+from quack.llm.tracing import Tracer
 from quack.storage.deletions import DeletionJournal, DeletionRecord
 from quack.storage.objects import ObjectStore
 
@@ -95,9 +96,16 @@ async def delete_account(
     now: datetime,
     *,
     redis: Redis | None = None,
+    tracer: Tracer | None = None,
+    pseudonym: str | None = None,
 ) -> DeletionDone:
-    """The journal record first (`Д-§8.5`): `DeletionJournalUnavailable` propagates (503)."""
+    """The journal record first (`Д-§8.5`): `DeletionJournalUnavailable` propagates (503).
+
+    The learner's traces go last, by their pseudonym (WP10.6, #210): `False` from the tracer —
+    nothing more, the traces expire by `langsmith_retention_days` (D-B-202)."""
     record = DeletionRecord(uuid4(), learner_id, "account", learner_id, now)
     await journal.write(record)
     await apply_account_record(db, neo4j, store, learner_id, record, redis=redis)
+    if tracer is not None and pseudonym is not None:
+        await tracer.delete_learner(pseudonym)
     return DeletionDone(record.deletion_id)

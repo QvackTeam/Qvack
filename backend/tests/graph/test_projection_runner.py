@@ -712,6 +712,7 @@ async def test_delete_account(pg_db: Db, neo4j: AsyncDriver, settings: Settings)
 
     from quack.deletion.account import delete_account
     from quack.deletion.journal import replay_deletions
+    from quack.llm.tracing import NullTracer
     from tests.support.deletions import FakeDeletionJournal
     from tests.support.storage import InMemoryObjectStore
 
@@ -723,7 +724,17 @@ async def test_delete_account(pg_db: Db, neo4j: AsyncDriver, settings: Settings)
     await store.put(f"learners/{learner}/materials/a.pdf", b"x", "application/pdf")
     await store.put(f"learners/{other}/materials/b.pdf", b"y", "application/pdf")
     journal, now = FakeDeletionJournal(), datetime(2026, 11, 3, tzinfo=UTC)
-    done = await delete_account(pg_db, neo4j, journal, store, learner, now)
+    deleted: list[str] = []
+
+    class _Tracer(NullTracer):
+        async def delete_learner(self, pseudonym: str) -> bool:
+            deleted.append(pseudonym)
+            return False
+
+    done = await delete_account(
+        pg_db, neo4j, journal, store, learner, now, tracer=_Tracer(), pseudonym="p-1"
+    )
+    assert deleted == ["p-1"]
     assert [r.kind for r in journal.records] == ["account"]
     for query in (
         "SELECT count(*) AS n FROM core.learners WHERE learner_id = %(l)s",
