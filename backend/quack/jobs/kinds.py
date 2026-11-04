@@ -22,8 +22,6 @@ __all__ = [
 
 # WP2.2: every kind with a registered handler; `workers` refuses to start on a mismatch (T-Q7).
 JOB_KINDS: tuple[str, ...] = (
-    "session.finish_artifacts",
-    "artifact.refresh_cheatsheet",
     "session.sweep_inactive",
     "artifact.topic_refresh",
     "artifact.cheatsheet",
@@ -52,8 +50,6 @@ JOB_KINDS: tuple[str, ...] = (
 
 # WP5.3/T-Q10: the roles whose models a kind calls; a kind waits while any of them is pressured.
 KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
-    "session.finish_artifacts": ("artifacts",),
-    "artifact.refresh_cheatsheet": ("artifacts",),
     "session.sweep_inactive": (),
     "artifact.topic_refresh": ("artifact_writer",),
     "artifact.cheatsheet": ("artifact_writer",),

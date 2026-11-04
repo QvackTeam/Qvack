@@ -1,7 +1,9 @@
 """Builders of process resources with test dependencies (ТЗ Фазы 3 §4.2, §8.1, seam S1).
 
 ТЗ Фазы 4 §4.2: `AppResources` also gets `storage`, `embeddings`, `email`, `deletions`; by default
-they are the in-memory doubles of `tests.support` (§8.1).
+they are the in-memory doubles of `tests.support` (§8.1). WP1.3: `AppResources` has no `engine` and
+no `session_factory`; the `engine` / `session_factory` arguments below only build the gateway,
+which still takes a session factory for its outbox (D-B-197, step 4 of stream B).
 
 `build_app_resources` assembles `quack.api.resources.AppResources` from the test pools,
 `build_job_context` assembles `quack.jobs.runner.JobContext` (WP2.1, conflict 20 of §2.3).
@@ -21,7 +23,7 @@ from quack.api.resources import AppResources
 from quack.compute_client.client import ComputeClient
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory, create_session_factory
+from quack.db.postgres import SessionFactory
 from quack.embeddings.client import EmbeddingClient
 from quack.jobs.runner import JobContext
 from quack.llm.gateway import LLMGateway
@@ -38,7 +40,7 @@ from tests.support.storage import InMemoryObjectStore
 
 def build_app_resources(
     settings: Settings,
-    engine: AsyncEngine,
+    engine: AsyncEngine | None,
     neo4j: AsyncDriver | Any,
     redis: Redis | Any | None,
     *,
@@ -56,13 +58,10 @@ def build_app_resources(
     empty `ComputeScenario` (answers 503); storage, embeddings, email and the deletion journal
     are the working in-memory doubles. Without `db` (pass `pg_db`, seam S2) the `Db` is over a
     closed pool: a test that touches Postgres through it fails with `PoolClosed`."""
-    factory = session_factory or create_session_factory(engine)
     db = db or Db(AsyncConnectionPool(settings.postgres_dsn, open=False))
     return AppResources(
         settings=settings,
         db=db,
-        engine=cast(AsyncEngine, engine),
-        session_factory=factory,
         neo4j=cast(AsyncDriver, neo4j),
         redis=cast(Redis | None, redis),
         llm=LLMGateway(provider or UnavailableLLMProvider(), settings, db=db),

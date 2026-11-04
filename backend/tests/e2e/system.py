@@ -89,13 +89,16 @@ def job_handlers() -> dict[str, JobHandler]:
     return register_all_handlers()
 
 
-def job_context(resources: AppResources) -> JobContext:
-    """The `workers` resources of §4.2 over the stand's ones: one process, one set (WP2.1)."""
+def job_context(
+    resources: AppResources, engine: AsyncEngine, session_factory: SessionFactory
+) -> JobContext:
+    """The `workers` resources of §4.2 over the stand's ones: one process, one set (WP2.1). The
+    SQLAlchemy pair is the stand's own: the resources of the API have none (WP1.3)."""
     return JobContext(
         settings=resources.settings,
         db=resources.db,
-        session_factory=resources.session_factory,
-        engine=resources.engine,
+        session_factory=session_factory,
+        engine=engine,
         neo4j=resources.neo4j,
         redis=resources.redis,
         llm=resources.llm,
@@ -156,7 +159,7 @@ class System:
             self.session_factory,
             f"e2e-{uuid4().hex[:8]}",
             handlers=handlers,
-            context=job_context(self.resources),
+            context=job_context(self.resources, self.engine, self.session_factory),
         )
         self._spawn(runner.run_forever)
 

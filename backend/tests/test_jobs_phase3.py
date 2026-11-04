@@ -193,10 +193,10 @@ def test_all_job_kinds_have_handlers() -> None:
     assert set(handlers) == set(JOB_KINDS)
     check_handlers_complete(handlers)
     broken = dict(handlers)
-    broken.pop("artifact.refresh_cheatsheet")
+    broken.pop("artifact.topic_refresh")
     with pytest.raises(JobHandlersMismatchError) as info:
         check_handlers_complete(broken)
-    assert info.value.missing == ["artifact.refresh_cheatsheet"] and info.value.extra == []
+    assert info.value.missing == ["artifact.topic_refresh"] and info.value.extra == []
 
 
 async def test_worker_exits_with_code_1_on_handler_mismatch(
@@ -205,7 +205,7 @@ async def test_worker_exits_with_code_1_on_handler_mismatch(
     """T-Q7: `workers` started with a registry that lacks a kind logs `job_handlers_mismatch`
     and exits with code 1 before any resource is created."""
     registry = dict(register_all_handlers())
-    registry.pop("artifact.refresh_cheatsheet")
+    registry.pop("artifact.topic_refresh")
     monkeypatch.setattr(cli, "register_all_handlers", lambda: registry)
     assert await cli._worker(settings) == 1
 
