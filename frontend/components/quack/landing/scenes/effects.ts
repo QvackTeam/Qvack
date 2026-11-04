@@ -31,6 +31,26 @@ export function makeDots(R: number, step: number): Dot[] {
   return dots;
 }
 
+// мягкое свечение узла — один готовый спрайт на цвет (радиальный градиент не создаётся заново на каждый узел каждого кадра)
+const GLOW: (HTMLCanvasElement | undefined)[] = [];
+function glowSprite(color: number): HTMLCanvasElement {
+  let cv = GLOW[color];
+  if (!cv) {
+    cv = document.createElement("canvas");
+    cv.width = cv.height = 64;
+    const g = cv.getContext("2d");
+    if (g) {
+      const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grad.addColorStop(0, css(PALETTE[color], 1));
+      grad.addColorStop(1, css(PALETTE[color], 0));
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 64, 64);
+    }
+    GLOW[color] = cv;
+  }
+  return cv;
+}
+
 export type NodeDraw = {
   x: number;
   y: number;
@@ -55,12 +75,8 @@ export function drawNode(ctx: CanvasRenderingContext2D, sprites: GlyphSprites[],
   if (al <= 0.01) return;
   const k = 1 + 0.35 * n.hot;
   const glowR = n.R * (2.2 + 1.1 * n.hot) * dpr;
-  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
-  glow.addColorStop(0, css(c, (0.14 + 0.2 * n.hot) * al));
-  glow.addColorStop(1, css(c, 0));
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = glow;
-  ctx.fillRect(cx - glowR, cy - glowR, glowR * 2, glowR * 2);
+  ctx.globalAlpha = (0.14 + 0.2 * n.hot) * al;
+  ctx.drawImage(glowSprite(n.color), cx - glowR, cy - glowR, glowR * 2, glowR * 2);
   const spr = sprites[n.color];
   for (const d of dots) {
     const fl = reduced ? 1 : 0.82 + 0.18 * Math.sin(now * 1.3 + d.h * 40);

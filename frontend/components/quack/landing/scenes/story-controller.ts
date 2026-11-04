@@ -10,9 +10,9 @@ import { STORY, storyPos, storyStore } from "./story";
  *    плавно собирается, а страница сама доезжает до своей точки.
  * Пока идёт переход (и ещё немного после) колесо, тач и инерция ничего не двигают.
  */
-const DISSOLVE_END = 0.28; // доля пути, к которой текущая сцена рассыпана полностью
-const COMMIT = 0.3; // доля пути, после которой переход идёт сам
-const SECONDS = 2.4;
+const DISSOLVE_END = 0.2; // доля пути, к которой текущая сцена рассыпана полностью
+const COMMIT = 0.22; // доля пути, после которой переход идёт сам
+const SECONDS = 1.8;
 const COOLDOWN_MS = 700;
 
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -66,7 +66,7 @@ export function useStoryController(scrollRef: RefObject<HTMLElement | null>, ena
         const k = Math.min(1, (now - t0) / dur);
         root.scrollTop = scrollFrom + (scrollTo - scrollFrom) * easeInOut(k);
         for (let i = 0; i < forms.length; i++) {
-          if (i === tgt) forms[i] = from[i] + (1 - from[i]) * smoothstep(0.3, 0.95, k); // новая собирается после того, как старая ушла
+          if (i === tgt) forms[i] = from[i] + (1 - from[i]) * smoothstep(0.2, 0.8, k); // новая собирается после того, как старая ушла
           else forms[i] = from[i] * (1 - smoothstep(0, 0.4, k));
         }
         notify();

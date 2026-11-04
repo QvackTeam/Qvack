@@ -153,13 +153,24 @@ export class GlyphSprites {
   }
 }
 
-/** Знак и ступень по яркости ячейки `l` (0..1) и её постоянному случайному числу `h` */
-export function pickGlyph(l: number, h: number): { shape: Shape; bucket: number; alpha: number } | null {
+export type Glyph = { shape: Shape; bucket: number; alpha: number };
+
+// Знаков всего несколько десятков (форма × ступень × прозрачность): раздаём готовые общие объекты,
+// а не создаём новый на каждую ячейку каждого кадра (десятки тысяч за кадр) — меньше мусора для сборщика
+const GLYPH_POOL: (Glyph | undefined)[] = [];
+function glyph(shape: Shape, bucket: number, alpha: number): Glyph {
+  const tier = alpha === 1 ? 0 : alpha === 0.95 ? 1 : alpha === 0.85 ? 2 : 3;
+  const k = SHAPE_INDEX[shape] * (BUCKETS * 4) + bucket * 4 + tier;
+  return (GLYPH_POOL[k] ??= { shape, bucket, alpha });
+}
+
+/** Знак и ступень по яркости ячейки `l` (0..1) и её постоянному случайному числу `h`. Возвращённый объект общий: не менять */
+export function pickGlyph(l: number, h: number): Glyph | null {
   if (l < 0.07) return null; // зрачок, глубокая тень
   const bucket = Math.min(BUCKETS - 1, Math.max(0, Math.round(l * (BUCKETS - 1))));
-  if (l > 0.8) return { shape: h < 0.85 ? "dot" : "star", bucket, alpha: 1 };
-  if (l > 0.6) return { shape: h < 0.5 ? "star" : "dot", bucket, alpha: 1 };
-  if (l > 0.42) return { shape: h < 0.35 ? "star" : h < 0.7 ? (h < 0.52 ? "y" : "yInv") : "dot", bucket, alpha: 0.95 };
-  if (l > 0.2) return { shape: h < 0.5 ? "y" : "yInv", bucket, alpha: 0.85 };
-  return { shape: h < 0.5 ? "yInv" : "dot", bucket: Math.max(1, bucket), alpha: 0.55 };
+  if (l > 0.8) return glyph(h < 0.85 ? "dot" : "star", bucket, 1);
+  if (l > 0.6) return glyph(h < 0.5 ? "star" : "dot", bucket, 1);
+  if (l > 0.42) return glyph(h < 0.35 ? "star" : h < 0.7 ? (h < 0.52 ? "y" : "yInv") : "dot", bucket, 0.95);
+  if (l > 0.2) return glyph(h < 0.5 ? "y" : "yInv", bucket, 0.85);
+  return glyph(h < 0.5 ? "yInv" : "dot", Math.max(1, bucket), 0.55);
 }
