@@ -63,6 +63,18 @@ REPAIR_TEMPLATE = (
 )
 
 
+def _data_event(line: str) -> dict[str, Any] | None:
+    """The JSON of one `data:` line of the stream; `None` for any other line and for the
+    `data: [DONE]` terminator the live API sends after `response.completed` (found by the live
+    run of 2026-11-04, WP10.7)."""
+    if not line.startswith("data:"):
+        return None
+    payload = line.removeprefix("data:").strip()
+    if not payload or payload == "[DONE]":
+        return None
+    return orjson.loads(payload)
+
+
 def _rate_limit_headers(headers: Mapping[str, str]) -> dict[str, str]:
     lowered = {k.lower(): v for k, v in headers.items()}
     return {name: lowered[name] for name in RATE_LIMIT_HEADERS if name in lowered}
@@ -378,9 +390,9 @@ class ResponsesClient:
                 headers = _rate_limit_headers(raw.headers)
                 commentary: set[str] = set()
                 async for line in raw.iter_lines():
-                    if not line.startswith("data:"):
+                    event = _data_event(line)
+                    if event is None:
                         continue
-                    event = orjson.loads(line.removeprefix("data:").strip())
                     for out in _stream_event(event, commentary, headers, request.base.model):
                         yield out
         except openai.RateLimitError as exc:
