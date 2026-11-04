@@ -186,8 +186,8 @@
 
 ### Поток A
 
-1. **WP1.3, шаг 5 ч.2** — после шага 3 C (`artifacts/*`, `api/*`, `cli`, `ops/*` на `Db`; тесты `tests/artifacts` и `tests/support/dispatch.py` без Фазы 3) и шага 4 B (шлюз без `session_factory`): снять `graph/worker.py`, `jobs/dispatcher.py`, `jobs/dispatcher_rules.py`, `jobs/queue.py`, `events/append|reader|catalog|projections`, `db/postgres.py`, `db/locks.py`, зависимости `sqlalchemy`, `asyncpg`, `alembic` (T-DB3); `supervise` — в `runtime/phase4.py`.
-2. **WP8.2** — A-часть готова; разделение темы из хода — B.
+1. **WP1.3, шаг 5 ч.2** — тесты A и B перенесены (D-A-227…232, #252). Осталось после PR C с тестами и стендом (`phase-4-c-step3-tests`): снять `graph/worker.py`, `jobs/dispatcher.py`, `jobs/dispatcher_rules.py`, `jobs/queue.py`, `JobRunner` из `jobs/runner.py`, `events/append|reader|catalog|projections|models`, `db/postgres.py`, `db/locks.py`, `graph/projector.py`, `graph/phase_a.py`; `sqlalchemy_dsn`, `migrations/env.py`; фикстуры Фазы 3 в `tests/conftest.py`; зависимости `sqlalchemy`, `asyncpg`, `alembic` (T-DB3); `supervise` — в `runtime/phase4.py`; обновить `backend/TESTS.md` (B1, B2).
+2. **WP2.3 / WP3.4, режим «наложение сессии»** (ТЗ §4.2, `Т-§2.6`) — не перенесён на `rules@3`: `graph/overlay.build_session_overlay` Фазы 3 нигде не вызывается, `turn_source` строит пустое наложение и держится на ожидании проектора до конца журнала. Перенос: обработчики `rules@3` поверх среза в памяти (`BatchSlice`), тесты — свежие события сессии поверх отстающей проекции, пустое наложение при догнавшем проекторе, ничего не пишется в базовый срез. Решение — после ответа B, нужно ли оно при `lag_degraded`.
 3. **Владелец:** `D-A-196` (класс C); `D-A-221` (правило весов свидетельств).
 
 ### Поток B
