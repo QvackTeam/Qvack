@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-A-218. WP2.4: реестр событий образа Фазы 4 — `quack/runtime/event_registry.py`
+- Класс: A
+- WP / место: WP2.4 (хвост), WP1.3; `quack/runtime/event_registry.py`
+- Контекст: `/app/event_registry.json`, `ops event-registry` и проверка отката (`Д-§6.3`) собираются из каталога и rules@2 Фазы 3 (`quack/ops/registry.py`, зона C, на SQLAlchemy). Шаг CI «реестр событий» (`Д-§5.2` п.6) делает C в WP9.3 — ему нужна функция Фазы 4. Как диспетчер «обслуживает» тип с отметкой в колонке «Диспетчер» §6.3, документ не перечисляет по механизмам.
+- Решение: тело ops-команд (§7.3, пересечение 5) — в `quack/runtime/event_registry.py` (слой сборки: видит и проектор, и диспетчер без циклов): `event_registry()` (пары каталога Фазы 4 + `rules@3`), `write_event_registry`, `seen_pairs(db)`, `can_rollback`, `registry_gaps()`. Колонка «Диспетчер» закрыта, если тип есть в строках WP7.1, в эпизодах (`EPISODE_TYPES`, «эпизод»), в фактах структуры (`STRUCTURE_TYPES`) или в маске `*` эмбеддингов (`EMBEDDED_TYPES` по §6.3 «эмбеддинг»: `topic.proposed`, `topic.created`, `skill.created`, `material.parsed`). Регистрацию в `cli.py`/`ops` и шаг CI делает C (#232).
+- Почему: `Д-§5.1`, `Д-§5.2` п.6, `Д-§6.3`, ТЗ §6.3, §7.3 п.5, WP2.4.
+- Обратимость: полная; `EMBEDDED_TYPES` переезжает в строку `*` WP7.1, когда она реализуется.
+- Тесты: `tests/events/test_catalog.py::test_image_registry_has_no_gaps_and_tracks_rollback` (T-EV5).
+- Требует подтверждения владельцем: нет
+
 ### D-A-217. WP8.3: маршрут `GET /v1/sessions/{id}/summary` объявляет A; тело — в `quack/graph/read/summary.py`
 - Класс: A
 - WP / место: WP8.3; `quack/session/router.py` (объявление), `quack/graph/read/summary.py`, `tests/e2e/routes/a.py`
