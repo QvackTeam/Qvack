@@ -6,6 +6,7 @@ import { useT } from "@/lib/i18n/provider";
 import type { Topic } from "@/lib/mock/types";
 import { cn } from "@/lib/utils";
 import { useShell } from "./app-shell";
+import { useTopicBlurb } from "@/lib/api/blurb";
 import { useStartSession } from "./live/use-start-session";
 import { useSoon } from "./soon";
 
@@ -36,6 +37,8 @@ export function TopicCardBody({ topic, hubLabel }: { topic: Topic; hubLabel?: st
   const soon = useSoon();
   const { domain } = useShell();
   const { start, busy } = useStartSession();
+  // with the backend a topic has no description: the card shows the start of its notes, when there are any
+  const blurb = useTopicBlurb(topic.id);
   const actions = [t.topicCard.study, t.topicCard.practice, t.topicCard.review, t.topicCard.history];
   // На бэкенде «Изучать» и «Повторять» открывают сессию по теме; «Историю» пока некуда вести
   const mode = (a: string) => (!API_MODE ? null : a === t.topicCard.study ? "learn" : a === t.topicCard.review ? "review" : null);
@@ -49,7 +52,7 @@ export function TopicCardBody({ topic, hubLabel }: { topic: Topic; hubLabel?: st
         </h3>
         {hubLabel && <span className="caps shrink-0 text-paper-dim">{hubLabel}</span>}
       </div>
-      <p className="mt-1 text-small text-paper-dim">{topic.simple}</p>
+      <p className="mt-1 text-small text-paper-dim">{blurb ?? topic.simple}</p>
       <p className="caps mt-3 flex items-center gap-2 text-paper">
         <StateDot state={topic.state} />
         {t.states[topic.state]}
