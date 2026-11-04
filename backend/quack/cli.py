@@ -10,7 +10,8 @@ import os
 import signal
 import subprocess
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -18,6 +19,7 @@ from uuid import UUID
 
 import structlog
 
+import quack.db
 from quack.agents.extraction_eval import compare_reports, evaluate_extraction, load_eval_set
 from quack.agents.judge import release_judge
 from quack.agents.metrics import metrics
@@ -35,7 +37,7 @@ from quack.llm.responses_client import ResponsesClient
 from quack.logging import configure_logging, get_logger
 from quack.ops.alerts import run_alerts
 from quack.ops.backup import run_backup
-from quack.ops.commands import AlembicSchemaFound, migrate, purge_deleted, replay_dlq
+from quack.ops.commands import AlembicSchemaFound, migrate
 from quack.ops.db_roles import DbRolesRefused, RolePasswords, apply_db_roles
 from quack.ops.restore_check import restore_check
 from quack.ops.seed import SeedRefusedError, seed_learners, write_learners
@@ -49,6 +51,7 @@ from quack.runtime import (
     register_all_handlers,
 )
 from quack.runtime.event_registry import can_rollback, seen_pairs, write_event_registry
+from quack.runtime.phase4 import projector_process, workers_process
 from quack.session.replay import replay_session, session_learner
 
 log = get_logger(__name__)
@@ -98,15 +101,13 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--learner", help="learner id")
     target.add_argument("--stale-rules", action="store_true", help="learners on other rules@N")
     target.add_argument("--all", action="store_true", help="every learner")
-    replay = ops_sub.add_parser("replay-dlq", help="replay DLQ entries")
-    replay.add_argument("--id", action="append", dest="ids", help="DLQ entry id (repeatable)")
-    ops_sub.add_parser("purge-deleted", help="physically delete learners with tombstones")
     backup = ops_sub.add_parser("backup", help="encrypted Postgres dump to R2 and local copies")
     backup.add_argument("when", nargs="?", choices=["now"], help="an out-of-schedule dump")
     ops_sub.add_parser(
         "restore-check", help="Neo4j must not be ahead of the event log after a restore"
     )
-    ops_sub.add_parser("alerts", help="check the conditions of Д-§9.3 and announce them")
+    alerts_p = ops_sub.add_parser("alerts", help="check the conditions of Д-§9.3 and announce them")
+    alerts_p.add_argument("--test", action="store_true", help="send a test alert message")
     ops_sub.add_parser("db-roles", help="create or update the Postgres roles and grants")
     ops_sub.add_parser("status", help="print the state of the system as one JSON object")
     registry = ops_sub.add_parser("event-registry", help="write the event registry JSON")
@@ -168,18 +169,19 @@ def _run_api(settings: Settings) -> int:
     return 0
 
 
-async def _with_resources[T](
-    settings: Settings, fn: Callable[..., Awaitable[T]], *, redis: bool = True
-) -> T:
+@asynccontextmanager
+async def _gateway(settings: Settings, db: quack.db.Db) -> AsyncIterator[LLMGateway]:
+    """The model gateway of `ops extraction-eval` and `ops replay-session`. It still takes the
+    session factory of Phases 1-3 (`LLMGateway.__init__`, stream B, WP1.3 step 4 removes it with
+    the outbox); this is the only place of the CLI that builds an engine, and it is not used on
+    the path of Phase 4 (`db=` is given)."""
     engine = create_engine(settings)
-    driver = create_driver(settings)
-    client = create_redis(settings) if redis else None
+    provider = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
+    llm = LLMGateway(create_session_factory(engine), provider, settings, db=db)
     try:
-        return await fn(engine, create_session_factory(engine), driver, client)
+        yield llm
     finally:
-        if client is not None:
-            await client.aclose()
-        await driver.close()
+        await llm.aclose()
         await engine.dispose()
 
 
@@ -193,16 +195,14 @@ def _stop_event() -> asyncio.Event:
 
 
 async def _projector_tasks(settings: Settings, stop: asyncio.Event) -> int:
-    """WP8.1: Neo4j schema check, then projector and dispatcher as two supervised tasks
-    (WP11.1). On stop each finishes its current batch and starts no new one (Д-§6.1)."""
-    from quack.runtime.phase4 import projector_process
-
+    """WP8.1: the projector (`rules@3`) and the dispatcher as two supervised tasks on `Db`
+    (WP1.3, D-A-200). On stop each finishes its current batch and starts no new one (Д-§6.1)."""
     return await projector_process(settings, stop)
 
 
 async def _workers_tasks(settings: Settings, stop: asyncio.Event) -> int:
-    """WP8.1: handler registration and completeness check (WP2.2), executors with the reaper
-    (graceful shutdown WP3.5) and the periodic scheduler (WP3.3)."""
+    """WP8.1: handler registration and completeness check (WP2.2), the executors with the reaper
+    (graceful shutdown WP3.5) and the periodic scheduler (WP3.3), on `Db` (D-A-200)."""
     handlers = register_all_handlers()
     try:
         check_handlers_complete(handlers)
@@ -211,8 +211,6 @@ async def _workers_tasks(settings: Settings, stop: asyncio.Event) -> int:
         return 1
     context = await create_job_context(settings)
     try:
-        from quack.runtime.phase4 import workers_process
-
         return await workers_process(settings, stop, handlers=handlers, ctx=context)
     finally:
         await close_job_context(context)
@@ -277,23 +275,16 @@ async def _rebuild(settings: Settings, args: argparse.Namespace) -> int:
 async def _seed_learners(settings: Settings, args: argparse.Namespace) -> int:
     """WP8.6 (Д-§11): exit code 2 when refused on prod. Tokens are sessions in
     `core.auth_sessions` (ТЗ Ф4 WP18.3), so the `ops` role needs no secret (Д-§7)."""
-    engine = create_engine(settings)
     db = await open_db(settings)
     try:
         learners = await seed_learners(
-            create_session_factory(engine),
-            db,
-            settings,
-            count=args.count,
-            fixture=args.fixture,
-            confirm=args.confirm,
+            db, settings, count=args.count, fixture=args.fixture, confirm=args.confirm
         )
     except SeedRefusedError as exc:
         log.error("seed_learners_refused", reason=str(exc))
         return 2
     finally:
         await db.close()
-        await engine.dispose()
     write_learners(Path(args.out), learners)
     log.info("seed_learners_done", count=len(learners), out=args.out)
     return 0
@@ -330,34 +321,30 @@ async def _replay_session(settings: Settings, args: argparse.Namespace) -> int:
     out = Path(args.out) if args.out else Path(f"replay-session-{args.session}.json")
     db = await open_db(settings)
     driver = create_driver(settings)
-    engine = create_engine(settings)
-    provider = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
-    llm = LLMGateway(create_session_factory(engine), provider, settings, db=db)
     try:
         learner_id = await session_learner(db, args.session)
         if learner_id is None:
             log.error("replay_session_unknown_session", session_id=str(args.session))
             return 2
         try:
-            report = await replay_session(
-                db,
-                learner_id=learner_id,
-                session_id=args.session,
-                teacher=args.teacher,
-                llm=llm,
-                settings=settings,
-                reader=lambda lid: create_graph_reader(driver, settings, learner_id=lid, db=db),
-                judge=release_judge(llm),
-                out=out,
-                renderer=args.renderer,
-            )
+            async with _gateway(settings, db) as llm:
+                report = await replay_session(
+                    db,
+                    learner_id=learner_id,
+                    session_id=args.session,
+                    teacher=args.teacher,
+                    llm=llm,
+                    settings=settings,
+                    reader=lambda lid: create_graph_reader(driver, settings, learner_id=lid, db=db),
+                    judge=release_judge(llm),
+                    out=out,
+                    renderer=args.renderer,
+                )
         except (PromptNotFoundError, ValueError) as exc:
             log.error("replay_session_refused", reason=str(exc))
             return 2
     finally:
-        await llm.aclose()
         await driver.close()
-        await engine.dispose()
         await db.close()
     print(json.dumps({"out": str(out), "summary": report["summary"]}, sort_keys=True, default=str))
     return 0
@@ -382,25 +369,21 @@ async def _extraction_eval(settings: Settings, args: argparse.Namespace) -> int:
         log.error("extraction_eval_input_refused", reason=str(exc))
         return 2
     db = await open_db(settings)
-    engine = create_engine(settings)
-    provider = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
-    llm = LLMGateway(create_session_factory(engine), provider, settings, db=db)
     try:
-        report = await evaluate_extraction(
-            llm,
-            settings,
-            eval_set,
-            learner_id=args.learner,
-            prompt=args.prompt,
-            runs=args.runs,
-            out=Path(args.out) if args.out else None,
-        )
+        async with _gateway(settings, db) as llm:
+            report = await evaluate_extraction(
+                llm,
+                settings,
+                eval_set,
+                learner_id=args.learner,
+                prompt=args.prompt,
+                runs=args.runs,
+                out=Path(args.out) if args.out else None,
+            )
     except ValueError as exc:
         log.error("extraction_eval_refused", reason=str(exc))
         return 2
     finally:
-        await llm.aclose()
-        await engine.dispose()
         await db.close()
     code = 0
     if previous is not None:
@@ -410,9 +393,15 @@ async def _extraction_eval(settings: Settings, args: argparse.Namespace) -> int:
     return code
 
 
-async def _restore_check(engine, session_factory, driver, redis) -> int:
+async def _restore_check(settings: Settings) -> int:
     """Д-§8.3: prints the verdict as one JSON object; exit code 1 when Neo4j is ahead of the log."""
-    violations = await restore_check(session_factory, driver)
+    db = await open_db(settings)
+    driver = create_driver(settings)
+    try:
+        violations = await restore_check(db, driver)
+    finally:
+        await driver.close()
+        await db.close()
     report = {
         "ok": not violations,
         "violations": [
@@ -424,16 +413,44 @@ async def _restore_check(engine, session_factory, driver, redis) -> int:
     return 1 if violations else 0
 
 
-async def _alerts(settings: Settings) -> int:
-    """Д-§9.3: Postgres and Redis only (the `alerts` container has no Neo4j secret, Д-§7)."""
-    engine = create_engine(settings, pool_size=1)
+async def _status(settings: Settings) -> int:
+    """Д-§9.1: the report on stdout; exit code 2 when Postgres does not answer. The pool opens
+    without waiting, so a dead Postgres is a report with code 2, not a traceback."""
+    db = await open_db(settings, wait=False)
+    driver = create_driver(settings)
     redis = create_redis(settings)
     try:
-        status, _ = await collect_status(settings, create_session_factory(engine), None, redis)
+        report, code = await collect_status(settings, db, driver, redis)
+    finally:
+        await redis.aclose()
+        await driver.close()
+        await db.close()
+    print(json.dumps(report, sort_keys=True))
+    return code
+
+
+async def _alerts(settings: Settings, *, test: bool = False) -> int:
+    """Д-§9.3: Postgres and Redis only (the `alerts` container has no Neo4j secret, Д-§7)."""
+    if test:
+        from quack.ops.notify import post_alert
+
+        try:
+            await post_alert(
+                settings, "INFO: Test alert from Quack ops alerts — Telegram alerts work!"
+            )
+            print("Test alert sent successfully.")
+            return 0
+        except Exception as exc:
+            print(f"Failed to send test alert: {exc}", file=sys.stderr)
+            return 1
+    db = await open_db(settings, wait=False)
+    redis = create_redis(settings)
+    try:
+        status, _ = await collect_status(settings, db, None, redis)
         return await run_alerts(settings, status, redis)
     finally:
         await redis.aclose()
-        await engine.dispose()
+        await db.close()
 
 
 async def _db_roles(settings: Settings) -> int:
@@ -443,11 +460,11 @@ async def _db_roles(settings: Settings) -> int:
     except DbRolesRefused as exc:
         log.error("db_roles_refused", reason=str(exc))
         return 2
-    engine = create_engine(settings, pool_size=1)
+    db = await open_db(settings)
     try:
-        await apply_db_roles(engine, passwords)
+        await apply_db_roles(db, passwords)
     finally:
-        await engine.dispose()
+        await db.close()
     return 0
 
 
@@ -468,9 +485,9 @@ async def _ops(settings: Settings, args: argparse.Namespace) -> int:
     if args.op == "db-roles":
         return await _db_roles(settings)
     if args.op == "restore-check":
-        return await _with_resources(settings, _restore_check, redis=False)
+        return await _restore_check(settings)
     if args.op == "alerts":
-        return await _alerts(settings)
+        return await _alerts(settings, test=getattr(args, "test", False))
     if args.op == "openapi":
         # Imported here: the function is stream C's (WP8.7) and needs no resources.
         from quack.api.app import write_openapi
@@ -486,13 +503,7 @@ async def _ops(settings: Settings, args: argparse.Namespace) -> int:
     if args.op == "extraction-eval":
         return await _extraction_eval(settings, args)
     if args.op == "status":
-
-        async def status(engine, session_factory, driver, redis) -> int:
-            report, code = await collect_status(settings, session_factory, driver, redis)
-            print(json.dumps(report, sort_keys=True))
-            return code
-
-        return await _with_resources(settings, status)
+        return await _status(settings)
     if args.op == "can-rollback":
         previous: dict[str, Any] = args.previous
 
@@ -505,23 +516,6 @@ async def _ops(settings: Settings, args: argparse.Namespace) -> int:
         return 0 if result["can_rollback"] else 1
     if args.op == "seed-learners":
         return await _seed_learners(settings, args)
-    if args.op == "replay-dlq":
-        ids = [UUID(x) for x in args.ids] if args.ids else None
-
-        async def replay(engine, session_factory, driver, redis) -> int:
-            await replay_dlq(session_factory, dlq_ids=ids)
-            return 0
-
-        return await _with_resources(settings, replay, redis=False)
-    if args.op == "purge-deleted":
-
-        async def purge(engine, session_factory, driver, redis) -> int:
-            await purge_deleted(
-                engine, session_factory, driver, chunk_size=settings.rebuild_max_tx_ops
-            )
-            return 0
-
-        return await _with_resources(settings, purge, redis=False)
     raise ValueError(f"unknown ops command {args.op!r}")
 
 
