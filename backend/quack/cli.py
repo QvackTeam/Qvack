@@ -18,6 +18,7 @@ from uuid import UUID
 import structlog
 from sqlalchemy import text
 
+from quack.agents.extraction_eval import compare_reports, evaluate_extraction, load_eval_set
 from quack.config import Settings, get_settings
 from quack.db import open_db
 from quack.db.neo4j import create_driver, verify_schema
@@ -25,17 +26,21 @@ from quack.db.postgres import create_engine, create_session_factory
 from quack.db.redis import create_redis
 from quack.graph.ids import CURRENT_RULES_VERSION
 from quack.graph.neo4j_store import find_learners_with_rules
+from quack.graph.projection.rebuild import rebuild_learner as rebuild_learner_p4
+from quack.graph.projection.runner import RULES_VERSION
+from quack.graph.projection.store import stale_learners
 from quack.graph.rebuild import rebuild_learner
 from quack.graph.worker import ProjectorWorker
 from quack.jobs.dispatcher import Dispatcher, supervise
 from quack.jobs.periodic import PeriodicScheduler
 from quack.jobs.runner import JobRunner
+from quack.llm.gateway import LLMGateway
+from quack.llm.responses_client import ResponsesClient
 from quack.logging import configure_logging, get_logger
 from quack.ops.alerts import run_alerts
 from quack.ops.backup import run_backup
 from quack.ops.commands import migrate, purge_deleted, replay_dlq
 from quack.ops.db_roles import DbRolesRefused, RolePasswords, apply_db_roles
-from quack.ops.registry import can_rollback, seen_pairs, write_event_registry
 from quack.ops.restore_check import restore_check
 from quack.ops.seed import SeedRefusedError, seed_learners, write_learners
 from quack.ops.status import collect_status
@@ -48,6 +53,7 @@ from quack.runtime import (
     create_projector_context,
     register_all_handlers,
 )
+from quack.runtime.event_registry import can_rollback, seen_pairs, write_event_registry
 
 log = get_logger(__name__)
 
@@ -111,6 +117,19 @@ def build_parser() -> argparse.ArgumentParser:
     seed.add_argument("--confirm", action="store_true", help="required when env=prod")
     openapi = ops_sub.add_parser("openapi", help="write the OpenAPI snapshot of the API")
     openapi.add_argument("--out", required=True, help="path of the openapi.json to write")
+    extraction = ops_sub.add_parser(
+        "extraction-eval", help="quality of the extraction on a reference set (Т-§7.11)"
+    )
+    extraction.add_argument("--set", required=True, help="reference set (EvalSet JSON)")
+    extraction.add_argument(
+        "--learner", type=UUID, required=True, help="evaluation learner: whose ledger is charged"
+    )
+    extraction.add_argument("--prompt", help="extractor prompt, name@N (default: the role's)")
+    extraction.add_argument("--runs", type=int, help="runs per episode (default: from Settings)")
+    extraction.add_argument("--out", help="path of the report JSON to write")
+    extraction.add_argument(
+        "--against", help="report of the previous version: compare, exit 1 unless nothing fell"
+    )
     return parser
 
 
@@ -231,7 +250,45 @@ async def _worker(settings: Settings) -> int:
     return max(codes)
 
 
+async def _rebuild_each(learners: list[UUID], rebuild: Callable[[UUID], Awaitable[Any]]) -> int:
+    """Every learner is tried; anything but `rebuilt` (busy, active session, failed) is exit 1."""
+    failed = 0
+    for learner_id in learners:
+        outcome = await rebuild(learner_id)
+        log.info("rebuild_outcome", learner_id=str(learner_id), status=outcome.status)
+        failed += outcome.status != "rebuilt"
+    return 1 if failed else 0
+
+
+async def _rebuild_p4(settings: Settings, args: argparse.Namespace) -> int:
+    """WP3.5, D-A-189: rules@3 on `Db`; `--stale-rules` is the learners of other rules."""
+    if not (args.learner or args.stale_rules or args.all):
+        log.error("rebuild_target_required")
+        return 2
+    db = await open_db(settings)
+    neo4j = create_driver(settings)
+    redis = create_redis(settings)
+    try:
+        if args.learner:
+            learners = [UUID(args.learner)]
+        elif args.stale_rules:
+            learners = [UUID(x) for x in await stale_learners(neo4j, RULES_VERSION)]
+        else:
+            rows = await db.fetch_all("SELECT learner_id FROM core.learners ORDER BY learner_id")
+            learners = [UUID(str(row["learner_id"])) for row in rows]
+        return await _rebuild_each(
+            learners, lambda lid: rebuild_learner_p4(db, neo4j, settings, lid, redis=redis)
+        )
+    finally:
+        await redis.aclose()
+        await neo4j.close()
+        await db.close()
+
+
 async def _rebuild(settings: Settings, args: argparse.Namespace) -> int:
+    if settings.phase4_processes:
+        return await _rebuild_p4(settings, args)
+
     async def run(engine, session_factory, driver, redis) -> int:
         if args.learner:
             learners = [UUID(args.learner)]
@@ -249,14 +306,10 @@ async def _rebuild(settings: Settings, args: argparse.Namespace) -> int:
         else:
             log.error("rebuild_target_required")
             return 2
-        failed = 0
-        for learner_id in learners:
-            outcome = await rebuild_learner(
-                settings, engine, session_factory, driver, redis, learner_id
-            )
-            log.info("rebuild_outcome", learner_id=str(learner_id), status=outcome.status)
-            failed += outcome.status != "rebuilt"
-        return 1 if failed else 0
+        return await _rebuild_each(
+            learners,
+            lambda lid: rebuild_learner(settings, engine, session_factory, driver, redis, lid),
+        )
 
     return await _with_resources(settings, run)
 
@@ -284,6 +337,53 @@ async def _seed_learners(settings: Settings, args: argparse.Namespace) -> int:
     write_learners(Path(args.out), learners)
     log.info("seed_learners_done", count=len(learners), out=args.out)
     return 0
+
+
+def _read_report(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+async def _extraction_eval(settings: Settings, args: argparse.Namespace) -> int:
+    """WP16.7, S15 (D-B-209): the report of the extraction quality as one JSON object on stdout.
+    Exit code 2 when there is no model key (the run calls the model), the set or the previous
+    report cannot be read, or the prompt or the run count is refused. With `--against`, exit
+    code 1 unless the comparison of Т-§18.4 found no fall (not comparable is not «passed»)."""
+    if not settings.meta_api_key.get_secret_value():
+        log.error("extraction_eval_needs_meta_api_key")
+        return 2
+    try:
+        eval_set = load_eval_set(Path(args.set))
+        previous = _read_report(Path(args.against)) if args.against else None
+    except (OSError, ValueError) as exc:  # unreadable, not JSON, not an EvalSet
+        log.error("extraction_eval_input_refused", reason=str(exc))
+        return 2
+    db = await open_db(settings)
+    engine = create_engine(settings)
+    provider = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
+    llm = LLMGateway(create_session_factory(engine), provider, settings, db=db)
+    try:
+        report = await evaluate_extraction(
+            llm,
+            settings,
+            eval_set,
+            learner_id=args.learner,
+            prompt=args.prompt,
+            runs=args.runs,
+            out=Path(args.out) if args.out else None,
+        )
+    except ValueError as exc:
+        log.error("extraction_eval_refused", reason=str(exc))
+        return 2
+    finally:
+        await llm.aclose()
+        await engine.dispose()
+        await db.close()
+    code = 0
+    if previous is not None:
+        report = {**report, "comparison": compare_reports(previous, report)}
+        code = 0 if report["comparison"]["regression"] is False else 1
+    print(json.dumps(report, sort_keys=True, default=str))
+    return code
 
 
 async def _restore_check(engine, session_factory, driver, redis) -> int:
@@ -355,6 +455,8 @@ async def _ops(settings: Settings, args: argparse.Namespace) -> int:
         return 0
     if args.op == "rebuild":
         return await _rebuild(settings, args)
+    if args.op == "extraction-eval":
+        return await _extraction_eval(settings, args)
     if args.op == "status":
 
         async def status(engine, session_factory, driver, redis) -> int:
@@ -366,12 +468,13 @@ async def _ops(settings: Settings, args: argparse.Namespace) -> int:
     if args.op == "can-rollback":
         previous: dict[str, Any] = args.previous
 
-        async def rollback(engine, session_factory, driver, redis) -> int:
-            result = can_rollback(previous, await seen_pairs(session_factory))
-            print(json.dumps(result, sort_keys=True))
-            return 0 if result["can_rollback"] else 1
-
-        return await _with_resources(settings, rollback, redis=False)
+        db = await open_db(settings)
+        try:
+            result = can_rollback(previous, await seen_pairs(db))
+        finally:
+            await db.close()
+        print(json.dumps(result, sort_keys=True))
+        return 0 if result["can_rollback"] else 1
     if args.op == "seed-learners":
         return await _seed_learners(settings, args)
     if args.op == "replay-dlq":
