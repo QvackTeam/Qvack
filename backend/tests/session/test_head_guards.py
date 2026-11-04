@@ -30,6 +30,7 @@ def _head(**fields: Any) -> TurnHead:
         "targetSkills": ["S1"],
         "verdict_stance": None,
         "branchType": None,
+        "topicLabel": None,
         "approach": "none",
     }
     return TurnHead.model_validate({**base, **fields})
@@ -95,6 +96,8 @@ def test_honest_verdict(stance: str | None, verdict: str | None, ok: bool) -> No
 def test_turn_without_target_skills_is_not_marked() -> None:
     violations = head_violations(_head(targetSkills=[]), answered_verdict=None, skill_labels=SKILLS)
     assert _reasons(violations) == ["no_target_skills"]
+    split = _head(targetSkills=[], intent="split_topic", topicLabel="T1")  # the topic is the object
+    assert head_violations(split, answered_verdict=None, skill_labels=SKILLS) == []
 
 
 def test_unknown_target_skill_label() -> None:

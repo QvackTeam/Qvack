@@ -112,6 +112,7 @@ def _output(**markup: Any) -> TeacherOutputV2:
                 "targetSkills": ["S1"],
                 "verdict_stance": None,
                 "branchType": None,
+                "topicLabel": None,
                 "approach": "example_first",
             },
             "p2_body": {
@@ -594,3 +595,22 @@ def test_known_check_without_topic_is_not_requested() -> None:
     assert [(a.kind, a.params.topic_id) for a in asked] == [("known_check", TOPIC)]
     [turn] = [e.payload for e in batch.events if e.type == "turn.committed"]
     assert [r.params.topic_id for r in turn.markup.agent_requests] == [TOPIC]
+
+
+def test_split_topic_requests_the_split_of_a_known_topic_only() -> None:
+    """`intent = split_topic` with a label of the table writes `agent.requested {topic_split}`
+    keyed by the turn and the topic after `turn.committed`; an unknown label writes nothing and
+    the turn goes on (WP8.2, D-B-213)."""
+
+    def split(label: str | None) -> list[Any]:
+        output = _bare()
+        head = output.p1_head.model_copy(update={"intent": "split_topic", "topic_label": label})
+        return _batch(uuid4(), output.model_copy(update={"p1_head": head})).events
+
+    events = split("T1")
+    assert [e.type for e in events] == ["turn.committed", "agent.requested"]
+    asked = events[1]
+    assert (asked.payload.kind, asked.payload.params.topic_id) == ("topic_split", TOPIC)
+    assert asked.idempotency_key.endswith(f":agent:topic_split:{TOPIC}")
+    assert [e.type for e in split("T9")] == ["turn.committed"]
+    assert [e.type for e in split(None)] == ["turn.committed"]

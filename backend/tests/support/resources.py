@@ -76,9 +76,10 @@ def build_app_resources(
     `db` (pass `pg_db`, seam S2) the `Db` is over a closed pool: a test that touches Postgres
     through it fails with `PoolClosed`. `retired`: see `_RETIRED_NOTE`."""
     _, neo4j, redis = _pools(pools)
+    db = db or Db(AsyncConnectionPool(settings.postgres_dsn, open=False))
     return AppResources(
         settings=settings,
-        db=db or Db(AsyncConnectionPool(settings.postgres_dsn, open=False)),
+        db=db,
         neo4j=cast(AsyncDriver, neo4j),
         redis=cast(Redis | None, redis),
         llm=LLMGateway(provider or UnavailableLLMProvider(), settings, db=db),

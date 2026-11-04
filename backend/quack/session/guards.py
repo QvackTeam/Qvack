@@ -67,7 +67,7 @@ def head_violations(
                 "verdict_stance code needs a code-class verdict of the answered answer",
             )
         )
-    if not head.target_skills:
+    if not head.target_skills and head.intent != "split_topic":  # the topic is the object
         violations.append(GuardViolation("no_target_skills", "targetSkills is empty"))
     violations.extend(_unknown("unknown_skill_label", head.target_skills, skill_labels))
     if boundary is not None:

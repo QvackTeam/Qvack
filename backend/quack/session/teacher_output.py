@@ -32,6 +32,7 @@ type TurnIntent = Literal[
     "answer_question",
     "plan",
     "wrap_up",
+    "split_topic",
 ]
 
 type Approach = Literal[
@@ -61,13 +62,16 @@ class _Strict(BaseModel):
 
 
 class TurnHead(_Strict):
-    """`p1_head` (Т-§12.2): checked by code before any body character is shown."""
+    """`p1_head` (Т-§12.2): checked by code before any body character is shown. `topic_label`
+    (`T…`) — the topic the learner asks to split, only with `intent = split_topic`
+    (WP8.2, D-B-213)."""
 
     intent: TurnIntent
     target_skills: list[str] = Field(alias="targetSkills")
     verdict_stance: VerdictStance | None
     branch_type: BranchType | None = Field(alias="branchType")
     approach: Approach
+    topic_label: str | None = Field(alias="topicLabel")
 
 
 class BodyBlock(_Strict):

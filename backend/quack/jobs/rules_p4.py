@@ -64,6 +64,7 @@ JOB_KIND_SPECS: tuple[JobKindSpec, ...] = (
     _k("agent.task_generation", "P2", visible=True, roles=("task_generator", "task_arbiter")),
     _k("agent.solution_space", "P2", visible=True, roles=("solution_space",)),
     _k("agent.artifact", "P2", visible=True, roles=("artifact_writer",)),
+    _k("agent.topic_split", "P2", visible=True, roles=("builder",)),
     _k("check.known_claim", "P2", visible=True, roles=("task_generator",)),
     _k("export.data", "P2"),
     _k("today.prepare", "P2", roles=("today_planner",)),
@@ -111,6 +112,7 @@ AGENT_JOB_KINDS: dict[str, str] = {
     "solution_space": "agent.solution_space",
     "artifact": "agent.artifact",
     "known_check": "check.known_claim",
+    "topic_split": "agent.topic_split",
 }
 
 
@@ -367,6 +369,14 @@ def _agent_requested(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
             return []
         payload["topic_id"] = str(p.params.topic_id)
         return [_plan(event, kind, cls=cls, graph=True, payload=payload)]
+    if kind == "agent.topic_split":
+        # WP8.2 (D-A-226): the topic to split is the parameter of the request; the job writes
+        # to the graph, so it holds the lock of the domain (as the other graph writers do).
+        if p.params.topic_id is None:
+            return []
+        payload["topic_id"] = str(p.params.topic_id)
+        return [_plan(event, kind, cls=cls, lock_key=f"domain:{event.domain_id}", graph=True,
+                      payload=payload)]  # fmt: skip
     if p.kind == "artifact" and p.params.artifact == "cheatsheet":
         # Т-§17.7 «генерация — после согласия», D-A-199: the consent to the cheat sheet of a hub
         # is the job of that hub, with the request to answer; without a hub nothing to build.
