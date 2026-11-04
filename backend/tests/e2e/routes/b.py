@@ -92,6 +92,7 @@ STREAM = Stream(
             ("GET", "/v1/sessions/{session_id}"),
             ("GET", "/v1/sessions/{session_id}/events"),
             ("GET", "/v1/sessions/{session_id}/jobs"),
+            ("GET", "/v1/llm/access"),
         }
     ),
     routers=("quack.session.router:router",),

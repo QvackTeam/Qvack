@@ -9,9 +9,11 @@ from uuid import UUID, uuid4
 import httpx
 from fastapi import FastAPI
 from neo4j import AsyncDriver
+from redis.asyncio import Redis
 
 from quack.config import Settings
 from quack.db import Db
+from quack.db.redis import presence_key
 from quack.events.log import NewEvent, append_events
 from quack.graph.projection.runner import project_learner
 from quack.llm.tracing import learner_pseudonym
@@ -170,29 +172,49 @@ async def test_domain_graph_and_topic_card_give_codes(
 
 async def test_delete_learner_removes_the_account(
     api_client: httpx.AsyncClient,
+    domains_app: FastAPI,
     pg_db: Db,
+    neo4j: AsyncDriver,
+    redis: Redis,
     seeded_learner: tuple[UUID, str],
     settings: Settings,
     tracer: RecordingTracer,
 ) -> None:
-    """`DELETE /v1/learner` is `delete_account`: the rows go, the traces are asked for deletion
-    by the pseudonym, the answer names the term of the copies, the session is dead (D-A-206)."""
+    """T-E10 (WP25 п.3, `Т-§19.5`, D-A-205…207): `DELETE /v1/learner` is `delete_account` — at
+    once, not by the scheduler: the journal record first, the rows of Phase 4, the subgraph and
+    the presence key go, the log row stays, the traces are asked for deletion by the pseudonym,
+    the answer names the term of the copies, the session is dead; another learner is untouched."""
     learner_id, token = seeded_learner
+    other = await create_learner(pg_db)
     headers = session_cookie(token)
-    created = await api_client.post(
-        "/v1/domains", headers=headers, json={"name": "Physics", "idempotency_key": "d-1"}
-    )
-    assert created.status_code == 201
+    for who in (learner_id, other):
+        await append_events(pg_db, who, _structure(uuid4(), uuid4(), uuid4()))
+        await project_learner(pg_db, neo4j, settings, who)
+    await redis.set(presence_key(learner_id), "1")
 
     deleted = await api_client.delete("/v1/learner", headers=headers)
     assert deleted.status_code == 200, deleted.text
     assert deleted.json()["copies_days"] == 15 and UUID(deleted.json()["deletion_id"])
     assert tracer.deleted == [learner_pseudonym(settings.langsmith_pseudonym_ns, learner_id)]
+    journal = domains_app.state.resources.deletions
+    assert [r.kind for r in journal.records] == ["account"]
     left = await pg_db.fetch_one(
         "SELECT (SELECT count(*) FROM core.learners WHERE learner_id = %(l)s) AS learners, "
-        "(SELECT count(*) FROM core.events WHERE learner_id = %(l)s) AS events",
+        "(SELECT count(*) FROM core.events WHERE learner_id = %(l)s) AS events, "
+        "(SELECT count(*) FROM ops.deletion_log WHERE learner_id = %(l)s) AS logged",
         {"l": learner_id},
     )
-    assert left == {"learners": 0, "events": 0}
+    assert left == {"learners": 0, "events": 0, "logged": 1}
+    counts = {}
+    for who in (learner_id, other):
+        async with neo4j.session() as session:
+            result = await session.run(
+                "MATCH (n) WHERE n.learnerId = $l RETURN count(n) AS n", l=str(who)
+            )
+            record = await result.single()
+        assert record is not None
+        counts[who] = record["n"]
+    assert counts[learner_id] == 0 and counts[other] > 0
+    assert await redis.get(presence_key(learner_id)) is None
     after = await api_client.get("/v1/domains", headers=headers)
     assert after.status_code == 401
