@@ -51,7 +51,7 @@
 | WP2.1 | Модели payload и реестр | влит | 65 типов, S3 заморожен (#80, #94, #119, #130) | — | D-A-121 (класс C) | T-EV1, T-EV2, T-EV3 |
 | WP2.2 | Ход и последствия вместе | влит | Пачка хода одним `append_events` (#109, `session/turn_commit.py`) | — | — | T-EV4 |
 | WP2.3 | Тексты для поиска | влит | Поля `text` типов каталога, сверка с индексом (`tests/events/test_catalog.py`) | — | — | — |
-| WP2.4 | Реестр в образе, полнота | частично | `test_registry_completeness` (#185) | `/app/event_registry.json` и `ops event-registry` собираются из каталога и rules@2 Фазы 3; шага CI «реестр событий» (Д-§5.2 п.6) нет — делает C в WP9.3 | WP1.3 | T-EV5 |
+| WP2.4 | Реестр в образе, полнота | частично | `test_registry_completeness` (#185); реестр Фазы 4, откат и пробелы — `quack/runtime/event_registry.py` (D-A-218, T-EV5) | регистрация в `cli.py` вместо `ops/registry.py` и шаг CI «реестр событий» — C (#232, WP9.3) | #232 | T-EV5 |
 | WP3.1 | Схема графа | влит | Ограничения и индексы Neo4j Фазы 4 (#114) | — | — | T-P7 |
 | WP3.2 | Обработчики фазы А | влит | Обработчики 38 строк S5 (#135, #185) | — | — | T-P2, T-P3, T-P4, T-P5 |
 | WP3.3 | Фазы А–В, срез | влит | Фазы А–В, запись разницей, остановка потока (#185) | в процесс `projector` не подключён (WP1.3) | — | T-P6 |
@@ -76,10 +76,10 @@
 | WP7.2 | Эпизоды | влит | `jobs/episodes.py` (#182) | — | issue #193 | T-D2 |
 | WP7.3 | Покрытие | влит | `jobs/coverage.py`, `mark_covered` (#133, #182) | — | — | T-D3, T-X4 |
 | WP7.4 | Очередь по `Т-§13.1` | частично | `queue_p4`, `executor_p4`, `visible_jobs`, `jobs_changed` (#182, #186); `GET /v1/sessions/{id}/jobs` (B, issue #212, D-B-207) | подключение к `workers` (WP1.3) | WP1.3 | T-D4–D8, T-D10 |
-| WP7.5 | Периодические задачи | частично | Планировщик `periodic_p4.py` (#182); `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201), `session.sweep_inactive` (D-A-211), `exports.cleanup` (D-A-215) | `calibration.weekly` (P2) | — | T-D9 |
+| WP7.5 | Периодические задачи | влит | `periodic_p4.py`; `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201), `session.sweep_inactive` (D-A-211), `exports.cleanup` (D-A-215), `calibration.weekly` — предложение `p_*` в лог (D-A-219…221) | предложение весов видов свидетельств — нет правила в документах (D-A-221) | — | T-D9 |
 | WP8.1 | Оспаривания, «описка» | влит | `POST /v1/disputes`, `POST /v1/verdicts/{seq}/typo` (#185, D-A-192) | — | — | T-ED1, T-ED2 |
 | WP8.2 | Правки тем, «я это знаю» | частично | Пять маршрутов правок (#185, D-A-193), `episode.reassigned` | обработчик `check.known_claim` (короткая проверка, WP12.6) не зарегистрирован; разбиение темы из чата (WP13) | — | T-ED3, T-ED4 |
-| WP8.3 | Состояние на момент N | частично | `state_at` на rules@3 (D-A-191); `session_summary` «до и после» в кодах (D-A-213, T-ED5) | объявление `GET /v1/sessions/{id}/summary` и e2e T-E13 — B (#228, D-A-214) | #228 | T-ED5, T-E13 |
+| WP8.3 | Состояние на момент N | влит | `state_at` на rules@3 (D-A-191); `GET /v1/sessions/{id}/summary` «до и после» в кодах (D-A-213, D-A-217, T-ED5) | e2e T-E13 целиком — с T-E1 (C, WP26.1) | — | T-ED5, T-E13 |
 | WP17.1 | Кандидаты на повторение | влит | `review_candidates` в `graph.read` (#179, D-A-151) | — | — | T-RV1 |
 | WP17.2 | «Сегодня» | влит | `GET /v1/domains/{id}/today`: лимиты, оценка времени, `today.shown` (D-A-195) | — | — | T-RV2 |
 | WP17.3 | Готовность и темп | влит | `topic_readiness`; прогноз темпа и предупреждение `pace_*` в «Сегодня» (D-A-203) | — | — | T-RV3 |
@@ -188,8 +188,6 @@
 
 1. **WP1.3, шаг 3** — A-часть сделана (#225, #226). Ждём B (#222) и C (#223, шаг 3 C).
 2. **WP1.3, шаг 5** — после шагов 3–4 всех потоков: снять код Фазы 3 зоны A (старые проектор, очередь, диспетчер, каталог, `db/postgres.py`), флаг `phase4_processes`, зависимости `sqlalchemy`, `asyncpg`, `alembic` (T-DB3).
-3. **WP8.3** — функция готова; маршрут — B (#228).
-4. **WP7.5** — `calibration.weekly` (P2).
 5. **WP8.2** — разбиение темы из чата (с WP13); `check.known_claim` зарегистрирован B.
 6. **Владелец:** `D-A-196` (класс C) — на подтверждение владельцу.
 
@@ -231,6 +229,7 @@
 | D-A-196 | Поля `hub_id` и `artifact` в `agent.requested` v1 (класс C, issue #191) |
 | Слой 1: 7 пунктов | Текст заготовок `verdict_proof`, `second_opinion`, `verdict_free`, `extractor`, `analyst`, `builder` и общий блок диагностики — раздел «Промпты» заметок |
 | Q-C-1 | Два теста `compute` падали при параллельном прогоне с backend (таймаут `pebble`) |
+| D-A-221 | Правило пересчёта весов видов свидетельств (`Т-§7.4`, `Т-§18.5`) в `calibration.weekly`: в документах нет; сейчас предлагаются только вероятности `p_*` |
 | Q-A-4 | A → B: на что указывает `confidence.reported.target_seq`; порог `calibrated` |
 
 Класс C подтверждает владелец на G4. Действия владельца вне кода: сервер, DNS, секреты окружения `production`, клиент Google OIDC, ключи Modal и Resend, ручной прогон на живой модели (DoD п.6a) — `deploy/README.md`.

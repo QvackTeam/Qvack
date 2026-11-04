@@ -68,6 +68,8 @@ CROSS_LEARNER_ALLOWED |= (
         # D-A-215: `exports.cleanup` deletes the expired archives of every learner (Д-§8.4).
         "quack/jobs/cleanup_p4.py:_EXPIRED_EXPORTS": "the periodic cleanup of every learner",
         "quack/jobs/cleanup_p4.py:_MARK_EXPIRED": "a row found by its global export_id",
+        # D-A-219: `calibration.weekly` measures the attempts of every learner (Т-§18.5).
+        "quack/jobs/calibration_p4.py:_ATTEMPTS": "the weekly calibration over every learner",
     }
 )
 # D-B-195 (WP16.7): `ops metrics` measures the whole system over a window (Т-§18.2, Т-§18.3);
