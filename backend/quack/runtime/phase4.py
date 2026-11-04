@@ -71,7 +71,12 @@ def bind_handlers(handlers: dict[str, JobHandler], ctx: JobContext) -> dict[str,
 async def periodic_tick(ctx: JobContext, stop: asyncio.Event) -> None:
     """WP7.5: every `scheduler_tick_s` the jobs of the current periods (one per period)."""
     while not stop.is_set():
-        await schedule_periodic(ctx.db, datetime.now(UTC), redis=ctx.redis)
+        await schedule_periodic(
+            ctx.db,
+            datetime.now(UTC),
+            redis=ctx.redis,
+            sweep_interval_s=ctx.settings.session_sweep_interval_s,
+        )
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(stop.wait(), timeout=ctx.settings.scheduler_tick_s)
 

@@ -131,7 +131,8 @@ def create_graph_reader(
     methods that take only an id of a node (`topic_memory`, `topic_requires`, ...) would take the
     owner from the node and read another learner's data (law 1, Т-§3.4; D-A-144). The
     implementation is `Neo4jGraphReader` (WP6.4, G2); tests pass `FixedGraphReader`. `db`
-    (`ctx.db`) lets `state_at` replay the log of Phase 4 with `rules@3` (WP8.3, D-A-191)."""
+    (`ctx.db`) lets `state_at` replay the log of Phase 4 with `rules@3` (WP8.3, D-A-191) and
+    `slice_for_turn` wait for the journal (D-A-210)."""
     from quack.graph.read.neo4j_reader import Neo4jGraphReader
 
     return Neo4jGraphReader(neo4j, settings, learner_id=learner_id, db=db)
