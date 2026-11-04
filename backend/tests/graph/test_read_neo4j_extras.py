@@ -17,7 +17,6 @@ from neo4j import AsyncDriver
 from quack.config import Settings
 from quack.embeddings.client import EmbeddingsUnavailable
 from quack.events.log import StoredEvent as LogEvent
-from quack.events.models import StoredEvent
 from quack.graph.memory import InMemoryGraph
 from quack.graph.read.models import ReviewScope
 from quack.graph.read.neo4j_extras import ExtraReads
@@ -406,8 +405,8 @@ async def test_prep_context_readiness_days_and_candidates(g: Graph, reader: Read
 # --- state_at -----------------------------------------------------------------------------
 
 
-def _event(seq: int, kind: str, **payload: Any) -> StoredEvent:
-    return StoredEvent.model_construct(
+def _event(seq: int, kind: str, **payload: Any) -> LogEvent:
+    return LogEvent.model_construct(
         learner_id=uuid4(), seq=seq, type=kind, payload=payload,
         occurred_at=datetime.fromtimestamp(1_700_000_000 + seq, UTC),
     )  # fmt: skip
@@ -424,12 +423,10 @@ async def test_state_at_replays_events_up_to_n_not_a_fold_by_seq(
     ]
 
     class Replaying(Reader):
-        async def _events_up_to(self, learner_id: UUID, seq_n: int) -> list[StoredEvent]:
+        async def _events_up_to(self, learner_id: UUID, seq_n: int) -> list[LogEvent]:
             return [e for e in log if e.seq <= seq_n]
 
-        async def _replay(
-            self, learner_id: UUID, events: Sequence[StoredEvent | LogEvent]
-        ) -> InMemoryGraph:
+        async def _replay(self, learner_id: UUID, events: Sequence[LogEvent]) -> InMemoryGraph:
             graph = InMemoryGraph()
             for e in events:  # a stand-in with the handlers' order: events decide, not seq
                 if e.type == "t.skill":
