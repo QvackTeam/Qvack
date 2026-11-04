@@ -5,7 +5,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useMocks, useT } from "@/lib/i18n/provider";
 import type { Domain } from "@/lib/mock/types";
 import { TermsGate } from "@/components/quack/live/terms-gate";
-import { domainFromApi } from "./adapters";
+import type { GraphModel } from "@/lib/graph/types";
+import { type ApiHub, domainFromApi, graphModelFromApi } from "./adapters";
 import { API_MODE, ApiError, get, idem, patch, post, sse, type S } from "./client";
 
 /** Projection updates come in bursts (one turn → several events): re-read once they settle */
@@ -20,6 +21,8 @@ type Data = {
   ready: boolean;
   error: string | null;
   domains: Domain[];
+  /** Model of the layered graph per subject (API mode; mocks have their own store) */
+  models: Record<string, GraphModel>;
   me: S["Me"] | null;
   active: S["SessionView"] | null;
   /**
@@ -53,6 +56,7 @@ function MockData({ children }: { children: React.ReactNode }) {
       ready: true,
       error: null,
       domains,
+      models: {},
       me: null,
       active: null,
       appliedSeq: 0,
@@ -77,6 +81,7 @@ function ApiData({ children }: { children: React.ReactNode }) {
   const [summaries, setSummaries] = useState<S["DomainSummary"][]>([]);
   const [consentBusy, setConsentBusy] = useState(false);
   const [graphs, setGraphs] = useState<Record<string, S["DomainGraphResponse"]>>({});
+  const [hubs, setHubs] = useState<Record<string, ApiHub[]>>({});
   const [me, setMe] = useState<S["Me"] | null>(null);
   const [active, setActiveState] = useState<S["SessionView"] | null>(null);
   const [history, setHistory] = useState<S["SessionView"][]>([]);
@@ -100,9 +105,14 @@ function ApiData({ children }: { children: React.ReactNode }) {
 
   const loadGraph = useCallback(async (domainId: string) => {
     try {
-      const g = await get<S["DomainGraphResponse"]>(`/v1/domains/${domainId}/graph`);
+      // chapters ride along with the graph; no hubs (or a failed call) means one chapter with every topic
+      const [g, h] = await Promise.all([
+        get<S["DomainGraphResponse"]>(`/v1/domains/${domainId}/graph`),
+        get<ApiHub[]>(`/v1/domains/${domainId}/hubs`).catch(() => [] as ApiHub[]),
+      ]);
       loaded.current.add(domainId);
       setGraphs((m) => ({ ...m, [domainId]: g }));
+      setHubs((m) => ({ ...m, [domainId]: h }));
     } catch (e) {
       // a subject without sessions or materials has no graph yet
       if (!(e instanceof ApiError && e.status === 404)) throw e;
@@ -211,7 +221,13 @@ function ApiData({ children }: { children: React.ReactNode }) {
     }),
     [t],
   );
-  const domains = useMemo(() => summaries.map((s) => domainFromApi(s, graphs[s.domain_id], labels, history)), [summaries, graphs, labels, history]);
+  const domains = useMemo(() => summaries.map((s) => domainFromApi(s, graphs[s.domain_id], labels, history, hubs[s.domain_id])), [summaries, graphs, hubs, labels, history]);
+
+  const models = useMemo(() => {
+    const out: Record<string, GraphModel> = {};
+    for (const s of summaries) if (graphs[s.domain_id]) out[s.domain_id] = graphModelFromApi(s, graphs[s.domain_id], hubs[s.domain_id] ?? [], history);
+    return out;
+  }, [summaries, graphs, hubs, history]);
 
   const savePreferences = useCallback(async (prefs: Record<string, unknown>) => {
     // one key per request: `preference.set {key, value}`; only plain values go through
@@ -246,8 +262,8 @@ function ApiData({ children }: { children: React.ReactNode }) {
   }, [termsVersion, t.live.serverDown]);
 
   const value = useMemo<Data>(
-    () => ({ ready, error, domains, me, active, appliedSeq, reload, loadGraph, setActive, savePreferences, logout }),
-    [ready, error, domains, me, active, appliedSeq, reload, loadGraph, setActive, savePreferences, logout],
+    () => ({ ready, error, domains, models, me, active, appliedSeq, reload, loadGraph, setActive, savePreferences, logout }),
+    [ready, error, domains, models, me, active, appliedSeq, reload, loadGraph, setActive, savePreferences, logout],
   );
   // the gate lies over the app (the app stays mounted: the router needs its segments, and the data loads behind it)
   return (

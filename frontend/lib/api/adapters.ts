@@ -1,4 +1,5 @@
-import type { Domain, Session, TodayItem, Topic, TopicState } from "@/lib/mock/types";
+import type { Domain, Hub, Session, TodayItem, Topic, TopicState } from "@/lib/mock/types";
+import { type GraphHub, type GraphModel, type GraphTopic, onGraph } from "@/lib/graph/types";
 import type { S } from "./client";
 
 /** Backend → the shapes the UI was built on (lib/mock/types.ts). The UI itself does not change. */
@@ -27,8 +28,28 @@ const retentionOf = (display: S["TopicDisplay"] | undefined) => Math.min(1, Math
 /** The graph already carries hubs on the backend (`GET /v1/domains/{id}/hubs`), but its nodes do not say which hub they belong to: all topics go into one chapter */
 export const allTopicsHubId = (domainId: string) => `all-${domainId}`;
 
-/** `from → to` in TopicRequires: `from` has to come before `to` */
-export function topicsFromGraph(domainId: string, graph: S["DomainGraphResponse"]): Topic[] {
+/** Chapters of the design = hubs of the backend (`GET /v1/domains/{id}/hubs`): their topic lists say which topic sits in which chapter */
+export type ApiHub = S["HubGoal"];
+
+const ROMAN: [number, string][] = [[10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+const roman = (n: number) => {
+  let out = "";
+  for (const [v, r] of ROMAN) while (n >= v) { out += r; n -= v; }
+  return out;
+};
+
+/** topic_id → the first hub that lists it (a topic may stand in several hubs on the backend; the graph draws it in one chapter) */
+function hubOfTopic(hubs: ApiHub[]): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const h of hubs) if (h.kind !== "domain_all") for (const t of h.topics ?? []) if (!m.has(t.topic_id)) m.set(t.topic_id, h.hub_id);
+  return m;
+}
+
+/** `from → to` in TopicRequires: `from` has to come before `to`. Without hubs all topics go into one chapter; with hubs a topic outside every hub is a free topic */
+export function topicsFromGraph(domainId: string, graph: S["DomainGraphResponse"], allHubs: ApiHub[] = []): Topic[] {
+  // `domain_all` is the hub over the whole subject, not a chapter
+  const hubs = allHubs.filter((h) => h.kind !== "domain_all");
+  const hubOf = hubOfTopic(hubs);
   const requires = new Map<string, string[]>();
   for (const e of graph.requires) requires.set(e.to_topic_id, [...(requires.get(e.to_topic_id) ?? []), e.from_topic_id]);
   // hidden and archived topics are the student's "not needed": they leave the graph
@@ -37,7 +58,7 @@ export function topicsFromGraph(domainId: string, graph: S["DomainGraphResponse"
   for (const [k, v] of requires) requires.set(k, v.filter((id) => ids.has(id)));
   return shown.map((t) => ({
     id: t.topic_id,
-    hubId: allTopicsHubId(domainId),
+    hubId: hubs.length ? hubOf.get(t.topic_id) : allTopicsHubId(domainId),
     title: t.name,
     // the graph carries no descriptions: the card line is filled by the topic page
     line: "",
@@ -95,15 +116,32 @@ export function domainFromApi(
   graph: S["DomainGraphResponse"] | undefined,
   labels: { hub: string } & SessionLabels & TodayLabels,
   history: S["SessionView"][],
+  apiHubs: ApiHub[] = [],
 ): Domain {
   const hubTitle = labels.hub;
-  const topics = graph ? topicsFromGraph(summary.domain_id, graph) : [];
+  const topics = graph ? topicsFromGraph(summary.domain_id, graph, apiHubs) : [];
+  const chapters = apiHubs.filter((h) => h.kind !== "domain_all");
+  // chapters with no visible topic would be an empty node in the ring: leave them out
+  const used = new Set(topics.map((t) => t.hubId));
+  const hubs: Hub[] = chapters.length
+    ? chapters
+        .filter((h) => used.has(h.hub_id))
+        .map((h, i) => ({
+          id: h.hub_id,
+          num: roman(i + 1),
+          title: h.name,
+          about: "",
+          deadline: h.deadline_at_ms ? { label: h.name, date: new Date(h.deadline_at_ms).toISOString().slice(0, 10) } : undefined,
+        }))
+    : topics.length
+      ? [{ id: allTopicsHubId(summary.domain_id), num: "I", title: hubTitle, about: "" }]
+      : [];
   const sessions = history.filter((s) => s.domain_id === summary.domain_id).map((s) => sessionFromApi(s, topics, labels));
   return {
     id: summary.domain_id,
     title: summary.name,
     titleDat: summary.name,
-    hubs: topics.length ? [{ id: allTopicsHubId(summary.domain_id), num: "I", title: hubTitle, about: "" }] : [],
+    hubs,
     topics,
     outside: [],
     sessions,
@@ -114,3 +152,48 @@ export function domainFromApi(
 
 /** Placeholder while the list is loading or empty: the shell always has some domain */
 export const EMPTY_DOMAIN: Domain = { id: "", title: "", titleDat: "", hubs: [], topics: [], outside: [], sessions: [], today: [] };
+
+const KNOWN_HUB_KINDS = new Set<string>(["material", "request", "deadline", "domain_all"]);
+const STATUSES = new Set<string>(["proposed", "active", "hidden", "off_domain"]);
+const VISIBILITIES = new Set<string>(["shown", "pale", "hidden"]);
+
+/**
+ * `GET …/graph` + `GET …/hubs` + the session history → the model of the layered graph (lib/graph/types.ts).
+ * That model was written to the contract of the backend, so this is a plain renaming: `requires {from, to}` means
+ * `to` needs `from` first; display codes and `nearest_due_at_ms` go over as they are; `domain_all` stays in the list
+ * (the graph does not draw it as a node).
+ */
+export function graphModelFromApi(summary: S["DomainSummary"], graph: S["DomainGraphResponse"], hubs: ApiHub[], history: S["SessionView"][], now = Date.now()): GraphModel {
+  const topics: GraphTopic[] = graph.topics.map((t) => ({
+    id: t.topic_id,
+    name: t.name,
+    status: (STATUSES.has(t.status) ? t.status : "active") as GraphTopic["status"],
+    visibility: (VISIBILITIES.has(t.visibility) ? t.visibility : "shown") as GraphTopic["visibility"],
+    displayState: t.display?.display_state && t.display.display_state !== "none" ? t.display.display_state : undefined,
+    nearestDueAtMs: t.nearest_due_at_ms ? t.nearest_due_at_ms : undefined,
+  }));
+  const onGraphIds = new Set(topics.filter(onGraph).map((t) => t.id));
+  const due = topics
+    .filter((t) => onGraphIds.has(t.id) && t.nearestDueAtMs && t.nearestDueAtMs < new Date(now).setHours(24, 0, 0, 0))
+    .sort((a, b) => (a.nearestDueAtMs ?? 0) - (b.nearestDueAtMs ?? 0))
+    .slice(0, TODAY_MAX);
+  return {
+    domainId: summary.domain_id,
+    domainName: summary.name,
+    topics,
+    hubs: hubs.map((h) => ({
+      id: h.hub_id,
+      name: h.name,
+      kind: (KNOWN_HUB_KINDS.has(h.kind) ? h.kind : "material") as GraphHub["kind"],
+      deadlineAtMs: h.deadline_at_ms ?? undefined,
+    })),
+    includes: hubs.flatMap((h) => (h.topics ?? []).map((t) => ({ hubId: h.hub_id, topicId: t.topic_id }))),
+    requires: graph.requires.map((e) => ({ topicId: e.to_topic_id, requiresId: e.from_topic_id })),
+    otherDomain: [],
+    recentSessions: history
+      .filter((x) => x.domain_id === summary.domain_id && x.topic_id)
+      .map((x) => ({ id: x.session_id, atMs: Date.parse(x.last_activity_at) || now, topicIds: [x.topic_id as string] })),
+    today: due.map((t) => ({ id: t.id, kind: "item" as const, topicId: t.id, name: t.name, action: "review" as const })),
+    nowMs: now,
+  };
+}

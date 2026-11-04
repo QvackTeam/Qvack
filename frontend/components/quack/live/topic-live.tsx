@@ -59,7 +59,9 @@ export function TopicLive({ id }: { id: string }) {
       try {
         const topic = await get<S["TopicView"]>(`/v1/topics/${id}`);
         const hubs = await get<S["HubGoal"][]>(`/v1/domains/${topic.domain_id}/hubs`).catch(() => [] as S["HubGoal"][]);
-        const hubId = hubs.find((h) => h.topics?.some((x) => x.topic_id === id))?.hub_id ?? null;
+        const has = (h: S["HubGoal"]) => h.topics?.some((x) => x.topic_id === id);
+        // a chapter first; `domain_all` (every topic of the subject) only when the topic is in no chapter
+        const hubId = (hubs.find((h) => h.kind !== "domain_all" && has(h)) ?? hubs.find(has))?.hub_id ?? null;
         const [notes, cards, cheat] = await Promise.all([
           orNone(get<S["ArtifactResponse"]>(`/v1/topics/${id}/notes`)),
           orNone(get<S["CardsResponse"]>(`/v1/topics/${id}/cards`)),

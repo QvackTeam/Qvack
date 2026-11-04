@@ -1,8 +1,12 @@
 import { onGraph, type GraphModel } from "./types";
 
 /** Step between neighbours, world units */
-export const GAP_X = 120;
-export const GAP_Y = 120;
+export const GAP_X = 130;
+export const GAP_Y = 140;
+/** Next to a topic of another hub the step is this many times wider: hubs read as separate branches */
+const FOREIGN_GAP = 2.3;
+/** How strongly a topic is pulled to the lane of its own hub (0 = only by its links, 1 = only by the hub) */
+const HUB_PULL = 0.88;
 /** A hub stands this far above the highest of its topics */
 const HUB_RISE = GAP_Y * 0.9;
 /** Hubs are bigger than topics and need more room */
@@ -123,26 +127,76 @@ export function layoutGraph(model: GraphModel, stored?: StoredPositions): Layout
   const rows: number[][] = Array.from({ length: depth }, () => []);
   layerOf.forEach((l, i) => rows[l].push(i));
 
+  // The hub a topic stands in (the first chapter that lists it); -1 for a free topic. `domain_all` is not a chapter
+  const hubIdx = new Map(model.hubs.filter((h) => h.kind !== "domain_all").map((h, i) => [h.id, i]));
+  const ownHub = new Array<number>(n).fill(-1);
+  for (const l of model.includes) {
+    const i = at.get(l.topicId);
+    const h = hubIdx.get(l.hubId);
+    if (i !== undefined && h !== undefined && ownHub[i] < 0) ownHub[i] = h;
+  }
+
   const x = new Array<number>(n).fill(NaN);
   const byComp = (a: number, b: number) => compOf[a] - compOf[b] || (topics[a].id < topics[b].id ? -1 : topics[a].id > topics[b].id ? 1 : 0);
-  const spread = (row: number[]) => row.forEach((v, r) => (x[v] = (r - (row.length - 1) / 2) * GAP_X));
+  /** Left to right, no closer than the step (wider between two hubs); the row keeps its middle */
+  const gapBetween = (a: number, b: number) => (ownHub[a] !== ownHub[b] ? GAP_X * FOREIGN_GAP : GAP_X);
+  const spread = (row: number[], want?: Map<number, number>) => {
+    const t = row.map((v, r) => want?.get(v) ?? (r - (row.length - 1) / 2) * GAP_X);
+    const p = [...t];
+    for (let r = 1; r < row.length; r++) p[r] = Math.max(p[r], p[r - 1] + gapBetween(row[r - 1], row[r]));
+    const shift = mean(t) - mean(p);
+    row.forEach((v, r) => (x[v] = p[r] + shift));
+  };
 
   if (!stored || !topics.some((t) => stored[t.id])) {
     // First layout: order each layer by the mean x of its neighbours, a few sweeps
+    // Start: every hub gets its own lane, left to right in the order of the hubs; free topics go by their links
+    const laneWidth = new Map<number, number>();
     for (const row of rows) {
-      row.sort(byComp);
-      spread(row);
+      const cnt = new Map<number, number>();
+      for (const v of row) if (ownHub[v] >= 0) cnt.set(ownHub[v], (cnt.get(ownHub[v]) ?? 0) + 1);
+      for (const [h, c] of cnt) laneWidth.set(h, Math.max(laneWidth.get(h) ?? 0, c));
+    }
+    const lane = new Map<number, number>();
+    let cursor = 0;
+    for (const h of [...laneWidth.keys()].sort((a, b) => a - b)) {
+      const w = (laneWidth.get(h)! - 1) * GAP_X;
+      lane.set(h, cursor + w / 2);
+      cursor += w + GAP_X * FOREIGN_GAP;
+    }
+    const mid = cursor ? (cursor - GAP_X * FOREIGN_GAP) / 2 : 0;
+    for (const row of rows) {
+      row.sort((a, b) => (ownHub[a] < 0 ? Infinity : lane.get(ownHub[a])!) - (ownHub[b] < 0 ? Infinity : lane.get(ownHub[b])!) || byComp(a, b));
+      // the topics of one hub in this layer stand side by side around the hub's lane
+      const total = new Map<number, number>();
+      for (const v of row) total.set(ownHub[v], (total.get(ownHub[v]) ?? 0) + 1);
+      const seen = new Map<number, number>();
+      const start = new Map<number, number>();
+      row.forEach((v, r) => {
+        const h = ownHub[v];
+        const k = seen.get(h) ?? 0;
+        seen.set(h, k + 1);
+        start.set(v, h >= 0 ? lane.get(h)! - mid + (k - (total.get(h)! - 1) / 2) * GAP_X : (r - (row.length - 1) / 2) * GAP_X);
+      });
+      spread(row, start);
     }
     const sweep = (layers: number[], nb: number[][]) => {
       for (const l of layers) {
         const row = rows[l];
-        const bary = new Map(row.map((v) => [v, nb[v].length ? mean(nb[v].map((w) => x[w])) : x[v]]));
-        row.sort((a, b) => bary.get(a)! - bary.get(b)! || byComp(a, b));
-        spread(row);
+        // pulled by the neighbours it is linked to and by the middle of its own hub
+        const aim = new Map(
+          row.map((v) => {
+            const link = nb[v].length ? mean(nb[v].map((w) => x[w])) : x[v];
+            const home = ownHub[v] >= 0 ? lane.get(ownHub[v])! - mid : NaN;
+            return [v, Number.isNaN(home) ? link : link * (1 - HUB_PULL) + home * HUB_PULL] as [number, number];
+          }),
+        );
+        row.sort((a, b) => aim.get(a)! - aim.get(b)! || byComp(a, b));
+        spread(row, aim);
       }
     };
     const up = Array.from({ length: depth }, (_, i) => i);
-    for (let it = 0; it < 4; it++) {
+    for (let it = 0; it < 6; it++) {
       sweep(up.slice(1), req);
       sweep([...up].reverse().slice(1), dep);
     }
@@ -213,7 +267,7 @@ export function loadPositions(learner: string, domainId: string): StoredPosition
     const raw = localStorage.getItem(KEY(learner, domainId));
     if (!raw) return undefined;
     const v = JSON.parse(raw) as { v?: number; pos?: StoredPositions };
-    return v.v === 1 && v.pos && typeof v.pos === "object" ? v.pos : undefined;
+    return v.v === 3 && v.pos && typeof v.pos === "object" ? v.pos : undefined;
   } catch {
     return undefined;
   }
@@ -223,7 +277,7 @@ export function savePositions(learner: string, domainId: string, layout: Layout)
   const pos: StoredPositions = {};
   for (const n of layout.nodes.values()) pos[n.key] = [Math.round(n.x * 10) / 10, n.layer];
   try {
-    localStorage.setItem(KEY(learner, domainId), JSON.stringify({ v: 1, pos }));
+    localStorage.setItem(KEY(learner, domainId), JSON.stringify({ v: 3, pos }));
   } catch {
     /* no storage: the layout is recomputed next time */
   }

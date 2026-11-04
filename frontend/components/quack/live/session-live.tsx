@@ -191,7 +191,8 @@ export function SessionLive({ id }: { id: string }) {
       sessionStorage.removeItem(firstTurnKey(id));
     } catch {}
     if (first) void send(first);
-    else if (detail.events.length === 0 && detail.intent && detail.intent !== "free") {
+    // a fresh session already has `session.started` in its log: "fresh" means nobody has spoken yet
+    else if (detail.intent && detail.intent !== "free" && !detail.events.some((e) => e.type === "message.sent" || e.type === "turn.committed")) {
       void act({ kind: "intent", intent: detail.intent, topic_id: detail.topic_id, hub_id: detail.hub_id });
     }
   }, [detail, id, send, act]);
