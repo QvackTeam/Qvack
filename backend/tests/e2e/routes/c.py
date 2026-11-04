@@ -269,7 +269,7 @@ STREAM = Stream(
         ),
         # ТЗ Ф4 §6.4, WP23.5: the review of the learner's cheat sheet and the consent to a
         # generated one. Last in the walk: the consent writes `agent.requested` with `artifact` and
-        # `hub_id`, which the schema takes with D-A-196 (issue #191); until then that step fails.
+        # `hub_id`, which the schema takes with D-A-196 (issue #191);.
         Route(
             "POST",
             "/v1/hubs/{hub_id}/cheatsheet/review",

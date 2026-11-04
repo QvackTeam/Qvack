@@ -12,15 +12,21 @@ import asyncio
 import sys
 from collections.abc import AsyncIterator
 from urllib.parse import urlsplit
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
 from psycopg import sql
+from sqlalchemy import text
 
 from quack.config import Settings
 from quack.db import Db, open_db
+from quack.db.postgres import SessionFactory
+from quack.events.append import append_events
+from quack.events.models import NewEvent
 from tests.conftest import PG_DSN, _unavailable
 from tests.db.fixtures import MIGRATIONS_DIR, PHASE4_SCHEMAS, database_url
+from tests.support.auth import session_token
 
 if sys.platform == "win32":  # psycopg cannot run on the default ProactorEventLoop
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())  # type: ignore[attr-defined,deprecated]
@@ -70,3 +76,32 @@ async def jobs_db(wp7_db_session: Db) -> Db:
     tables = sql.SQL(", ").join(sql.Identifier(r["table_schema"], r["table_name"]) for r in rows)
     await wp7_db_session.execute(sql.SQL("TRUNCATE {} RESTART IDENTITY").format(tables))
     return wp7_db_session
+
+
+@pytest.fixture
+async def seeded_learner(db: SessionFactory, pg_db: Db, settings: Settings) -> tuple[UUID, str]:
+    """A learner of the Phase 3 log (`auth.users` + `learner.registered`)."""
+    learner_id = uuid4()
+    email = f"learner-{learner_id.hex[:8]}@example.com"
+    async with db() as session, session.begin():
+        await session.execute(
+            text(
+                "INSERT INTO auth.users (id, email, password_hash, display_name, preferences) "
+                "VALUES (:id, :email, :pw, :name, CAST(:prefs AS JSONB))"
+            ),
+            {"id": learner_id, "email": email, "pw": "!", "name": "Seeded", "prefs": "{}"},
+        )
+        await append_events(
+            session,
+            learner_id,
+            [
+                NewEvent(
+                    type="learner.registered",
+                    actor="learner",
+                    idempotency_key=f"register:{learner_id}",
+                    payload={"email": email, "display_name": "Seeded", "preferences": {}},
+                )
+            ],
+            publish_wakeup=False,
+        )
+    return learner_id, await session_token(pg_db, learner_id, settings)

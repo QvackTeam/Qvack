@@ -248,3 +248,36 @@ def test_session_started_marks_a_resumed_session() -> None:
     resumed = {**sample_payload("session.started"), "resumed": True}
     back = validate_payload("session.started", resumed)
     assert isinstance(back, SessionStarted) and back.resumed is True
+
+
+def test_agent_artifact_request_names_the_artifact_and_its_hub() -> None:
+    """D-A-196 (#191): `agent.requested {kind: artifact}` carries the artifact and the hub of a
+    cheat sheet as data; an unknown artifact is rejected."""
+    from uuid import uuid4
+
+    payload = sample_payload("agent.requested")
+    payload["kind"] = "artifact"
+    payload["params"] = {"artifact": "cheatsheet", "hub_id": str(uuid4())}
+    validate_payload("agent.requested", payload, 1)
+    payload["params"] = {"artifact": "poster"}
+    with pytest.raises(ValidationError):
+        validate_payload("agent.requested", payload, 1)
+
+
+def test_image_registry_has_no_gaps_and_tracks_rollback() -> None:
+    """WP2.4 (Д-§5.2 п.6, Д-§6.3, T-EV5, D-A-218): the registry of the image is the Phase 4
+    catalog with `rules@3`; every type marked for the projector or the dispatcher has its handler
+    or rule; a new pair already written, or other rules, forbid a rollback."""
+    from quack.runtime.event_registry import can_rollback, event_registry, registry_gaps
+
+    current = event_registry()
+    assert current["rules_version"] == "rules@3"
+    assert len(current["events"]) == len(SPECS)
+    assert registry_gaps() == []
+    assert can_rollback(current, set())["can_rollback"]
+    first = current["events"][0]
+    previous = {**current, "events": current["events"][1:]}
+    seen = {(first["type"], first["schema_version"])}
+    verdict = can_rollback(previous, seen)
+    assert not verdict["can_rollback"] and verdict["new_pairs_seen"] == [first]
+    assert not can_rollback({**current, "rules_version": "rules@2"}, set())["can_rollback"]

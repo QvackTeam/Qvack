@@ -83,10 +83,6 @@ async def test_get_cheatsheet_offer_is_true_before_the_deadline(
     assert (await client.get(f"/v1/hubs/{hub}/cheatsheet")).json()["offer"] is True
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="D-A-196 (issue #191): `AgentParamsRecord` has no `artifact` and `hub_id` yet",
-)
 async def test_post_cheatsheet_writes_the_consent(pg_db: Db, client_for: ClientFor) -> None:
     """`POST /v1/hubs/{id}/cheatsheet`: the consent is `agent.requested`; a repeat with the same
     key returns the same request and writes nothing."""

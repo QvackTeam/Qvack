@@ -46,12 +46,12 @@
 | :-- | :-- | :-: | :-- | :-- | :-- | :-- |
 | WP1.1 | dbmate и базовая схема | влит | `db/migrations/…baseline.sql` + 3 расширяющие миграции (#78, #142) | — | — | T-DB1 |
 | WP1.2 | `Db` и репозитории | влит | `quack.db.Db`, `append_events`, блокировки на psycopg (#78, #107) | — | — | T-DB2, T-DB4, T-DB5 |
-| WP1.3 | Перенос кода, снятие SQLAlchemy | не начат | Модулей `quack/**` с `sqlalchemy`/`asyncpg` было 43 на `main`, стало 41; новый код Фазы 4 на `Db` — это WP1.2 | перенести 41 модуль и 79 тестовых файлов; подключить к процессам `projector`/`workers`/`api`/`ops` проектор `graph/projection`, очередь `queue_p4`, исполнитель, диспетчер (сейчас в бою код Фазы 3: старые проектор, очередь, `ops/registry.py` на rules@2); `JOB_KINDS`/`HANDLER_MODULES`; удалить зависимости `sqlalchemy`, `asyncpg`, `alembic` | — | T-DB3 (G4) |
+| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1: процессы Фазы 4 за `phase4_processes` (D-A-200, D-A-206, #224); шаг 3 A: `graph/read` на `Db`, `sweep_inactive` в `periodic_p4` (D-A-210…212, #225), `quack/domains/**` на `Db`, интервью и диагностика удалены (D-A-207…209, #226); план — #215 | шаг 2 — стенд на dbmate (C, #223); шаг 3 B (#222) и C; шаг 5 A — снять код Фазы 3 (перечень D-A-212), `graph.curate` Фазы 3, флаг, `sqlalchemy`/`asyncpg`/`alembic`; владелец `quack/ops/*` — #215 | #223 | T-DB3 (G4) |
 | WP1.4 | squawk | влит | `backend/.squawk.toml` (#185), job `squawk` в CI (#189) | — | — | T-DB7 |
 | WP2.1 | Модели payload и реестр | влит | 65 типов, S3 заморожен (#80, #94, #119, #130) | — | D-A-121 (класс C) | T-EV1, T-EV2, T-EV3 |
 | WP2.2 | Ход и последствия вместе | влит | Пачка хода одним `append_events` (#109, `session/turn_commit.py`) | — | — | T-EV4 |
 | WP2.3 | Тексты для поиска | влит | Поля `text` типов каталога, сверка с индексом (`tests/events/test_catalog.py`) | — | — | — |
-| WP2.4 | Реестр в образе, полнота | частично | `test_registry_completeness` (#185) | `/app/event_registry.json` и `ops event-registry` собираются из каталога и rules@2 Фазы 3; шага CI «реестр событий» (Д-§5.2 п.6) нет — делает C в WP9.3 | WP1.3 | T-EV5 |
+| WP2.4 | Реестр в образе, полнота | частично | `test_registry_completeness` (#185); реестр Фазы 4, откат и пробелы — `quack/runtime/event_registry.py` (D-A-218, T-EV5) | регистрация в `cli.py` вместо `ops/registry.py` и шаг CI «реестр событий» — C (#232, WP9.3) | #232 | T-EV5 |
 | WP3.1 | Схема графа | влит | Ограничения и индексы Neo4j Фазы 4 (#114) | — | — | T-P7 |
 | WP3.2 | Обработчики фазы А | влит | Обработчики 38 строк S5 (#135, #185) | — | — | T-P2, T-P3, T-P4, T-P5 |
 | WP3.3 | Фазы А–В, срез | влит | Фазы А–В, запись разницей, остановка потока (#185) | в процесс `projector` не подключён (WP1.3) | — | T-P6 |
@@ -71,22 +71,22 @@
 | WP6.2 | Коды состояния темы | влит | Восемь правил `Т-§8.6` (#185) | — | — | T-TH2 |
 | WP6.3 | Хабы, дедлайны, уровни | влит | Обработчики хабов, `PATCH /v1/hubs/{id}` (#185, D-A-193) | — | — | T-TH3 |
 | WP6.4 | Чтение памяти `graph.read` | влит | `GraphReader`, `Neo4jGraphReader`, `ExtraReads` (#101, #170, #175, #179) | `prep_context.control_materials` пусто (материал контроля в графе не различается) | D-A-152 | T-TH4 |
-| WP6.5 | API графа, тем, хабов | не начат | — | `GET /v1/domains/{id}/graph` на коде Фазы 3 (display_state строками); нужны `TopicDisplay` с кодами, `GET /v1/topics/{id}` с «местами в сессиях», маршруты хабов; обновить `openapi.json` | — | T-TH5 (G3) |
+| WP6.5 | API графа, тем, хабов | влит | «Почему», хабы (D-A-194, D-A-198); `GET /v1/domains/{id}/graph` на `TopicDisplay`, `GET /v1/topics/{id}` на `topic_view` (D-A-207, #226) | — | — | T-TH5 (G3) |
 | WP7.1 | Правила диспетчера | влит | Таблица `plan_jobs`, виды задач (#101, #117, #154, #182) | виды без обработчика пока не в `JOB_KINDS` (процедура #173) | — | T-D1 |
 | WP7.2 | Эпизоды | влит | `jobs/episodes.py` (#182) | — | issue #193 | T-D2 |
 | WP7.3 | Покрытие | влит | `jobs/coverage.py`, `mark_covered` (#133, #182) | — | — | T-D3, T-X4 |
 | WP7.4 | Очередь по `Т-§13.1` | частично | `queue_p4`, `executor_p4`, `visible_jobs`, `jobs_changed` (#182, #186); `GET /v1/sessions/{id}/jobs` (B, issue #212, D-B-207) | подключение к `workers` (WP1.3) | WP1.3 | T-D4–D8, T-D10 |
-| WP7.5 | Периодические задачи | частично | Планировщик и ключи периода `periodic_p4.py` (#182) | обработчики `manifests.cleanup`, `exports.cleanup`, `deletions.reconcile` (с WP25), `calibration.weekly` (P2) | — | T-D9 |
+| WP7.5 | Периодические задачи | влит | `periodic_p4.py`; `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201), `session.sweep_inactive` (D-A-211), `exports.cleanup` (D-A-215), `calibration.weekly` — предложение `p_*` в лог (D-A-219…221) | предложение весов видов свидетельств — нет правила в документах (D-A-221) | — | T-D9 |
 | WP8.1 | Оспаривания, «описка» | влит | `POST /v1/disputes`, `POST /v1/verdicts/{seq}/typo` (#185, D-A-192) | — | — | T-ED1, T-ED2 |
 | WP8.2 | Правки тем, «я это знаю» | частично | Пять маршрутов правок (#185, D-A-193), `episode.reassigned` | обработчик `check.known_claim` (короткая проверка, WP12.6) не зарегистрирован; разбиение темы из чата (WP13) | — | T-ED3, T-ED4 |
-| WP8.3 | Состояние на момент N | частично | `state_at` на обработчиках rules@3 (#179, #185, D-A-191) | `GET /v1/sessions/{id}/summary` «до и после»; передача `db=ctx.db` в читатель (issue #190) | — | T-ED5, T-E13 |
+| WP8.3 | Состояние на момент N | влит | `state_at` на rules@3 (D-A-191); `GET /v1/sessions/{id}/summary` «до и после» в кодах (D-A-213, D-A-217, T-ED5) | e2e T-E13 целиком — с T-E1 (C, WP26.1) | — | T-ED5, T-E13 |
 | WP17.1 | Кандидаты на повторение | влит | `review_candidates` в `graph.read` (#179, D-A-151) | — | — | T-RV1 |
-| WP17.2 | «Сегодня» | не начат | Событие `today.shown` и агент B `today.prepare` (#180) | `GET /v1/domains/{id}/today`: лимиты, оценка времени, запись `today.shown` (пакет `quack.review` пуст) | — | T-RV2 |
-| WP17.3 | Готовность и темп | частично | `topic_readiness` в `graph.read` (WP6.4) | темп и предупреждение `pace_*` (Т-§14.6) | — | T-RV3 |
-| WP17.4 | Режим подготовки | частично | `prep_context` в `graph.read` (#179) | `POST /v1/hubs/{id}/prep-mode`, подача в слот 6 (B) | D-A-152 | T-RV4 |
-| WP17.5 | После дедлайна | не начат | Типы `grade.reported` в каталоге | `POST /v1/hubs/{id}/grade`, предложение оценки в `today` и хабе | — | T-RV4 |
+| WP17.2 | «Сегодня» | влит | `GET /v1/domains/{id}/today`: лимиты, оценка времени, `today.shown` (D-A-195) | — | — | T-RV2 |
+| WP17.3 | Готовность и темп | влит | `topic_readiness`; прогноз темпа и предупреждение `pace_*` в «Сегодня» (D-A-203) | — | — | T-RV3 |
+| WP17.4 | Режим подготовки | частично | `prep_context`; `POST /v1/hubs/{id}/prep-mode` (D-A-195) | подача в слот 6 (B) | D-A-152 | T-RV4 |
+| WP17.5 | После дедлайна | влит | `POST /v1/hubs/{id}/grade`, предложение оценки (D-A-195) | — | — | T-RV4 |
 | WP17.6 | Повторение в ходе учителя (реализует B) | влит | `session/review_turn.py`: кандидаты `review_candidates` в картине памяти, намерение `review`, «давай 5 минут», подбор `select_tasks` (#208, D-B-189, D-B-190) | явное поле лимита времени во входе хода (сейчас — из текста, D-B-189) | — | — |
-| WP25 | Удаление и журнал удалений | не начат | `DeletionJournal` (R2) от C (#74); пакет `quack.deletion` пуст | эндпоинты `DELETE …`, запись в R2 до удаления, границы `Т-§19.5`, `ops.deletion_log`, `reconcile_deletions`, `replay_deletions`; снять `account.purge_deleted` | — | T-DL1, T-DL2, T-DL3, T-E12 |
+| WP25 | Удаление и журнал удалений | влит | Домен, тема, аккаунт (`DELETE /v1/learner` на `delete_account`, трассы), сверка и повтор, `deletions.reconcile` (D-A-197, D-A-201, D-A-202, D-A-205…207) | снять `account.purge_deleted` Фазы 3 — шаг 5 WP1.3 | — | T-DL1, T-DL2, T-DL3, T-E12 |
 
 ### 4.2. Поток B: AI-слой, учитель, проверка, задачи, агенты
 
@@ -186,14 +186,10 @@
 
 ### Поток A
 
-1. **WP1.3** — снять SQLAlchemy: перенести 41 модуль, подключить `graph/projection`, `queue_p4`, исполнитель и диспетчер к процессам, зарегистрировать виды в `JOB_KINDS`/`HANDLER_MODULES`, пересобрать `ops/registry.py` на каталог Фазы 4 и rules@3 (закроет хвосты WP2.4, WP3.5). Разблокирует `T-E1`, WP20.2.
-2. **WP7.4 и WP8.3** — маршруты `GET /v1/sessions/{id}/jobs` (T-D10) и `GET /v1/sessions/{id}/summary` (T-ED5, T-E13); тело — функции A, объявление в `quack/session/router.py`.
-3. **WP6.5** — API графа, тем и хабов с кодами и провенансом (T-TH5), обновить `openapi.json`.
-4. **WP17.2 → 17.3 → 17.4 → 17.5** — «Сегодня», темп, режим подготовки, оценка после дедлайна (T-RV2–T-RV4).
-5. **WP25** — удаление и журнал; заодно функции S15 для WP9.6 (`restore_check`, `resume`, `replay_deletions`, `reconcile_deletions`).
-6. **WP7.5** — обработчики `manifests.cleanup`, `exports.cleanup`, `deletions.reconcile` (после WP25), `calibration.weekly` (P2).
-7. **WP8.2** — согласовать с B владельца обработчика `check.known_claim`; разбиение темы из чата (с WP13).
-8. **Issues:** ответить по #193 и #188 (закрыть); `D-A-196` (класс C) — на подтверждение владельцу.
+1. **WP1.3, шаг 3** — A-часть сделана (#225, #226). Ждём B (#222) и C (#223, шаг 3 C).
+2. **WP1.3, шаг 5** — после шагов 3–4 всех потоков: снять код Фазы 3 зоны A (старые проектор, очередь, диспетчер, каталог, `db/postgres.py`), флаг `phase4_processes`, зависимости `sqlalchemy`, `asyncpg`, `alembic` (T-DB3).
+5. **WP8.2** — разбиение темы из чата (с WP13); `check.known_claim` зарегистрирован B.
+6. **Владелец:** `D-A-196` (класс C) — на подтверждение владельцу.
 
 ### Поток B
 
@@ -232,6 +228,7 @@
 | D-A-196 | Поля `hub_id` и `artifact` в `agent.requested` v1 (класс C, issue #191) |
 | Слой 1: 7 пунктов | Текст заготовок `verdict_proof`, `second_opinion`, `verdict_free`, `extractor`, `analyst`, `builder` и общий блок диагностики — раздел «Промпты» заметок |
 | Q-C-1 | Два теста `compute` падали при параллельном прогоне с backend (таймаут `pebble`) |
+| D-A-221 | Правило пересчёта весов видов свидетельств (`Т-§7.4`, `Т-§18.5`) в `calibration.weekly`: в документах нет; сейчас предлагаются только вероятности `p_*` |
 | Q-A-4 | A → B: на что указывает `confidence.reported.target_seq`; порог `calibrated` |
 
 Класс C подтверждает владелец на G4. Действия владельца вне кода: сервер, DNS, секреты окружения `production`, клиент Google OIDC, ключи Modal и Resend, ручной прогон на живой модели (DoD п.6a) — `deploy/README.md`.

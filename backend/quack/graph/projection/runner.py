@@ -158,6 +158,9 @@ async def project_learner(
             _EVENTS_AFTER, params | {"after": after, "limit": limit}, row=StoredEvent
         )
         if not events:
+            # The copy of the watermark may lag after a crash between commit and copy (Т-§2.4):
+            # bring it level, so the pass over lagging learners does not find this one again.
+            await db.execute(_OFFSET, params | {"seq": after})
             return BatchOutcome("empty", after)
         try:
             need = batch_need(events)

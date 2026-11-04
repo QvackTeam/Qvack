@@ -80,10 +80,6 @@ async def test_no_offer_once_a_cheat_sheet_exists(pg_db: Db, settings: Settings)
     assert not await _offer(pg_db, learner, hub, settings)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="D-A-196 (issue #191): `AgentParamsRecord` has no `artifact` and `hub_id` yet",
-)
 async def test_no_offer_once_the_learner_agreed(pg_db: Db, settings: Settings) -> None:
     """The consent is `agent.requested {kind: artifact, params: {artifact: cheatsheet, hub_id}}`
     (D-C-143, D-C-144); the request of another hub does not end this hub's offer."""

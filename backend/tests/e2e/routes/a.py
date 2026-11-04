@@ -1,7 +1,8 @@
-"""Routes of stream A (ТЗ Ф4 §7.3): domains, structure, diagnostic, graph, topics, hubs, WP8.
+"""Routes of stream A (ТЗ Ф4 §7.3): preferences, domains, graph, topics, hubs, WP8, deletion.
 
-Stages 10-120 are the learner's onboarding (domain, structure, diagnostic), 280 the dispute and
-300 the archive; B and C walk between them.
+Stages 10-40 are the learner's first steps (preference, domain), 125 the hub and 280 the dispute;
+B and C walk between them. The interview of the structure, the diagnostic and the archive are
+gone (ТЗ Ф4 §2.3 row 5, D-A-207).
 """
 
 from __future__ import annotations
@@ -65,27 +66,19 @@ async def _wp8_targets_of(system: System, learner: Learner, ids: Ids) -> Ids:
     )
 
 
-async def _created_domain(system: System, learner: Learner, ids: Ids, payload: Any) -> Ids:
-    return ids.replace(domain_id=UUID(payload["domain_id"]))
-
-
-async def _proposed_structure(system: System, learner: Learner, ids: Ids, payload: Any) -> Ids:
-    return ids.replace(
-        topic_id=UUID(payload["topics"][0]["topic_id"]),
-        structure_version=payload["structure_version"],
-    )
-
-
-async def _confirmed_structure(system: System, learner: Learner, ids: Ids, payload: Any) -> Ids:
-    await system.settle()
+async def _domain_in_graph(system: System, learner: Learner, ids: Ids) -> Ids:
+    """WP6.5: the domain of the walk as a node of `rules@3`, which hub creation looks up."""
+    async with system.resources.neo4j.session() as session:
+        await session.run(
+            "MERGE (d:Domain {id: $domain}) ON CREATE SET d.learnerId = $learner",
+            domain=str(ids.domain_id),
+            learner=str(learner.learner_id),
+        )
     return ids
 
 
-async def _started_diagnostic(system: System, learner: Learner, ids: Ids, payload: Any) -> Ids:
-    return ids.replace(
-        diagnostic_session_id=UUID(payload["session_id"]),
-        diagnostic_task_id=UUID(payload["next_question"]["task_id"]),
-    )
+async def _created_domain(system: System, learner: Learner, ids: Ids, payload: Any) -> Ids:
+    return ids.replace(domain_id=UUID(payload["domain_id"]))
 
 
 STREAM = Stream(
@@ -93,9 +86,6 @@ STREAM = Stream(
     ids={
         "domain_id": NO_ID,
         "topic_id": NO_ID,
-        "diagnostic_session_id": NO_ID,
-        "diagnostic_task_id": NO_ID,
-        "structure_version": 1,
         # WP8: a hub of the learner (Neo4j), a verdict (`answer.submitted`) and an
         # `episode.closed` of the Phase 4 log; `0` is a number nobody has.
         "hub_id": NO_ID,
@@ -107,12 +97,13 @@ STREAM = Stream(
             "PATCH",
             "/v1/learner/preferences",
             stage=10,
-            body=lambda ids, v: {"preferences": {"language": ["en", "de"][v]}},
+            body=lambda ids, v: {"key": "language", "value": ["en", "de"][v]},
         ),
+        # ТЗ Ф4 WP25 п.3: the account is deleted physically, the session goes with it.
         Route(
             "DELETE",
             "/v1/learner",
-            no_key="one tombstone per learner; a repeat is a no-op",
+            no_key="ТЗ §6.4 WP25: physical deletion; the session dies with the account",
         ),
         Route(
             "POST",
@@ -120,72 +111,6 @@ STREAM = Stream(
             stage=40,
             body=lambda ids, v: {"name": ["Physics", "Chemistry"][v]},
             advance=_created_domain,
-        ),
-        Route(
-            "POST",
-            "/v1/domains/{domain_id}/structure/propose",
-            stage=50,
-            body=lambda ids, v: {
-                "goals": ["Pass the exam", "Understand it"][v],
-                "background": "School algebra",
-                "focus_areas": ["Basics", "Next steps"],
-            },
-            advance=_proposed_structure,
-        ),
-        Route(
-            "POST",
-            "/v1/domains/{domain_id}/structure/confirm",
-            stage=60,
-            body=lambda ids, v: {"structure_version": ids.structure_version + v},
-            advance=_confirmed_structure,
-        ),
-        Route(
-            "PATCH",
-            "/v1/domains/{domain_id}/structure",
-            stage=70,
-            body=lambda ids, v: {
-                "updated_topics": [{"topic_id": str(ids.topic_id), "name": ["Renamed", "Other"][v]}]
-            },
-        ),
-        Route(
-            "PATCH",
-            "/v1/domains/{domain_id}/topics/{topic_id}/status",
-            stage=80,
-            body=lambda ids, v: {"status": ["active", "skipped"][v]},
-        ),
-        Route(
-            "PATCH",
-            "/v1/topics/{topic_id}/status",
-            stage=90,
-            body=lambda ids, v: {"status": ["active", "skipped"][v]},
-        ),
-        Route(
-            "POST",
-            "/v1/domains/{domain_id}/diagnostic/start",
-            stage=100,
-            body=lambda ids, v: {},
-            no_other_body="the body has no field besides the key",
-            advance=_started_diagnostic,
-        ),
-        Route(
-            "POST",
-            "/v1/domains/{domain_id}/diagnostic/answer",
-            stage=110,
-            requires=("diagnostic_session_id", "diagnostic_task_id"),
-            body=lambda ids, v: {
-                "session_id": str(ids.diagnostic_session_id),
-                "task_id": str(ids.diagnostic_task_id),
-                "answer": ["A", "B"][v],
-            },
-        ),
-        Route(
-            "POST",
-            "/v1/domains/{domain_id}/diagnostic/finish",
-            stage=120,
-            requires=("diagnostic_session_id",),
-            body=lambda ids, v: {
-                "session_id": str(ids.diagnostic_session_id if v == 0 else ids.session_id)
-            },
         ),
         # ТЗ Ф4 WP8.1: the verdict the dispute names is an `answer.submitted` of the Phase 4 log.
         Route(
@@ -198,11 +123,15 @@ STREAM = Stream(
                 "target_id": f"{ids.answer_seq}:{['main', 'other'][v]}",
             },
         ),
+        # ТЗ Ф4 WP6.5 (§6.4 «Хабы», D-A-198): a hub of the learner's request; its id comes from
+        # the key, so a repeat gives the same hub.
         Route(
             "POST",
-            "/v1/domains/{domain_id}/archive",
-            stage=300,
-            body=lambda ids, v: {"reason": ["done", "moved"][v]},
+            "/v1/domains/{domain_id}/hubs",
+            stage=125,
+            requires=("domain_id",),
+            prepare=_domain_in_graph,
+            body=lambda ids, v: {"name": ["Exam", "Quiz"][v], "control_type": "tasks"},
         ),
         # ТЗ Ф4 WP8.1/WP8.2/WP6.3 (§6.4 tables): the requests carry no key. Each route appends
         # one event whose key is the edit itself with the state it starts from (law 5, D-A-192,
@@ -256,16 +185,57 @@ STREAM = Stream(
             body_key="none",
             body=lambda ids, v: {"deadline_at_ms": 1_000 + v},
         ),
+        # ТЗ Ф4 WP17.4–17.5 (D-A-195): prep mode — the mode already set returns its event; the
+        # grade is keyed by its value.
+        Route(
+            "POST",
+            "/v1/hubs/{hub_id}/prep-mode",
+            no_key="ТЗ §6.4 WP17.4: no key; the same mode returns its event",
+            body_key="none",
+            body=lambda ids, v: {"enabled": [True, False][v]},
+        ),
+        Route(
+            "POST",
+            "/v1/hubs/{hub_id}/grade",
+            no_key="ТЗ §6.4 WP17.5: no key; keyed by the hub and the grade",
+            body_key="none",
+            body=lambda ids, v: {"grade": ["5", "4"][v], "scale": "1-5"},
+        ),
+        # ТЗ Ф4 WP25 (D-A-197): a physical deletion; a repeat finds no domain (404).
+        Route(
+            "DELETE",
+            "/v1/domains/{domain_id}",
+            no_key="ТЗ §6.4 WP25: physical deletion; a repeat is «not found»",
+            body_key="none",
+            body=lambda ids, v: {},
+        ),
+        Route(
+            "DELETE",
+            "/v1/topics/{topic_id}",
+            no_key="ТЗ §6.4 WP25: physical deletion; a repeat is «not found»",
+            body_key="none",
+            body=lambda ids, v: {},
+        ),
     ),
     other_routes=frozenset(
         {
             ("GET", "/v1/domains"),
-            ("GET", "/v1/domains/{domain_id}"),
+            # ТЗ Ф4 WP6.5 (D-A-198, D-A-207): the map and the card are codes (T-TH5)
             ("GET", "/v1/domains/{domain_id}/graph"),
-            ("GET", "/v1/domains/{domain_id}/topics/{topic_id}"),
             ("GET", "/v1/topics/{topic_id}"),
+            # ТЗ Ф4 WP6.5, WP17.2 (D-A-198, D-A-195)
+            ("GET", "/v1/topics/{topic_id}/why"),
+            ("GET", "/v1/domains/{domain_id}/hubs"),
+            ("GET", "/v1/hubs/{hub_id}"),
+            ("GET", "/v1/domains/{domain_id}/today"),
+            # ТЗ Ф4 WP8.3, §7.3 crossing 3 (D-A-217): declared by A in the session router
+            ("GET", "/v1/sessions/{session_id}/summary"),
         }
     ),
-    routers=("quack.domains.router:_protected",),
+    routers=(
+        "quack.domains.router:_protected",
+        "quack.review.router:router",
+        "quack.deletion.router:router",
+    ),
     isolation=(_wp8_targets_of,),
 )

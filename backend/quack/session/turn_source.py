@@ -641,7 +641,7 @@ def source_of(resources: AppResources) -> MemoryTurnContextSource:
             resources.neo4j,
             resources.settings,
             learner_id=learner_id,
-            session_factory=resources.session_factory,
+            db=resources.db,
             redis=resources.redis,
         )
 

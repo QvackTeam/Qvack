@@ -86,7 +86,8 @@ def test_fsrs_card_and_reviews() -> None:
         1,
         DAY,
     )
-    assert int(first["retDueAtMs"]) > DAY  # type: ignore[arg-type]
+    due = first["retDueAtMs"]
+    assert isinstance(due, int) and due > DAY
     hot = [FoldExposure(at_ms=3 * DAY - 60_000, seq=0, kind="example")]
     after_show = fold_skill([_ev(1), _ev(3)], hot, P)
     assert after_show.skill["retReviews"] == 1  # hot window: not a review
@@ -241,7 +242,8 @@ def test_exposure_and_signals() -> None:
     s = fold_skill(wrong, shows, P).skill
     assert (s["expCount"], s["expLastExplainedAtMs"], s["expLastExampleAtMs"]) == (2, DAY, 2 * DAY)
     assert (s["gapType"], s["lastPracticeAtMs"]) == ("execution", 3 * DAY)
-    assert 0.5 < float(s["gapTypeConfidence"]) < 1  # type: ignore[arg-type]
+    confidence = s["gapTypeConfidence"]
+    assert isinstance(confidence, float) and 0.5 < confidence < 1
     bypass = fold_skill([_ev(1, assistance="shown_solution"), _ev(2, level=2)], [], P).skill
     assert (bypass["needsConsolidation"], bypass["bypassCount"]) == (True, 1)  # 2 < 3
 
@@ -270,7 +272,7 @@ def test_topic_status_visibility() -> None:
         ({"status": "off_domain"}, used, ("off_domain", "shown", "none")),
     ]
     for topic, skill, expected in cases:
-        out = fold_topic(topic, [skill], [], TopicParams())  # type: ignore[arg-type]
+        out = fold_topic(dict(topic), [skill], [], TopicParams())
         assert (out["status"], out["visibility"], out["displayState"]) == expected, topic
 
 

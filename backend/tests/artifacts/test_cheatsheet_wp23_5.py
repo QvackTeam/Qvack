@@ -334,10 +334,6 @@ async def test_consent_of_a_foreign_hub_is_not_found(pg_db: Db) -> None:
         await request_hub_cheatsheet(pg_db, stranger, hub, idempotency_key="k1")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="D-A-196 (issue #191): `AgentParamsRecord` has no `artifact` and `hub_id` yet",
-)
 async def test_consent_is_written_once_per_key(pg_db: Db) -> None:
     learner = await create_learner(pg_db)
     hub, _ = await create_hub(pg_db, learner)

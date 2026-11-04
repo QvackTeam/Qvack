@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from quack.jobs.queue import JobDeferred, JobFailedPermanently, JobSpec
+from quack.jobs.types import JobDeferred, JobFailedPermanently, JobSpec
 
 __all__ = [
     "JOB_KINDS",
@@ -44,6 +44,10 @@ JOB_KINDS: tuple[str, ...] = (
     "check.model",
     "today.prepare",
     "graph.hygiene",
+    "deletions.reconcile",
+    "manifests.cleanup",
+    "exports.cleanup",
+    "calibration.weekly",
     "task.solution_space",
     "agent.task_generation",
     "agent.solution_space",
@@ -74,6 +78,10 @@ KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
     "check.model": ("verdict_proof", "verdict_free"),
     "today.prepare": ("today_planner",),
     "graph.hygiene": ("builder",),
+    "deletions.reconcile": (),
+    "manifests.cleanup": (),
+    "exports.cleanup": (),
+    "calibration.weekly": (),
     "task.solution_space": ("solution_space",),
     "agent.task_generation": ("task_generator", "task_arbiter"),
     "agent.solution_space": ("solution_space",),

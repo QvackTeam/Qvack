@@ -12,6 +12,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import orjson
+import pytest
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
 
@@ -330,7 +331,8 @@ async def test_disputes_check_the_target_and_append_one_event(
     await append_events(pg_db, mine, [answer])
 
     def ask(kind: str, target: str) -> DisputeRequest:
-        return DisputeRequest(target_kind=kind, target_id=target, idempotency_key=target)  # type: ignore[arg-type]
+        body = {"target_kind": kind, "target_id": target, "idempotency_key": target}
+        return DisputeRequest.model_validate(body)
 
     assert await file_dispute(pg_db, neo4j, None, mine, ask("evidence", evidence)) == 2
     assert await file_dispute(pg_db, neo4j, None, other, ask("evidence", evidence)) is None
@@ -401,3 +403,407 @@ async def test_hub_edit_scope_and_deadline(
     )
     assert [e["type"] for e in events] == ["hub.topics_changed", "hub.deadline_set"]
     assert events[1]["payload"]["deadline_at_ms"] is None
+
+
+async def test_topic_and_hub_reads(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP6.5 (§6.4, `Т-§22.2`, D-A-198): a projected topic is read with codes and levels and its
+    places in sessions; a hub created by the learner is in the hubs of the domain and has its
+    readiness; another learner's ids are «not found»."""
+    from quack.domains import graph_reads as reads
+
+    learner, other = await create_learner(pg_db), await create_learner(pg_db)
+    domain, topic, skill, material, chunk = uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
+    await append_events(pg_db, learner, _materials(domain, topic, skill, material, chunk))
+    await _project_all(pg_db, neo4j, settings, learner)
+    view = await reads.topic_view(pg_db, neo4j, learner, topic)
+    assert view is not None
+    assert (view.display.display_state, view.visibility, view.places) == ("not_tested", "shown", [])
+    assert [lv.status for lv in view.skills[0].levels] == ["unknown"] * 6
+    assert await reads.topic_view(pg_db, neo4j, other, topic) is None
+    body = reads.CreateHub(name="Exam", control_type="tasks", idempotency_key="exam")
+    created = await reads.create_hub(pg_db, neo4j, None, learner, domain, body)
+    assert created is not None
+    assert await reads.create_hub(pg_db, neo4j, None, learner, domain, body) == created  # retry
+    assert await reads.create_hub(pg_db, neo4j, None, other, domain, body) is None
+    await _project_all(pg_db, neo4j, settings, learner)
+    hubs = await reads.domain_hubs(neo4j, settings, learner, domain)
+    assert hubs is not None and created.hub_id in {h.hub_id for h in hubs}
+    hub = await reads.hub_view(neo4j, settings, learner, created.hub_id)
+    assert hub is not None and hub.goal.control_type == "tasks"
+    assert await reads.hub_view(neo4j, settings, other, created.hub_id) is None
+
+
+async def test_today_prep_mode_and_grade(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP17 (`Т-§14.4`, `Т-§14.7`, `Т-§14.8`, D-A-195): «Сегодня» of a domain with nothing to
+    repeat is empty and writes no event; the past deadline of a hub offers the grade until it is
+    reported; prep mode switches once per state; another learner's ids are «not found»."""
+    from datetime import UTC, datetime
+
+    from quack.review import today as review
+
+    learner, other = await create_learner(pg_db), await create_learner(pg_db)
+    domain, topic, skill, material, chunk = uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
+    await append_events(pg_db, learner, _materials(domain, topic, skill, material, chunk))
+    await _project_all(pg_db, neo4j, settings, learner)
+    hub = uuid4()
+    await append_events(pg_db, learner, [
+        _new("hub.created", {"hub_id": str(hub), "domain_id": str(domain), "name": "Exam",
+             "kind": "request", "origin": "learner", "control_type": "tasks"}, "h"),
+        _new("hub.deadline_set", {"hub_id": str(hub), "deadline_at_ms": 1_000,
+             "source": "learner"}, "dl"),
+    ])  # fmt: skip
+    await _project_all(pg_db, neo4j, settings, learner)
+    now = datetime(2026, 11, 3, tzinfo=UTC)
+    view = await review.today(pg_db, neo4j, None, settings, learner, domain, now)
+    assert view is not None and (view.items, view.minutes) == ([], 0.0)
+    assert view.grade_hub_ids == [hub]
+    assert await review.today(pg_db, neo4j, None, settings, other, domain, now) is None
+    on = await review.set_prep_mode(pg_db, neo4j, None, learner, hub, True)
+    assert (
+        on is not None and await review.set_prep_mode(pg_db, neo4j, None, learner, hub, True) == on
+    )
+    off = await review.set_prep_mode(pg_db, neo4j, None, learner, hub, False)
+    assert off is not None and off > on
+    assert await review.set_prep_mode(pg_db, neo4j, None, other, hub, True) is None
+    grade = review.Grade(grade="5", scale="1-5")
+    assert await review.report_grade(pg_db, neo4j, None, learner, hub, grade) is not None
+    after = await review.today(pg_db, neo4j, None, settings, learner, domain, now)
+    assert after is not None and after.grade_hub_ids == []
+
+
+async def test_delete_domain(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP25 (`Т-§19.5`, `Д-§8.5`, D-A-197): no record in the journal — nothing is deleted; a
+    foreign domain is «not found»; the deletion removes the events and objects of the domain,
+    keeps the rest, writes `ops.deletion_log` and rebuilds the graph without the domain."""
+    from datetime import UTC, datetime
+
+    from quack.deletion.domain import delete_domain
+    from quack.storage.deletions import DeletionJournalUnavailable
+    from tests.support.deletions import FakeDeletionJournal
+    from tests.support.storage import InMemoryObjectStore
+
+    learner, other = await create_learner(pg_db), await create_learner(pg_db)
+    gone_domain, kept_domain = uuid4(), uuid4()
+    gone = _materials(gone_domain, *[uuid4() for _ in range(4)])
+    kept = _materials(kept_domain, *[uuid4() for _ in range(4)])
+    kept = [e.model_copy(update={"idempotency_key": f"kept:{e.idempotency_key}"}) for e in kept]
+    await append_events(pg_db, learner, [*gone, *kept])
+    await _project_all(pg_db, neo4j, settings, learner)
+    store = InMemoryObjectStore()
+    await store.put("k", b"pdf", "application/pdf")  # the object_key of both materials
+    now = datetime(2026, 11, 3, tzinfo=UTC)
+    down = FakeDeletionJournal(available=False)
+    with pytest.raises(DeletionJournalUnavailable):
+        await delete_domain(pg_db, neo4j, settings, down, store, learner, gone_domain, now)
+    journal = FakeDeletionJournal()
+    assert (
+        await delete_domain(pg_db, neo4j, settings, journal, store, other, gone_domain, now) is None
+    )
+    done = await delete_domain(pg_db, neo4j, settings, journal, store, learner, gone_domain, now)
+    assert done is not None and done.copies_days == 15
+    assert [r.deletion_id for r in journal.records] == [done.deletion_id]
+    left = await pg_db.fetch_all(
+        "SELECT domain_id FROM core.events WHERE learner_id = %(l)s", {"l": learner}
+    )
+    assert {r["domain_id"] for r in left} == {kept_domain}
+    assert "k" not in store.objects
+    log = await pg_db.fetch_one(
+        "SELECT kind, target_id FROM ops.deletion_log WHERE deletion_id = %(d)s",
+        {"d": done.deletion_id},
+    )
+    assert log is not None and (log["kind"], log["target_id"]) == ("domain", gone_domain)
+    async with neo4j.session() as session:
+        result = await session.run(
+            "MATCH (n {learnerId: $l}) WHERE n.domainId = $d RETURN count(n) AS n",
+            l=str(learner),
+            d=str(gone_domain),
+        )
+        assert (await result.single() or {"n": -1})["n"] == 0
+
+
+async def test_projector_process_walks_the_lagging_learners(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings
+) -> None:
+    """WP1.3 (D-A-200): one pass projects every lagging learner and skips a stopped stream; the
+    next pass finds nothing (the copy of the watermark is level)."""
+    from quack.graph.projection.process import ProjectorP4
+
+    first, second, stopped = [await create_learner(pg_db) for _ in range(3)]
+    for learner in (first, second, stopped):
+        await append_events(pg_db, learner, _materials(*[uuid4() for _ in range(5)]))
+    await pg_db.execute(
+        "INSERT INTO ops.projector_failures (learner_id, seq, error) "
+        "VALUES (%(learner_id)s, 1, 'test')",
+        {"learner_id": stopped},
+    )
+    projector = ProjectorP4(settings, pg_db, neo4j)
+    mine = {first, second, stopped}
+    assert mine & set(await projector.pending_learners(10_000)) == {first, second}
+    await projector.run_once()
+    assert mine & set(await projector.pending_learners(10_000)) == set()  # level now
+    async with neo4j.session() as session:
+        result = await session.run(
+            "MATCH (l:Learner) WHERE l.id IN $ids RETURN l.id AS id, l.projectedSeq AS seq",
+            ids=[str(first), str(second), str(stopped)],
+        )
+        seqs = {r["id"]: r["seq"] async for r in result}
+    assert seqs == {str(first): 6, str(second): 6}
+
+
+async def test_workers_adapter_runs_a_registered_handler(pg_db: Db, settings: Settings) -> None:
+    """WP1.3 (D-A-116, D-A-200): a handler registered as in Phase 3 gets the job of the Phase 4
+    queue in its shape, with the context of the process; the job succeeds."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from quack.jobs import queue_p4
+    from quack.jobs.executor_p4 import JobWorker
+    from quack.jobs.queue import ClaimedJob as Phase3Job
+    from quack.jobs.rules_p4 import JobPlan
+    from quack.jobs.runner import JobContext
+    from quack.runtime.phase4 import bind_handlers
+
+    learner = await create_learner(pg_db)
+    seen: list[Phase3Job] = []
+
+    async def handler(job: Phase3Job, ctx: JobContext) -> None:
+        seen.append(job)
+
+    ctx = cast(JobContext, SimpleNamespace(settings=settings, db=pg_db))
+    plan = JobPlan(kind="check.model", job_key=f"adapter:{learner}", priority_class="P1",
+                   learner_id=learner, payload={"answer_seq": 3})  # fmt: skip
+    assert await queue_p4.enqueue(pg_db, plan) == "inserted"
+    worker = JobWorker(settings, pg_db, bind_handlers({"check.model": handler}, ctx),
+                       admission=lambda: _allowed(["check.model"]))  # fmt: skip
+    while seen == [] and await worker.run_one():
+        pass
+    assert [(j.kind, j.learner_id, j.payload, j.attempt, j.job_key) for j in seen] == [
+        ("check.model", learner, {"answer_seq": 3}, 1, f"adapter:{learner}")
+    ]
+    row = await pg_db.fetch_one(
+        "SELECT status FROM ops.jobs WHERE job_key = %(k)s", {"k": f"adapter:{learner}"}
+    )
+    assert row is not None and row["status"] == "succeeded"
+
+
+async def _allowed(kinds: list[str]) -> list[str]:
+    return kinds
+
+
+async def test_projector_process_starts_and_stops(neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP1.3 (D-A-200): `projector` of Phase 4 checks the Neo4j schema and its two supervised
+    tasks end on `stop` (Д-§6.1)."""
+    import asyncio
+
+    from quack.runtime.phase4 import projector_process
+
+    stop = asyncio.Event()
+    stop.set()
+    assert await asyncio.wait_for(projector_process(settings, stop), timeout=30) == 0
+
+
+async def test_reconcile_and_replay_deletions(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings
+) -> None:
+    """WP25 п.5 (D-A-201): a record of the journal without its row of `ops.deletion_log` runs
+    again; a second reconcile finds nothing; a replay after a «restore» deletes again."""
+    from datetime import UTC, datetime
+
+    from quack.deletion.journal import reconcile_deletions, replay_deletions
+    from quack.storage.deletions import DeletionRecord
+    from tests.support.deletions import FakeDeletionJournal
+    from tests.support.storage import InMemoryObjectStore
+
+    learner, domain = await create_learner(pg_db), uuid4()
+    events = _materials(domain, *[uuid4() for _ in range(4)])
+    await append_events(pg_db, learner, events)
+    await _project_all(pg_db, neo4j, settings, learner)
+    journal, store = FakeDeletionJournal(), InMemoryObjectStore()
+    since = datetime(2026, 11, 1, tzinfo=UTC)
+    journal.records.append(
+        DeletionRecord(uuid4(), learner, "domain", domain, datetime(2026, 11, 3, tzinfo=UTC))
+    )  # written, but the deletion did not run (a crash before `ops.deletion_log`)
+
+    async def left() -> int:
+        row = await pg_db.fetch_one(
+            "SELECT count(*) AS n FROM core.events WHERE learner_id = %(l)s", {"l": learner}
+        )
+        return -1 if row is None else int(row["n"])
+
+    assert await reconcile_deletions(pg_db, neo4j, settings, journal, store, since) == 1
+    assert await left() == 0
+    assert await reconcile_deletions(pg_db, neo4j, settings, journal, store, since) == 0
+    restored = [e.model_copy(update={"idempotency_key": f"r:{e.idempotency_key}"}) for e in events]
+    await append_events(pg_db, learner, restored)  # the dump brought the domain back
+    assert await replay_deletions(pg_db, neo4j, settings, journal, store, since) == 1
+    assert await left() == 0
+
+
+async def test_delete_topic(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP25 (`Т-§19.5`, D-A-202): the events of the structure of the topic and of its skills, its
+    tasks with their answers and verdicts go; the turn of the teacher stays (a message of the
+    session); the graph is rebuilt without the topic, its skill and task; another topic stays."""
+    from datetime import UTC, datetime
+
+    from quack.deletion.topic import delete_topic
+    from tests.graph.test_projection_batches import S1, S2, SCRIPT, T1, T2, TASK
+    from tests.support.deletions import FakeDeletionJournal
+    from tests.support.storage import InMemoryObjectStore
+
+    learner = await create_learner(pg_db)
+    events = [
+        _new(e.type, e.payload, f"k{e.seq}", domain_id=e.domain_id, session_id=e.session_id)
+        for e in SCRIPT
+    ]
+    await append_events(pg_db, learner, events)
+    await _project_all(pg_db, neo4j, settings, learner)
+    journal = FakeDeletionJournal()
+    now = datetime(2026, 11, 3, tzinfo=UTC)
+    store = InMemoryObjectStore()
+    other = await create_learner(pg_db)  # law 1: a topic of another learner is «not found»
+    assert await delete_topic(pg_db, neo4j, settings, journal, store, other, UUID(T1), now) is None
+    assert journal.records == []
+    done = await delete_topic(pg_db, neo4j, settings, journal, store, learner, UUID(T1), now)
+    assert done is not None and [r.kind for r in journal.records] == ["topic"]
+    rows = await pg_db.fetch_all(
+        "SELECT type FROM core.events WHERE learner_id = %(l)s ORDER BY seq", {"l": learner}
+    )
+    left = [r["type"] for r in rows]
+    gone = {"skill.created", "task.created", "answer.submitted", "verdict.recorded"}
+    assert "turn.committed" in left and left.count("skill.created") == 1  # S2 stays
+    assert not gone - {"skill.created"} & set(left)
+    async with neo4j.session() as session:
+        result = await session.run(
+            "MATCH (n {learnerId: $l}) WHERE n.id IN $ids RETURN n.id AS id",
+            l=str(learner),
+            ids=[T1, T2, S1, S2, TASK],
+        )
+        found = {r["id"] async for r in result}
+    assert found == {T2, S2}
+
+
+async def test_manifests_cleanup_deletes_only_old_manifests(pg_db: Db) -> None:
+    """WP7.5 (`Т-§3.6`, D-A-204): manifests older than `turn_manifest_retention_days` go; newer
+    ones stay."""
+    from datetime import UTC, datetime, timedelta
+
+    from quack.jobs.cleanup_p4 import delete_old_manifests
+
+    learner, now = await create_learner(pg_db), datetime(2026, 11, 3, tzinfo=UTC)
+    for manifest, age in ((uuid4(), 40), (uuid4(), 5)):
+        await pg_db.execute(
+            "INSERT INTO ops.turn_manifests (manifest_id, learner_id, session_id, prompt_version, "
+            "role, model, projected_seq, created_at) VALUES (%(m)s, %(l)s, %(s)s, 'teacher@1', "
+            "'teacher', 'm', 0, %(at)s)",
+            {"m": manifest, "l": learner, "s": uuid4(), "at": now - timedelta(days=age)},
+        )
+    assert await delete_old_manifests(pg_db, now - timedelta(days=30)) >= 1
+    rows = await pg_db.fetch_all(
+        "SELECT created_at FROM ops.turn_manifests WHERE learner_id = %(l)s", {"l": learner}
+    )
+    assert [r["created_at"] for r in rows] == [now - timedelta(days=5)]
+
+
+async def test_exports_cleanup_deletes_only_expired_archives(pg_db: Db) -> None:
+    """WP7.5 (`Д-§8.4`, `Т-§19.6`, D-A-215): an archive whose link expired is deleted from the
+    store and its row is marked `expired`; a live one stays; a second run finds nothing."""
+    from datetime import UTC, datetime, timedelta
+
+    from quack.jobs.cleanup_p4 import delete_expired_exports
+    from tests.support.storage import InMemoryObjectStore
+
+    learner, now = await create_learner(pg_db), datetime(2026, 11, 4, tzinfo=UTC)
+    store = InMemoryObjectStore()
+    old, live = uuid4(), uuid4()
+    for export_id, hours in ((old, -1), (live, 5)):
+        key = f"learners/{learner}/exports/{export_id}.zip"
+        await store.put(key, b"z", "application/zip")
+        await pg_db.execute(
+            "INSERT INTO content.exports (export_id, learner_id, status, object_key, expires_at) "
+            "VALUES (%(e)s, %(l)s, 'ready', %(k)s, %(at)s)",
+            {"e": export_id, "l": learner, "k": key, "at": now + timedelta(hours=hours)},
+        )
+    assert await delete_expired_exports(pg_db, store, now) == 1
+    assert sorted(store.objects) == [f"learners/{learner}/exports/{live}.zip"]
+    row = await pg_db.fetch_one(
+        "SELECT status, object_key FROM content.exports WHERE export_id = %(e)s", {"e": old}
+    )
+    assert row is not None and row["status"] == "expired" and row["object_key"] is None
+    assert await delete_expired_exports(pg_db, store, now) == 0
+
+
+async def test_delete_account(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """WP25 п.3 (`Т-§19.5`, D-A-205): the journal record first, then every row of the learner,
+    its objects under `learners/{id}/` and its subgraph; the log row stays; a replay of the
+    record finds nothing and does not fail; another learner is untouched."""
+    from datetime import UTC, datetime
+
+    from quack.deletion.account import delete_account
+    from quack.deletion.journal import replay_deletions
+    from quack.llm.tracing import NullTracer
+    from tests.support.deletions import FakeDeletionJournal
+    from tests.support.storage import InMemoryObjectStore
+
+    learner, other = await create_learner(pg_db), await create_learner(pg_db)
+    for who in (learner, other):
+        await append_events(pg_db, who, _materials(*[uuid4() for _ in range(5)]))
+        await _project_all(pg_db, neo4j, settings, who)
+    store = InMemoryObjectStore()
+    await store.put(f"learners/{learner}/materials/a.pdf", b"x", "application/pdf")
+    await store.put(f"learners/{other}/materials/b.pdf", b"y", "application/pdf")
+    journal, now = FakeDeletionJournal(), datetime(2026, 11, 3, tzinfo=UTC)
+    deleted: list[str] = []
+
+    class _Tracer(NullTracer):
+        async def delete_learner(self, pseudonym: str) -> bool:
+            deleted.append(pseudonym)
+            return False
+
+    done = await delete_account(
+        pg_db, neo4j, journal, store, learner, now, tracer=_Tracer(), pseudonym="p-1"
+    )
+    assert deleted == ["p-1"]
+    assert [r.kind for r in journal.records] == ["account"]
+    for query in (
+        "SELECT count(*) AS n FROM core.learners WHERE learner_id = %(l)s",
+        "SELECT count(*) AS n FROM core.events WHERE learner_id = %(l)s",
+    ):
+        row = await pg_db.fetch_one(query, {"l": learner})
+        assert row is not None and row["n"] == 0, query
+    log = await pg_db.fetch_one(
+        "SELECT kind FROM ops.deletion_log WHERE deletion_id = %(d)s", {"d": done.deletion_id}
+    )
+    assert log is not None and log["kind"] == "account"
+    assert sorted(store.objects) == [f"learners/{other}/materials/b.pdf"]
+    nodes_mine, _ = await _graph(neo4j, learner)
+    nodes_other, _ = await _graph(neo4j, other)
+    assert nodes_mine == set() and nodes_other != set()
+    assert await replay_deletions(pg_db, neo4j, settings, journal, store, now) == 1  # repeatable
+
+
+async def test_slice_waits_for_the_journal_of_phase_4(pg_db: Db) -> None:
+    """D-A-210: without `min_seq` the slice waits for the tail of `core.learners.seq` (`db=`);
+    a watermark behind it gives `lag_degraded`, at or past it — a plain answer."""
+    from quack.graph.slice import SliceDeps, read_consistent_slice
+
+    learner = await create_learner(pg_db)
+    domain = uuid4()
+    await append_events(
+        pg_db,
+        learner,
+        [_new("domain.created", {"domain_id": str(domain), "name": "A"}, "d", domain_id=domain)],
+    )
+
+    async def load() -> str:
+        return "slice"
+
+    def deps(applied: int) -> SliceDeps:
+        async def reader(_: UUID) -> int:
+            return applied
+
+        return SliceDeps(None, None, reader, db=pg_db)
+
+    behind = await read_consistent_slice(learner, None, load, 50, deps=deps(0))
+    assert (behind.min_seq, behind.lag_degraded) == (1, True)
+    caught_up = await read_consistent_slice(learner, None, load, 50, deps=deps(1))
+    assert (caught_up.min_seq, caught_up.lag_degraded) == (1, False)
