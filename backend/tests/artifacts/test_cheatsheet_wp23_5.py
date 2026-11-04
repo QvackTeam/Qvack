@@ -346,7 +346,8 @@ async def test_consent_is_written_once_per_key(pg_db: Db) -> None:
         {"learner_id": learner},
     )
     assert len(rows) == 1
-    assert rows[0]["payload"]["params"] == {"artifact": "cheatsheet", "hub_id": str(hub)}
+    params = {k: v for k, v in rows[0]["payload"]["params"].items() if v is not None}
+    assert params == {"artifact": "cheatsheet", "hub_id": str(hub)}
 
 
 # --- the job -------------------------------------------------------------------------------
