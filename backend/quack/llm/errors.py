@@ -20,12 +20,13 @@ class LLMError(Exception):
     """Base error of the LLM gateway."""
 
 
-type BudgetScope = Literal["daily", "session"]
+type BudgetScope = Literal["daily", "session", "pool"]
 
 
 class LLMBudgetExceededError(LLMError):
     """`scope` routes the job in the runner (seam S3): `session` → failed permanently,
-    `daily` → deferred to the next UTC day."""
+    `daily` and `pool` (D-B-211: the pool is in `judges_only` and the learner is no judge) →
+    deferred to the next UTC day."""
 
     def __init__(
         self,

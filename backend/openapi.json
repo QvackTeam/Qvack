@@ -14,6 +14,14 @@
         "title": "Accepted",
         "type": "object"
       },
+      "AccessMode": {
+        "enum": [
+          "normal",
+          "tight",
+          "judges_only"
+        ],
+        "type": "string"
+      },
       "ActionFrame": {
         "anyOf": [
           {
@@ -2591,6 +2599,34 @@
           "idempotency_key"
         ],
         "title": "KeyedRequest",
+        "type": "object"
+      },
+      "LLMAccess": {
+        "description": "D-B-211: `mode` of the money pool; `judge` — the learner said «I am a Meta judge»;\n`blocked` — the client shows the banner with the one button (`preference_key` = true).",
+        "properties": {
+          "blocked": {
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "judge": {
+            "title": "Judge",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/AccessMode"
+          },
+          "preference_key": {
+            "title": "Preference Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "judge",
+          "blocked",
+          "preference_key"
+        ],
+        "title": "LLMAccess",
         "type": "object"
       },
       "Layout": {
@@ -9445,6 +9481,45 @@
         "tags": [
           "learner"
         ]
+      }
+    },
+    "/v1/llm/access": {
+      "get": {
+        "description": "Owner decision D-B-211: what the client shows before the learner acts. The remainder of\nthe pool itself is not shown (operational data).",
+        "operationId": "llm_access_v1_llm_access_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LLMAccess"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Llm Access"
       }
     },
     "/v1/materials/{material_id}": {
