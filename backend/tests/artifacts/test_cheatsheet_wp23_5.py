@@ -26,8 +26,8 @@ from quack.db.postgres import SessionFactory
 from quack.graph.read import HubGoal, HubTopicGoal, TopicMemory
 from quack.graph.read.materials import ChunkHit
 from quack.graph.read.models import MisconceptionFact, SkillFact
-from quack.jobs.types import ClaimedJob
 from quack.jobs.runner import JOB_HANDLERS
+from quack.jobs.types import ClaimedJob
 from tests.artifacts.hubs import create_hub
 from tests.db.fixtures import create_learner
 from tests.support.compute import ComputeScenario, scripted_compute
