@@ -79,7 +79,7 @@
 | WP7.5 | Периодические задачи | частично | Планировщик `periodic_p4.py` (#182); `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201), `session.sweep_inactive` (D-A-211), `exports.cleanup` (D-A-215) | `calibration.weekly` (P2) | — | T-D9 |
 | WP8.1 | Оспаривания, «описка» | влит | `POST /v1/disputes`, `POST /v1/verdicts/{seq}/typo` (#185, D-A-192) | — | — | T-ED1, T-ED2 |
 | WP8.2 | Правки тем, «я это знаю» | частично | Пять маршрутов правок (#185, D-A-193), `episode.reassigned` | обработчик `check.known_claim` (короткая проверка, WP12.6) не зарегистрирован; разбиение темы из чата (WP13) | — | T-ED3, T-ED4 |
-| WP8.3 | Состояние на момент N | частично | `state_at` на rules@3 (D-A-191); `session_summary` «до и после» в кодах (D-A-213, T-ED5) | объявление `GET /v1/sessions/{id}/summary` и e2e T-E13 — B (#228, D-A-214) | #228 | T-ED5, T-E13 |
+| WP8.3 | Состояние на момент N | влит | `state_at` на rules@3 (D-A-191); `GET /v1/sessions/{id}/summary` «до и после» в кодах (D-A-213, D-A-217, T-ED5) | e2e T-E13 целиком — с T-E1 (C, WP26.1) | — | T-ED5, T-E13 |
 | WP17.1 | Кандидаты на повторение | влит | `review_candidates` в `graph.read` (#179, D-A-151) | — | — | T-RV1 |
 | WP17.2 | «Сегодня» | влит | `GET /v1/domains/{id}/today`: лимиты, оценка времени, `today.shown` (D-A-195) | — | — | T-RV2 |
 | WP17.3 | Готовность и темп | влит | `topic_readiness`; прогноз темпа и предупреждение `pace_*` в «Сегодня» (D-A-203) | — | — | T-RV3 |
@@ -188,7 +188,6 @@
 
 1. **WP1.3, шаг 3** — A-часть сделана (#225, #226). Ждём B (#222) и C (#223, шаг 3 C).
 2. **WP1.3, шаг 5** — после шагов 3–4 всех потоков: снять код Фазы 3 зоны A (старые проектор, очередь, диспетчер, каталог, `db/postgres.py`), флаг `phase4_processes`, зависимости `sqlalchemy`, `asyncpg`, `alembic` (T-DB3).
-3. **WP8.3** — функция готова; маршрут — B (#228).
 4. **WP7.5** — `calibration.weekly` (P2).
 5. **WP8.2** — разбиение темы из чата (с WP13); `check.known_claim` зарегистрирован B.
 6. **Владелец:** `D-A-196` (класс C) — на подтверждение владельцу.

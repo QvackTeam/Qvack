@@ -228,6 +228,8 @@ STREAM = Stream(
             ("GET", "/v1/domains/{domain_id}/hubs"),
             ("GET", "/v1/hubs/{hub_id}"),
             ("GET", "/v1/domains/{domain_id}/today"),
+            # ТЗ Ф4 WP8.3, §7.3 crossing 3 (D-A-217): declared by A in the session router
+            ("GET", "/v1/sessions/{session_id}/summary"),
         }
     ),
     routers=(

@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-A-217. WP8.3: маршрут `GET /v1/sessions/{id}/summary` объявляет A; тело — в `quack/graph/read/summary.py`
+- Класс: A
+- WP / место: WP8.3; `quack/session/router.py` (объявление), `quack/graph/read/summary.py`, `tests/e2e/routes/a.py`
+- Контекст: D-A-214 отдало объявление B (#228), но ТЗ §7.3, пересечение 3 прямо называет `summary` и `jobs` эндпоинтами A в `quack/session/router.py`. Тело в `quack/review/` нарушает таблицу слоёв §4.1 (T-A6): продуктовый `session` не импортирует продуктовый `review`.
+- Решение: A объявляет маршрут в роутере B (только объявление); тело `session_summary` перенесено в ядро `quack/graph/read/summary.py` (зависит только от `db`, `events`, `graph.read`). Чужая или несуществующая сессия — 404. Маршрут — в `other_routes` A (T-A1, T-E3). D-A-214 заменено этим решением.
+- Почему: ТЗ §7.3 п.3, §4.1 (T-A6), WP8.3.
+- Обратимость: полная.
+- Тесты: `tests/review/test_session_summary.py`, `tests/domains/test_edits.py` (T-ED5), T-A1, T-E3.
+- Требует подтверждения владельцем: нет
+
 ### D-A-216. WP1.3, подготовка шага 5: типы задачи — в `quack/jobs/types.py`
 - Класс: A
 - WP / место: WP1.3; `quack/jobs/types.py`, `quack/jobs/queue.py`
