@@ -40,7 +40,16 @@ _SESSION = (
 _SESSION_FOR_UPDATE = _SESSION + " FOR UPDATE OF s"
 _SESSIONS = (
     f"SELECT {_COLUMNS} FROM content.sessions s WHERE s.learner_id = %(learner_id)s "
-    "ORDER BY s.started_at DESC, start_seq DESC"
+    "AND (%(domain_id)s::uuid IS NULL OR s.domain_id = %(domain_id)s) "
+    "ORDER BY s.started_at DESC, start_seq DESC LIMIT %(limit)s"
+)
+_ACTIVE = (
+    f"SELECT {_COLUMNS} FROM content.sessions s WHERE s.learner_id = %(learner_id)s "
+    "AND s.status = 'active' ORDER BY s.started_at DESC, start_seq DESC LIMIT 1"
+)
+_FEED = (
+    "SELECT seq, type, actor, occurred_at, payload FROM core.events "
+    "WHERE learner_id = %(learner_id)s AND session_id = %(session_id)s ORDER BY seq"
 )
 _DOMAIN_OF_LEARNER = (
     "SELECT 1 AS found FROM core.events WHERE learner_id = %(learner_id)s "
@@ -110,6 +119,18 @@ class SessionView(BaseModel):
     start_seq: int | None
 
 
+class FeedEvent(BaseModel):
+    """An event of the session feed (`GET /v1/sessions/{id}`, D-B-210)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    seq: int
+    type: str
+    actor: str
+    occurred_at: datetime
+    payload: dict[str, object]
+
+
 class _Found(BaseModel):
     found: int
 
@@ -174,9 +195,23 @@ async def get_session(db: Db, *, learner_id: UUID, session_id: UUID) -> SessionV
     return row
 
 
-async def list_sessions(db: Db, *, learner_id: UUID) -> list[SessionView]:
-    """`GET /v1/sessions`: the history, the newest first."""
-    return await db.fetch_all(_SESSIONS, {"learner_id": learner_id}, row=SessionView)
+async def list_sessions(
+    db: Db, *, learner_id: UUID, domain_id: UUID | None = None, limit: int | None = None
+) -> list[SessionView]:
+    """`GET /v1/sessions`: the history, the newest first; of one domain, up to `limit`."""
+    params = {"learner_id": learner_id, "domain_id": domain_id, "limit": limit}
+    return await db.fetch_all(_SESSIONS, params, row=SessionView)
+
+
+async def active_session(db: Db, *, learner_id: UUID) -> SessionView | None:
+    """`GET /v1/sessions/active`: the newest open session of the learner, if any."""
+    return await db.fetch_one(_ACTIVE, {"learner_id": learner_id}, row=SessionView)
+
+
+async def session_feed(db: Db, *, learner_id: UUID, session_id: UUID) -> list[FeedEvent]:
+    """`GET /v1/sessions/{id}`: the events of the session in `seq` order (WP13.10)."""
+    params = {"learner_id": learner_id, "session_id": session_id}
+    return await db.fetch_all(_FEED, params, row=FeedEvent)
 
 
 async def heartbeat(db: Db, *, learner_id: UUID, session_id: UUID) -> SessionView:
@@ -306,15 +341,18 @@ def _event(
 
 __all__ = [
     "EndReason",
+    "FeedEvent",
     "SessionConflictError",
     "SessionIntent",
     "SessionView",
     "StartSession",
+    "active_session",
     "end_if_inactive",
     "end_session",
     "get_session",
     "heartbeat",
     "list_sessions",
     "resume_if_swept",
+    "session_feed",
     "start_session",
 ]

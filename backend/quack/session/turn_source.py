@@ -33,6 +33,8 @@ from quack.db.db import Db
 from quack.events.event_types import MessageSent, SessionStarted, TaskClosed, TaskCreated
 from quack.events.log import StoredEvent
 from quack.events.values import AnswerSpec, Level, Verdict
+from quack.graph.memory import InMemoryGraph
+from quack.graph.overlay import SessionOverlay
 from quack.graph.read import (
     GraphReader,
     HubGoal,
@@ -94,6 +96,7 @@ NEO4J_UNAVAILABLE: tuple[type[BaseException], ...] = (
 _TIMEZONE = (
     "SELECT settings->>'timezone' AS timezone FROM core.learners WHERE learner_id = %(learner_id)s"
 )
+_JOURNAL_END = "SELECT seq FROM core.learners WHERE learner_id = %(learner_id)s"
 _LATEST_DIGEST = (
     "SELECT payload FROM core.events WHERE learner_id = %(learner_id)s AND type = 'digest.written' "
     "AND domain_id = %(d)s ORDER BY seq DESC LIMIT 1"
@@ -108,6 +111,12 @@ _TASK_ACTIONS = {
     "solution.requested": "solution_request",
     "check.skipped": "check_skip",
 }
+
+
+async def journal_end(db: Db, *, learner_id: UUID) -> int:
+    """The last `seq` of the learner's journal (0 for a learner without a row)."""
+    row = await db.fetch_one(_JOURNAL_END, {"learner_id": learner_id})
+    return int(row["seq"]) if row is not None else 0
 
 
 async def learner_timezone(db: Db, *, learner_id: UUID) -> str | None:
@@ -351,8 +360,12 @@ class MemoryTurnContextSource:
     async def _slice(
         self, reader: GraphReader, request: TurnRequest, focus: SliceFocus
     ) -> tuple[MemorySlice, bool]:
+        # The wait target is the end of the learner's journal (Т-§2.6): the reader waits for
+        # the projector up to it and reports `lag_degraded` (`projector_lag`, §4.4).
+        end = await journal_end(self._db, learner_id=request.learner_id)
+        tail = SessionOverlay(applied_seq=0, overlay_seq=end, events=[], graph=InMemoryGraph())
         try:
-            found = await reader.slice_for_turn(request.learner_id, request.session_id, focus)
+            found = await reader.slice_for_turn(request.learner_id, request.session_id, focus, tail)
         except NEO4J_UNAVAILABLE:
             return MemorySlice(learner_id=request.learner_id, projected_seq=0), True
         return found, False
@@ -632,17 +645,16 @@ async def _none() -> None:
 
 
 def source_of(resources: AppResources) -> MemoryTurnContextSource:
-    """The source of the API process: the reader of the teacher turn waits for the whole
-    journal of the learner (`session_factory`, Т-§2.6; A in #175) and is bound to the learner
-    of the turn (D-A-144)."""
+    """The source of the API process: the reader of the teacher turn is bound to the learner of
+    the turn (D-A-144) and replays the log of Phase 4 through `db` (WP8.3)."""
 
     def reader(learner_id: UUID) -> GraphReader:
         return Neo4jGraphReader(
             resources.neo4j,
             resources.settings,
             learner_id=learner_id,
-            db=resources.db,
             redis=resources.redis,
+            db=resources.db,
         )
 
     return MemoryTurnContextSource(

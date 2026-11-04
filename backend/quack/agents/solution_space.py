@@ -12,8 +12,8 @@ from uuid import UUID
 from quack.agents.delivery import NO_SESSION, deliver
 from quack.events.event_types import AgentRequested, TaskCreated
 from quack.graph.read import GraphReader, SliceFocus, create_graph_reader
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.practice.repo import agent_request, task_events
 from quack.practice.role_outputs import SolutionSpace
 from quack.practice.solution_space import SPACE_ROLE, SkillMisconception, build_solution_space
