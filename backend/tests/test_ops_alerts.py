@@ -86,6 +86,19 @@ def test_a_stopped_projector_stream_is_critical():
     assert "2" in found[alerts.PROJECTOR_STOPPED].message
 
 
+def test_team_spend_above_the_daily_threshold_is_a_warning():
+    """Д-§9.3, WP10.4: the spend of the day (`ops.llm_usage`) against `team_daily_alert_usd`."""
+    spent = {"llm": {"cost_last_day_usd": 61.0}}
+    found = by_key(snapshot(status_patch=spent), team_daily_alert_usd=60.0)
+    assert found[alerts.TEAM_SPEND].level == "warning"
+    assert "61" in found[alerts.TEAM_SPEND].message
+    assert alerts.TEAM_SPEND not in by_key(
+        snapshot(status_patch={"llm": {"cost_last_day_usd": 60.0}}), team_daily_alert_usd=60.0
+    )
+    # Absence is not zero (law 8): no figure, no alert.
+    assert alerts.TEAM_SPEND not in by_key(snapshot(status_patch={"llm": {"cost_last_day_usd": None}}))
+
+
 @pytest.mark.parametrize("age_s", [None, 6 * 3600 + 31 * 60])
 def test_an_old_or_missing_backup_is_critical(age_s: float | None):
     found = by_key(snapshot(backup_age_s=age_s))

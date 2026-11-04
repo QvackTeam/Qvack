@@ -1,18 +1,21 @@
-"""T-OPS2 (ТЗ Фазы 4): `ops db-roles` is idempotent; `quack_app` has no DDL; reader reads."""
+"""T-OPS2 (ТЗ Фазы 4): `ops db-roles` is idempotent; `quack_app` has no DDL; reader reads.
+The schemas are those of Phase 4: `core`, `content`, `ops` (no `auth`)."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 from uuid import uuid4
 
+import psycopg
 import pytest
+from psycopg import sql
+from psycopg.conninfo import make_conninfo
+from psycopg.errors import InsufficientPrivilege
 from pydantic import SecretStr
-from sqlalchemy import text
-from sqlalchemy.engine import URL
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from quack.config import Settings
+from quack.db import Db, open_db
 from quack.ops.db_roles import (
     APP,
     MIGRATOR,
@@ -21,129 +24,118 @@ from quack.ops.db_roles import (
     RolePasswords,
     apply_db_roles,
 )
+from tests.conftest import PG_DSN
 
 PASSWORDS = RolePasswords(migrator="m-pass'1%x", app='a-pass"2', reader="r-pass;3")
 
 
 @pytest.fixture
-async def scratch(pg_engine: AsyncEngine) -> AsyncIterator[URL]:
-    """A throwaway database: the roles are cluster-wide, the shared test schema stays untouched."""
+async def scratch(settings: Settings) -> AsyncIterator[str]:
+    """A throwaway database: the roles are cluster-wide, the shared test schema stays untouched.
+    Yields its DSN (as the superuser of the test server)."""
     name = f"quack_roles_{uuid4().hex[:8]}"
-    admin = create_async_engine(pg_engine.url, isolation_level="AUTOCOMMIT")
-    async with admin.connect() as conn:
-        await conn.execute(text(f'CREATE DATABASE "{name}"'))
-    url = pg_engine.url.set(database=name)
-    owner = create_async_engine(url)
-    async with owner.begin() as conn:
-        for schema in ("auth", "core", "content", "ops"):
-            await conn.execute(text(f"CREATE SCHEMA {schema}"))
-        await conn.execute(text("CREATE TABLE core.events (id serial PRIMARY KEY, body text)"))
-        await conn.execute(text("CREATE TABLE ops.jobs (id serial PRIMARY KEY, kind text)"))
-    await owner.dispose()
+    admin = await psycopg.AsyncConnection.connect(PG_DSN, autocommit=True)
+    await admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    dsn = make_conninfo(PG_DSN, dbname=name)
+    async with await psycopg.AsyncConnection.connect(dsn) as owner:
+        for schema in ("core", "content", "ops"):
+            await owner.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
+        await owner.execute("CREATE TABLE core.events (id serial PRIMARY KEY, body text)")
+        await owner.execute("CREATE TABLE ops.jobs (id serial PRIMARY KEY, kind text)")
     try:
-        yield url
+        yield dsn
     finally:
-        async with admin.connect() as conn:
-            await conn.execute(text(f'DROP DATABASE "{name}" WITH (FORCE)'))
-        await admin.dispose()
+        await admin.execute(
+            sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name))
+        )
+        await admin.close()
 
 
-def as_role(url: URL, role: str, password: str) -> AsyncEngine:
-    return create_async_engine(url.set(username=role, password=password))
+async def superuser_db(settings: Settings, dsn: str) -> Db:
+    return await open_db(settings.model_copy(update={"postgres_dsn": dsn}))
 
 
-async def test_roles_are_applied_twice_without_error(scratch: URL):
-    engine = create_async_engine(scratch)
+async def apply(settings: Settings, dsn: str, passwords: RolePasswords = PASSWORDS) -> list[str]:
+    db = await superuser_db(settings, dsn)
     try:
-        first = await apply_db_roles(engine, PASSWORDS)
-        second = await apply_db_roles(engine, PASSWORDS)
+        return await apply_db_roles(db, passwords)
     finally:
-        await engine.dispose()
-
-    assert first == second == ["auth", "content", "core", "ops"]
+        await db.close()
 
 
-async def test_app_reads_and_writes_but_has_no_ddl(scratch: URL):
-    engine = create_async_engine(scratch)
+async def as_role(dsn: str, role: str, password: str) -> psycopg.AsyncConnection[Any]:
+    return await psycopg.AsyncConnection.connect(
+        make_conninfo(dsn, user=role, password=password), autocommit=True
+    )
+
+
+async def test_roles_are_applied_twice_without_error(settings: Settings, scratch: str):
+    first = await apply(settings, scratch)
+    second = await apply(settings, scratch)
+
+    assert first == second == ["content", "core", "ops"]
+
+
+async def test_app_reads_and_writes_but_has_no_ddl(settings: Settings, scratch: str):
+    await apply(settings, scratch)
+
+    app = await as_role(scratch, APP, PASSWORDS.app)
     try:
-        await apply_db_roles(engine, PASSWORDS)
-    finally:
-        await engine.dispose()
-
-    app = as_role(scratch, APP, PASSWORDS.app)
-    try:
-        async with app.begin() as conn:
-            await conn.execute(text("INSERT INTO core.events (body) VALUES ('x')"))
-            await conn.execute(text("UPDATE core.events SET body = 'y'"))
-            assert (await conn.execute(text("SELECT count(*) FROM ops.jobs"))).scalar_one() == 0
+        await app.execute("INSERT INTO core.events (body) VALUES ('x')")
+        await app.execute("UPDATE core.events SET body = 'y'")
+        cur = await app.execute("SELECT count(*) FROM ops.jobs")
+        assert (await cur.fetchone()) == (0,)
         for ddl in (
             "CREATE TABLE core.sneaky (id int)",
             "DROP TABLE core.events",
             "ALTER TABLE core.events ADD COLUMN extra int",
             "CREATE SCHEMA sneaky",
         ):
-            with pytest.raises(DBAPIError, match=r"permission denied|must be owner"):
-                async with app.begin() as conn:
-                    await conn.execute(text(ddl))
+            with pytest.raises(InsufficientPrivilege):
+                await app.execute(ddl)  # pyright: ignore[reportArgumentType]
     finally:
-        await app.dispose()
+        await app.close()
 
 
-async def test_reader_only_reads(scratch: URL):
-    engine = create_async_engine(scratch)
+async def test_reader_only_reads(settings: Settings, scratch: str):
+    await apply(settings, scratch)
+    async with await psycopg.AsyncConnection.connect(scratch, autocommit=True) as owner:
+        await owner.execute("INSERT INTO core.events (body) VALUES ('x')")
+
+    reader = await as_role(scratch, READER, PASSWORDS.reader)
     try:
-        await apply_db_roles(engine, PASSWORDS)
-        async with engine.begin() as conn:
-            await conn.execute(text("INSERT INTO core.events (body) VALUES ('x')"))
+        cur = await reader.execute("SELECT count(*) FROM core.events")
+        assert (await cur.fetchone()) == (1,)
+        with pytest.raises(InsufficientPrivilege):
+            await reader.execute("INSERT INTO core.events (body) VALUES ('y')")
     finally:
-        await engine.dispose()
+        await reader.close()
 
-    reader = as_role(scratch, READER, PASSWORDS.reader)
+
+async def test_tables_created_later_by_the_migrator_reach_the_app(settings: Settings, scratch: str):
+    await apply(settings, scratch)
+
+    migrator = await as_role(scratch, MIGRATOR, PASSWORDS.migrator)
+    app = await as_role(scratch, APP, PASSWORDS.app)
     try:
-        async with reader.begin() as conn:
-            assert (await conn.execute(text("SELECT count(*) FROM core.events"))).scalar_one() == 1
-        with pytest.raises(DBAPIError, match="permission denied"):
-            async with reader.begin() as conn:
-                await conn.execute(text("INSERT INTO core.events (body) VALUES ('y')"))
+        await migrator.execute("CREATE SCHEMA fresh")
+        await migrator.execute("CREATE TABLE core.later (id serial PRIMARY KEY, v int)")
+        await app.execute("INSERT INTO core.later (v) VALUES (1)")
     finally:
-        await reader.dispose()
+        await migrator.close()
+        await app.close()
 
 
-async def test_tables_created_later_by_the_migrator_reach_the_app(scratch: URL):
-    engine = create_async_engine(scratch)
+async def test_a_second_run_rotates_the_password(settings: Settings, scratch: str):
+    await apply(settings, scratch)
+    await apply(settings, scratch, RolePasswords(migrator="m2", app="a2", reader="r2"))
+
+    app = await as_role(scratch, APP, "a2")
     try:
-        await apply_db_roles(engine, PASSWORDS)
+        cur = await app.execute("SELECT current_user")
+        assert (await cur.fetchone()) == (APP,)
     finally:
-        await engine.dispose()
-
-    migrator = as_role(scratch, MIGRATOR, PASSWORDS.migrator)
-    app = as_role(scratch, APP, PASSWORDS.app)
-    try:
-        async with migrator.begin() as conn:
-            await conn.execute(text("CREATE SCHEMA fresh"))
-            await conn.execute(text("CREATE TABLE core.later (id serial PRIMARY KEY, v int)"))
-        async with app.begin() as conn:
-            await conn.execute(text("INSERT INTO core.later (v) VALUES (1)"))
-    finally:
-        await migrator.dispose()
-        await app.dispose()
-
-
-async def test_a_second_run_rotates_the_password(scratch: URL):
-    engine = create_async_engine(scratch)
-    rotated = RolePasswords(migrator="m2", app="a2", reader="r2")
-    try:
-        await apply_db_roles(engine, PASSWORDS)
-        await apply_db_roles(engine, rotated)
-    finally:
-        await engine.dispose()
-
-    app = as_role(scratch, APP, "a2")
-    try:
-        async with app.connect() as conn:
-            assert (await conn.execute(text("SELECT current_user"))).scalar_one() == APP
-    finally:
-        await app.dispose()
+        await app.close()
 
 
 def test_missing_passwords_are_refused():

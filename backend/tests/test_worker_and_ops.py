@@ -1,4 +1,4 @@
-"""Projector worker loop, ops rebuild / replay-dlq / purge-deleted and the job runner
+"""Projector worker loop, ops rebuild / purge-deleted and the job runner
 (Т-§2.4, §2.7, §2.9, spec §4.3–4.4, §7, Д-§6)."""
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from quack.graph.worker import ProjectorWorker
 from quack.jobs import kinds
 from quack.jobs.queue import ClaimedJob, JobSpec, claim_next_job, enqueue_job, fail_or_retry_job
 from quack.jobs.runner import JobContext, JobRunner, register_job_handler
-from quack.ops.commands import purge_deleted, replay_dlq
+from quack.ops.purge_job import purge_deleted
 from tests.scenario import build_scenario
 from tests.support.resources import build_job_context
 
@@ -128,7 +128,9 @@ async def test_poison_event_stops_learner_until_replay(
     assert await worker.pending_learners() == []  # stream stopped, others continue
 
     monkeypatch.setattr(projector_module, "apply_event_to_trace", original)
-    assert await replay_dlq(db) == 1
+    # `ops replay-dlq` is gone with the Phase 3 queue; releasing the stream is the same update.
+    async with db() as session, session.begin():
+        await session.execute(text("UPDATE ops.dlq SET replayed_at = now() WHERE source = 'projector'"))
     assert await worker.pending_learners() == [learner]
     await _drain(worker)
     wm = await Neo4jGraphStore(neo4j, str(learner)).load_watermark(str(learner))
@@ -180,22 +182,6 @@ async def test_chunked_rebuild_respects_presence(
         events = await read_learner_events(session, learner)
     expected = await project_in_memory(learner, events, settings.fold, batch_size=100)
     assert (await Neo4jGraphStore(neo4j, str(learner)).dump()).snapshot() == expected.snapshot()
-
-
-async def test_replay_failed_job(db: SessionFactory) -> None:
-    spec = kinds.turn_extract(uuid4(), uuid4(), {"turn": 3}, required_seq=None)
-    async with db() as session, session.begin():
-        await enqueue_job(session, JobSpec(**{**spec.__dict__, "max_attempts": 1}))
-    async with db() as session, session.begin():
-        job = await claim_next_job(session, "w")
-        assert job is not None
-        await fail_or_retry_job(session, job.id, "w", RuntimeError("x"))
-    assert await replay_dlq(db) == 1
-    queued = await _q(db, "SELECT kind, payload, lock_key FROM ops.jobs WHERE status = 'queued'")
-    assert queued == [{"kind": "turn.extract", "payload": {"turn": 3}, "lock_key": spec.lock_key}]
-    [dlq] = await _q(db, "SELECT replayed_at FROM ops.dlq")
-    assert dlq["replayed_at"] is not None
-    assert await replay_dlq(db) == 0
 
 
 async def test_purge_deleted_removes_all_learner_data(

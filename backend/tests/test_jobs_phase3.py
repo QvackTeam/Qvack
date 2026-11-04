@@ -31,8 +31,7 @@ from quack.jobs.periodic import PeriodicScheduler
 from quack.jobs.queue import ClaimedJob, JobSpec, claim_next_job, enqueue_job, release_job
 from quack.jobs.runner import JobContext, JobHandler, JobRunner
 from quack.llm.errors import LLMBudgetExceededError
-from quack.ops.commands import PURGE_TABLES
-from quack.ops.purge_job import handle_purge_deleted
+from quack.ops.purge_job import PURGE_TABLES, handle_purge_deleted
 from quack.runtime import (
     JobHandlersMismatchError,
     check_handlers_complete,

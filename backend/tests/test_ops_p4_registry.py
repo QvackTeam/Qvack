@@ -129,12 +129,11 @@ def test_main_reads_the_previous_registry_of_can_rollback(
 
 
 class _Rebuilds:
-    """Replaces the rebuild of Phase 4 and the Phase 3 one; records the calls."""
+    """Replaces the rebuild of Phase 4; records the calls."""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, wiring: _Wiring) -> None:
         self.wiring = wiring
         self.calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-        self.p3_calls: list[UUID] = []
         self.statuses: dict[UUID, str] = {}
         self.stale: list[tuple[Any, str]] = []
         self.stale_ids: list[str] = []
@@ -143,16 +142,11 @@ class _Rebuilds:
             self.calls.append((args, kw))
             return RebuildOutcome(self.statuses.get(args[3], "rebuilt"))  # type: ignore[arg-type]
 
-        async def rebuild_p3(*args: Any) -> RebuildOutcome:
-            self.p3_calls.append(args[5])
-            return RebuildOutcome("rebuilt")
-
         async def stale_learners(neo4j: Any, version: str) -> list[str]:
             self.stale.append((neo4j, version))
             return self.stale_ids
 
         monkeypatch.setattr(cli, "rebuild_learner_p4", rebuild_p4)
-        monkeypatch.setattr(cli, "rebuild_learner", rebuild_p3)
         monkeypatch.setattr(cli, "stale_learners", stale_learners)
 
 
@@ -168,7 +162,6 @@ async def test_rebuild_phase4_one_learner(monkeypatch: pytest.MonkeyPatch) -> No
     ((args, kw),) = rebuilds.calls
     assert args == (wiring.db, wiring.neo4j, settings, A)
     assert kw == {"redis": wiring.redis}
-    assert rebuilds.p3_calls == []
     assert wiring.db.closed and wiring.neo4j.closed and wiring.redis.closed
 
 
@@ -210,17 +203,13 @@ async def test_rebuild_needs_a_target(monkeypatch: pytest.MonkeyPatch) -> None:
     assert rebuilds.calls == []
 
 
-async def test_rebuild_without_the_flag_stays_on_phase3(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`phase4_processes` off: the code of Phase 3 until the stand switches to dbmate (#223)."""
+async def test_rebuild_is_on_phase_4_without_the_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WP1.3 step 3: no Phase 3 path of `ops rebuild` is left, with the flag or without it."""
     wiring = _Wiring(monkeypatch, [])
     rebuilds = _Rebuilds(monkeypatch, wiring)
-    monkeypatch.setattr(cli, "create_engine", lambda settings: _Engine())
     assert await cli._ops(_settings(), _rebuild_args("--learner", str(A))) == 0
-    assert rebuilds.p3_calls == [A] and rebuilds.calls == []
-
-
-class _Engine:
-    async def dispose(self) -> None: ...
+    ((args, _),) = rebuilds.calls
+    assert args[0] is wiring.db and args[3] == A
 
 
 # --- WP16.7, S15: `ops extraction-eval` ---------------------------------------------------
