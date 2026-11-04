@@ -348,6 +348,7 @@ STREAM = Stream(
             ("GET", "/health/live"),
             ("GET", "/health/ready"),
             ("GET", "/healthz"),
+            ("GET", "/internal/status"),  # WP9.5: not proxied by Caddy, not in the OpenAPI
             # ТЗ Ф4 WP18: sign-in routes (public ones are listed in `PUBLIC_ROUTES`).
             ("POST", "/auth/link"),
             ("GET", "/auth/link/verify"),

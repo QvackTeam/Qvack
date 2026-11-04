@@ -4,12 +4,14 @@ requests and the integration branches, `compute` and `images` gated by the chang
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, cast
 
 import yaml  # pyright: ignore[reportMissingModuleSource]
 
 CI = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+DEPLOY = CI.with_name("deploy.yml")
 STREAM_BRANCHES = {"phase-4-a", "phase-4-b", "phase-4-c"}
 CHECKS = {"fast", "backend", "squawk", "compute", "images"}
 
@@ -148,3 +150,74 @@ def test_deploy_follows_publish_on_main_only_where_enabled() -> None:
     assert "vars.DEPLOY_ENABLED == 'true'" in condition
     assert "phase-4" not in condition
     assert job["permissions"] == {"contents": "read"}
+
+
+def test_fast_job_checks_modal_with_the_backend_settings() -> None:
+    """WP9.3: `modal/` has its ruff and pyright (D-C-210); it has no project of its own, so the
+    backend's settings and environment (`modal` is a backend dependency, §4.6) are used."""
+    (step,) = [s for s in _jobs()["fast"]["steps"] if "modal/" in str(s.get("name", ""))]
+    run = step["run"]
+    for command in (
+        "ruff check --config pyproject.toml ../modal",
+        "ruff format --check --config pyproject.toml ../modal",
+        "pyright ../modal",
+    ):
+        assert command in run
+
+
+def test_isolation_and_one_writer_are_steps_of_their_own() -> None:
+    """Д-§5.2 п.5 (D-C-210): the contract tests run before the full run as named steps, with
+    the infrastructure of the `backend` job (T-DB4, T-E3, T-A9a, T-A9b)."""
+    steps = _jobs()["backend"]["steps"]
+    names = [str(step.get("name", "")) for step in steps]
+    isolation = next(i for i, n in enumerate(names) if n.startswith("Isolation"))
+    writer = next(i for i, n in enumerate(names) if n.startswith("One writer"))
+    full = next(i for i, step in enumerate(steps) if step.get("run") == "uv run pytest -q")
+    assert isolation < full
+    assert writer < full
+    assert "test_repository_functions_take_learner_id" in steps[isolation]["run"]
+    assert "test_cross_learner_isolation" in steps[isolation]["run"]
+    assert "test_neo4j_writes_only_from_projector_static" in steps[writer]["run"]
+    assert "test_read_session_rejects_writes" in steps[writer]["run"]
+
+
+def test_frontend_types_check_is_on_pull_requests_and_not_a_gate_of_publish() -> None:
+    """Д-§5.2 п.7, ТЗ Ф4 WP9.3 (R4-2, D-C-210): types generated from `backend/openapi.json`
+    equal the committed ones; expectedly red until the frontend moves, so `publish` does not
+    wait for it, and it changes no file of the frontend."""
+    job = _jobs()["frontend-types"]
+    assert job["if"] == "github.event_name == 'pull_request'"
+    assert "frontend-types" not in _jobs()["publish"]["needs"]
+    assert "permissions" not in job
+    assert "secrets" not in str(job)
+    script = _steps_text(job)
+    assert "npm ci --ignore-scripts" in script
+    assert "openapi-typescript backend/openapi.json" in script
+    assert "frontend/lib/api/schema.d.ts" in script
+    assert "cmp " in script
+    assert "api:types" in script, "flags are read from the frontend's own script"
+
+
+def test_frontend_types_script_keeps_the_shape_the_ci_step_expects() -> None:
+    package = json.loads((CI.parents[2] / "frontend" / "package.json").read_text(encoding="utf-8"))
+    script = package["scripts"]["api:types"]
+    assert script.startswith("openapi-typescript lib/api/openapi.json -o lib/api/schema.d.ts")
+
+
+def test_deploy_job_runs_in_production_one_at_a_time_and_stops_on_freeze() -> None:
+    """ТЗ Ф4 WP9.3/WP9.4: environment `production`, `concurrency: deploy`, `DEPLOY_FREEZE = true`
+    skips every step after the freeze check (D-C-210)."""
+    workflow = cast(dict[Any, Any], yaml.safe_load(DEPLOY.read_text(encoding="utf-8")))
+    job = workflow["jobs"]["deploy"]
+    assert job["environment"] == "production"
+    assert job["concurrency"] == {"group": "deploy", "cancel-in-progress": False}
+    assert job["env"]["FROZEN"] == "${{ vars.DEPLOY_FREEZE }}"
+    steps = job["steps"]
+    assert steps[0]["id"] == "freeze"
+    assert 'FROZEN" == "true"' in steps[0]["run"]
+    for step in steps[1:]:
+        assert "steps.freeze.outputs.skip != 'true'" in str(step.get("if")), step
+    triggers = workflow["on"] if "on" in workflow else workflow[True]
+    assert "pull_request" not in triggers
+    assert "pull_request_target" not in triggers
+    assert workflow["permissions"] == {"contents": "read"}

@@ -211,3 +211,28 @@ async def test_the_command_prints_one_json_object_and_exits_0(
     report = json.loads(capsys.readouterr().out)
     assert report["dependencies"]["postgres"] == "ok"
     assert report["projector"]["learners_total"] == 0
+
+
+async def test_internal_status_serves_the_report_of_ops_status(
+    pg_db: Db, pg_engine: Any, neo4j: AsyncDriver, redis: Redis, settings: Settings
+) -> None:
+    """WP9.5, Д-§9.1: `GET /internal/status` has the content of `ops status`; Caddy does not
+    proxy it (`deploy/Caddyfile`), and the OpenAPI snapshot does not list it (D-C-212)."""
+    import httpx
+    from fastapi import FastAPI
+
+    from quack.api.app import create_app
+    from tests.support.resources import build_app_resources
+
+    app: FastAPI = create_app(
+        settings,
+        resources=build_app_resources(settings, pg_engine, neo4j, redis, db=pg_db),
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/internal/status")
+
+    report = response.json()
+    assert response.status_code == 200, response.text
+    assert {"projector", "jobs", "llm", "version"} <= set(report)
+    assert "/internal/status" not in app.openapi()["paths"]

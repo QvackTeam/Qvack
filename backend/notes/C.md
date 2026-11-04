@@ -23,6 +23,36 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-C-212. WP9.5: `GET /internal/status` в приложении `api`
+- Класс: C
+- WP / место: WP9.5, Д-§9.1; `quack/api/app.py` (`_internal_router`), `tests/e2e/routes/c.py`, `tests/test_ops_p4_status.py`
+- Контекст: ТЗ WP9.5 требует внутренний эндпоинт сводки с содержимым `ops status`; в коде его не было (Caddyfile уже отдаёт `/internal/*` кодом 404).
+- Решение: `GET /internal/status` вызывает `collect_status` на ресурсах процесса и отвечает отчётом: 200, либо 503, если Postgres не отвечает (код 2 команды). Маршрут вне схемы OpenAPI (`include_in_schema=False`), без входа ученика: защита — сеть Docker и Caddy, который его не проксирует. В реестре маршрутов — в `other_routes`.
+- Почему: ТЗ Ф4 WP9.5, Д-§9.1.
+- Обратимость: код.
+- Тесты: `test_internal_status_serves_the_report_of_ops_status`.
+- Требует подтверждения владельцем: нет.
+
+### D-C-211. WP9.6: `orphan-objects`, `resume`, `replay-deletions`, `rebuild --concurrency`
+- Класс: C (определение «есть ссылка в Postgres» для `orphan-objects` в документах не дано)
+- WP / место: WP9.6, Д-§8.3, Д-§8.7; `quack/ops/orphan_objects.py`, `quack/cli.py`, `deploy/README.md`
+- Контекст: функции A из S15 влиты (`replay_deletions`, `reconcile_deletions` в `deletion/journal.py`, `resume` в `graph/projection/runner.py`); функции `orphan_objects` у A нет, она в зоне C (ops).
+- Решение: `ops resume --learner`, `ops replay-deletions --since` (печатает `{"replayed": N}`), `ops rebuild ... --concurrency N` (по умолчанию `rebuild_concurrency`; ученики пересобираются по N одновременно, код выхода 1, если хоть один не `rebuilt`). `ops orphan-objects --since [--dry-run]` смотрит объекты `learners/` новее метки: объект держат ссылки: ключ в `content.materials.object_key`, `material_pages.image_key`, `exports.object_key`; ключ в `payload` события или в `content` версии артефакта того же ученика; для кусков холста `learners/{l}/canvas/{s}/{c}/…` - строка `content.canvas_boards` (куски находятся по префиксу, ключа в базе нет). Остальное удаляется (при `--dry-run` только список). Печатает JSON `{checked, orphans, deleted, dry_run}`. Поиск ключа в событиях идёт по ученику ключа (`strpos(payload::text, key)`): дорого на большом журнале, но команда одноразовая, после восстановления, и объектов новее дампа немного.
+- Почему: ТЗ Ф4 WP9.6, Д-§8.3 шаги 5 и 8, Д-§8.7; T-OPS4.
+- Обратимость: код. Удаление необратимо, поэтому в README команде предшествует `--dry-run`. Если появятся новые места ссылок на ключи (таблица, колонка), их надо добавить в `orphan_objects.py`, иначе команда удалит живой файл.
+- Тесты: `tests/test_ops_p4_recovery.py`.
+- Требует подтверждения владельцем: да (риск удаления файлов ученика при неполном списке ссылок).
+
+### D-C-210. WP9.3: шаги CI (типы фронтенда, `modal/`, изоляция и один писатель), тесты порядка выкатки, ссылки OpenAPI
+- Класс: C (зона C: `.github`, `deploy`, `openapi.json`)
+- WP / место: WP9.3, WP9.4; `.github/workflows/ci.yml`, `quack/api/openapi.py`, `tests/test_ci_layers.py`, `tests/test_deploy_order.py` (T-OPS8), `tests/test_app_assembly.py`
+- Контекст: п.7 `Д-§5.2` («типы фронтенда из OpenAPI совпадают») требует Node, пакета нет в ТЗ §4.6; `modal/` не имел проверок; изоляция и один писатель шли только внутри полного прогона; `backend/openapi.json` не собирался генератором типов: у `/auth/*` и `/companion/pair` в ответе 422 остался `$ref` на удалённый `HTTPValidationError`.
+- Решение: (1) job `frontend-types` (только pull_request, не в `needs` у `publish`, ожидаемо красный до перевода фронтенда, R4-2): `npm ci --ignore-scripts` в `frontend/` по его lock-файлу (генератор `openapi-typescript` уже в `frontend/package.json`, новых зависимостей и actions нет, файлы фронтенда не меняются), генерация из `backend/openapi.json` теми же флагами, что в `api:types`, и `cmp` с `frontend/lib/api/schema.d.ts`. (2) `modal/` в job `fast`: `ruff check`, `ruff format --check` с настройками backend и `pyright ../modal` (пакет `modal` есть в backend, ТЗ §4.6). (3) Перед полным прогоном job `backend` отдельные шаги: изоляция (T-DB4, T-E3) и один писатель (T-A9a, T-A9b). (4) Выкатка (WP9.4): job `deploy` с окружением `production`, `concurrency: deploy` и пропуском при `DEPLOY_FREEZE` уже были; добавлены тесты (`test_ci_layers`) и `test_deploy_order.py` (T-OPS8): порядок шагов `Д-§6.1` и запрет автоотката при новых событиях, правилах, миграциях читаются по тексту `deploy.sh` (режима проверки в скрипте нет). (5) `quack/api/openapi.py`: ссылка 422 на удалённую модель заменена на `ErrorResponse` для всех маршрутов; тест `test_openapi_refs_all_resolve`; `openapi.json` пересобран.
+- Почему: `Д-§5.2` п.5, п.7, ТЗ Ф4 WP9.3, WP9.4, R4-2, §4.6, §8.13 (T-OPS8).
+- Обратимость: код и workflow.
+- Тесты: `tests/test_ci_layers.py`, `tests/test_deploy_order.py`, `tests/test_app_assembly.py::test_openapi_refs_all_resolve`.
+- Требует подтверждения владельцем: нет (обязательным `frontend-types` делает владелец после перевода фронтенда).
+
 ### D-C-182. WP9.5: поддержка Telegram в алертинге и деплое (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
 - Класс: C (универсальный транспорт вебхуков тревог по Д-§9.3, Д-§14.3)
 - WP / место: WP9.5, T-OPS5; `quack/ops/notify.py`, `quack/config.py`, `quack/cli.py`, `deploy/env.example`, `compose.yaml`, `.github/workflows/deploy.yml`
