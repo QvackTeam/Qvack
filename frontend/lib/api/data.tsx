@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useMocks, useT } from "@/lib/i18n/provider";
 import type { Domain } from "@/lib/mock/types";
 import { domainFromApi } from "./adapters";
-import { API_MODE, ApiError, fetchMe, get, getToken, idem, patch, setToken, sse, type S } from "./client";
+import { API_MODE, ApiError, fetchMe, get, idem, logoutApi, patch, sse, type S } from "./client";
 
 /** Projection updates come in bursts (one turn → several events): re-read once they settle */
 const LIVE_SETTLE_MS = 600;
@@ -132,18 +132,14 @@ function ApiData({ children }: { children: React.ReactNode }) {
   }, [t.live.serverDown]);
 
   useEffect(() => {
-    if (!getToken()) {
-      router.replace("/login");
-      return;
-    }
-    // first load of the session data; setState happens after the await
+    // first load; a missing cookie answers 401 and the client sends the user to the login screen
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reload();
-  }, [reload, router]);
+  }, [reload]);
 
   // Live updates: the stream says only "the projection moved", the data comes with ordinary GETs
   useEffect(() => {
-    if (!ready || !getToken()) return;
+    if (!ready || !me) return;
     const stop = new AbortController();
     let settle: ReturnType<typeof setTimeout> | undefined;
     let seen = -1;
@@ -190,7 +186,7 @@ function ApiData({ children }: { children: React.ReactNode }) {
       stop.abort();
       clearTimeout(settle);
     };
-  }, [ready, loadGraph, loadHistory]);
+  }, [ready, me, loadGraph, loadHistory]);
 
   // A lagging graph is re-read until the backend catches up, even without a new `projection_advanced`
   useEffect(() => {
@@ -226,8 +222,8 @@ function ApiData({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    setToken(null);
-    router.replace("/login");
+    // the cookie is HttpOnly: only the backend can drop it
+    void logoutApi().finally(() => router.replace("/login"));
   }, [router]);
 
   const value = useMemo<Data>(
