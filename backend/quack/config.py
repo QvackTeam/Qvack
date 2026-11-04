@@ -329,6 +329,8 @@ class Settings(BaseSettings):
         }
     )
     why_recent_n: int = 3
+    # D-A-141, D-A-242: last exposures per skill in the slice of the teacher (no number in Т-§10.2).
+    slice_recent_exposures: int = 3
     # Т-§9.2, Т-§9.5: misconceptions and profile.
     fix_min_resists: int = 2
     watch_days: int = 3
