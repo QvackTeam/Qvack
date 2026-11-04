@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-A-222. WP7.4: `skipped_budget` по лимиту режима пула (D-B-211, #236)
+- Класс: A
+- WP / место: WP7.4 (T-D7); `quack/jobs/queue_p4.py::_over_budget`
+- Контекст: решение владельца D-B-211 (#234): лимит сессии зависит от остатка пула моделей — `normal` → `session_agent_budget_usd`, `tight` → `tight_session_agent_budget_usd`. Очередь снимала задачи только по обычному лимиту.
+- Решение: `_over_budget` берёт `budgets_for(settings, await access_mode(db, settings)).session_usd` (`quack.llm.access`, ядро; сумма пула кэшируется на `llm_pool_cache_s`). Без пула (`llm_pool_budget_usd = 0`) — режим `normal`, поведение прежнее. `judges_only` — тот же лимит, что `tight` (`budgets_for`); запрет вызовов не-судьям держит шлюз.
+- Почему: D-B-211, `Т-§13.2`, WP7.4.
+- Обратимость: полная.
+- Тесты: `tests/jobs/test_queue_p4.py::test_budget_follows_the_pool_mode`; T-D7 без изменений.
+- Требует подтверждения владельцем: нет (решение владельца D-B-211)
+
 ### D-A-221. WP7.5: веса видов свидетельств — предложения нет, пока в документах нет правила пересчёта
 - Класс: A
 - WP / место: WP7.5, `calibration.weekly`; `quack/jobs/calibration_p4.py`
