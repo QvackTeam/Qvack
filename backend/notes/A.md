@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-A-226. WP8.2: `split_topic` и `topic_split` — правка v1 перечней; задача `agent.topic_split`; порядок пачки (по #245 B)
+- Класс: C (схема события после G1, красная линия 2 — по прецеденту D-A-196/D-A-121: значения перечней v1, событий Фазы 4 в проде нет)
+- WP / место: WP8.2 «Разделить (фразой в чат)»; `quack/events/records.py` (`TurnIntent`, `AgentKind`), `quack/jobs/rules_p4.py`
+- Контекст: строка контракта WP8.2 требует: учитель размечает намерение → сверка предлагает распределение → `topic.split`. В перечнях `TurnIntent` и `AgentKind` для этого значений нет; B не может писать ход с таким намерением (`TurnHeadRecord` отвергает весь ход).
+- Решение: `TurnIntent` += `split_topic`; `AgentKind` += `topic_split`; `JOB_KIND_SPECS` += `agent.topic_split` (P2, видимая, роль `builder`), `AGENT_JOB_KINDS["topic_split"] = "agent.topic_split"`. Правило `agent.requested`: без `params.topic_id` задач нет; иначе граф-задача под замком `domain:{domain_id}` с `topic_id` в нагрузке. Версия схем остаётся 1. Порядок событий в одной пачке для темы с одним навыком: сначала `topic.split` (создаёт части), затем `skill.split` (его части ложатся в созданные темы); обратный порядок теряет часть (`_skill_split` пропускает часть, чьей темы нет) — тест это фиксирует.
+- Почему: ТЗ Ф4 WP8.2, §6.3 (`topic.split`, `skill.split`), D-A-131, D-A-196; патч B из #245.
+- Обратимость: полная до первых событий в проде (значения перечней можно убрать).
+- Тесты: `tests/jobs/test_rules_p4.py::test_topic_split_request_is_a_graph_job_of_the_domain`, `tests/graph/test_projection_rules3.py::test_split_of_a_one_skill_topic_in_one_batch_needs_the_topics_first`; счётчик видов в `test_every_kind_of_the_spec…` 24 → 25 (+5 периодических).
+- Требует подтверждения владельцем: да (класс C, действует до ответа)
+
 ### D-A-225. WP1.3 шаг 5, часть 1: что из кода Фазы 3 остаётся до части 2
 - Класс: A
 - WP / место: WP1.3, §7.3, §8.15; `quack/graph/worker.py`, `quack/jobs/dispatcher.py`, `quack/jobs/dispatcher_rules.py`, `quack/graph/projector.py`
