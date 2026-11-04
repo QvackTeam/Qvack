@@ -13,7 +13,7 @@ from quack.db import Db
 from quack.events.log import NewEvent, StoredEvent, append_events
 from quack.graph.projection.runner import project_learner
 from quack.graph.read.neo4j_reader import Neo4jGraphReader
-from quack.review.session_summary import SessionNotFoundError, SessionSummary, session_summary
+from quack.graph.read.summary import SessionNotFoundError, SessionSummary, session_summary
 from tests.db.fixtures import create_learner
 
 DOMAIN, TOPIC, SKILL, TASK, FAMILY = (uuid4() for _ in range(5))
