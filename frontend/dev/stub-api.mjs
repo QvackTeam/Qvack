@@ -31,6 +31,13 @@ const id = (s) => {
 const MOCK = JSON.parse(readFileSync(new URL("./fixtures/mock-domains.json", import.meta.url), "utf8"));
 const STATE = { solid: "solved_independently", review: "inconsistent", confused: "struggling", new: "not_tested" };
 const cap = (x) => x.charAt(0).toUpperCase() + x.slice(1);
+// Topics with no "needed before" link and in no chapter (not in the mocks; stub only)
+const EXTRA_UNLINKED = {
+  matan: [
+    { id: "complex-numbers", title: "Complex numbers", line: "Algebraic form, modulus, argument", simple: "Numbers of the form a + bi, where i squared is minus one.", about: "Needed for Euler's formula and for series with complex terms.", state: "new", retention: 0 },
+    { id: "modelling", title: "Mathematical modelling", line: "From a word problem to an equation", simple: "Turning a situation into formulas you can solve.", about: "Practice of choosing variables and writing the relations between them.", state: "solid", retention: 0.9 },
+  ],
+};
 function toDomain(m) {
   let reviewN = 0;
   const topic = (t) => {
@@ -44,7 +51,8 @@ function toDomain(m) {
     key: m.id,
     name: m.title,
     hubs: m.hubs.map((h) => ({ key: h.id, name: h.title, deadlineMs: h.deadline ? Date.parse(h.deadline.date) : null, topics: m.topics.filter((t) => t.hubId === h.id).map(topic) })),
-    free: m.topics.filter((t) => !t.hubId).map(topic),
+    // free topics of the mocks plus a couple with no links at all: they stand in the "Standalone" column of the graph
+    free: [...m.topics.filter((t) => !t.hubId), ...(EXTRA_UNLINKED[m.id] ?? [])].map(topic),
     requires: m.topics.flatMap((t) => t.requires.map((r) => [r, t.id])),
     sessions: m.sessions,
   };

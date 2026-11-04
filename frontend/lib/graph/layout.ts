@@ -7,12 +7,22 @@ export const GAP_Y = 140;
 const FOREIGN_GAP = 2;
 /** How strongly a topic is pulled to the lane of its own hub (0 = only by its links, 1 = only by the hub) */
 const HUB_PULL = 0.88;
+/** The rail of lone topics runs this far below the lowest topic of each hub (room for a label under the node) */
+const RAIL_DROP = GAP_Y * 0.85;
+/** Step between lone topics along the rail */
+const LONE_STEP = GAP_X * 1.6;
+/** A second pass of lone topics runs this far below the first */
+const LAP_DROP = GAP_Y * 0.8;
+/** Where the flow turns round, the rail goes this far outside the last topic of the row */
+const RAIL_OUTER = GAP_X * 1.3;
 /** The snake of hub lanes turns round when a row would be wider than this, world units */
 const MAX_ROW_WIDTH = 2800;
 /** A hub stands this far above the highest of its topics */
 const HUB_RISE = GAP_Y * 0.9;
 /** Hubs are bigger than topics and need more room */
 const HUB_GAP_X = GAP_X * 1.35;
+
+type Pt = { x: number; y: number };
 
 export type LayoutNode = {
   /** Topic id, or `h:<id>` for a hub */
@@ -29,7 +39,7 @@ export type Layout = {
   nodes: Map<string, LayoutNode>;
   topics: LayoutNode[];
   hubs: LayoutNode[];
-  /** Topics with no "needed before" link at all. They do not belong in the chains (they go to the left column) */
+  /** Always empty now: topics with no link are lone nodes in `topics` (kept for readers of the old column) */
   unlinked: string[];
   bounds: { x0: number; y0: number; x1: number; y1: number };
 };
@@ -256,6 +266,88 @@ export function layoutGraph(model: GraphModel, stored?: StoredPositions): Layout
     return node;
   });
 
+  // Topics with no link at all are lone nodes on the graph itself, tied to nothing. They follow the flow of the graph:
+  // a "rail" runs parallel to the main branch, a little below it, through the hubs in the order of the flow, and the lone
+  // topics stand on it, the most relevant first. Where the flow turns round, the rail goes round the outside of the turn.
+  const loneNodes: LayoutNode[] = [];
+  if (unlinked.length) {
+    const byHub = new Map<number, LayoutNode[]>();
+    topicNodes.forEach((nd, i) => {
+      if (ownHub[i] >= 0) byHub.set(ownHub[i], [...(byHub.get(ownHub[i]) ?? []), nd]);
+    });
+    // the hubs in the order of the flow (the same order the lanes were laid in)
+    const flow = [...byHub.keys()].sort((u, v) => Math.min(...byHub.get(u)!.map((q) => q.layer)) - Math.min(...byHub.get(v)!.map((q) => q.layer)) || u - v);
+    const belowOf = (h: number): Pt => {
+      const m = byHub.get(h)!;
+      return { x: mean(m.map((q) => q.x)), y: Math.max(...m.map((q) => q.y)) + RAIL_DROP };
+    };
+    // the polyline of the rail
+    let rail: Pt[] = [];
+    flow.forEach((h, i) => {
+      const cur = belowOf(h);
+      rail.push(cur);
+      const next = flow[i + 1] !== undefined ? belowOf(flow[i + 1]) : undefined;
+      const prev = i > 0 ? belowOf(flow[i - 1]) : undefined;
+      if (!next || !prev) return;
+      // a turn: the flow was going one way and the next hub goes back the other way
+      const was = Math.sign(cur.x - prev.x);
+      const will = Math.sign(next.x - cur.x);
+      if (was !== 0 && will !== 0 && was !== will) {
+        const xs = byHub.get(h)!.map((q) => q.x);
+        const outer = was > 0 ? Math.max(...xs) + RAIL_OUTER : Math.min(...xs) - RAIL_OUTER;
+        rail.push({ x: outer, y: cur.y }, { x: outer, y: next.y });
+      }
+    });
+    if (!rail.length) {
+      const cx = topicNodes.length ? mean(topicNodes.map((q) => q.x)) : 0;
+      rail = [{ x: cx - 4 * LONE_STEP, y: GAP_Y }, { x: cx + 4 * LONE_STEP, y: GAP_Y }];
+    }
+    if (rail.length === 1) rail.push({ x: rail[0].x + LONE_STEP, y: rail[0].y });
+    const segs = rail.slice(1).map((q, i) => Math.hypot(q.x - rail[i].x, q.y - rail[i].y));
+    const total = segs.reduce((a, b) => a + b, 0) || 1;
+    // When the rail is used up, the next topics make a second pass beside it, further out (lower), and so on
+    const at = (dist: number): Pt => {
+      const lap = Math.floor(dist / total);
+      let d = dist - lap * total;
+      const drop = lap * LAP_DROP;
+      for (let i = 0; i < segs.length; i++) {
+        if (d <= segs[i] || i === segs.length - 1) {
+          const t = segs[i] ? d / segs[i] : 0; // past the end it goes on in the direction of the last piece
+          return { x: rail[i].x + (rail[i + 1].x - rail[i].x) * t, y: rail[i].y + (rail[i + 1].y - rail[i].y) * t + drop };
+        }
+        d -= segs[i];
+      }
+      return { x: rail[0].x, y: rail[0].y + drop };
+    };
+    // most relevant first: topics of the latest sessions, then weak ones, then those due, then the rest by name
+    const recent = [...model.recentSessions].sort((u, v) => v.atMs - u.atMs).flatMap((r) => r.topicIds);
+    const topicOf = new Map(model.topics.map((t) => [t.id, t]));
+    const score = (id: string) => {
+      const r = recent.indexOf(id);
+      const t = topicOf.get(id);
+      if (r >= 0) return 3000 - r;
+      if (t?.displayState && ["confused_with", "persistent_error", "struggling", "inconsistent"].includes(t.displayState)) return 2000;
+      if (t?.nearestDueAtMs !== undefined && t.nearestDueAtMs <= model.nowMs) return 1000;
+      return 0;
+    };
+    const order = [...unlinked].sort((u, v) => score(v) - score(u) || (topicOf.get(u)?.name ?? u).localeCompare(topicOf.get(v)?.name ?? v));
+    const taken: Pt[] = topicNodes.map((q) => ({ x: q.x, y: q.y }));
+    let dist = 0;
+    for (const id of order) {
+      // the next free place along the rail: not on top of a topic of the graph or of another lone topic
+      let pt = at(dist);
+      for (let tries = 0; tries < 40 && taken.some((o) => Math.abs(o.x - pt.x) < GAP_X * 0.9 && Math.abs(o.y - pt.y) < GAP_Y * 0.55); tries++) {
+        dist += LONE_STEP / 2;
+        pt = at(dist);
+      }
+      const node: LayoutNode = { key: id, id, kind: "topic", x: pt.x, y: pt.y, layer: -1 };
+      nodes.set(node.key, node);
+      loneNodes.push(node);
+      taken.push(pt);
+      dist += LONE_STEP;
+    }
+  }
+
   // Hubs: above the highest of their topics, near the middle of them unless they already have a saved place
   const topY = topicNodes.length ? Math.min(...topicNodes.map((t) => t.y)) : 0;
   const members = new Map<string, LayoutNode[]>();
@@ -264,7 +356,7 @@ export function layoutGraph(model: GraphModel, stored?: StoredPositions): Layout
     if (t) members.set(l.hubId, [...(members.get(l.hubId) ?? []), t]);
   }
   const hubNodes: LayoutNode[] = [];
-  const placed: LayoutNode[] = [...topicNodes];
+  const placed: LayoutNode[] = [...topicNodes, ...loneNodes];
   const hubs = model.hubs
     .filter((h) => h.kind !== "domain_all")
     .map((h) => {
@@ -282,11 +374,11 @@ export function layoutGraph(model: GraphModel, stored?: StoredPositions): Layout
     placed.push(node);
   }
 
-  const all = [...topicNodes, ...hubNodes];
+  const all = [...topicNodes, ...loneNodes, ...hubNodes];
   const bounds = all.length
     ? { x0: Math.min(...all.map((p) => p.x)), x1: Math.max(...all.map((p) => p.x)), y0: Math.min(...all.map((p) => p.y)), y1: Math.max(...all.map((p) => p.y)) }
     : { x0: 0, x1: 0, y0: 0, y1: 0 };
-  return { nodes, topics: topicNodes, hubs: hubNodes, unlinked, bounds };
+  return { nodes, topics: [...topicNodes, ...loneNodes], hubs: hubNodes, unlinked: [], bounds };
 }
 
 const KEY = (learner: string, domainId: string) => `quack.graph.${learner}.${domainId}.pos`;
@@ -296,7 +388,7 @@ export function loadPositions(learner: string, domainId: string): StoredPosition
     const raw = localStorage.getItem(KEY(learner, domainId));
     if (!raw) return undefined;
     const v = JSON.parse(raw) as { v?: number; pos?: StoredPositions };
-    return v.v === 6 && v.pos && typeof v.pos === "object" ? v.pos : undefined;
+    return v.v === 9 && v.pos && typeof v.pos === "object" ? v.pos : undefined;
   } catch {
     return undefined;
   }
@@ -306,7 +398,7 @@ export function savePositions(learner: string, domainId: string, layout: Layout)
   const pos: StoredPositions = {};
   for (const n of layout.nodes.values()) pos[n.key] = [Math.round(n.x * 10) / 10, n.layer];
   try {
-    localStorage.setItem(KEY(learner, domainId), JSON.stringify({ v: 6, pos }));
+    localStorage.setItem(KEY(learner, domainId), JSON.stringify({ v: 9, pos }));
   } catch {
     /* no storage: the layout is recomputed next time */
   }
