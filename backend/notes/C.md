@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-C-217. WP25 / S9: `R2DeletionJournal` на S3 API, сбой журнала - всегда `DeletionJournalUnavailable`; `SESSION_COOKIE_DOMAIN` в compose
+- Класс: B (формат объекта и ключа в Д-§8.5 дан; точный формат времени ключа, чтение записей и границы ошибок - нет)
+- WP / место: WP25, S9 (D-C-102), WP9.1; `quack/storage/deletions.py`, `compose.yaml`, `deploy/env.example`, `.github/workflows/deploy.yml`, `backend/.env.example`
+- Контекст: `R2DeletionJournal.write/list_since` были `raise NotImplementedError`, три пути удаления зовут `journal.write` безусловно: `DELETE /v1/learner` на стенде давал 500. `SESSION_COOKIE_DOMAIN` не доходил до контейнеров (по умолчанию `qvack.online`), локальный стенд не мог его сменить, браузер на `localhost` терял `quack_session`. `backend/.env.example` отстал от `compose.yaml`.
+- Решение: (1) Объект `{deleted_at}-{deletion_id}.json`, `deleted_at` в ключе - UTC фиксированной ширины `%Y%m%dT%H%M%S.%fZ`, ключи сортируются как время; тело - JSON из пяти идентификаторов и времени (данных ученика нет). Время без пояса - `ValueError`. (2) `list_since` листает бакет `StartAfter = время since`, читает объекты `.json` и фильтрует по `deleted_at >= since`, порядок - по времени. Чужой по виду объект (не `.json`) пропускается; запись, которую нельзя прочитать, не пропускается молча (пропущенная запись - удаление, которое сверка не повторит): ошибка `DeletionJournalUnavailable`. (3) Любой сбой журнала - соединение, таймаут, любой ответ бакета (и 4xx, в отличие от `S3ObjectStore`), пустой `deletions_s3_endpoint` (иначе botocore пошёл бы в AWS) - `DeletionJournalUnavailable`, роутеры отвечают 503 `SERVICE_UNAVAILABLE`. (4) `SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-qvack.online}` в общем `x-db-env` (api, workers, projector), в `deploy/env.example` (не секрет) и в маппинг `deploy.yml` (`vars.SESSION_COOKIE_DOMAIN`, пусто - значение шаблона). (5) `backend/.env.example` дополнен именами из `api` (значения-заглушки, без секретов); тест не даёт ему снова отстать.
+- Почему: Д-§8.5 (сначала запись в R2, не записалось - не удаляем), Т-§19.5, Т-§20.7, D-C-103, Д-§7.
+- Обратимость: код и значения по умолчанию; формат ключа менять нельзя после первой записи в бакет с bucket lock (записи бессрочные).
+- Тесты: `tests/storage/test_deletion_journal.py`, `tests/test_compose_contract.py` (`test_the_session_cookie_domain_*`, `test_backend_env_example_lists_*`)
+- Требует подтверждения владельцем: нет. Не проверено: запись и чтение настоящего бакета R2 (нужен ключ), `bucket lock` не мешает `put_object` нового ключа.
+
 ### D-C-216. WP23.6: скиллы ученика (`/v1/learner-skills`), системные шаблоны (`/v1/system-templates`), привязка к артефактам
 - Класс: C (в документах не заданы: форма `bindings`, правила имён, какие промпты считаются «системными шаблонами», идемпотентность без события)
 - WP / место: WP23.6, Т-§17.8, П-11.6; `quack/artifacts/learner_skills.py`, `skills_routes.py`, `topic_refresh.py`, `hub_cheatsheet.py`, `config.py`
