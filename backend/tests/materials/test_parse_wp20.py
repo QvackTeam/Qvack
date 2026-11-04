@@ -12,14 +12,6 @@ from uuid import UUID, uuid4
 
 import pytest
 from pydantic import BaseModel
-from quack.materials.parse import (
-    MaterialParserOutput,
-    SheetReading,
-    SubjectSpec,
-    parse_step,
-    split_chunks,
-    structure_step,
-)
 
 from quack.compute_client.contracts import AlignResponse, PdfPage, PdfPagesResponse
 from quack.config import Settings
@@ -30,6 +22,14 @@ from quack.jobs.runner import JOB_HANDLERS, JobContext
 from quack.jobs.types import ClaimedJob, JobFailedPermanently
 from quack.llm.gateway import LLMGateway
 from quack.materials.library import upload_material
+from quack.materials.parse import (
+    MaterialParserOutput,
+    SheetReading,
+    SubjectSpec,
+    parse_step,
+    split_chunks,
+    structure_step,
+)
 from quack.prompts.registry import PromptRegistry
 from quack.runtime import HANDLER_MODULES
 from tests.db.fixtures import create_learner
@@ -229,7 +229,8 @@ async def test_material_parse_pipeline(world: _World) -> None:
     assert queued["payload"]["material_id"] == str(material)
 
     resolver = _Resolver()
-    structure_job = _job(learner, material, **queued["payload"])
+    payload = {k: v for k, v in queued["payload"].items() if k != "material_id"}
+    structure_job = _job(learner, material, **payload)
     await structure_step(world.ctx, structure_job, resolver)
 
     # one reconciliation per batch of subjects; topics first, then skills with their order
