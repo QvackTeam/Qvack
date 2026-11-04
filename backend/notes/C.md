@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-C-213. WP9.6: `orphan-objects` по умолчанию ничего не удаляет (`--apply`), перечень источников ссылок в одном списке
+- Класс: C (безопасность ops-команды; уточняет D-C-211, текст Д-§8.3 шаг 8 «Они удаляются» не меняется по сути)
+- WP / место: WP9.6, Д-§8.3; `quack/ops/orphan_objects.py`, `quack/cli.py`, `deploy/README.md`
+- Контекст: D-C-211 удалял файлы по умолчанию, а `--dry-run` надо было вспомнить; ссылки на файлы были тремя строками SQL, тест лишь на часть из них. Пропущенный источник ссылки стоит файла ученика.
+- Решение: `ops orphan-objects --since <t>` без флага только строит отчёт; удаление только с `--apply`; `--dry-run` убран (старый вызов с ним даёт ошибку аргументов, а не удаление). `orphan_objects(..., apply=False)`; отчёт `OrphanReport{checked, orphans, deleted, dry_run}`. Источники ссылок - один кортеж `REFERENCE_SOURCES` (`materials.object_key`, `material_pages.image_key`, `exports.object_key`, `core.events.payload`, `artifact_versions.content`) и `CANVAS_SOURCE` (`canvas_boards` по префиксу холста); `SOURCE_NAMES` - их имена. События и версии артефактов ищутся по ученику ключа.
+- Почему: удаление необратимо; безопасное поведение по умолчанию; тест на каждый источник ловит забытое место ссылки.
+- Обратимость: код. Новое место ссылки на ключ (таблица, колонка) - строка в `REFERENCE_SOURCES` и случай в `_insert_reference` (иначе `test_every_reference_source_has_a_test_case` красный).
+- Тесты: `tests/test_ops_p4_recovery.py` (`test_a_live_file_named_by_any_source_is_never_deleted` по шести источникам и режимам, `test_every_reference_source_has_a_test_case`, разбор аргументов: `--dry-run` отвергается).
+- Требует подтверждения владельцем: нет (сужает D-C-211); определение «ссылка» из D-C-211 по-прежнему ждёт подтверждения.
+
 ### D-C-212. WP9.5: `GET /internal/status` в приложении `api`
 - Класс: C
 - WP / место: WP9.5, Д-§9.1; `quack/api/app.py` (`_internal_router`), `tests/e2e/routes/c.py`, `tests/test_ops_p4_status.py`
@@ -37,9 +47,9 @@
 - Класс: C (определение «есть ссылка в Postgres» для `orphan-objects` в документах не дано)
 - WP / место: WP9.6, Д-§8.3, Д-§8.7; `quack/ops/orphan_objects.py`, `quack/cli.py`, `deploy/README.md`
 - Контекст: функции A из S15 влиты (`replay_deletions`, `reconcile_deletions` в `deletion/journal.py`, `resume` в `graph/projection/runner.py`); функции `orphan_objects` у A нет, она в зоне C (ops).
-- Решение: `ops resume --learner`, `ops replay-deletions --since` (печатает `{"replayed": N}`), `ops rebuild ... --concurrency N` (по умолчанию `rebuild_concurrency`; ученики пересобираются по N одновременно, код выхода 1, если хоть один не `rebuilt`). `ops orphan-objects --since [--dry-run]` смотрит объекты `learners/` новее метки: объект держат ссылки: ключ в `content.materials.object_key`, `material_pages.image_key`, `exports.object_key`; ключ в `payload` события или в `content` версии артефакта того же ученика; для кусков холста `learners/{l}/canvas/{s}/{c}/…` - строка `content.canvas_boards` (куски находятся по префиксу, ключа в базе нет). Остальное удаляется (при `--dry-run` только список). Печатает JSON `{checked, orphans, deleted, dry_run}`. Поиск ключа в событиях идёт по ученику ключа (`strpos(payload::text, key)`): дорого на большом журнале, но команда одноразовая, после восстановления, и объектов новее дампа немного.
+- Решение: `ops resume --learner`, `ops replay-deletions --since` (печатает `{"replayed": N}`), `ops rebuild ... --concurrency N` (по умолчанию `rebuild_concurrency`; ученики пересобираются по N одновременно, код выхода 1, если хоть один не `rebuilt`). `ops orphan-objects --since [--apply]` (с D-C-213; был `--dry-run`) смотрит объекты `learners/` новее метки: объект держат ссылки: ключ в `content.materials.object_key`, `material_pages.image_key`, `exports.object_key`; ключ в `payload` события или в `content` версии артефакта того же ученика; для кусков холста `learners/{l}/canvas/{s}/{c}/…` - строка `content.canvas_boards` (куски находятся по префиксу, ключа в базе нет). Остальное удаляется только с `--apply`, без него только список. Печатает JSON `{checked, orphans, deleted, dry_run}`. Перечень источников ссылок - `REFERENCE_SOURCES` в `orphan_objects.py` (D-C-213). Поиск ключа в событиях идёт по ученику ключа (`strpos(payload::text, key)`): дорого на большом журнале, но команда одноразовая, после восстановления, и объектов новее дампа немного.
 - Почему: ТЗ Ф4 WP9.6, Д-§8.3 шаги 5 и 8, Д-§8.7; T-OPS4.
-- Обратимость: код. Удаление необратимо, поэтому в README команде предшествует `--dry-run`. Если появятся новые места ссылок на ключи (таблица, колонка), их надо добавить в `orphan_objects.py`, иначе команда удалит живой файл.
+- Обратимость: код. Удаление необратимо, поэтому по умолчанию команда только сообщает (D-C-213). Если появятся новые места ссылок на ключи (таблица, колонка), их надо добавить в `orphan_objects.py`, иначе команда удалит живой файл.
 - Тесты: `tests/test_ops_p4_recovery.py`.
 - Требует подтверждения владельцем: да (риск удаления файлов ученика при неполном списке ссылок).
 
