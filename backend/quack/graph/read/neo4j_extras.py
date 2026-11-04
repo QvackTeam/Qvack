@@ -1,8 +1,8 @@
 """Neo4j part of `quack.graph.read` (ТЗ Ф4 WP6.4, WP17.1, WP17.4, WP8.3, WP15 п.2, WP16.2).
 
 `ExtraReads` is a mixin: the class that inherits it provides `_neo4j` (a driver) and
-`_settings`, and may set `_embedder` (free-text `similar_mistakes`) and `_session_factory`
-(the event log for `state_at`). Every query carries the learner (law 1). Reads that take only an
+`_settings`, and may set `_embedder` (free-text `similar_mistakes`) and `_db` (the event log
+for `state_at`). Every query carries the learner (law 1). Reads that take only an
 anchor id (`skill_history`, `prerequisites`, `prep_context`, `misconception_detail`) first read
 the owner of the anchor and bind every other node to that `learnerId`. Reads of a learner's slice
 use the watermark check of Т-§2.6 (`Learner.projectedSeq` before and after, up to
@@ -23,15 +23,11 @@ from neo4j import AsyncDriver, Record
 from quack.config import Settings
 from quack.db import Db
 from quack.db.neo4j import cypher
-from quack.db.postgres import SessionFactory
 from quack.embeddings.client import EmbeddingClient, EmbeddingsUnavailable
 from quack.events.log import StoredEvent as LogEvent
-from quack.events.models import StoredEvent
-from quack.events.reader import read_learner_events
 from quack.events.values import Level
 from quack.graph.folds import MS_PER_DAY, retrievability
 from quack.graph.memory import InMemoryGraph
-from quack.graph.projector import project_in_memory
 from quack.graph.read.models import (
     CandidateSkill,
     EvidenceFact,
@@ -62,7 +58,6 @@ _PROPER_STATUSES = ("suspected", "confirmed", "in_work", "watching")
 _DETAIL_STATUSES = (*_PROPER_STATUSES, "unknown")
 _OUTCOMES = frozenset({"correct", "incorrect", "partial", "unclear"})
 _ASSISTANCE = frozenset({"none", "hint", "shown_solution"})
-_READ_CHUNK = 1000
 _EVENTS_UP_TO = (
     "SELECT learner_id, seq, id, type, schema_version, actor, domain_id, session_id, "
     "causation_seq, correlation_id, idempotency_key, payload_hash, occurred_at, payload, "
@@ -136,7 +131,6 @@ class ExtraReads:
     _settings: Settings
     # Optional resources; the class that inherits sets them when it has them.
     _embedder: EmbeddingClient | None = None
-    _session_factory: SessionFactory | None = None
     _db: Db | None = None  # the log of Phase 4: `state_at` replays it with `rules@3` (WP8.3)
     _bound: UUID | None = None  # the learner of a bound reader (D-A-144)
 
@@ -772,42 +766,18 @@ class ExtraReads:
                 facts.append(_replayed_skill(graph, skill_id, dict(props), as_of))
         return StateAt(learner_id=learner_id, seq=seq_n, skills=facts)
 
-    async def _events_up_to(self, learner_id: UUID, seq_n: int) -> Sequence[StoredEvent | LogEvent]:
-        if self._db is not None:  # the log of Phase 4 (WP8.3)
-            params = {"learner_id": learner_id, "seq": seq_n}
-            return await self._db.fetch_all(_EVENTS_UP_TO, params, row=LogEvent)
-        if self._session_factory is None:
-            raise RuntimeError("state_at reads the event log: the reader has no session factory")
-        events: list[StoredEvent] = []
-        async with self._session_factory() as session:
-            while True:
-                chunk = await read_learner_events(
-                    session,
-                    learner_id,
-                    after_seq=events[-1].seq if events else 0,
-                    limit=_READ_CHUNK,
-                )
-                events += chunk
-                if len(chunk) < _READ_CHUNK or chunk[-1].seq >= seq_n:
-                    break
-        return [e for e in events if e.seq <= seq_n]
+    async def _events_up_to(self, learner_id: UUID, seq_n: int) -> Sequence[LogEvent]:
+        if self._db is None:
+            raise RuntimeError("state_at reads the event log: the reader has no Db")
+        params = {"learner_id": learner_id, "seq": seq_n}
+        return await self._db.fetch_all(_EVENTS_UP_TO, params, row=LogEvent)
 
-    async def _replay(
-        self, learner_id: UUID, events: Sequence[StoredEvent | LogEvent]
-    ) -> InMemoryGraph:
+    async def _replay(self, learner_id: UUID, events: Sequence[LogEvent]) -> InMemoryGraph:
         """The seam of the projector: the same code as the rebuild (Т-§2.5, Т-§2.7) — `rules@3`
-        over the log of Phase 4 when the reader has `Db` (WP8.3, D-A-191)."""
-        if self._db is not None:
-            from quack.graph.projection.rebuild import project_all  # no import cycle: read ← A
+        over the log of Phase 4 (WP8.3, D-A-191)."""
+        from quack.graph.projection.rebuild import project_all  # no import cycle: read ← A
 
-            log_events = [e for e in events if isinstance(e, LogEvent)]
-            return _memory(await project_all(learner_id, log_events, self._settings))
-        return await project_in_memory(
-            learner_id,
-            [e for e in events if isinstance(e, StoredEvent)],
-            self._settings.fold,
-            batch_size=self._settings.projector_batch_max_events,
-        )
+        return _memory(await project_all(learner_id, list(events), self._settings))
 
 
 @dataclass
