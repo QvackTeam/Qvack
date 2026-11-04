@@ -26,11 +26,7 @@ if TYPE_CHECKING:
     from tests.e2e.system import Learner, System
 
 
-async def _note_created(system: System, learner: Learner, ids: Ids, payload: Any) -> Ids:
-    return ids.replace(artifact_id=UUID(payload["artifact_id"]))
-
-
-async def _note_deleted(system: System, learner: Learner, ids: Ids, payload: Any) -> Ids:
+async def _topic_with_notes(system: System, learner: Learner, ids: Ids) -> Ids:
     """WP23.1 reads topics from the Phase 4 log (`topic.created`), which the Phase 3 structure
     of the walk does not write (D-C-112): one topic is recorded there for the notes routes."""
     topic_id, domain_id = uuid4(), uuid4()
@@ -192,36 +188,10 @@ STREAM = Stream(
             body=lambda ids, v: {"version": ["2026-11", "2026-12"][v]},
         ),
         Route(
-            "POST",
-            "/v1/artifacts/notes",
-            stage=190,
-            body=lambda ids, v: {
-                "domain_id": str(ids.domain_id),
-                "title": ["Note", "Other note"][v],
-                "text": "My own words",
-            },
-            advance=_note_created,
-        ),
-        Route(
-            "PATCH",
-            "/v1/artifacts/notes/{artifact_id}",
-            stage=200,
-            requires=("artifact_id",),
-            body=lambda ids, v: {"title": "Note", "text": ["Edited", "Edited again"][v]},
-        ),
-        Route(
-            "DELETE",
-            "/v1/artifacts/notes/{artifact_id}",
-            stage=210,
-            requires=("artifact_id",),
-            body=lambda ids, v: {},
-            no_other_body="the body has no field besides the key",
-            advance=_note_deleted,
-        ),
-        Route(
             "PUT",
             "/v1/artifacts/{artifact_id}/blocks/{block_id}",
             stage=220,
+            prepare=_topic_with_notes,
             requires=("artifact_id", "block_id"),
             body=lambda ids, v: {"content": ["My words", "Other words"][v]},
             advance=_block_written,
@@ -335,20 +305,12 @@ STREAM = Stream(
             files={"audio": ("segment.wav", b"RIFF", "audio/wav")},
             form={"started_at_ms": "1000", "ended_at_ms": "2000"},
         ),
-        # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
-        Route(
-            "POST",
-            "/v1/topics/{topic_id}/cheatsheet/refresh",
-            no_key="no event; the job coalesces",
-            body=lambda ids, v: {"domain_id": str(ids.domain_id)},
-        ),
     ),
     other_routes=frozenset(
         {
             ("GET", "/health/live"),
             ("GET", "/health/ready"),
             ("GET", "/healthz"),
-            ("GET", "/internal/status"),  # WP9.5: not proxied by Caddy, not in the OpenAPI
             # ТЗ Ф4 WP18: sign-in routes (public ones are listed in `PUBLIC_ROUTES`).
             ("POST", "/auth/link"),
             ("GET", "/auth/link/verify"),
@@ -365,11 +327,6 @@ STREAM = Stream(
             ("GET", "/v1/canvases/{canvas_id}"),
             ("GET", "/v1/canvases/{canvas_id}/replay"),
             ("GET", "/v1/domains/{domain_id}/canvases"),
-            # ТЗ-П3 §3: artifacts, search, cheatsheets, export
-            ("GET", "/v1/artifacts"),
-            ("GET", "/v1/artifacts/search"),
-            ("GET", "/v1/topics/{topic_id}/cheatsheet"),
-            ("GET", "/v1/domains/{domain_id}/export"),
             # ТЗ Ф4 §6.4 «Артефакты», WP23.1, WP23.4
             ("GET", "/v1/topics/{topic_id}/notes"),
             ("GET", "/v1/topics/{topic_id}/cards"),
@@ -379,8 +336,9 @@ STREAM = Stream(
             ("GET", "/v1/learner/stream"),
         }
     ),
+    # T-E3: the notes of the learner whose ids the other learner tries (blocks, cards routes).
+    isolation=(_topic_with_notes,),
     routers=(
-        "quack.artifacts.router:router",
         "quack.artifacts.notes_routes:router",
         "quack.artifacts.cards_routes:router",
         "quack.artifacts.hub_cheatsheet_routes:router",

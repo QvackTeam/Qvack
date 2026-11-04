@@ -27,7 +27,7 @@
 - Класс: C
 - WP / место: WP9.5, Д-§9.1; `quack/api/app.py` (`_internal_router`), `tests/e2e/routes/c.py`, `tests/test_ops_p4_status.py`
 - Контекст: ТЗ WP9.5 требует внутренний эндпоинт сводки с содержимым `ops status`; в коде его не было (Caddyfile уже отдаёт `/internal/*` кодом 404).
-- Решение: `GET /internal/status` вызывает `collect_status` на ресурсах процесса и отвечает отчётом: 200, либо 503, если Postgres не отвечает (код 2 команды). Маршрут вне схемы OpenAPI (`include_in_schema=False`), без входа ученика: защита — сеть Docker и Caddy, который его не проксирует. В реестре маршрутов — в `other_routes`.
+- Решение: `GET /internal/status` вызывает `collect_status` на ресурсах процесса и отвечает отчётом: 200, либо 503, если Postgres не отвечает (код 2 команды). Маршрут вне схемы OpenAPI (`include_in_schema=False`), без входа ученика: защита — сеть Docker и Caddy, который его не проксирует. Вне реестра маршрутов `tests/e2e/routes` (реестр сверяется со схемой OpenAPI).
 - Почему: ТЗ Ф4 WP9.5, Д-§9.1.
 - Обратимость: код.
 - Тесты: `test_internal_status_serves_the_report_of_ops_status`.
@@ -52,6 +52,30 @@
 - Обратимость: код и workflow.
 - Тесты: `tests/test_ci_layers.py`, `tests/test_deploy_order.py`, `tests/test_app_assembly.py::test_openapi_refs_all_resolve`.
 - Требует подтверждения владельцем: нет (обязательным `frontend-types` делает владелец после перевода фронтенда).
+
+### D-C-170. WP1.3 шаг 3 C: артефакты и сборка API без SQLAlchemy - маршруты Фазы 3 сняты, `AppResources` без `engine` и `session_factory`
+- Класс: C (зона C; формат событий и схемы БД не менялись); две правки в зоне A - п.5
+- WP / место: WP1.3 шаг 3 (issue #215, #235), WP23, WP25, §6.4 «Что заменено»; `quack/artifacts/{notes,cheatsheets,search,store,deps,router}.py` (удалены), `quack/artifacts/schemas.py`, `quack/api/{app,resources,auth}.py`, `tests/support/resources.py`, `tests/e2e/routes/c.py`
+- Контекст: план WP1.3 велел перевести модули C на `Db` «или снять, если их заменяет Фаза 4». Модули `notes`, `cheatsheets`, `search`, `store`, `deps` читали и писали `core.artifacts`/`core.events` через SQLAlchemy; в схеме dbmate этих таблиц нет (артефакты - `content.artifacts` и `content.artifact_versions`, WP23.1). Таблица §6.4 «Что заменено» называет замены: конспект блоками, карточки, cheat sheet хаба, `GET /v1/search`.
+- Решение:
+  1. Сняты без переноса на `Db`: `POST/PATCH/DELETE /v1/artifacts/notes`, `GET /v1/artifacts`, `GET /v1/artifacts/search` (замена - `GET /v1/topics/{id}/notes`, блоки, `GET /v1/search`), `GET /v1/topics/{id}/cheatsheet` и `POST …/cheatsheet/refresh` (замена - `GET/POST /v1/hubs/{id}/cheatsheet`), обработчики `session.finish_artifacts` и `artifact.refresh_cheatsheet` (дайджест сессии заменён итогом `GET …/summary`; cheat sheet обновляет `artifact.cheatsheet`).
+  2. `GET /v1/domains/{id}/export` Фазы 3 снят: он собирал `pMastery` и `core.domains`, которых в Фазе 4 нет; новый экспорт - WP23.7 (T-AR5, не начат), в STATUS строка WP23.7 это называет.
+  3. `quack/artifacts/schemas.py` оставляет `ArtifactGenOutput` (схема выхода роли `artifacts@1`, её читают контракты промптов и `scripts/meta_smoke.py`); модели запросов и ответов сняты.
+  4. `AppResources` без `engine` и `session_factory`; `/health/ready` и `/healthz` спрашивают Postgres через `resources.db` (`SELECT 1`, тот же срок `health_check_timeout_s`). `get_current_learner_id` читает только сессию-cookie: `_DELETED_LEARNER_SQL` (надгробия `auth.users`, `ops.deletion_tombstones`) снят, аккаунт удаляется физически через `delete_account` вместе с `core.auth_sessions`, cookie перестаёт разбираться.
+  5. Шлюз: `LLMGateway(..., db=db)` собран с `db=` (D-B-197), но его первый аргумент `session_factory` остаётся обязательным (outbox `core.llm_outbox`); API держит для него одно ленивое соединение SQLAlchemy (`_outbox_session_factory`, `pool_size=1`). Уходит с аргументом в шаге 4 потока B. Правки в зоне A: из `quack/jobs/kinds.py` убраны виды `session.finish_artifacts` и `artifact.refresh_cheatsheet` (как B убрал `turn.extract`), из `quack/runtime/__init__.py` - модуль `quack.artifacts.cheatsheets`; без этого `T-Q7` падал бы на лишнем виде. Фабрики видов и правила `dispatcher_rules` Фазы 3 остаются до шага 5 A.
+  6. `tests/support/resources.py`: `build_app_resources` и `build_job_context` передают `db=` в шлюз, если `db` дан; аргументы `engine` и `session_factory` только строят шлюз.
+- Почему: ТЗ Ф4 WP1.3, §6.4, §8.15 п.1, D-A-103, D-B-197, D-C-146 (политика тестов).
+- Обратимость: код - откатом коммита; данных Фазы 3 в боевой базе нет (чистый старт, D-C-160).
+- Тесты: `tests/test_app_assembly.py` (`test_healthz_depends_only_on_postgres` - через `Db`, T-A3 на `/v1/me`, `test_search_limits_come_from_settings` на `/v1/search`), `tests/e2e/routes/c.py` (T-A1, T-E2, T-E3 без маршрутов Фазы 3, заметки Фазы 4 в изоляции), `tests/storage/test_s1_resources.py::test_app_resources_fields` (набор полей `AppResources` без `engine` и `session_factory`).
+- Правки тестов (§8.15 п.1, тест Фазы 3 удалён вместе с кодом; свойство теперь проверяет тест Фазы 4):
+  - `tests/artifacts/test_artifacts_search_export.py` (заметки Markdown, `finish_artifacts`, обновление cheat sheet темы, поиск по `core.artifacts`, экспорт домена) → блоки и версии: `test_documents_wp23.py`, `test_topic_refresh_wp23.py`; cheat sheet хаба: `test_cheatsheet_wp23_5.py`; поиск: `tests/materials/test_materials_routes.py` (`GET /v1/search`); экспорт - T-AR5 в WP23.7;
+  - `tests/artifacts/test_artifact_isolation.py` (шпаргалка чужой темы - 404, `T-E3`) → `tests/e2e/test_isolation_and_idempotency.py::test_cross_learner_isolation` (все маршруты с id в пути, включая блоки заметок и cheat sheet хаба) и `test_cheatsheet_routes_wp23_5.py`;
+  - `tests/artifacts/conftest.py` (стенд Фазы 3: `Seeder`, `worker_deps`, `client`) - без потребителей, удалён;
+  - `tests/e2e/test_isolation_and_idempotency.py`: заметка Markdown и её поиск `T-E3` сняты (изоляция заметок Фазы 4 - `isolation=(_topic_with_notes,)` потока C); `tests/e2e/routes/c.py`: пять маршрутов Фазы 3 сняты из реестра `T-A1`/`T-E2`;
+  - `tests/test_dispatcher.py::test_cheatsheet_refresh_endpoint_enqueues_directly` (T-D8 Фазы 3, `POST /v1/topics/{id}/cheatsheet/refresh`) - вместе с маршрутом; кнопка «собери сам» хаба и согласие - `test_cheatsheet_routes_wp23_5.py`;
+  - `tests/test_jobs_phase3.py` (`T-Q7`: `test_all_job_kinds_have_handlers`, `test_worker_exits_with_code_1_on_handler_mismatch`): вид, чей пропуск проверяется, - `artifact.topic_refresh` вместо `artifact.refresh_cheatsheet` (его нет в `JOB_KINDS`); свойство то же;
+  - `tests/test_app_assembly.py`: `test_search_limits_come_from_settings` переведён с `/v1/artifacts/search` на `/v1/search` (лимиты те же), проба `T-A3` `/v1/artifacts` → `/v1/me`.
+- Требует подтверждения владельцем: нет
 
 ### D-C-182. WP9.5: поддержка Telegram в алертинге и деплое (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
 - Класс: C (универсальный транспорт вебхуков тревог по Д-§9.3, Д-§14.3)

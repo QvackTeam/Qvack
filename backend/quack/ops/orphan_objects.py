@@ -61,24 +61,30 @@ def _uuid(text: str) -> UUID | None:
         return None
 
 
-async def _referenced(db: Db, info: ObjectInfo) -> bool:
-    parts = info.key.split("/")
-    learner_id = _uuid(parts[1]) if len(parts) > 1 else None
-    if learner_id is None:
-        return False  # not under a learner: nothing in Postgres can refer to it
-    if len(parts) >= _CANVAS_PARTS and parts[2] == "canvas":
-        canvas_id = _uuid(parts[4])
-        if canvas_id is None:
-            return False
+async def _referenced(db: Db, learner_id: UUID, key: str, canvas_id: UUID | None) -> bool:
+    if canvas_id is not None:
         return (
             await db.fetch_one(_CANVAS, {"learner_id": learner_id, "canvas_id": canvas_id})
             is not None
         )
-    params = {"learner_id": learner_id, "key": info.key}
+    params = {"learner_id": learner_id, "key": key}
     for query in (_KEYS_IN_TABLES, _KEY_IN_EVENTS, _KEY_IN_ARTIFACTS):
         if await db.fetch_one(query, params) is not None:
             return True
     return False
+
+
+async def _kept(db: Db, info: ObjectInfo) -> bool:
+    parts = info.key.split("/")
+    learner_id = _uuid(parts[1]) if len(parts) > 1 else None
+    if learner_id is None:
+        return False  # not under a learner: nothing in Postgres can refer to it
+    canvas_id = None
+    if len(parts) >= _CANVAS_PARTS and parts[2] == "canvas":
+        canvas_id = _uuid(parts[4])
+        if canvas_id is None:
+            return False
+    return await _referenced(db, learner_id, info.key, canvas_id)
 
 
 async def orphan_objects(
@@ -87,7 +93,7 @@ async def orphan_objects(
     """Objects of `quack-learners` newer than `since` without a reference in Postgres; they are
     deleted unless `dry_run`. Sorted by key."""
     newer = [o for o in await store.list_objects(_PREFIX) if o.last_modified > since]
-    orphans = sorted(o.key for o in newer if not await _referenced(db, o))
+    orphans = sorted([o.key for o in newer if not await _kept(db, o)])
     if orphans and not dry_run:
         await store.delete_keys(orphans)
     return OrphanReport(checked=len(newer), orphans=orphans, deleted=0 if dry_run else len(orphans))
