@@ -1,15 +1,13 @@
 "use client";
 
 import { useRef } from "react";
-import { Backdrop } from "./backdrop";
-import { Compare } from "./compare";
-import { Features } from "./features";
 import { LandingFooter } from "./footer";
 import { Hero } from "./hero";
 import { LandingNav } from "./nav";
-import { Pluses } from "./pluses";
+import { EfficiencyScene } from "./scenes/efficiency-scene";
+import { GraphScene } from "./scenes/graph-scene";
 
-/** Лендинг целиком: общий фон, панель, первый экран, сравнение, два блока плюсов и подвал. Страница прокручивается внутри этого контейнера, а не окном: у body overflow hidden */
+/** Лендинг: панель, первый экран, две сцены (эффективность и память; как работает) и подвал. Прежние блоки и фон с графами пока не показываются (файлы остались). Страница прокручивается внутри этого контейнера, а не окном: у body overflow hidden */
 export function LandingPage() {
   const scrollRef = useRef<HTMLElement>(null);
   return (
@@ -17,12 +15,10 @@ export function LandingPage() {
       ref={scrollRef}
       className="relative isolate h-full overflow-x-hidden overflow-y-auto bg-[#080504] text-[#f1e4d6] motion-safe:scroll-smooth"
     >
-      <Backdrop scrollRef={scrollRef} />
       <LandingNav scrollRef={scrollRef} />
       <Hero scrollRef={scrollRef} />
-      <Compare scrollRef={scrollRef} />
-      <Pluses />
-      <Features />
+      <EfficiencyScene scrollRef={scrollRef} />
+      <GraphScene scrollRef={scrollRef} />
       <LandingFooter />
     </main>
   );

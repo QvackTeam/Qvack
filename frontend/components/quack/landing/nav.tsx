@@ -41,14 +41,11 @@ export function LandingNav({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
           Qvack<span className="text-[#ff8a2a]">!</span>
         </a>
         <div className="hidden items-center md:flex">
-          <a href="#compare" className={LINK}>
+          <a href="#efficiency" className={LINK}>
             {t.nav.why}
           </a>
-          <a href="#pluses" className={LINK}>
+          <a href="#how" className={LINK}>
             {t.nav.pluses}
-          </a>
-          <a href="#features" className={LINK}>
-            {t.nav.features}
           </a>
         </div>
       </div>

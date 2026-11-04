@@ -227,6 +227,61 @@ export const ru: Dict = {
     cta: "Начать",
     scroll: "Листай вниз",
     hero: { brand: "Quack!", title: "Learning Hub", duck: "Тыкни утку" },
+    story: {
+      efficiency: {
+        lines: ["Same hours.", "Real understanding."],
+        text: "It remembers where you slip, what you have already proven and when it starts to fade, so every minute goes into practice that sticks.",
+        hint: "Hover the nodes",
+        nodes: [
+          {
+            title: "Real understanding",
+            text: "A usual chat lets you feel you get it while you read. Here only what you solve yourself, in new wording and days later, counts.",
+          },
+          {
+            title: "Edge of understanding",
+            text: "For every skill it knows what you have proven, where you failed and what is still unchecked, and works exactly on that edge.",
+          },
+          {
+            title: "Every mistake tracked",
+            text: "Your slips are kept in your own words. It tells a typo from a real misconception and sees how you think, not just what you answered.",
+          },
+          {
+            title: "Practice that fits",
+            text: "Recall first, then reread only what slipped. New wording, similar topics mixed. Review comes inside new lessons, right when a skill starts to fade.",
+          },
+          {
+            title: "No extra discipline",
+            text: "No schedules, no card decks, no backlog of overdue items. Come back after two weeks and just continue.",
+          },
+        ],
+      },
+      how: {
+        eyebrow: "How it works",
+        lines: ["Bring your own material.", "Get taught."],
+        sub: "A teacher that picks every next step for you.",
+        left: {
+          title: "Your material",
+          text: "Drop lectures, problem sets, mock exams and your own notes. Topics grow out of them in your professor's notation.",
+        },
+        right: {
+          title: "Your exam",
+          text: "Say \u201cmidterm on the 14th\u201d. Readiness grows only from what you proved: 9 of 14 topics ready, not hours logged.",
+        },
+        hint: "Hover the nodes",
+        nodes: [
+          { label: "Teacher", text: "Picks every next move from what it knows about you: explain, ask, hint, show. There is no fixed script. Ask for the full solution and you get it." },
+          { label: "Material", text: "Lectures, seminars, mock exams, your notes. A syllabus is welcome but never required." },
+          { label: "Memory", text: "Your mistakes, proven levels and the way you learn best. One memory across all your subjects." },
+          { label: "Tasks", text: "Each task is tagged by topic and level. Typical wrong turns are prepared in advance and hints come in three steps." },
+          { label: "Review", text: "Recall first, then reread only what slipped. Never a pile of overdue items." },
+          { label: "Deadline", text: "Topics in scope get priority. Prep mode adds timed mock exams and a one-page cheat sheet." },
+          { label: "Notes", text: "A living summary per topic with a \u201cyour traps\u201d block. Anything you edit by hand is never overwritten." },
+          { label: "Cards", text: "Only what is truly fixed: definitions, formulas, sign to method, look-alike pairs. Built from your own errors." },
+          { label: "Helpers", text: "While you read, background agents build visuals and double-check problems, so answers never wait." },
+          { label: "Trust", text: "Not sure? It asks instead of marking you wrong. Every verdict has a \u201cdisagree\u201d button." },
+        ],
+      },
+    },
     compare: {
       lecture: {
         title: "Презентации препода",

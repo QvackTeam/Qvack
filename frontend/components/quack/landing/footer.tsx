@@ -34,14 +34,11 @@ export function LandingFooter() {
           </div>
           <nav aria-label={t.footer.product} className="flex flex-col items-start">
             <p className="mb-2 text-[0.8125rem] text-[#8d8273]">{t.footer.product}</p>
-            <a href="#compare" className={LINK}>
+            <a href="#efficiency" className={LINK}>
               {t.nav.why}
             </a>
-            <a href="#pluses" className={LINK}>
+            <a href="#how" className={LINK}>
               {t.nav.pluses}
-            </a>
-            <a href="#features" className={LINK}>
-              {t.nav.features}
             </a>
           </nav>
           <nav aria-label={t.footer.account} className="flex flex-col items-start">

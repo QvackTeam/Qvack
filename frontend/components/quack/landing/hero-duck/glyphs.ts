@@ -7,6 +7,7 @@
 export type Shape = "dot" | "star" | "y" | "yInv";
 
 export const BUCKETS = 10;
+const SHAPE_INDEX: Record<Shape, number> = { dot: 0, star: 1, y: 2, yInv: 3 };
 
 // янтарная шкала бренда: от тёплой тени до почти белого блика
 export type Ramp = [number, [number, number, number]][];
@@ -117,7 +118,7 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: Shape, r: number, lw: n
 export class GlyphSprites {
   readonly cell: number; // шаг решётки в device px
   readonly box: number;
-  private sprites = new Map<string, HTMLCanvasElement>();
+  private sprites: (HTMLCanvasElement | undefined)[] = []; // индекс: форма * BUCKETS + ступень (без строковых ключей: отрисовка идёт тысячи раз за кадр)
 
   /**
    * `proportional`: толщина линий — постоянная доля шага (как на весь экран 1920px: 1px при шаге ~6,8px),
@@ -139,13 +140,13 @@ export class GlyphSprites {
         ctx.translate(this.box / 2, this.box / 2);
         const r = glyphSize(s, b) * cellDevicePx;
         drawShape(ctx, s, r, proportional ? cellDevicePx * 0.147 : Math.max(1, cellDevicePx * 0.13));
-        this.sprites.set(`${s}${b}`, c);
+        this.sprites[SHAPE_INDEX[s] * BUCKETS + b] = c;
       }
     }
   }
 
   draw(ctx: CanvasRenderingContext2D, shape: Shape, bucket: number, x: number, y: number, scale = 1) {
-    const img = this.sprites.get(`${shape}${bucket}`);
+    const img = this.sprites[SHAPE_INDEX[shape] * BUCKETS + bucket];
     if (!img) return;
     const s = this.box * scale;
     ctx.drawImage(img, x - s / 2, y - s / 2, s, s);

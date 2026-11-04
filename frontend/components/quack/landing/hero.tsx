@@ -10,7 +10,7 @@ export function Hero({ scrollRef }: { scrollRef: RefObject<HTMLElement | null> }
   const t = useT().landing;
 
   return (
-    <section id="top" className="relative flex h-full shrink-0 flex-col items-center justify-center overflow-x-clip px-4 pt-14 pb-12">
+    <section id="top" className="relative flex h-full shrink-0 flex-col items-center justify-center overflow-clip px-4 pt-14 pb-12">
       {/* сразу под шапкой: утка остаётся по центру экрана, между ними — воздух с растениями.
           Archivo Expanded SemiBold прописными, цвет между янтарём утки и цветом растений, лёгкое свечение.
           На телефоне — в две строки */}
