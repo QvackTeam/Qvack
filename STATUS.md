@@ -145,11 +145,11 @@
 | WP0 | Вход и аудит (зоны A, B выполнены) | влит | `main` зелёный, чистый старт подтверждён владельцем 2026-11-02, п.3а–3е закрыты (#71, #72) | — | — | T-A9b |
 | WP9.1 | compose | частично | `compose.yaml`: Caddy, сети, лимиты, секреты ролей (#102, #174); `LLM_PRICES`, `LANGSMITH_API_KEY` у `api`/`workers`, пустая `LLM_PRICES` допустима вне prod (D-B-198, D-C-149, ветка phase-4-c-b209) | сервис `alerts` и таймер; сверить состав с `Д-§3` | — | T-OPS1, T-OPS6 |
 | WP9.2 | Caddy и образы | влит | `deploy/Caddyfile`, Dockerfile с `pg_dump 16`, `age`, CORS (#120, #177); `dbmate` и `db/migrations` в образе - D-C-160 | — | — | — |
-| WP9.3 | CI | частично | Jobs: backend, squawk, compute, images, publish в GHCR (#77, #171, #178, #189) | шаги: реестр событий (с A), типы фронтенда из OpenAPI, `modal/`, изоляция и один писатель отдельно; job выкатки | — | T-DB7 |
-| WP9.4 | Выкатка и откат | частично | `deploy/deploy.sh` (#120) | job выкатки в окружении `production`, `DEPLOY_FREEZE`; проверка порядка шагов | — | T-OPS8 |
-| WP9.5 | Бэкапы и тревоги | частично | `ops backup`, сервис и таймер `backup`, вебхук тревог (#122, #126) | `ops alerts` и `alerts`-контейнер, `GET /internal/status` | — | T-OPS5, T-OPS7 |
-| WP9.6 | Команды восстановления | частично | `ops db-roles` (#127), `ops rebuild`, `can-rollback` | `restore-check`, `orphan-objects`, `resume`, `replay-deletions`, `--concurrency`; ждут функций A (S15) | WP25 (A) | T-OPS2, T-OPS3, T-OPS4 |
-| WP9.7 | Сервер | частично | `deploy/setup-server.sh`, `deploy/README.md` (#120, #169) | таймер systemd `alerts`; раздел восстановления `Д-§8.3` | — | — |
+| WP9.3 | CI | в PR (ветка phase-4-c-wp9-3-ci) | Jobs: fast (+`modal/`: ruff, pyright), backend (+ шаги «изоляция», «один писатель»), squawk, compute, images, publish в GHCR, реестр событий (#237), `frontend-types` (только PR, ожидаемо красный до перевода фронтенда, не гейт публикации; R4-2); job выкатки с `production`, `concurrency: deploy`, `DEPLOY_FREEZE` (WP9.4); `$ref` 422 в `openapi.json` исправлены (D-C-210) | сделать `frontend-types` обязательным — владелец после перевода фронтенда | D-C-210 | T-DB7 |
+| WP9.4 | Выкатка и откат | в PR (ветка phase-4-c-wp9-3-ci) | `deploy/deploy.sh` (#120), job выкатки в окружении `production`, `DEPLOY_FREEZE` (#217), `tests/test_deploy_order.py` (порядок шагов Д-§6.1, нет автоотката при новых событиях) | живой прогон на сервере — владелец | D-C-210 | T-OPS8 |
+| WP9.5 | Бэкапы и тревоги | в PR (ветка phase-4-c-wp9-3-ci) | `ops backup`, сервис и таймер `backup`, вебхук тревог (#122, #126), `ops alerts`, сервис `alerts`, таймеры (#204, D-C-182), `GET /internal/status` (D-C-212) | — | D-C-212 | T-OPS5, T-OPS7 |
+| WP9.6 | Команды восстановления | в PR (ветка phase-4-c-wp9-3-ci) | `ops db-roles` (#127), `ops rebuild --concurrency`, `can-rollback`, `restore-check`, `resume`, `replay-deletions`, `orphan-objects` (функции A из S15 влиты; `orphan_objects` — в зоне C, D-C-211) | подтверждение владельцем определения «ссылка в Postgres» для `orphan-objects` | D-C-211 | T-OPS2, T-OPS3, T-OPS4 |
+| WP9.7 | Сервер | в PR (ветка phase-4-c-wp9-3-ci) | `deploy/setup-server.sh` с таймерами `quack-alerts` и `quack-host-state`, `deploy/README.md` с разделом восстановления Д-§8.3 (#120, #169, #204) | — | — | — |
 | WP18.1 | Вход по ссылке на почту | влит | `auth/links.py`, `ResendEmailSender`, лимиты (#97, #106) | — | D-C-133 | T-AU1, T-AU2 |
 | WP18.2 | Google OIDC | влит | `AuthlibGoogleOIDC` (#106) | клиент Google OIDC создаёт владелец | действие владельца | T-AU3 |
 | WP18.3 | Сессии и cookie | влит | Весь API на сессиях, JWT и пароль удалены (#123) | — | — | T-AU4, T-AU5 |
@@ -208,7 +208,7 @@
 3. **WP20.2** — задача `material.parse` и слой 2 `material_parser@1` (рантайм — после WP1.3).
 4. ~~WP21.4 → WP21.5~~ — сделано в ветке phase-4-c (D-C-158, D-C-159): каскад проверки шагов, пометки и вмешательства (T-CV4, T-CV5).
 5. **WP26.1–26.2** — перевести `tests/e2e/` на новый путь (`T-E1` для G2), красные `T-E2`–`T-E14`; после WP1.3 потока A.
-6. **WP9.5, WP9.6, WP9.3** — `ops alerts`, команды восстановления (после функций A), шаги CI (реестр событий, типы фронтенда, `modal/`), job выкатки (WP9.4).
+6. ~~WP9.5, WP9.6, WP9.3~~ — сделано в ветке phase-4-c-wp9-3-ci (D-C-210–D-C-212); остаётся живая проверка на сервере.
 7. **WP9.1/9.7** (`alerts`). WP21.6 (голос) и WP22.3 шаг 5 сделаны (D-C-153, D-C-152).
 8. **WP23.6–23.7** (P2), Locust на 100 учеников (WP26.3, P2); issues #193 (ответ C), #188.
 

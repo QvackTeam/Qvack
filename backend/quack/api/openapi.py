@@ -105,6 +105,11 @@ def _sse_response(description: str, events: str = "") -> dict[str, Any]:
     }
 
 
+def _mentions_default_model(response: dict[str, Any]) -> bool:
+    text = json.dumps(response)
+    return any(f"/{name}" in text for name in DEFAULT_VALIDATION_MODELS)
+
+
 def _document(schema: dict[str, Any]) -> dict[str, Any]:
     components = schema.setdefault("components", {}).setdefault("schemas", {})
     _, defs = models_json_schema([(ErrorResponse, "serialization")], ref_template=COMPONENT_REF)
@@ -122,6 +127,11 @@ def _document(schema: dict[str, Any]) -> dict[str, Any]:
                 )
             for status in _error_statuses(method, path, operation):
                 responses[status] = _error_response(status)
+            # Routes outside `/v1` (`/auth/*`, `/companion/pair`) keep FastAPI's 422 entry that
+            # points at the removed model; the handler answers them with `ErrorResponse` too, and
+            # a dangling `$ref` breaks the type generator of the frontend (D-C-210).
+            if "422" in responses and _mentions_default_model(responses["422"]):
+                responses["422"] = _error_response("422")
     return schema
 
 
