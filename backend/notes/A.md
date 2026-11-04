@@ -23,6 +23,50 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-A-215. WP7.5: обработчик `exports.cleanup`
+- Класс: A
+- WP / место: WP7.5; `quack/jobs/cleanup_p4.py`, `quack/jobs/kinds.py`
+- Контекст: ТЗ §6 (таблица периодических) — «правило жизненного цикла префикса экспорта, если хранилище его не поддерживает» (`Д-§8.4`: на Contabo правило задаётся только API/CLI). Статусов `content.exports` и того, что делать со строкой, в документах нет; `export.data` ещё не написан.
+- Решение: раз в сутки — строки с `expires_at < now` и `object_key` не NULL: сначала `delete_keys` объектов, затем строка `status = 'expired'`, `object_key = NULL` (строка остаётся: по ней видно, что ссылка была и истекла). Повтор безопасен; сбой между шагами оставляет строку следующему проходу. Работает и при настроенном правиле хранилища (удаление отсутствующего ключа — не ошибка).
+- Почему: `Д-§8.4`, `Т-§19.6` (`export_link_ttl_hours`), WP7.5.
+- Обратимость: полная.
+- Тесты: `tests/graph/test_projection_runner.py::test_exports_cleanup_deletes_only_expired_archives`.
+- Требует подтверждения владельцем: нет
+
+### D-A-214. WP8.3: маршрут `GET /v1/sessions/{id}/summary` — код объявления для B
+- Класс: A
+- WP / место: WP8.3, §6.4; `quack/session/router.py` (зона B, черновик #222)
+- Контекст: функция готова (D-A-213), маршрут лежит в зоне B и не объявлен.
+- Решение: B добавляет в `quack/session/router.py` (импорты `create_graph_reader`, `SessionNotFoundError`, `SessionSummary`, `session_summary`):
+  ```python
+  @router.get("/sessions/{session_id}/summary", response_model=SessionSummary)
+  async def get_session_summary(
+      session_id: UUID, learner_id: LearnerId, resources: Resources
+  ) -> SessionSummary:
+      reader = create_graph_reader(
+          resources.neo4j, resources.settings, learner_id=learner_id, db=resources.db
+      )
+      try:
+          return await session_summary(resources.db, reader, learner_id, session_id)
+      except SessionNotFoundError as exc:
+          raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
+  ```
+  Ответ — `SessionSummary` (200); чужая или несуществующая сессия — `404 NOT_FOUND`. Читатель обязан получить `db=` (без него `state_at` падает, D-A-191). Нужно также: строка в `EXPECTED_ROUTES` (T-A1), пересборка `openapi.json`; сам T-E13 — в e2e B.
+- Почему: ТЗ WP8.3, зона B; ресурсов хватает: `AppResources` уже даёт `db`, `neo4j`, `settings`.
+- Обратимость: полная.
+- Тесты: нет (маршрута нет).
+- Требует подтверждения владельцем: нет
+
+### D-A-213. WP8.3: `session_summary` — «до» и «после» сессии в кодах
+- Класс: A
+- WP / место: WP8.3, §2.3 строка 12, `П-4.10`, `Т-§2.6`; `quack/review/session_summary.py`
+- Контекст: в ТЗ нет правила, какие навыки «затронуты сессией», откуда `seq_n` при возврате в сессию и как отличить чужую сессию.
+- Решение: `session_summary(db, reader, learner_id, session_id) -> SessionSummary`. События сессии — `core.events` по `learner_id` и `session_id`. Нет `session.started` — `SessionNotFoundError` (чужая сессия выглядит так же: закон 1). `seq_n` = `seq` первого `session.started` минус 1 (возврат `resumed: true` его не сдвигает). «До» — `reader.state_at(learner, seq_n, навыки)`; «после» — `reader.slice_for_turn(learner, session, SliceFocus(skill_ids))` (текущая проекция, ждёт хвост журнала). Затронутые навыки: `skill.created` сессии; `exposures` и `tests` задач хода (`turn.committed`); `elements[].skill_id` и `root_cause.skill_id` (`observation.extracted`); `root_cause_skill_id` (`observation.diagnosed`); `tests` (и `parts[].tests`) задач, на которые в сессии были ответ, подсказка, закрытие или показ, — по `task.created` с последней поправкой `corrected_markup` проверки. Код, не текст: на навык — уровни (`status`, `basis`), `gap_type`, `consolidation_flag`, без имён, весов и времени; `before = None` — навыка до сессии не было; `changed` — коды различаются. Навык, названный событием, но которого нет в графе, пропускается. «Что сделано» — по задаче: число ответов, наибольший шаг подсказки, исход последнего вердикта, как закрыта (`None` — открыта). Слитый после N навык виден под разными id «до» и «после» (известное ограничение: псевдонимы не склеиваются).
+- Почему: WP8.3, `Т-§2.6` (проигрывание, не свёртка по `seq ≤ N`), `П-4.10`.
+- Обратимость: полная.
+- Тесты: `tests/domains/test_edits.py::test_state_at_n_with_late_dispute` (T-ED5); `tests/review/test_session_summary.py::test_summary_before_and_after_differ_for_solved_task` (часть T-E13), `::test_a_session_of_another_learner_is_not_found`.
+- Требует подтверждения владельцем: нет
+
 ### D-A-212. WP1.3 шаг 3: что остаётся на SQLAlchemy в зоне A после `graph/read/**`
 - Класс: A
 - WP / место: WP1.3, §7.3, §8.15; `quack/graph`, `quack/events`, `quack/jobs`, `quack/db`, `quack/ops`
@@ -56,6 +100,62 @@
 ### Правки тестов (D-A-210…212)
 - `tests/graph/test_read_neo4j_extras.py`: события подмены `state_at` — `LogEvent` вместо `StoredEvent` Фазы 3 (проверка та же).
 - `tests/jobs/test_queue_p4.py::test_periodic_keys`: счётчики 4/0/3 → 5/0/1/4 и ключи минут обхода (добавлена пятая периодическая задача; проверка периодов остальных четырёх не ослаблена).
+
+### D-A-209. WP1.3 шаг 3: тесты — что снято, что перенесено, мост стенда e2e
+- Класс: A
+- WP / место: WP1.3, §8.15; `tests/domains/`, `tests/jobs/`, `tests/e2e/journey.py`, `tests/e2e/routes/a.py`, `tests/test_*.py`
+- Контекст: стенд e2e и тесты сессий (B, #222) ещё на Фазе 3: `POST /v1/sessions` читает структуру домена в журнале Фазы 3. Маршруты `structure/*` и `diagnostic/*`, которые её писали, сняты (§2.3 строка 5).
+- Решение: `onboard()` стенда создаёт домен маршрутом Фазы 4 (`POST /v1/domains`), а структуру (две темы, навык у каждой, одно предусловие — как давал `structurer` стенда) кладёт в журнал Фазы 3 напрямую (`_seed_phase3_structure`). Мост — пока B не переведёт сессии (#222) и не придёт T-E1 Фазы 4; тогда `onboard()` и `structure_node()` уходят. Тесты снятого кода удалены, тесты свойств, которые остаются, перенесены (список — ниже).
+- Почему: §8.15 п.1–2, §0.4.4 п.14 (не ломать тесты чужого стека до его перехода).
+- Обратимость: полная; мост — один файл теста.
+- Тесты: `tests/domains/test_domains_routes.py` (4 теста), весь обход `tests/e2e`.
+- Требует подтверждения владельцем: нет
+
+**Правки тестов (§8.15)**
+
+| Снят / изменён | Почему | Что проверяет теперь |
+| :-- | :-- | :-- |
+| `tests/domains/test_structure_and_dag.py`, `test_structure_actor_and_delete.py`, `test_propose_idempotency.py`, `test_confirm_idempotency.py` | интервью структуры снято (§2.3 строка 5; §8.15 п.1) | свойство «повтор с тем же ключом» — `test_domains_routes.py::test_create_and_list_domains`; рост графа — T-P*, `test_projection_runner.py` |
+| `tests/domains/test_diag_idempotency.py`, `test_diag_open_and_bank.py`, `test_diag_state_from_events.py`, `test_diag_wakeup.py`, `test_diagnostic_and_graph_view.py` (диагностика, карта Фазы 3) | диагностика снята (§2.3 строка 5) | карта — `test_domains_routes.py::test_domain_graph_and_topic_card_give_codes` (T-TH5) |
+| `tests/domains/test_graph_view_fixes.py`, `test_topic_alias_routes.py` | `p_mastery`/пять `display_state`, короткие маршруты статуса темы сняты (§8.15 п.1) | то же, T-TH1/T-TH2 в `tests/graph/` |
+| `tests/domains/test_auth_and_learner.py` | `auth.users.preferences`, tombstone и `learner.preferences_updated` сняты | `test_set_preference`, `test_delete_learner_removes_the_account`; `test_projection_runner.py::test_delete_account` |
+| `tests/domains/test_curation_*.py` (3 файла) и два теста `graph.curate` из `test_diagnostic_and_graph_view.py` | не сняты: обработчик жив на конвейере Фазы 3 | перенесены в `tests/jobs/test_curation_p3_*.py` без изменения утверждений (D-A-208) |
+| `tests/test_meta_mock.py::test_structurer_answer_gives_topics_with_skills` | проверял `sanitize_structurer_output` снятого модуля | — (роль `structurer` у B) |
+| `tests/test_jobs_phase3.py::test_purge_job_removes_learner_completely` | `DELETE /v1/learner` больше не пишет tombstone | тот же тест, tombstone кладёт сам тест: проверяется обработчик чистки Фазы 3, пока он жив |
+| `tests/test_neo4j_outage.py` | `GET /v1/domains/{id}/topics/{id}` снят; домен — в журнале Фазы 4 | карта и карточка темы (`/v1/topics/{id}`) при сбое Neo4j — `503` |
+| `tests/test_app_assembly.py` (фикстура `sign_in`) | журнал Фазы 4 требует строку `core.learners` | то же утверждение (T-A3, T-A5) |
+| `tests/e2e/test_journey_and_laws.py` | T-E1: проверка `p_mastery` по карточке темы Фазы 3 снята; T-E10: чистка планировщиком снята | T-E10: `DELETE /v1/learner` — `delete_account` сразу: строки Фазы 4, граф, ключ присутствия, журнал, `401` |
+| `tests/e2e/test_degradation.py`, `test_isolation_and_idempotency.py`, `journey.py`, `routes/a.py` | интервью, диагностика, архив сняты; `preferences` — `{key, value}` | то же, через мост (выше) |
+
+- Правка после CI #226: `tests/session/test_phase3_hot_path.py::test_turn_survives_neo4j_outage` (зона B) — снята проверка `GET /v1/domains/{id}/graph` → 503: домен теста живёт в журнале Фазы 3, маршрут — на Фазе 4; 503 графа при недоступном Neo4j проверяет `tests/test_neo4j_outage.py` (T-H1). Файл переписывает B в #222.
+
+### D-A-208. WP1.3 шаг 3: что остаётся от Фазы 3 в зоне домена
+- Класс: A
+- WP / место: WP1.3, §6.5; `quack/jobs/curation_p3.py`, `quack/domains/curation.py`, `quack/domains/schemas.py`
+- Контекст: обработчик `graph.curate` (`curation.py`) живёт на конвейере задач Фазы 3: диспетчер Фазы 3 ставит `graph.curate`, `quack.runtime.HANDLER_MODULES` его импортирует, на виде задачи стоят тесты очереди и диспетчера. Портировать его на `Db` нельзя: он пишет события Фазы 3 в базу Фазы 3 (`SessionFactory`). Выходы ролей `structurer`, `diagnostic`, `curator` (`StructurerOutput`, `DiagnosticOutput`, `CuratorOutput`) нужны тестам и скриптам B (`tests/llm/prompt_contracts.py`, `test_llm_runtime.py`, `test_meta_mock.py`, `scripts/meta_smoke.py`), пока роли и промпты не сняты.
+- Решение:
+  1. Обработчик перенесён `quack/domains/curation.py` → `quack/jobs/curation_p3.py` без правок; в `quack/domains/curation.py` остался импорт (`HANDLER_MODULES` не тронут). Тесты перенесены в `tests/jobs/test_curation_p3_*.py`. Всё это уходит вместе с `graph.curate` (`kinds.graph_curate`, `dispatcher_rules`, запись в `HANDLER_MODULES`, `REMOVED_JOB_KINDS`): одним шагом исполнителя, снимающего конвейер Фазы 3.
+  2. Три схемы выходов ролей остались в конце `quack/domains/schemas.py` (с подмоделями); B убирает их вместе с ролями.
+- Почему: §0.4.4 п.14, §8.15 п.1 (снимается вместе с последним потребителем), §7.3 (зона B — промпты и тесты ролей).
+- Обратимость: полная.
+- Тесты: `tests/jobs/test_curation_p3_*.py` (перенесены без изменений утверждений), `tests/test_contracts.py` (T-A6, импорт каждого модуля).
+- Требует подтверждения владельцем: нет
+
+### D-A-207. WP1.3 шаг 3: `quack/domains/**` на `Db`; маршруты A на код Фазы 4
+- Класс: A
+- WP / место: WP1.3, WP6.5, WP25 п.3, §6.4; D-A-194, D-A-198, D-A-205, D-A-206; `quack/domains/{service,learner,graph_view,graph_reads,schemas,router}.py`, `quack/deletion/router.py`
+- Контекст: в ТЗ нет формы ответа `GET /v1/domains/{id}/graph` и тела `PATCH /v1/learner/preferences` на новых кодах; слово «архив» и статус темы §6.4 заменяет WP25; нет места для `DELETE /v1/learner` между роутерами.
+- Решение:
+  1. **Домены.** Таблицы нет (§6.1): `POST /v1/domains` пишет `domain.created {domain_id, name}`; id — от ключа (`deterministic_id(learner, 0, "domain:<key>")`), повтор даёт тот же домен, тот же ключ с другим именем — `409`. `GET /v1/domains` читает `domain.created` ученика по `seq`: `{domain_id, name, created_seq, created_at}`. Поля `slug`, `status`, `has_materials`, `active_structure_version` и `include_archived` ушли.
+  2. **Предпочтения.** `PATCH /v1/learner/preferences {key, value, idempotency_key}` → `preference.set`, ответ `{key, value, seq}`. Ключ — `^[a-z][a-z0-9_]{0,31}$` (он станет именем свойства `pref<Key>`), значение — строка до 500 знаков, число или булево. Прежнее тело `{preferences: {…}}` снято.
+  3. **Карта домена.** `GET /v1/domains/{id}/graph` → `{domain_id, projected_seq, lag_degraded, topics[{topic_id, name, status, visibility, display: TopicDisplay, nearest_due_at_ms, skill_count}], requires[]}`; `requires` — `topic_requires` читателя, только между показанными темами. Домен — ученика по `domain.created` в журнале (только что созданный, ещё не спроецированный домен — пустая карта, не `404`; чужой — `404`). Скрытые темы не отдаются без `?include_hidden=true`. `lag_degraded` — отметка проектора меньше счётчика ученика. Пересчёта «на момент чтения» нет: «пора повторить» — клиент по `nearest_due_at_ms` (Т-§8.6).
+  4. **Карточка темы.** `GET /v1/topics/{id}` → `graph_reads.topic_view` (D-A-198); лимит мест — 200 по умолчанию (параметра в `Settings` нет и не вводится).
+  5. **Снято с кодом:** `…/structure/propose|confirm`, `PATCH …/structure`, `…/diagnostic/start|answer|finish`, `POST …/archive`, `PATCH …/topics/{id}/status` и `PATCH /topics/{id}/status`, `GET /domains/{id}`, `GET /domains/{id}/topics/{topic_id}` (их нет в §6.4; старый → новый — таблица §6.4), модули `structure`, `diagnostic`, `topics`.
+  6. **`DELETE /v1/learner`** → `quack.deletion.account.delete_account` в `quack/deletion/router.py` (рядом с остальными удалениями). Ответ как у домена и темы: `{deletion_id, copies_days: 15}`. `tracer` — `resources.llm.tracer` (шлюз его уже держит; поля в `AppResources` не нужно), `pseudonym = learner_pseudonym(settings.langsmith_pseudonym_ns, learner_id)` (D-A-206). Журнал R2 недоступен или блокировка занята — `503`. Сессия уходит вместе со строками, следующий запрос — `401`.
+- Почему: §6.4 (таблицы «Домены», «Граф и темы», «Ученик», «Удаление»; «Старый API → новый»), §2.3 строка 5, §6.1, T-TH5, WP25 п.1, п.3; закон 1.
+- Обратимость: полная; `include_hidden` и лимит мест — параметры чтения.
+- Тесты: `tests/domains/test_domains_routes.py` (создание и список, предпочтение, карта и карточка с кодами и `TopicDisplay` в OpenAPI, удаление аккаунта), `tests/e2e/routes/a.py` (T-A1, T-E2, T-E3).
+- Требует подтверждения владельцем: нет
 
 ### D-A-206. WP1.3: `db=` шлюза в `workers` и удаление трасс при удалении аккаунта
 - Класс: A

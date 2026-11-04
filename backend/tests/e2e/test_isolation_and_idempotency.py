@@ -120,22 +120,10 @@ async def test_cross_learner_isolation(system: System) -> None:
         ),
         201,
     )
-    async with system.session_factory() as session:
-        diag = (
-            await session.execute(
-                text(
-                    "SELECT payload->>'session_id' AS sid FROM core.events "
-                    "WHERE learner_id = :l AND type = 'diagnostic.started' LIMIT 1"
-                ),
-                {"l": a.learner_id},
-            )
-        ).one()
     ids = Ids(
         domain_id=domain_id,
         topic_id=topic_id,
         artifact_id=UUID(note["artifact_id"]),
-        diagnostic_session_id=UUID(diag.sid),
-        structure_version=1,
     )
     # The session of the learner is on the Phase 4 log (D-B-210): its own domain, then a start.
     ids = await _session_domain(system, a, ids)

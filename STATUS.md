@@ -46,7 +46,7 @@
 | :-- | :-- | :-: | :-- | :-- | :-- | :-- |
 | WP1.1 | dbmate и базовая схема | влит | `db/migrations/…baseline.sql` + 3 расширяющие миграции (#78, #142) | — | — | T-DB1 |
 | WP1.2 | `Db` и репозитории | влит | `quack.db.Db`, `append_events`, блокировки на psycopg (#78, #107) | — | — | T-DB2, T-DB4, T-DB5 |
-| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1: процессы `projector`/`workers` Фазы 4 на `Db` за флагом `phase4_processes` — `ProjectorP4`, `DispatcherP4`, `JobWorker` с переходником `bind_handlers`, тик периодических (D-A-200); `db=` шлюза при флаге (D-A-206); план шагов — issue #215 | шаг 2 — стенд на dbmate (C, #223); шаг 3 — маршруты и модули потоков на `Db` (A: `domains/**`, `graph/read`; B: #222; C); шаг 5 — снять код Фазы 3, флаг, `sqlalchemy`/`asyncpg`/`alembic` | #223 | T-DB3 (G4) |
+| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1: процессы Фазы 4 за `phase4_processes` (D-A-200, D-A-206, #224); шаг 3 A: `graph/read` на `Db`, `sweep_inactive` в `periodic_p4` (D-A-210…212, #225), `quack/domains/**` на `Db`, интервью и диагностика удалены (D-A-207…209, #226); план — #215 | шаг 2 — стенд на dbmate (C, #223); шаг 3 B (#222) и C; шаг 5 A — снять код Фазы 3 (перечень D-A-212), `graph.curate` Фазы 3, флаг, `sqlalchemy`/`asyncpg`/`alembic`; владелец `quack/ops/*` — #215 | #223 | T-DB3 (G4) |
 | WP1.4 | squawk | влит | `backend/.squawk.toml` (#185), job `squawk` в CI (#189) | — | — | T-DB7 |
 | WP2.1 | Модели payload и реестр | влит | 65 типов, S3 заморожен (#80, #94, #119, #130) | — | D-A-121 (класс C) | T-EV1, T-EV2, T-EV3 |
 | WP2.2 | Ход и последствия вместе | влит | Пачка хода одним `append_events` (#109, `session/turn_commit.py`) | — | — | T-EV4 |
@@ -71,22 +71,22 @@
 | WP6.2 | Коды состояния темы | влит | Восемь правил `Т-§8.6` (#185) | — | — | T-TH2 |
 | WP6.3 | Хабы, дедлайны, уровни | влит | Обработчики хабов, `PATCH /v1/hubs/{id}` (#185, D-A-193) | — | — | T-TH3 |
 | WP6.4 | Чтение памяти `graph.read` | влит | `GraphReader`, `Neo4jGraphReader`, `ExtraReads` (#101, #170, #175, #179) | `prep_context.control_materials` пусто (материал контроля в графе не различается) | D-A-152 | T-TH4 |
-| WP6.5 | API графа, тем, хабов | частично | «Почему» темы, хабы домена, вид и создание хаба; `topic_view` для `GET /v1/topics/{id}` (D-A-194, D-A-198) | замена `GET /v1/domains/{id}/graph` и `GET /v1/topics/{id}` Фазы 3 — в шаге 3 WP1.3 | — | T-TH5 (G3) |
+| WP6.5 | API графа, тем, хабов | влит | «Почему», хабы (D-A-194, D-A-198); `GET /v1/domains/{id}/graph` на `TopicDisplay`, `GET /v1/topics/{id}` на `topic_view` (D-A-207, #226) | — | — | T-TH5 (G3) |
 | WP7.1 | Правила диспетчера | влит | Таблица `plan_jobs`, виды задач (#101, #117, #154, #182) | виды без обработчика пока не в `JOB_KINDS` (процедура #173) | — | T-D1 |
 | WP7.2 | Эпизоды | влит | `jobs/episodes.py` (#182) | — | issue #193 | T-D2 |
 | WP7.3 | Покрытие | влит | `jobs/coverage.py`, `mark_covered` (#133, #182) | — | — | T-D3, T-X4 |
 | WP7.4 | Очередь по `Т-§13.1` | частично | `queue_p4`, `executor_p4`, `visible_jobs`, `jobs_changed` (#182, #186); `GET /v1/sessions/{id}/jobs` (B, issue #212, D-B-207) | подключение к `workers` (WP1.3) | WP1.3 | T-D4–D8, T-D10 |
-| WP7.5 | Периодические задачи | частично | Планировщик `periodic_p4.py` (#182); `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201) | `exports.cleanup`, `calibration.weekly` (P2); `session.sweep_inactive` в `periodic_p4` (#215) | — | T-D9 |
+| WP7.5 | Периодические задачи | частично | Планировщик `periodic_p4.py` (#182); `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201), `session.sweep_inactive` (D-A-211), `exports.cleanup` (D-A-215) | `calibration.weekly` (P2) | — | T-D9 |
 | WP8.1 | Оспаривания, «описка» | влит | `POST /v1/disputes`, `POST /v1/verdicts/{seq}/typo` (#185, D-A-192) | — | — | T-ED1, T-ED2 |
 | WP8.2 | Правки тем, «я это знаю» | частично | Пять маршрутов правок (#185, D-A-193), `episode.reassigned` | обработчик `check.known_claim` (короткая проверка, WP12.6) не зарегистрирован; разбиение темы из чата (WP13) | — | T-ED3, T-ED4 |
-| WP8.3 | Состояние на момент N | частично | `state_at` на обработчиках rules@3 (#179, #185, D-A-191) | `GET /v1/sessions/{id}/summary` «до и после»; передача `db=ctx.db` в читатель (issue #190) | — | T-ED5, T-E13 |
+| WP8.3 | Состояние на момент N | частично | `state_at` на rules@3 (D-A-191); `session_summary` «до и после» в кодах (D-A-213, T-ED5) | объявление `GET /v1/sessions/{id}/summary` и e2e T-E13 — B (#228, D-A-214) | #228 | T-ED5, T-E13 |
 | WP17.1 | Кандидаты на повторение | влит | `review_candidates` в `graph.read` (#179, D-A-151) | — | — | T-RV1 |
 | WP17.2 | «Сегодня» | влит | `GET /v1/domains/{id}/today`: лимиты, оценка времени, `today.shown` (D-A-195) | — | — | T-RV2 |
 | WP17.3 | Готовность и темп | влит | `topic_readiness`; прогноз темпа и предупреждение `pace_*` в «Сегодня» (D-A-203) | — | — | T-RV3 |
 | WP17.4 | Режим подготовки | частично | `prep_context`; `POST /v1/hubs/{id}/prep-mode` (D-A-195) | подача в слот 6 (B) | D-A-152 | T-RV4 |
 | WP17.5 | После дедлайна | влит | `POST /v1/hubs/{id}/grade`, предложение оценки (D-A-195) | — | — | T-RV4 |
 | WP17.6 | Повторение в ходе учителя (реализует B) | влит | `session/review_turn.py`: кандидаты `review_candidates` в картине памяти, намерение `review`, «давай 5 минут», подбор `select_tasks` (#208, D-B-189, D-B-190) | явное поле лимита времени во входе хода (сейчас — из текста, D-B-189) | — | — |
-| WP25 | Удаление и журнал удалений | частично | `DELETE /v1/domains/{id}` (D-A-197), `DELETE /v1/topics/{id}` (D-A-202), удаление аккаунта функцией с трассами (D-A-205, D-A-206), сверка и повтор, `deletions.reconcile` (D-A-201) | `DELETE /v1/learner` на `delete_account` и снятие `account.purge_deleted` — шаг 3 WP1.3 | — | T-DL1, T-DL2, T-DL3, T-E12 |
+| WP25 | Удаление и журнал удалений | влит | Домен, тема, аккаунт (`DELETE /v1/learner` на `delete_account`, трассы), сверка и повтор, `deletions.reconcile` (D-A-197, D-A-201, D-A-202, D-A-205…207) | снять `account.purge_deleted` Фазы 3 — шаг 5 WP1.3 | — | T-DL1, T-DL2, T-DL3, T-E12 |
 
 ### 4.2. Поток B: AI-слой, учитель, проверка, задачи, агенты
 
@@ -186,10 +186,10 @@
 
 ### Поток A
 
-1. **WP1.3, шаг 3** — `quack/domains/**` и маршруты A (`/graph`, `/topics/{id}`, `DELETE /v1/learner`) на `Db`; `graph/read` на `Db`; `session.sweep_inactive` в `periodic_p4` (#215). Стенд на dbmate — C (#223).
+1. **WP1.3, шаг 3** — A-часть сделана (#225, #226). Ждём B (#222) и C (#223, шаг 3 C).
 2. **WP1.3, шаг 5** — после шагов 3–4 всех потоков: снять код Фазы 3 зоны A (старые проектор, очередь, диспетчер, каталог, `db/postgres.py`), флаг `phase4_processes`, зависимости `sqlalchemy`, `asyncpg`, `alembic` (T-DB3).
-3. **WP8.3** — `GET /v1/sessions/{id}/summary` «до и после» (T-ED5, T-E13).
-4. **WP7.5** — `exports.cleanup`, `calibration.weekly` (P2).
+3. **WP8.3** — функция готова; маршрут — B (#228).
+4. **WP7.5** — `calibration.weekly` (P2).
 5. **WP8.2** — разбиение темы из чата (с WP13); `check.known_claim` зарегистрирован B.
 6. **Владелец:** `D-A-196` (класс C) — на подтверждение владельцу.
 

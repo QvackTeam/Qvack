@@ -704,6 +704,34 @@ async def test_manifests_cleanup_deletes_only_old_manifests(pg_db: Db) -> None:
     assert [r["created_at"] for r in rows] == [now - timedelta(days=5)]
 
 
+async def test_exports_cleanup_deletes_only_expired_archives(pg_db: Db) -> None:
+    """WP7.5 (`Д-§8.4`, `Т-§19.6`, D-A-215): an archive whose link expired is deleted from the
+    store and its row is marked `expired`; a live one stays; a second run finds nothing."""
+    from datetime import UTC, datetime, timedelta
+
+    from quack.jobs.cleanup_p4 import delete_expired_exports
+    from tests.support.storage import InMemoryObjectStore
+
+    learner, now = await create_learner(pg_db), datetime(2026, 11, 4, tzinfo=UTC)
+    store = InMemoryObjectStore()
+    old, live = uuid4(), uuid4()
+    for export_id, hours in ((old, -1), (live, 5)):
+        key = f"learners/{learner}/exports/{export_id}.zip"
+        await store.put(key, b"z", "application/zip")
+        await pg_db.execute(
+            "INSERT INTO content.exports (export_id, learner_id, status, object_key, expires_at) "
+            "VALUES (%(e)s, %(l)s, 'ready', %(k)s, %(at)s)",
+            {"e": export_id, "l": learner, "k": key, "at": now + timedelta(hours=hours)},
+        )
+    assert await delete_expired_exports(pg_db, store, now) == 1
+    assert sorted(store.objects) == [f"learners/{learner}/exports/{live}.zip"]
+    row = await pg_db.fetch_one(
+        "SELECT status, object_key FROM content.exports WHERE export_id = %(e)s", {"e": old}
+    )
+    assert row is not None and row["status"] == "expired" and row["object_key"] is None
+    assert await delete_expired_exports(pg_db, store, now) == 0
+
+
 async def test_delete_account(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
     """WP25 п.3 (`Т-§19.5`, D-A-205): the journal record first, then every row of the learner,
     its objects under `learners/{id}/` and its subgraph; the log row stays; a replay of the

@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-import httpx
 import pytest
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
@@ -18,7 +17,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack import cli
-from quack.api.app import create_app
 from quack.config import Settings
 from quack.db import Db
 from quack.db.postgres import SessionFactory
@@ -41,8 +39,8 @@ from quack.runtime import (
     register_all_handlers,
 )
 from tests.scenario import build_scenario
-from tests.support.auth import ensure_user, session_cookie, session_token
-from tests.support.resources import build_app_resources, build_job_context
+from tests.support.auth import ensure_user
+from tests.support.resources import build_job_context
 
 QUACK_ROOT = Path(__file__).resolve().parents[1] / "quack"
 
@@ -277,17 +275,19 @@ async def test_purge_job_removes_learner_completely(
     await redis.set(f"ratelimit:actions:{learner}", "3", ex=60)
     await redis.set(f"ratelimit:turns:{learner}", "1", ex=60)
 
-    app = create_app(
-        settings,
-        resources=build_app_resources(
-            settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db
-        ),
-    )
-    token = await session_token(pg_db, learner, settings)
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.delete("/v1/learner", headers=session_cookie(token))
-    assert response.status_code == 200
+    # `DELETE /v1/learner` is `delete_account` since WP1.3 (D-A-207); the tombstone it used to
+    # write is what the purge job of Phase 3 takes, so the test writes it itself.
+    async with db() as session, session.begin():
+        await session.execute(
+            text("UPDATE auth.users SET deleted_at = now() WHERE id = :id"), {"id": learner}
+        )
+        await session.execute(
+            text(
+                "INSERT INTO ops.deletion_tombstones (learner_id, requested_at, status) "
+                "VALUES (:id, now(), 'pending_purge')"
+            ),
+            {"id": learner},
+        )
 
     async with db() as session, session.begin():
         await enqueue_job(session, kinds.account_purge_deleted())
