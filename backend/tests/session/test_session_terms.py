@@ -12,12 +12,10 @@ import httpx
 import pytest
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.config import Settings
 from quack.db.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.event_types import ConsentGiven
 from quack.events.log import NewEvent, append_events
 from tests.session.helpers import Learner, make_learner
@@ -36,16 +34,12 @@ def terms_settings(settings: Settings) -> Settings:
 @pytest.fixture
 async def gated(
     terms_settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     neo4j: AsyncDriver,
     redis: Redis,
     pg_db: Db,
 ) -> AsyncIterator[httpx.AsyncClient]:
     """The app with the consent gate in place (no override of `require_terms`)."""
-    resources = build_app_resources(
-        terms_settings, pg_engine, neo4j, redis, session_factory=db, db=pg_db
-    )
+    resources = build_app_resources(terms_settings, neo4j, redis, db=pg_db)
     app = create_app(terms_settings, resources=resources)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:

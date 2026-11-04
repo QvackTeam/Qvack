@@ -7,7 +7,7 @@ f-string, `+` concatenation, `%` formatting or `str.format` — dynamic SQL goes
 T-DB4: every repository function over a table with `learner_id` takes `learner_id` and every
 statement over such a table uses `%(learner_id)s` (in `WHERE` for reads, updates and deletes).
 A repository module is a module of `quack/` that works through `Db` (imports `quack.db`'s `Db`);
-the SQLAlchemy modules of Phases 1–3 leave with WP1.3 (T-DB3).
+the SQLAlchemy modules of Phases 1–3 were removed in WP1.3 (T-DB3, D-A-234).
 """
 
 from __future__ import annotations

@@ -12,14 +12,12 @@ import pytest
 from fastapi import FastAPI
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.auth import SESSION_COOKIE
 from quack.auth.sessions import open_session
 from quack.config import Settings
 from quack.db.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.log import NewEvent, append_events
 from quack.jobs.queue_p4 import enqueue
 from quack.jobs.rules_p4 import JobPlan
@@ -31,15 +29,13 @@ pytest_plugins = ["tests.session.fixtures"]
 @pytest.fixture
 async def app(
     settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     neo4j: AsyncDriver,
     redis: Redis,
     pg_db: Db,
 ) -> FastAPI:
     from tests.support.resources import build_app_resources
 
-    resources = build_app_resources(settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db)
+    resources = build_app_resources(settings, neo4j, redis, db=pg_db)
     return create_app(settings, resources=resources)
 
 

@@ -581,9 +581,9 @@ async def test_workers_adapter_runs_a_registered_handler(pg_db: Db, settings: Se
 
     from quack.jobs import queue_p4
     from quack.jobs.executor_p4 import JobWorker
-    from quack.jobs.queue import ClaimedJob as Phase3Job
     from quack.jobs.rules_p4 import JobPlan
     from quack.jobs.runner import JobContext
+    from quack.jobs.types import ClaimedJob as Phase3Job
     from quack.runtime.phase4 import bind_handlers
 
     learner = await create_learner(pg_db)
@@ -824,7 +824,7 @@ async def test_slice_waits_for_the_journal_of_phase_4(pg_db: Db) -> None:
         async def reader(_: UUID) -> int:
             return applied
 
-        return SliceDeps(None, None, reader, db=pg_db)
+        return SliceDeps(None, reader, db=pg_db)
 
     behind = await read_consistent_slice(learner, None, load, 50, deps=deps(0))
     assert (behind.min_seq, behind.lag_degraded) == (1, True)

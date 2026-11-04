@@ -16,13 +16,11 @@ import pytest
 from fastapi import FastAPI
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.auth import require_terms
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from tests.session.helpers import Learner, make_learner
 from tests.support.resources import build_app_resources
 
@@ -30,8 +28,6 @@ from tests.support.resources import build_app_resources
 @pytest.fixture
 async def session_app(
     settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
@@ -41,7 +37,7 @@ async def session_app(
     The lifespan is not run by `ASGITransport`, so the resources set here stay in place
     and the pools are owned (and closed) by the infrastructure fixtures.
     """
-    resources = build_app_resources(settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db)
+    resources = build_app_resources(settings, neo4j, redis, db=pg_db)
     app = create_app(settings, resources=resources)
     # The learners of these tests have a cookie session but no consent; the consent gate of the
     # session start (WP18.4) has its own test (`test_session_terms.py`).

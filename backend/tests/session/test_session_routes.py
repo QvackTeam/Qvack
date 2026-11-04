@@ -10,11 +10,9 @@ from uuid import uuid4
 import httpx
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.db.redis import presence_key
 from quack.jobs.types import ClaimedJob
 from quack.session.lifecycle import sweep_inactive_sessions
@@ -110,11 +108,9 @@ async def test_sweep_ends_only_the_inactive_sessions(
     learner: Learner,
     client: httpx.AsyncClient,
     pg_db: Db,
-    db: SessionFactory,
     settings: Settings,
     neo4j: AsyncDriver,
     redis: Redis,
-    pg_engine: AsyncEngine,
 ) -> None:
     stale, fresh = await _start(client, learner), await _start(client, learner)
     await pg_db.execute(
@@ -122,7 +118,7 @@ async def test_sweep_ends_only_the_inactive_sessions(
         "WHERE learner_id = %(learner_id)s AND session_id = %(session_id)s",
         {"learner_id": learner.learner_id, "session_id": stale},
     )
-    ctx = build_job_context(settings, db, neo4j, redis, db=pg_db, engine=pg_engine)
+    ctx = build_job_context(settings, neo4j, redis, db=pg_db)
     await sweep_inactive_sessions(cast(ClaimedJob, None), ctx)
     await sweep_inactive_sessions(cast(ClaimedJob, None), ctx)  # a repeat changes nothing
 

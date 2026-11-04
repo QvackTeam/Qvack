@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-
 from quack.api.resources import create_app_resources
 from quack.config import Settings
 from quack.llm.responses_client import ResponsesClient
 
 
-@pytest.mark.usefixtures("pg_engine")  # the resources open `Db` (§4.2)
 async def test_api_resources_use_responses_client(settings: Settings) -> None:
     configured = settings.model_copy(
         update={"meta_api_base_url": "http://meta-mock:8080", "redis_url": settings.redis_url}

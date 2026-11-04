@@ -24,9 +24,8 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 # ТЗ Ф4 WP1.2, D-A-103: Phase 4 Postgres fixtures (`p4_db`, `pg_db`), registered once for all
 # streams; a second registration would re-create the database under an open pool.
-# `tests.support.phase3_pg` holds the fixtures of Phase 3 Postgres (`pg_engine`, `db`) that the
-# tests of streams A and B still request; zone C does not.
-pytest_plugins = ["tests.db.fixtures", "tests.support.phase3_pg"]
+# The SQLAlchemy / Alembic database of Phases 1–3 (`pg_engine`, `db`) is gone (WP1.3, D-A-234).
+pytest_plugins = ["tests.db.fixtures"]
 
 PG_DSN = os.environ.get(
     "QUACK_TEST_POSTGRES_DSN", "postgresql://quack:quack@localhost:55432/quack_test"

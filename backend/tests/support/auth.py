@@ -20,15 +20,11 @@ from quack.auth.sessions import open_session
 from quack.config import Settings
 from quack.db import Db
 
-# `ensure_user` is re-exported for the tests of streams A and B that still import it from here.
-from tests.support.phase3_pg import ensure_user
-
 type RequestHook = Callable[[httpx.Request], Awaitable[None]]
 
 TEST_LEARNER_HEADER = "X-Test-Learner"
 
 __all__ = [
-    "ensure_user",
     "learner_headers",
     "login",
     "login_hook",

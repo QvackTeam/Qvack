@@ -446,9 +446,7 @@ def test_route_builds_the_source_from_the_resources() -> None:
     from quack.api.errors import ApiError
     from quack.session.router import get_turn_context_source
 
-    resources = SimpleNamespace(
-        db=None, llm=None, settings=SETTINGS, neo4j=None, session_factory=None, redis=None
-    )
+    resources = SimpleNamespace(db=None, llm=None, settings=SETTINGS, neo4j=None, redis=None)
     state = SimpleNamespace(resources=resources)
     request = cast(Any, SimpleNamespace(app=SimpleNamespace(state=state)))
     source = get_turn_context_source(request)
