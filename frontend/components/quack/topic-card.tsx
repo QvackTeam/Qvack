@@ -74,7 +74,7 @@ export function TopicCardBody({ topic, hubLabel }: { topic: Topic; hubLabel?: st
             disabled={busy}
             onClick={() => {
               const m = mode(a);
-              if (m) void start({ domainId: domain.id, topicId: topic.id, mode: m });
+              if (m) void start({ domainId: domain.id, topicId: topic.id, intent: m });
               else soon(t.soon.topicAction(a, topic.title));
             }}
             className="caps h-10 rounded-pill border border-seam px-3 text-paper transition-colors duration-[var(--dur-s)] ease-out hover:border-rule hover:bg-cloth-hover disabled:opacity-50"

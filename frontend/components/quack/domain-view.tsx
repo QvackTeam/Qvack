@@ -214,7 +214,7 @@ export function DomainView() {
               <TodayCards recs={recs} nameOf={nameOf} onHover={setHot} className="hidden md:grid" />
             </>
           ) : (
-            <EmptyDomain titleDat={domain.titleDat} setupHref={domain.status === "onboarding" ? `/domains/${domain.id}/structure` : undefined} />
+            <EmptyDomain titleDat={domain.titleDat} />
           )}
         </div>
       </div>

@@ -94,7 +94,7 @@ export function TodayCards({
                   disabled={busy}
                   onClick={() =>
                     API_MODE && r.topicId && (r.action === "learn" || r.action === "review")
-                      ? void start({ domainId: domain.id, topicId: r.topicId, mode: r.action })
+                      ? void start({ domainId: domain.id, topicId: r.topicId, intent: r.action })
                       : soon(t.soon.session(label ?? ""))
                   }
                   className={cn(CARD, CARD_ACTIVE, "disabled:opacity-50")}
