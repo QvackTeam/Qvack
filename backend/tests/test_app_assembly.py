@@ -266,9 +266,9 @@ async def test_rate_limit_local_fallback_without_redis(
 async def test_actions_and_turns_rate_limits(
     make_app: AppFactory, redis: Redis, sign_in: SignIn
 ) -> None:
-    """T-A5: `learner_actions_per_min` for POST/PATCH/DELETE, `turns_per_min` for turns,
-    GET unlimited, heartbeat outside `actions`, Redis keys carry a TTL."""
-    app = make_app(learner_actions_per_min=3, turns_per_min=1)
+    """T-A5: `learner_actions_per_min` for POST/PATCH/DELETE (one limit for every action, ТЗ Ф4
+    §2.3 строка 16), GET unlimited, heartbeat outside `actions`, Redis keys carry a TTL."""
+    app = make_app(learner_actions_per_min=3)
     async with _client(app) as client:
         learner_id, headers = await sign_in()
         for i in range(3):
@@ -301,36 +301,6 @@ async def test_actions_and_turns_rate_limits(
             )
             assert created.status_code == 201, created.text
         assert await redis.get(ratelimit_key("actions", other_id)) == "3"
-
-        # turns: the second turn of the window is refused (the session does not matter)
-        third_id, third = await sign_in()
-        first_turn = await client.post(
-            f"/v1/sessions/{uuid4()}/turns",
-            json={"text": "hi", "idempotency_key": str(uuid4())},
-            headers=third,
-        )
-        assert first_turn.status_code != 429, first_turn.text
-        second_turn = await client.post(
-            f"/v1/sessions/{uuid4()}/turns",
-            json={"text": "hi again", "idempotency_key": str(uuid4())},
-            headers=third,
-        )
-        assert second_turn.status_code == 429, second_turn.text
-        assert await redis.ttl(ratelimit_key("turns", third_id)) > 0
-
-
-async def test_turn_limit_without_redis_is_local(make_app: AppFactory, sign_in: SignIn) -> None:
-    """T-E8 in small: the turn limit does not fail open when Redis is down."""
-    app = make_app(redis_client=BrokenRedis(), turns_per_min=1)
-    async with _client(app) as client:
-        _, headers = await sign_in()
-        for expected_blocked in (False, True):
-            response = await client.post(
-                f"/v1/sessions/{uuid4()}/turns",
-                json={"text": "hi", "idempotency_key": str(uuid4())},
-                headers=headers,
-            )
-            assert (response.status_code == 429) is expected_blocked, response.text
 
 
 # --- WP1.6: thresholds read from Settings at request time ------------------------------------
@@ -499,33 +469,11 @@ def test_sse_endpoints_document_event_stream() -> None:
     """WP8.7: SSE endpoints (`С-§8.5`) describe a `text/event-stream` body."""
     paths = _snapshot_app().openapi()["paths"]
     for path in (
-        "/v1/sessions/{session_id}/turns",
         "/v1/sessions/{session_id}/events",
         "/v1/sessions/{session_id}/actions",
     ):
         (operation,) = paths[path].values()
         assert list(operation["responses"]["200"]["content"]) == ["text/event-stream"], path
-
-
-def test_turn_stream_documents_status_after_turn_started() -> None:
-    """WP6.3: the turn stream description lists its events in order; `status` with
-    `{"state": "thinking"}` comes right after `turn_started` (for the frontend at G1)."""
-    paths = _snapshot_app().openapi()["paths"]
-    (operation,) = paths["/v1/sessions/{session_id}/turns"].values()
-    schema = operation["responses"]["200"]["content"]["text/event-stream"]["schema"]
-    order = [
-        "turn_started",
-        "status",
-        "token",
-        "task_evaluated",
-        "task_assigned",
-        "turn_completed",
-        "done",
-    ]
-    positions = [schema["description"].find(f"`{name}`") for name in order]
-    assert all(p >= 0 for p in positions), schema["description"]
-    assert positions == sorted(positions), schema["description"]
-    assert '{"state": "thinking"}' in schema["description"]
 
 
 def test_create_app_binds_process_and_version(settings: Settings) -> None:

@@ -15,7 +15,7 @@ from quack.api.auth import get_current_learner_id
 from quack.api.errors import ApiError
 from quack.api.ratelimit import enforce_action_rate_limit
 from quack.api.resources import AppResources, get_compute, get_llm, get_resources
-from quack.artifacts import cheatsheets, notes, practice, search
+from quack.artifacts import cheatsheets, notes, search
 from quack.artifacts.schemas import (
     ArtifactListResponse,
     ArtifactView,
@@ -23,10 +23,6 @@ from quack.artifacts.schemas import (
     CheatsheetRefreshResponse,
     ExportJson,
     ExportMdResponse,
-    HintRequest,
-    HintResponse,
-    NextTaskRequest,
-    NextTaskResponse,
     NoteCreateRequest,
     NoteCreateResponse,
     NoteDeleteRequest,
@@ -34,8 +30,6 @@ from quack.artifacts.schemas import (
     NoteUpdateRequest,
     NoteUpdateResponse,
     SearchResponse,
-    SubmitRequest,
-    SubmitResponse,
 )
 from quack.compute_client.client import ComputeClient
 from quack.config import Settings
@@ -58,52 +52,6 @@ type Resources = Annotated[AppResources, Depends(get_resources)]
 type Gateway = Annotated[LLMGateway, Depends(get_llm)]
 type Compute = Annotated[ComputeClient, Depends(get_compute)]
 type AppSettings = Annotated[Settings, Depends(_settings)]
-
-
-# --- Practice ---
-
-
-@router.post("/sessions/{session_id}/tasks/next", response_model=NextTaskResponse)
-async def next_task(
-    session_id: UUID,
-    body: NextTaskRequest,
-    learner_id: CurrentLearnerId,
-    resources: Resources,
-    gateway: Gateway,
-    settings: AppSettings,
-) -> NextTaskResponse:
-    return await practice.next_task(learner_id, session_id, body, resources, gateway, settings)
-
-
-@router.post("/sessions/{session_id}/tasks/{task_id}/hint", response_model=HintResponse)
-async def give_hint(
-    session_id: UUID,
-    task_id: UUID,
-    body: HintRequest,
-    learner_id: CurrentLearnerId,
-    resources: Resources,
-    gateway: Gateway,
-    settings: AppSettings,
-) -> HintResponse:
-    return await practice.give_hint(
-        learner_id, session_id, task_id, body, resources, gateway, settings
-    )
-
-
-@router.post("/sessions/{session_id}/tasks/{task_id}/submit", response_model=SubmitResponse)
-async def submit_answer(
-    session_id: UUID,
-    task_id: UUID,
-    body: SubmitRequest,
-    learner_id: CurrentLearnerId,
-    resources: Resources,
-    gateway: Gateway,
-    compute: Compute,
-    settings: AppSettings,
-) -> SubmitResponse:
-    return await practice.submit_answer(
-        learner_id, session_id, task_id, body, resources, gateway, compute, settings
-    )
 
 
 # --- Notes and artifacts ---
