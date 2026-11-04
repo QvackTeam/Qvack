@@ -24,7 +24,7 @@ from quack.ops.db_roles import (
     RolePasswords,
     apply_db_roles,
 )
-from tests.conftest import PG_DSN
+from tests.conftest import PG_DSN, _unavailable
 
 PASSWORDS = RolePasswords(migrator="m-pass'1%x", app='a-pass"2', reader="r-pass;3")
 
@@ -34,7 +34,11 @@ async def scratch(settings: Settings) -> AsyncIterator[str]:
     """A throwaway database: the roles are cluster-wide, the shared test schema stays untouched.
     Yields its DSN (as the superuser of the test server)."""
     name = f"quack_roles_{uuid4().hex[:8]}"
-    admin = await psycopg.AsyncConnection.connect(PG_DSN, autocommit=True)
+    try:
+        admin = await psycopg.AsyncConnection.connect(PG_DSN, autocommit=True)
+    except psycopg.Error as exc:  # no infrastructure: skip, or fail under REQUIRE_INFRA
+        _unavailable("Postgres", exc)
+        return
     await admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
     dsn = make_conninfo(PG_DSN, dbname=name)
     async with await psycopg.AsyncConnection.connect(dsn) as owner:
