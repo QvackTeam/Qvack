@@ -7,17 +7,13 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
-import httpx
 import pytest
 from neo4j import AsyncDriver
-from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from structlog.testing import capture_logs
 
-from quack.api.app import create_app
 from quack.config import Settings
-from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.events import append_events
 from quack.events.models import NewEvent, StoredEvent
@@ -28,8 +24,6 @@ from quack.jobs.dispatcher import Dispatcher, supervise
 from quack.jobs.dispatcher_rules import DISPATCHER_RULES
 from quack.jobs.queue import JobSpec
 from tests.factories import new_event
-from tests.support.auth import ensure_user, session_cookie, session_token
-from tests.support.resources import build_app_resources
 
 # Rows compared with what the transaction of the event used to enqueue (WP11.2).
 _JOB_COLUMNS = "kind, priority, lock_key, coalesce_key, required_seq, payload"
@@ -476,63 +470,3 @@ async def test_dispatcher_lag(db: SessionFactory, settings: Settings) -> None:
     assert lagging >= 1 and max_lag >= await _last_seq(db, story.learner)
     await dispatcher.run_once()
     assert await dispatcher.lag() == (0, 0)
-
-
-# --- T-D8 -------------------------------------------------------------------------------
-
-
-async def test_cheatsheet_refresh_endpoint_enqueues_directly(
-    db: SessionFactory,
-    pg_db: Db,
-    settings: Settings,
-    pg_engine: AsyncEngine,
-    neo4j: AsyncDriver,
-    redis: Redis,
-) -> None:
-    learner = uuid4()
-    await ensure_user(db, learner)
-    domain, topic = uuid4(), uuid4()
-    d, t = str(domain), str(topic)
-    await _append(
-        db,
-        learner,
-        new_event(
-            "domain.created", {"domain_id": d, "name": "D", "slug": f"d-{d[:8]}"}, actor="learner"
-        ),
-        new_event(
-            "structure.proposed",
-            {
-                "domain_id": d,
-                "structure_version": 1,
-                "topics": [{"topic_id": t, "name": "T"}],
-                "skills": [],
-                "prereqs": [],
-                "skill_deps": [],
-                "misconceptions": [],
-            },
-            actor="structurer@1",
-        ),
-        new_event("structure.confirmed", {"domain_id": d, "structure_version": 1}, actor="learner"),
-    )
-    app = create_app(
-        settings,
-        resources=build_app_resources(
-            settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db
-        ),
-    )
-    headers = session_cookie(await session_token(pg_db, learner, settings))
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        first = await client.post(
-            f"/v1/topics/{t}/cheatsheet/refresh", json={"domain_id": d}, headers=headers
-        )
-        second = await client.post(
-            f"/v1/topics/{t}/cheatsheet/refresh", json={"domain_id": d}, headers=headers
-        )
-    assert first.status_code == 200, first.text
-    assert second.status_code == 200, second.text
-    assert first.json()["job_id"] == second.json()["job_id"]
-    rows = await _q(db, "SELECT kind, required_seq FROM ops.jobs WHERE learner_id = :l", l=learner)
-    assert rows == [
-        {"kind": "artifact.refresh_cheatsheet", "required_seq": await _last_seq(db, learner)}
-    ]

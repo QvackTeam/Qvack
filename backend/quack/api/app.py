@@ -14,7 +14,6 @@ from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import text
 
 from quack.api.errors import install_error_handlers
 from quack.api.learner_stream import router as learner_stream_router
@@ -24,7 +23,6 @@ from quack.api.resources import AppResources, create_app_resources
 from quack.artifacts.cards_routes import router as cards_router
 from quack.artifacts.hub_cheatsheet_routes import router as hub_cheatsheet_router
 from quack.artifacts.notes_routes import router as notes_router
-from quack.artifacts.router import router as artifacts_router
 from quack.auth.consents import has_current_terms
 from quack.auth.google import AuthlibGoogleOIDC, GoogleOIDC
 from quack.auth.router import router as auth_router
@@ -86,8 +84,7 @@ def _health_router() -> APIRouter:
         else:
 
             async def postgres() -> None:
-                async with resources.engine.connect() as conn:
-                    await conn.execute(text("SELECT 1"))
+                await resources.db.fetch_one("SELECT 1")
 
             async def redis() -> None:
                 if resources.redis is None:
@@ -128,8 +125,7 @@ def _healthz_router() -> APIRouter:
         if resources is not None:
 
             async def postgres() -> None:
-                async with resources.engine.connect() as conn:
-                    await conn.execute(text("SELECT 1"))
+                await resources.db.fetch_one("SELECT 1")
 
             status = await _check(postgres, resources.settings.health_check_timeout_s)
         return JSONResponse({"status": status}, status_code=200 if status == "ok" else 503)
@@ -208,7 +204,6 @@ def create_app(
     app.include_router(review_router)
     app.include_router(deletion_router)
     app.include_router(session_router, dependencies=[Depends(enforce_action_rate_limit)])
-    app.include_router(artifacts_router)
     app.include_router(notes_router)
     app.include_router(cards_router)
     app.include_router(hub_cheatsheet_router)

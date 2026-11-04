@@ -5,7 +5,9 @@ packages import `AppResources` and the dependencies only from this module (§4.1
 `quack.api.app` can import product routers without an import cycle.
 
 ТЗ Фазы 4 §4.2 adds `storage`, `embeddings`, `email`, `deletions` (stream C) and `db` (the `Db`
-of WP1.2, stream A, seam S2); `engine` and `session_factory` leave in WP1.3.
+of WP1.2, stream A, seam S2); `engine` and `session_factory` left in WP1.3 (D-C-170). The only
+SQLAlchemy object of the API process is the session factory handed to `LLMGateway` for its
+outbox until stream B removes that argument (D-B-197, step 4).
 """
 
 from __future__ import annotations
@@ -15,7 +17,6 @@ from dataclasses import dataclass
 from fastapi import Request
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.requests import HTTPConnection
 
 from quack.api.email import EmailSender, create_email_sender
@@ -45,8 +46,6 @@ class AppResources:
 
     settings: Settings
     db: Db
-    engine: AsyncEngine
-    session_factory: SessionFactory
     neo4j: AsyncDriver
     redis: Redis | None
     llm: LLMGateway
@@ -58,7 +57,7 @@ class AppResources:
 
     async def close(self) -> None:
         """Close in reverse creation order: deletions, email, embeddings, storage, compute, llm,
-        redis, neo4j, engine, db (§4.2)."""
+        redis, neo4j, db (§4.2)."""
         await self.deletions.aclose()
         await self.email.aclose()
         await self.embeddings.aclose()
@@ -68,8 +67,13 @@ class AppResources:
         if self.redis is not None:
             await self.redis.aclose()
         await self.neo4j.close()
-        await self.engine.dispose()
         await self.db.close()
+
+
+def _outbox_session_factory(settings: Settings) -> SessionFactory:
+    """The argument `LLMGateway` still takes for its outbox (D-B-197): one lazy connection, no
+    other use in the API process. Goes with the argument (WP1.3, step 4 of stream B)."""
+    return create_session_factory(create_engine(settings, pool_size=1))
 
 
 async def create_app_resources(settings: Settings) -> AppResources:
@@ -77,19 +81,15 @@ async def create_app_resources(settings: Settings) -> AppResources:
     opens without waiting for Postgres (`wait=False`): the API starts and `/health/ready`
     reports a missing database as 503 (Phase 3 readiness contract)."""
     db = await open_db(settings, wait=False)
-    engine = create_engine(settings)
-    session_factory = create_session_factory(engine)
     neo4j = create_driver(settings)
     redis = create_redis(settings)
     provider = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
     return AppResources(
         settings=settings,
         db=db,
-        engine=engine,
-        session_factory=session_factory,
         neo4j=neo4j,
         redis=redis,
-        llm=LLMGateway(session_factory, provider, settings),
+        llm=LLMGateway(_outbox_session_factory(settings), provider, settings, db=db),
         compute=create_compute_client(settings),
         storage=create_object_store(settings),
         embeddings=create_embedding_client(settings),
