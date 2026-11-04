@@ -74,7 +74,7 @@ export function TopicCardBody({ topic, hubLabel }: { topic: Topic; hubLabel?: st
             disabled={busy}
             onClick={() => {
               const m = mode(a);
-              if (m) void start({ domainId: domain.id, topicId: topic.id, mode: m });
+              if (m) void start({ domainId: domain.id, topicId: topic.id, intent: m });
               else soon(t.soon.topicAction(a, topic.title));
             }}
             className="h-10 disabled:opacity-50 rounded-control border border-seam px-3 text-small text-paper transition-colors hover:border-rule hover:bg-cloth-hover"

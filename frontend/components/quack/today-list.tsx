@@ -55,7 +55,7 @@ export function TodayList({ items, idPrefix = "" }: { items: TodayItem[]; idPref
                   disabled={busy}
                   onClick={() =>
                     it.topicId
-                      ? void start({ domainId: domain.id, topicId: it.topicId, mode: "review" })
+                      ? void start({ domainId: domain.id, topicId: it.topicId, intent: "review" })
                       : soon(t.soon.session(it.title))
                   }
                   className={cn(CARD, "disabled:opacity-50")}

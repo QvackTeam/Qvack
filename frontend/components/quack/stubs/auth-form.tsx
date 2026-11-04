@@ -3,19 +3,23 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
-import { API_MODE, ApiError, post, setToken } from "@/lib/api/client";
+import { API_MODE, ApiError, post } from "@/lib/api/client";
 import { useT } from "@/lib/i18n/provider";
 import { Duck } from "../duck";
-import { FIELD, Field, PRIMARY_BTN, StubNote } from "./stub-parts";
+import { FIELD, Field, PRIMARY_BTN, SECONDARY_BTN } from "./stub-parts";
 
-/** Log in / sign up. With the backend it gets a JWT; on mocks submitting just opens the app. */
+/**
+ * Log in / sign up. With the backend there is no password: a one-time link by email (`POST /auth/link`) or Google
+ * (`GET /auth/google/start`); the session is the `quack_session` cookie. On mocks submitting just opens the app.
+ */
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const t = useT().stubs.auth;
+  const live = useT().live;
   const router = useRouter();
   const id = useId();
   const signup = mode === "signup";
-  const tx = useT();
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async (form: FormData) => {
@@ -25,29 +29,12 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
     }
     setBusy(true);
     setError(null);
-    const email = String(form.get("email") ?? "");
-    const password = String(form.get("password") ?? "");
-    const name = String(form.get("name") ?? "").trim();
     try {
-      const res = signup
-        ? await post("/v1/auth/register", { email, password, display_name: name || null })
-        : await post("/v1/auth/login", { email, password });
-      setToken(res.token);
-      // the app layout mounts fresh and loads data with the new token
-      router.replace("/");
+      await post("/auth/link", { email: String(form.get("email") ?? "").trim() });
+      setSent(true);
     } catch (e) {
-      const code = e instanceof ApiError ? e.code : "";
-      setError(
-        code === "UNAUTHORIZED"
-          ? tx.live.badLogin
-          : e instanceof ApiError && e.status === 409
-            ? tx.live.emailTaken
-            : code === "RATE_LIMITED"
-              ? tx.live.rateLimited
-              : e instanceof ApiError && e.status < 500
-                ? e.message
-                : tx.live.serverDown,
-      );
+      setError(e instanceof ApiError && e.code === "RATE_LIMITED" ? live.rateLimited : e instanceof ApiError && e.status < 500 ? e.message : live.serverDown);
+    } finally {
       setBusy(false);
     }
   };
@@ -57,43 +44,42 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
       <div className="m-auto w-full max-w-[400px]">
         <Duck className="size-14" />
         <h1 className="mt-4 font-serif text-[28px] leading-tight font-bold text-paper">{signup ? t.signupTitle : t.loginTitle}</h1>
-        <p className="mt-2 text-body text-paper-dim">{signup ? t.signupBody : t.loginBody}</p>
+        <p className="mt-2 text-body text-paper-dim">{API_MODE ? live.linkBody : signup ? t.signupBody : t.loginBody}</p>
 
-        <form
-          className="mt-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit(new FormData(e.currentTarget));
-          }}
-        >
-          {signup && (
-            <Field id={`${id}-name`} label={t.name}>
-              <input id={`${id}-name`} name="name" autoComplete="nickname" placeholder={t.namePh} className={FIELD} />
+        {sent ? (
+          <p role="status" className="mt-6 text-body text-paper">
+            {live.linkSent}
+          </p>
+        ) : (
+          <form
+            className="mt-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submit(new FormData(e.currentTarget));
+            }}
+          >
+            <Field id={`${id}-email`} label={t.email}>
+              <input id={`${id}-email`} name="email" type="email" required autoComplete="email" placeholder={t.emailPh} className={FIELD} />
             </Field>
-          )}
-          <Field id={`${id}-email`} label={t.email}>
-            <input id={`${id}-email`} name="email" type="email" required autoComplete="email" placeholder={t.emailPh} className={FIELD} />
-          </Field>
-          <Field id={`${id}-pw`} label={t.password} help={signup ? t.passwordHelp : undefined}>
-            <input
-              id={`${id}-pw`}
-              name="password"
-              type="password"
-              required
-              minLength={signup ? 8 : 1}
-              autoComplete={signup ? "new-password" : "current-password"}
-              className={FIELD}
-            />
-          </Field>
-          {error && (
-            <p role="alert" className="mt-4 text-small text-st-confused">
-              {error}
-            </p>
-          )}
-          <button type="submit" disabled={busy} className={`${PRIMARY_BTN} mt-6 w-full`}>
-            {signup ? t.signup : t.login}
-          </button>
-        </form>
+            {error && (
+              <p role="alert" className="mt-4 text-small text-st-confused">
+                {error}
+              </p>
+            )}
+            <button type="submit" disabled={busy} className={`${PRIMARY_BTN} mt-6 w-full`}>
+              {busy ? live.linkSending : API_MODE ? live.linkSend : signup ? t.signup : t.login}
+            </button>
+            {API_MODE && (
+              <>
+                <p className="my-3 text-center text-small text-paper-dim">{live.orWord}</p>
+                {/* a full page navigation on purpose: the backend answers with a redirect to Google */}
+                <a href="/api/auth/google/start" className={`${SECONDARY_BTN} w-full`}>
+                  {live.google}
+                </a>
+              </>
+            )}
+          </form>
+        )}
 
         <p className="mt-5 text-small text-paper-dim">
           {signup ? t.haveAccount : t.noAccount}{" "}
@@ -101,8 +87,6 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
             {signup ? t.toLogin : t.toSignup}
           </Link>
         </p>
-
-        {!API_MODE && <StubNote className="mt-8" endpoints={signup ? ["POST /v1/auth/register"] : ["POST /v1/auth/login", "GET /v1/auth/me"]} />}
       </div>
     </main>
   );

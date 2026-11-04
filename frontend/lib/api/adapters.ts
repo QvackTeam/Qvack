@@ -3,42 +3,50 @@ import type { S } from "./client";
 
 /** Backend → the shapes the UI was built on (lib/mock/types.ts). The UI itself does not change. */
 
-/** displayState of the backend (Т-§22.2) → the four topic states of the design */
-export function topicState(display: S["TopicNodeView"]["display_state"]): TopicState {
-  switch (display) {
-    case "solid":
+/** displayState of the backend (Т-§22.2: 8 codes + `none`) → the four topic states of the design */
+export function topicState(display: S["TopicDisplay"] | undefined): TopicState {
+  switch (display?.display_state) {
+    case "solved_independently":
       return "solid";
-    case "rusty":
+    case "confused_with":
+    case "persistent_error":
+    case "struggling":
+      return "confused";
+    case "inconsistent":
     case "in_progress":
       return "review";
     default:
+      // not_tested, known_from_other_domain, none
       return "new";
   }
 }
 
-/** The backend has no chapters yet: all topics of a subject go into one chapter, so the graph layout works */
+/** Ring of the topic: how far its levels have come (`display_level` 0..6), the backend has no mastery number */
+const retentionOf = (display: S["TopicDisplay"] | undefined) => Math.min(1, Math.max(0, (display?.display_level ?? 0) / 6));
+
+/** The graph already carries hubs on the backend (`GET /v1/domains/{id}/hubs`), but its nodes do not say which hub they belong to: all topics go into one chapter */
 export const allTopicsHubId = (domainId: string) => `all-${domainId}`;
 
-/** `from → to` in PrereqEdge: `from` has to come before `to` */
+/** `from → to` in TopicRequires: `from` has to come before `to` */
 export function topicsFromGraph(domainId: string, graph: S["DomainGraphResponse"]): Topic[] {
   const requires = new Map<string, string[]>();
-  for (const e of graph.prereqs) requires.set(e.to_topic_id, [...(requires.get(e.to_topic_id) ?? []), e.from_topic_id]);
-  // skipped and archived topics are the student's "not needed": they leave the graph
-  const shown = graph.topics.filter((t) => t.status === "active");
+  for (const e of graph.requires) requires.set(e.to_topic_id, [...(requires.get(e.to_topic_id) ?? []), e.from_topic_id]);
+  // hidden and archived topics are the student's "not needed": they leave the graph
+  const shown = graph.topics.filter((t) => t.status === "active" && t.visibility !== "hidden");
   const ids = new Set(shown.map((t) => t.topic_id));
   for (const [k, v] of requires) requires.set(k, v.filter((id) => ids.has(id)));
-  return shown
-    .map((t) => ({
-      id: t.topic_id,
-      hubId: allTopicsHubId(domainId),
-      title: t.name,
-      line: t.description ?? "",
-      simple: t.description || t.name,
-      about: t.description ?? "",
-      state: topicState(t.display_state),
-      retention: t.mastery,
-      requires: requires.get(t.topic_id) ?? [],
-    }));
+  return shown.map((t) => ({
+    id: t.topic_id,
+    hubId: allTopicsHubId(domainId),
+    title: t.name,
+    // the graph carries no descriptions: the card line is filled by the topic page
+    line: "",
+    simple: t.name,
+    about: "",
+    state: topicState(t.display),
+    retention: retentionOf(t.display),
+    requires: requires.get(t.topic_id) ?? [],
+  }));
 }
 
 /** «С чего начнём?»: не больше стольких тем, у которых подошёл срок повторения */
@@ -47,16 +55,17 @@ const DAY_MS = 86_400_000;
 
 export type TodayLabels = { reviewToday: string; reviewOverdue: (days: number) => string };
 
-/** Темы, у которых срок повторения (`nearest_review_at`, мс; 0 — не назначен) наступает до конца дня, самые давние первыми */
+/** Темы, у которых срок повторения (`nearest_due_at_ms`, мс; 0 — не назначен) наступает до конца дня, самые давние первыми */
 export function todayFromGraph(graph: S["DomainGraphResponse"], topics: Topic[], labels: TodayLabels, now = Date.now()): TodayItem[] {
   const endOfDay = new Date(now).setHours(24, 0, 0, 0);
   const shown = new Map(topics.map((t) => [t.id, t]));
+  const due = (t: S["TopicNodeView"]) => t.nearest_due_at_ms ?? 0;
   return graph.topics
-    .filter((t) => shown.has(t.topic_id) && t.nearest_review_at > 0 && t.nearest_review_at < endOfDay)
-    .sort((a, b) => a.nearest_review_at - b.nearest_review_at)
+    .filter((t) => shown.has(t.topic_id) && due(t) > 0 && due(t) < endOfDay)
+    .sort((a, b) => due(a) - due(b))
     .slice(0, TODAY_MAX)
     .map((t) => {
-      const days = Math.floor((now - t.nearest_review_at) / DAY_MS);
+      const days = Math.floor((now - due(t)) / DAY_MS);
       return {
         id: t.topic_id,
         topicId: t.topic_id,
@@ -68,14 +77,15 @@ export function todayFromGraph(graph: S["DomainGraphResponse"], topics: Topic[],
 
 export type SessionLabels = { activeSession: string; modes: Record<string, string> };
 
-/** Session history row → the sessions panel: topic, else what the student asked, else the mode */
-export function sessionFromApi(s: S["SessionListItem"], topics: Topic[], labels: SessionLabels): Session {
-  const mode = labels.modes[s.mode] ?? s.mode;
+/** Session history row → the sessions panel: topic, else the intent */
+export function sessionFromApi(s: S["SessionView"], topics: Topic[], labels: SessionLabels): Session {
+  const intent = s.intent ?? "free";
+  const mode = labels.modes[intent] ?? intent;
   return {
     id: s.session_id,
     href: `/session/${s.session_id}`,
     date: s.started_at.slice(0, 10),
-    title: topics.find((t) => t.id === s.topic_id)?.title ?? s.goal ?? mode,
+    title: topics.find((t) => t.id === s.topic_id)?.title ?? mode,
     topics: s.status === "active" ? [labels.activeSession] : [mode],
   };
 }
@@ -84,7 +94,7 @@ export function domainFromApi(
   summary: S["DomainSummary"],
   graph: S["DomainGraphResponse"] | undefined,
   labels: { hub: string } & SessionLabels & TodayLabels,
-  history: S["SessionListItem"][],
+  history: S["SessionView"][],
 ): Domain {
   const hubTitle = labels.hub;
   const topics = graph ? topicsFromGraph(summary.domain_id, graph) : [];
@@ -93,7 +103,6 @@ export function domainFromApi(
     id: summary.domain_id,
     title: summary.name,
     titleDat: summary.name,
-    status: summary.status,
     hubs: topics.length ? [{ id: allTopicsHubId(summary.domain_id), num: "I", title: hubTitle, about: "" }] : [],
     topics,
     outside: [],
