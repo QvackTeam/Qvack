@@ -84,6 +84,44 @@
   - `tests/test_dispatcher.py::test_cheatsheet_refresh_endpoint_enqueues_directly` (T-D8 Фазы 3, `POST /v1/topics/{id}/cheatsheet/refresh`) - вместе с маршрутом; кнопка «собери сам» хаба и согласие - `test_cheatsheet_routes_wp23_5.py`;
   - `tests/test_jobs_phase3.py` (`T-Q7`: `test_all_job_kinds_have_handlers`, `test_worker_exits_with_code_1_on_handler_mismatch`): вид, чей пропуск проверяется, - `artifact.topic_refresh` вместо `artifact.refresh_cheatsheet` (его нет в `JOB_KINDS`); свойство то же;
   - `tests/test_app_assembly.py`: `test_search_limits_come_from_settings` переведён с `/v1/artifacts/search` на `/v1/search` (лимиты те же), проба `T-A3` `/v1/artifacts` → `/v1/me`.
+### D-C-203. WP20.2: фото конспекта, слой 1 `material_parser@1`, правка файлов B
+- Класс: B (форма данных и черновик промпта; доктрина — по D-C-132)
+- WP / место: WP20.2, S8; `quack/materials/parse.py` (`SheetReading`), `quack/prompts/material_parser/v1.md`, `tests/llm/prompt_contracts.py`, `scripts/meta_smoke.py`, `PROMPT_CONTRACTS.md`, `manifest.json`
+- Контекст: (1) фото конспекта читает `recognizer` в режиме листа (Т-§16.5), но `quack.materials` не может импортировать `quack.canvas` (§4.1). (2) Для `material_parser@1` нужен слой 2 (формат, контракт) и какой-то слой 1 (красная линия 13: доктрину пишет владелец).
+- Решение: (1) `SheetReading`, `SheetLine`, `SheetBox` в `materials/parse.py` — копия схемы `RecognizerSheetOutput`; тест сверяет `$defs` и `required` двух схем. Из ответа берутся строки не-рисунки и не зачёркнутые, склеенные через перевод строки, одна страница; выровненное изображение — картинка страницы. (2) Слой 2 `v1.md`: контракт `MaterialParserOutput {title, chunks[{n, topic, notation, teaches, uses}]}` и блок входа `chunks`. Слой 1 — черновик по тезисам Т-§4.3 (прецедент D-C-132, как у `recognizer@1` и `artifact_writer@1`): размечать, а не обучать; названия словами материала; что преподаёт и что использует; честная пустота; текст куска — данные (Т-§19.8); новых правил нет. Владелец может заменить своим пакетом. (3) Схема зарегистрирована в `tests/llm/prompt_contracts.py` и `scripts/meta_smoke.py` (`ROLE_SCHEMAS`, файл B; правка в несколько строк: иначе `test_smoke_runs_every_role...` и покрытие `ALL_PROMPT_SCHEMAS` красные).
+- Почему: §4.1, §7.6 п.1–2, §0.4.4 п.13, D-C-132, Т-§16.5, Т-§19.8.
+- Обратимость: код и файл промпта; версия `@2` для новой доктрины.
+- Тесты: `test_sheet_reading_is_the_schema_of_the_recognizer`, `test_image_material_is_read_by_the_recognizer`, `test_the_prompt_material_parser_v1_has_its_contract`, `tests/llm` (T-M5).
+- Требует подтверждения владельцем: нет (замена слоя 1 — на его усмотрение)
+
+### D-C-202. WP20.2: что разбор отдаёт структуре — имена, REQUIRES из `uses`, хаб «из материала»; что оставлено
+- Класс: B (WP20.2 п.3–4 не называет формат метки и состав записи)
+- WP / место: WP20.2 п.3–5, WP16.3 (`reconcile_domain`, B); `quack/materials/parse.py::structure_step`
+- Контекст: ТЗ: `material_parser` размечает «по кандидатам с метками», а `chunk.indexed` несёт `teaches`/`uses` как id навыков; кандидатов из графа на шаге 1 нет (он без блокировки и без графа).
+- Решение: (1) Парсер называет темы и навыки словами материала; метки кандидатов ставит сверка B (`builder`, Reconcile) на шаге 2 — она и есть «по кандидатам с метками». (2) Шаг 2: темы, затем навыки пачками по `candidate_k` (совет docstring `reconcile_domain`); `Subject.topic` нового навыка — тема куска, где его преподают (иначе название материала); `Subject.requires` — `uses` кусков, которые преподают навык (кроме самого навыка), `origin = material`. Одно имя в разных регистрах — один субъект (`casefold`, первое написание). (3) События одной транзакцией со статусом: `hub.created {kind: material, origin: material, control_type: no_goal, name = title или «Untitled material»}` (`hub_id` = `uuid5` от материала) и `hub.topics_changed` (темы из ответа сверки, `required_levels` = `control_type_levels["no_goal"]`), `chunk.indexed` на каждый кусок (в том числе без разметки), `material.parsed {pages_count}`; ключи `…:{chunk_id|material_id}`. (4) Оставлено: дедлайны и структура курса из силлабуса (`hub.deadline_set`) и задачи семинара (`task.created`, проверка Т-§5.6) — нужны разметка задач WP12.5 (B) и часовой пояс ученика, в T-MT1 их нет; PDF без текстового слоя (скан) даёт пустые страницы — распознавание картинок страниц не делается. Это хвост WP20.2, не закрытый этим решением.
+- Почему: Т-§4.3, Т-§4.4, Т-§4.6, Т-§4.8, WP16.3, WP20.2 п.3–5.
+- Обратимость: код; формат `chunk.indexed` не менялся.
+- Тесты: `test_material_parse_pipeline` (T-MT1), `test_parse_step_repeat_after_a_crash_reuses_pages`.
+- Требует подтверждения владельцем: нет
+
+### D-C-201. WP20.2: размер куска и параметры разбора, полезная нагрузка второго шага
+- Класс: C (числа из документа «около 1–2 КБ», остальное — параметры)
+- WP / место: WP20.2; `quack/config.py`, `quack/materials/parse.py`
+- Контекст: Т-§3.4.5 «около 1–2 КБ», Т-§4.3 «параллельно для больших материалов» — без чисел.
+- Решение: `material_chunk_chars = 1500` (цель), `material_chunk_max_chars = 2000` (потолок), `material_parser_batch = 8` кусков на вызов, `material_parser_concurrency = 4` вызова одновременно, `material_marks_per_chunk = 6`. Кусок лежит на одной странице; абзац цел, пока влезает; маленький кусок берёт следующий абзац до потолка; длинный текст режется по концу предложения, строки или пробелу. Номер куска в промпте — `[n]` с 1; номер вне диапазона и повтор отбрасываются, пропущенный кусок остаётся без разметки (`check=` не ставится: он стоил бы лишний вызов). Метки уходят в payload второго шага (`chunks[{chunk_id, topic, notation, teaches, uses}]`, около 0,2 КБ на кусок); тексты кусков там не лежат — шаг 2 режет страницы из `content.material_pages` тем же `split_chunks`, `chunk_id` = `uuid5` от материала, страницы и места на ней (закон 5). Изменение параметров между шагами сдвинет границы: метки несовпавших кусков теряются, кусок индексируется без них.
+- Почему: Т-§3.4.5, Т-§4.3, §0.4.3 (числа только в `Settings`).
+- Обратимость: параметры.
+- Тесты: `test_split_chunks_are_one_to_two_kb_inside_a_page`, `test_parser_gets_batches_and_loses_nothing_on_bad_numbers`.
+- Требует подтверждения владельцем: нет
+
+### D-C-200. WP20.2: `material.parse` — два шага одного вида, блокировка домена на втором, обработчик в слое сборки
+- Класс: B (ТЗ: «шаг записи структуры — `domain:{id}`», «тяжёлая часть — без блокировки»; как это сделать в очереди — не сказано)
+- WP / место: WP20.2, #173, S6; `quack/materials/parse.py`, `quack/ops/material_parse.py`, `quack/jobs/kinds.py`, `quack/runtime/__init__.py`
+- Контекст: правило диспетчера A ставит `material.parse` без `lock_key` (`rules_p4._material_uploaded`), а `reconcile_domain` (B) требует, чтобы вызвавшая задача держала `domain:{id}`. Блокировка на всю задачу заперла бы домен на время вызовов `material_parser`. Слои §4.1: `quack.materials` не импортирует `quack.agents`.
+- Решение: (1) Шаг 1 (`payload.step` нет) идёт без блокировки: страницы, куски, разметка; он ставит через `queue_p4.enqueue` второй шаг того же вида `material.parse` с `job_key = material.parse:{learner}:{material}:structure`, `lock_key = domain:{id}`, классом P1 (в сессии) / P2 (иначе), `required_seq = trigger_seq` (шаг 2 читает граф), `visible = true`, `payload.step = "structure"`. Повтор шага 1 находит тот же ключ — второго шага не будет (закон 5). Правки правила A не нужны. (2) Обработчик `material.parse` — клей в `quack/ops/material_parse.py` (слой сборки): передаёт в `structure_step` функцию над `reconcile_domain`; `quack.materials` знает только протокол `StructureResolver` и `SubjectSpec`. (3) Регистрация по #173: `JOB_KINDS`, `KIND_LLM_ROLES` (`material_parser`), `HANDLER_MODULES` (`quack.ops.material_parse`) — те же три строки, что у `artifact.topic_refresh`. (4) Статус строки `content.materials`: `uploaded` -> `parsed` вместе с событиями шага 2; `parsed` на входе любого шага — выход без работы.
+- Почему: Т-§4.3, Т-§13.4, WP20.2 п.4, WP16.3, D-A-110, #173, §4.1.
+- Обратимость: код. Если A захочет второй вид задачи (`material.structure`) — переименование `step`.
+- Тесты: `test_material_parse_pipeline`, `test_a_parsed_material_is_not_parsed_again`, `test_unknown_material_fails_permanently`, `test_the_kind_is_registered_by_the_procedure_of_issue_173`, `tests/test_jobs_phase3.py::test_all_job_kinds_have_handlers`.
 - Требует подтверждения владельцем: нет
 
 ### D-C-182. WP9.5: поддержка Telegram в алертинге и деплое (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)

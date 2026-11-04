@@ -45,6 +45,7 @@ JOB_KINDS: tuple[str, ...] = (
     "agent.solution_space",
     "check.known_claim",
     "agent.illustration",
+    "material.parse",
     "agent.topic_split",
 )
 
@@ -73,6 +74,7 @@ KIND_LLM_ROLES: dict[str, tuple[str, ...]] = {
     "agent.solution_space": ("solution_space",),
     "check.known_claim": ("task_generator",),
     "agent.illustration": ("illustrator",),
+    "material.parse": ("material_parser",),
     "agent.topic_split": ("builder",),
 }
 

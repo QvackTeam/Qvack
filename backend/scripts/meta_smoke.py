@@ -12,7 +12,7 @@ Covers:
   `run_tool_loop` on the model of the teacher (Т-§11.8 п.1).
 
 A recording wrapper keeps the raw answer to report the token kinds and the rate-limit headers.
-A role whose prompt is not in the registry yet (`material_parser`, `viz_checker`) is reported as
+A role whose prompt is not in the registry yet (`viz_checker`) is reported as
 `skipped`. Output: the table «role → status, model, latency» and one line of JSON per row;
 `--out FILE` writes the same to a file. Exit code 1 if any role failed. Without `META_API_KEY`
 nothing is called: the report says «Не проверено» with the command, exit code 1.
@@ -68,6 +68,7 @@ from quack.llm.responses_client import ResponsesClient
 from quack.llm.streaming import StreamEvent, StreamRequest
 from quack.llm.strict_schema import to_strict_json_schema
 from quack.llm.tool_loop import run_tool_loop
+from quack.materials.parse import MaterialParserOutput
 from quack.practice import role_outputs
 from quack.practice.schemas import EvaluatorOutput, TaskGenOutput
 from quack.prompts.registry import PromptError, PromptRegistry, PromptTemplate
@@ -127,8 +128,8 @@ _COMMON: dict[str, Any] = {
 
 
 # Output schema of each text role of the table (ТЗ Ф4 §6.6, `PROMPT_CONTRACTS.md`). A prompt with
-# two schemas (`builder@1`, `recognizer@1`) is smoked by its first one. `material_parser` and
-# `viz_checker` have no prompt in the registry yet, so they are reported as `skipped`.
+# two schemas (`builder@1`, `recognizer@1`) is smoked by its first one. `viz_checker` has no
+# prompt in the registry yet, so it is reported as `skipped`.
 ROLE_SCHEMAS: dict[str, type[BaseModel]] = {
     "teacher": TeacherOutputV2,
     "teacher_fallback": TeacherOutputV2,
@@ -148,6 +149,7 @@ ROLE_SCHEMAS: dict[str, type[BaseModel]] = {
     "viz_builder": agents.VizBuilderOutput,
     "misconception_describer": agents.MisconceptionDescription,
     "artifact_writer": ArtifactWriterOutput,
+    "material_parser": MaterialParserOutput,
     "today_planner": agents.TodayPlannerOutput,
     "domain_classifier": agents.DomainClassifierOutput,
     "release_judge": agents.ReleaseJudgeOutput,
