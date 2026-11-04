@@ -76,7 +76,7 @@
 | WP7.2 | Эпизоды | влит | `jobs/episodes.py` (#182) | — | issue #193 | T-D2 |
 | WP7.3 | Покрытие | влит | `jobs/coverage.py`, `mark_covered` (#133, #182) | — | — | T-D3, T-X4 |
 | WP7.4 | Очередь по `Т-§13.1` | частично | `queue_p4`, `executor_p4`, `visible_jobs`, `jobs_changed` (#182, #186); `GET /v1/sessions/{id}/jobs` (B, issue #212, D-B-207) | подключение к `workers` (WP1.3) | WP1.3 | T-D4–D8, T-D10 |
-| WP7.5 | Периодические задачи | частично | Планировщик `periodic_p4.py` (#182); `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201), `session.sweep_inactive` (D-A-211), `exports.cleanup` (D-A-215) | `calibration.weekly` (P2) | — | T-D9 |
+| WP7.5 | Периодические задачи | влит | `periodic_p4.py`; `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201), `session.sweep_inactive` (D-A-211), `exports.cleanup` (D-A-215), `calibration.weekly` — предложение `p_*` в лог (D-A-219…221) | предложение весов видов свидетельств — нет правила в документах (D-A-221) | — | T-D9 |
 | WP8.1 | Оспаривания, «описка» | влит | `POST /v1/disputes`, `POST /v1/verdicts/{seq}/typo` (#185, D-A-192) | — | — | T-ED1, T-ED2 |
 | WP8.2 | Правки тем, «я это знаю» | частично | Пять маршрутов правок (#185, D-A-193), `episode.reassigned` | обработчик `check.known_claim` (короткая проверка, WP12.6) не зарегистрирован; разбиение темы из чата (WP13) | — | T-ED3, T-ED4 |
 | WP8.3 | Состояние на момент N | влит | `state_at` на rules@3 (D-A-191); `GET /v1/sessions/{id}/summary` «до и после» в кодах (D-A-213, D-A-217, T-ED5) | e2e T-E13 целиком — с T-E1 (C, WP26.1) | — | T-ED5, T-E13 |
@@ -188,7 +188,6 @@
 
 1. **WP1.3, шаг 3** — A-часть сделана (#225, #226). Ждём B (#222) и C (#223, шаг 3 C).
 2. **WP1.3, шаг 5** — после шагов 3–4 всех потоков: снять код Фазы 3 зоны A (старые проектор, очередь, диспетчер, каталог, `db/postgres.py`), флаг `phase4_processes`, зависимости `sqlalchemy`, `asyncpg`, `alembic` (T-DB3).
-4. **WP7.5** — `calibration.weekly` (P2).
 5. **WP8.2** — разбиение темы из чата (с WP13); `check.known_claim` зарегистрирован B.
 6. **Владелец:** `D-A-196` (класс C) — на подтверждение владельцу.
 
@@ -229,6 +228,7 @@
 | D-A-196 | Поля `hub_id` и `artifact` в `agent.requested` v1 (класс C, issue #191) |
 | Слой 1: 7 пунктов | Текст заготовок `verdict_proof`, `second_opinion`, `verdict_free`, `extractor`, `analyst`, `builder` и общий блок диагностики — раздел «Промпты» заметок |
 | Q-C-1 | Два теста `compute` падали при параллельном прогоне с backend (таймаут `pebble`) |
+| D-A-221 | Правило пересчёта весов видов свидетельств (`Т-§7.4`, `Т-§18.5`) в `calibration.weekly`: в документах нет; сейчас предлагаются только вероятности `p_*` |
 | Q-A-4 | A → B: на что указывает `confidence.reported.target_seq`; порог `calibrated` |
 
 Класс C подтверждает владелец на G4. Действия владельца вне кода: сервер, DNS, секреты окружения `production`, клиент Google OIDC, ключи Modal и Resend, ручной прогон на живой модели (DoD п.6a) — `deploy/README.md`.
