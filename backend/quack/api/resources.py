@@ -89,7 +89,7 @@ async def create_app_resources(settings: Settings) -> AppResources:
         session_factory=session_factory,
         neo4j=neo4j,
         redis=redis,
-        llm=LLMGateway(session_factory, provider, settings),
+        llm=LLMGateway(provider, settings, db=db),
         compute=create_compute_client(settings),
         storage=create_object_store(settings),
         embeddings=create_embedding_client(settings),

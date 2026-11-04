@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import BaseModel, SecretStr
 
 from quack.config import Settings
-from quack.db.postgres import SessionFactory
+from quack.db import Db
 from quack.llm.media import ImageResponse, TranscribeResponse
 from quack.llm.provider import ProviderResponse
 from quack.llm.strict_schema import to_strict_json_schema
@@ -117,14 +117,12 @@ def test_smoke_calls_follow_the_role_table_and_contracts() -> None:
     assert {"teacher", "analyst_deep", "extractor"} <= {c.role for c in calls}
 
 
-async def test_smoke_runs_every_role_through_the_gateway(
-    settings: Settings, db: SessionFactory
-) -> None:
+async def test_smoke_runs_every_role_through_the_gateway(settings: Settings, pg_db: Db) -> None:
     """All 26 roles of the table, the Phase 3 prompts and the stream with a tool pass; a role
     without a prompt is `skipped`; the table and the report carry model, status and latency."""
     smoke = _script()
     provider = MetaScripted()
-    rows = await smoke.run_smoke(settings, db, provider)
+    rows = await smoke.run_smoke(settings, pg_db, provider)
     by_role = {row["role"]: row for row in rows}
     assert set(settings.llm_roles) <= set(by_role) and len(settings.llm_roles) == 26
     registry = PromptRegistry()
@@ -174,12 +172,12 @@ async def test_smoke_runs_every_role_through_the_gateway(
         assert role in report
 
 
-async def test_smoke_reports_a_failed_role(settings: Settings, db: SessionFactory) -> None:
+async def test_smoke_reports_a_failed_role(settings: Settings, pg_db: Db) -> None:
     """A role whose answer breaks the schema is a failed row and exit code 1; the rest go on."""
     smoke = _script()
     provider = MetaScripted()
     provider.respond("MisconceptionDescription", lambda _r: "{not json")
-    rows = await smoke.run_smoke(settings, db, provider)
+    rows = await smoke.run_smoke(settings, pg_db, provider)
     failed = [r["role"] for r in rows if r["status"].split(":")[0] not in ("ok", "skipped")]
     assert failed == ["misconception_describer"]
     assert smoke.exit_code(rows) == 1

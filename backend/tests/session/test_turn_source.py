@@ -10,7 +10,6 @@ from uuid import UUID, uuid4, uuid5
 
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.event_types import (
     AgentCompleted,
     AgentRequested,
@@ -287,7 +286,7 @@ async def test_assemble_first_turn_freezes_slots(pg_db: Db) -> None:
     seq = await _message(
         pg_db, learner_id, session_id, text="teach me", intent="learn", topic_id=fx.TOPIC_OPEN
     )
-    gateway = LLMGateway(cast(SessionFactory, None), ScriptedLLMProvider(), SETTINGS)
+    gateway = LLMGateway(ScriptedLLMProvider(), SETTINGS, db=pg_db)
     source = MemoryTurnContextSource(
         db=pg_db,
         gateway=gateway,

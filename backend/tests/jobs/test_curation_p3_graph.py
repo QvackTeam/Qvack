@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.config import Settings
+from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.db.redis import presence_key
 from quack.domains.schemas import CuratorMerge, CuratorOutput
@@ -184,6 +185,7 @@ async def test_graph_curate_deterministic_promotion_dedup_and_curator_model_pass
     seeded_learner: tuple[UUID, str],
     fake_llm_provider: FakeLLMProvider,
     db: SessionFactory,
+    pg_db: Db,
     settings: Settings,
     pg_engine: AsyncEngine,
     neo4j: AsyncDriver,
@@ -345,7 +347,7 @@ async def test_graph_curate_deterministic_promotion_dedup_and_curator_model_pass
         claimed = await claim_next_job(session, "test-worker", ["graph.curate"])
     assert claimed is not None
 
-    ctx = build_job_context(settings, db, neo4j, redis, provider=fake_llm_provider)
+    ctx = build_job_context(settings, db, neo4j, redis, db=pg_db, provider=fake_llm_provider)
     await handle_graph_curate(claimed, ctx)
     async with db() as session, session.begin():
         await complete_job(session, claimed.id, "test-worker")

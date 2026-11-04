@@ -10,10 +10,9 @@ from uuid import UUID, uuid4
 
 import httpx2
 import orjson
-from sqlalchemy import text
 
 from quack.config import Settings
-from quack.db.postgres import SessionFactory
+from quack.db import Db
 from quack.llm.gateway import LLMGateway
 from quack.llm.media import BoxPrompt
 from quack.llm.provider import HttpLLMProvider, ImageInput
@@ -75,29 +74,25 @@ class _Meta:
         return _answer({"model": "muse-image-1.0", "data": [{"b64_json": PIXEL}]})
 
 
-def _gateway(db: SessionFactory, meta: _Meta) -> LLMGateway:
+def _gateway(db: Db, meta: _Meta) -> LLMGateway:
     http = httpx2.AsyncClient(transport=httpx2.MockTransport(meta))
     client = ResponsesClient("http://meta.test/v1", "key", http_client=http)
     provider = HttpLLMProvider("http://meta.test/v1", "key")
     provider._impl = client  # pyright: ignore[reportPrivateUsage]
-    return LLMGateway(db, provider, Settings(env="test"))
+    return LLMGateway(provider, Settings(env="test"), db=db)
 
 
-async def _rows(db: SessionFactory, learner_id: UUID) -> list[Any]:
-    async with db() as session:
-        result = await session.execute(
-            text(
-                "SELECT role, model, prompt_version, status, input_tokens, output_tokens "
-                "FROM ops.llm_ledger WHERE learner_id = :l ORDER BY created_at"
-            ),
-            {"l": learner_id},
-        )
-        return list(result.all())
+async def _rows(db: Db, learner_id: UUID) -> list[dict[str, Any]]:
+    return await db.fetch_all(
+        "SELECT role, model, prompt_version, status, input_tokens, output_tokens "
+        "FROM ops.llm_usage WHERE learner_id = %(l)s ORDER BY id",
+        {"l": learner_id},
+    )
 
 
-async def test_segmenter_request_parsed_answer_and_ledger(db: SessionFactory) -> None:
+async def test_segmenter_request_parsed_answer_and_usage(pg_db: Db) -> None:
     meta, learner_id = _Meta(), uuid4()
-    gw = _gateway(db, meta)
+    gw = _gateway(pg_db, meta)
 
     result = await gw.segment(
         PNG, learner_id=learner_id, box=BoxPrompt(1, 2, 30, 40, 640, 480), include_confidence=True
@@ -117,19 +112,19 @@ async def test_segmenter_request_parsed_answer_and_ledger(db: SessionFactory) ->
     assert first.mask is not None and (first.mask.height, first.mask.width) == (220, 110)
     assert (first.mask.marker, first.mask.data, first.confidence) == ("~", "ab;c;d", 0.91)
     assert second.mask is None and second.index == 1
-    [row] = await _rows(db, learner_id)
-    assert (row.role, row.model, row.prompt_version, row.status) == (
+    [row] = await _rows(pg_db, learner_id)
+    assert (row["role"], row["model"], row["prompt_version"], row["status"]) == (
         "segmenter",
         "sam-3.1",
-        0,
+        "segmenter@0",
         "ok",
     )
-    assert (row.input_tokens, row.output_tokens) == (300, 12)
+    assert (row["input_tokens"], row["output_tokens"]) == (300, 12)
 
 
-async def test_voice_request_parsed_answer_and_ledger(db: SessionFactory) -> None:
+async def test_voice_request_parsed_answer_and_usage(pg_db: Db) -> None:
     meta, learner_id = _Meta(), uuid4()
-    gw = _gateway(db, meta)
+    gw = _gateway(pg_db, meta)
 
     result = await gw.transcribe(b"RIFF-wav", learner_id=learner_id, language_bias="ru")
 
@@ -141,13 +136,17 @@ async def test_voice_request_parsed_answer_and_ledger(db: SessionFactory) -> Non
     assert b'"model":"muse-voice-transcribe-1.0"' in request.content
     assert result.value.text == "минус b плюс корень" and result.value.audio_duration_ms == 4200
     assert [turn.turn_id for turn in result.value.turns] == ["t1"]
-    [row] = await _rows(db, learner_id)
-    assert (row.role, row.model, row.status) == ("voice", "muse-voice-transcribe-1.0", "ok")
+    [row] = await _rows(pg_db, learner_id)
+    assert (row["role"], row["model"], row["status"]) == (
+        "voice",
+        "muse-voice-transcribe-1.0",
+        "ok",
+    )
 
 
-async def test_illustrator_request_parsed_answer_and_ledger(db: SessionFactory) -> None:
+async def test_illustrator_request_parsed_answer_and_usage(pg_db: Db) -> None:
     meta, learner_id = _Meta(), uuid4()
-    gw = _gateway(db, meta)
+    gw = _gateway(pg_db, meta)
 
     result = await gw.illustrate(
         "a river delta, watercolor", learner_id=learner_id, size="1024x1024"
@@ -163,5 +162,5 @@ async def test_illustrator_request_parsed_answer_and_ledger(db: SessionFactory) 
         "size": "1024x1024",
     }
     assert result.value.image == b"png-bytes" and result.value.url is None
-    [row] = await _rows(db, learner_id)
-    assert (row.role, row.model, row.status) == ("illustrator", "muse-image-1.0", "ok")
+    [row] = await _rows(pg_db, learner_id)
+    assert (row["role"], row["model"], row["status"]) == ("illustrator", "muse-image-1.0", "ok")

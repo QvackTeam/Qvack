@@ -358,9 +358,8 @@ async def _extraction_eval(settings: Settings, args: argparse.Namespace) -> int:
         log.error("extraction_eval_input_refused", reason=str(exc))
         return 2
     db = await open_db(settings)
-    engine = create_engine(settings)
     provider = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
-    llm = LLMGateway(create_session_factory(engine), provider, settings, db=db)
+    llm = LLMGateway(provider, settings, db=db)
     try:
         report = await evaluate_extraction(
             llm,
@@ -376,7 +375,6 @@ async def _extraction_eval(settings: Settings, args: argparse.Namespace) -> int:
         return 2
     finally:
         await llm.aclose()
-        await engine.dispose()
         await db.close()
     code = 0
     if previous is not None:
