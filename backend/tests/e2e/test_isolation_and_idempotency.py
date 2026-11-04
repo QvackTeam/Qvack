@@ -100,32 +100,12 @@ async def test_mutating_endpoints_are_idempotent(system_for_walk: System) -> Non
             ids = await route.advance(system, learner, ids, _payload(first_response))
 
 
-NOTE_WORD = "quokkasecret"
-
-
 async def test_cross_learner_isolation(system: System) -> None:
     """T-E3: learner B with ids of learner A gets 404 on every route with an id in the path;
-    A's data does not change; B's search does not see A's note."""
+    A's data does not change."""
     a = await system.register()
     domain_id, topic_id = await onboard(system, a, "te3")
-    note = ok(
-        await system.client.post(
-            "/v1/artifacts/notes",
-            json={
-                "domain_id": str(domain_id),
-                "title": "Mine",
-                "text": f"Remember the {NOTE_WORD}",
-                "idempotency_key": "te3:note",
-            },
-            headers=a.headers,
-        ),
-        201,
-    )
-    ids = Ids(
-        domain_id=domain_id,
-        topic_id=topic_id,
-        artifact_id=UUID(note["artifact_id"]),
-    )
+    ids = Ids(domain_id=domain_id, topic_id=topic_id)
     # The session of the learner is on the Phase 4 log (D-B-210): its own domain, then a start.
     ids = await _session_domain(system, a, ids)
     started = ok(
@@ -173,7 +153,3 @@ async def test_cross_learner_isolation(system: System) -> None:
 
     await system.settle()
     assert await _events(system, a.learner_id) == a_events
-    found = ok(
-        await system.client.get("/v1/artifacts/search", params={"q": NOTE_WORD}, headers=b.headers)
-    )
-    assert found["artifact_hits"] == [] and found["event_hits"] == [], found

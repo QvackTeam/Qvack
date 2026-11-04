@@ -57,8 +57,6 @@
 
 - **Тревоги по расходу в долларах** (`team_daily_alert_usd`, нужна таблица `ops.llm_usage`, WP10.4), по объектам `quack-deletions` без строки в журнале (WP25) и по дате оплаты Contabo.
 - **Перевод `api`, `workers`, `projector` и `migrate` на роли `quack_app` и `quack_migrator`**: схема уже идёт через dbmate, но SQLAlchemy-код Фазы 3 ещё не снят (WP1.3, шаг 5, поток A), поэтому сервисы пока работают под `quack` (D-C-160).
-- **Команды восстановления** `replay-deletions` и `orphan-objects` (WP9.6): первая зависит от журнала удалений в R2 (`replay_deletions`, WP25, поток A), вторая от списка ссылок на объекты в Postgres. Сценарии восстановления — Д-§8.3.
-- **Job выкатки** в GitHub Actions и публикация образов в GHCR: WP9.3/9.4.
 - **CORS** API (`cors_origins` уже есть в конфиге, подключение к приложению — отдельный пакет).
 
 ## Локальная проверка
@@ -83,9 +81,14 @@ docker compose --env-file .env --env-file release.env ps
 
 Проверка: у `postgres`, `neo4j`, `redis` и `api` в колонке PORTS ничего нет, 80 и 443 только у `caddy`.
 
-## Проверка после восстановления
+## Восстановление
 
-`docker compose run --rm migrate ops restore-check` сравнивает у каждого ученика `appliedSeq` в Neo4j с `last_seq` в журнале Postgres. Если граф опережает журнал, команда печатает список учеников и завершается кодом 1: тогда `ops rebuild --all`. Отстающий граф проверку не ломает, проектор его догонит. Без пройденной проверки остальные сервисы после восстановления не запускаются (Д-§8.3).
+Порядок — Д-§8.3. Команды `ops` запускаются так: `docker compose run --rm migrate ops <команда>` для тех, что читают только Postgres и Neo4j (`restore-check`, `resume`), и `docker compose run --rm --no-deps workers ops <команда>` для тех, что ходят в хранилища (`replay-deletions`, `orphan-objects`): у `workers` есть ключи `quack-learners` и `quack-deletions`.
+
+- `ops replay-deletions --since <время дампа>` (шаг 5) повторяет все записи журнала `quack-deletions` новее дампа; повтор идемпотентен. Печатает `{"replayed": N}`.
+- `ops restore-check` сравнивает у каждого ученика `projectedSeq` в Neo4j с `seq` в `core.learners`. Если граф опережает журнал, команда печатает список учеников и завершается кодом 1: тогда `ops rebuild --all`. Отстающий граф проверку не ломает, проектор его догонит. Без пройденной проверки остальные сервисы после восстановления не запускаются.
+- `ops orphan-objects --since <время дампа> [--dry-run]` (последний шаг) удаляет из `quack-learners` объекты новее дампа, на которые нет ссылок в Postgres (материалы, страницы, выгрузки, холсты, ключи в событиях и версиях артефактов). Сначала запустите с `--dry-run` и просмотрите список.
+- `ops resume --learner <id>` снимает остановку потока проектора после исправления причины (Д-§8.7); `ops rebuild --all --concurrency N` пересобирает графы по N учеников сразу (по умолчанию `rebuild_concurrency`).
 
 ## Выкатка из GitHub Actions
 

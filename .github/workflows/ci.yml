@@ -46,6 +46,13 @@ jobs:
         run: >-
           uv run python -c "from quack.runtime.event_registry import registry_gaps as g;
           import sys; gaps = g(); print(*gaps, sep='\n'); sys.exit(1 if gaps else 0)"
+      # WP9.3: modal/ (the embeddings app, WP20.3) is checked with the backend's settings and
+      # environment (`modal` is a backend dependency, §4.6): ruff and pyright (D-C-210).
+      - name: modal/ (ruff, pyright)
+        run: |
+          uv run ruff check --config pyproject.toml ../modal
+          uv run ruff format --check --config pyproject.toml ../modal
+          uv run pyright ../modal
       - run: uv run pytest -q
 
   # Full layer: the same tests with real Postgres 16, Neo4j and Redis; nothing is skipped.
@@ -107,6 +114,18 @@ jobs:
           sudo install -m 0755 "$RUNNER_TEMP/dbmate" /usr/local/bin/dbmate
           dbmate --version
       - run: uv sync --frozen
+      # Д-§5.2 п.5, WP9.3 (D-C-210): isolation and the single Neo4j writer as steps of their own,
+      # so a break is named in the check list. The full run below repeats them.
+      - name: Isolation of learners (T-DB4, T-E3)
+        run: >-
+          uv run pytest -q
+          tests/db/test_sql_static.py::test_repository_functions_take_learner_id
+          tests/e2e/test_isolation_and_idempotency.py::test_cross_learner_isolation
+      - name: One writer in Neo4j (T-A9a, T-A9b)
+        run: >-
+          uv run pytest -q
+          tests/test_contracts.py::test_neo4j_writes_only_from_projector_static
+          tests/test_neo4j_read_session.py::test_read_session_rejects_writes
       - run: uv run pytest -q
 
   # Д-§5.2 п.2, ТЗ Ф4 WP1.4/WP9.3 (D-C-142): squawk over the migrations a pull request adds or
@@ -141,6 +160,35 @@ jobs:
           # shellcheck disable=SC2086
           uvx --from "squawk-cli==${SQUAWK_VERSION}" squawk \
             --config backend/.squawk.toml --exclude="$excluded" $files
+
+  # Д-§5.2 п.7, WP9.3 (D-C-210): the types the frontend generates from the OpenAPI snapshot of
+  # the backend equal the committed ones. Pull requests only. Expectedly red until the frontend
+  # moves to the API of Phase 4 (R4-2): the owner makes it required after that, so it is not in
+  # `needs` of `publish`. The generator is the frontend's own, at the version of its lock file;
+  # no frontend file is changed. Node of the runner image, no extra action.
+  frontend-types:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the generator of the lock file
+        working-directory: frontend
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate types from backend/openapi.json and compare
+        run: |
+          script=$(node -p "require('./frontend/package.json').scripts['api:types']")
+          flags=${script#openapi-typescript lib/api/openapi.json -o lib/api/schema.d.ts}
+          if [ "$flags" = "$script" ]; then
+            echo "the api:types script changed shape; update this step"
+            exit 1
+          fi
+          # shellcheck disable=SC2086
+          frontend/node_modules/.bin/openapi-typescript backend/openapi.json -o "$RUNNER_TEMP/schema.d.ts" $flags
+          diff -u frontend/lib/api/schema.d.ts "$RUNNER_TEMP/schema.d.ts" | head -n 200
+          cmp frontend/lib/api/schema.d.ts "$RUNNER_TEMP/schema.d.ts"
 
   # Always reports (a required check), but the heavy steps run only when compute/ or the
   # workflow itself changed.

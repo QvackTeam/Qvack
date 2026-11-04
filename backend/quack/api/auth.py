@@ -2,9 +2,9 @@
 
 The password, JWT and `/v1/auth/register|login|me` of Phases 1–3 are removed (§2.3 row 3).
 `get_current_learner_id` keeps its name and signature, so the routers of every stream stay as
-they are; it reads the session cookie (`get_current_session`). Until the deletion moves to `Db`
-(WP25) a learner with `auth.users.deleted_at` or a row in `ops.deletion_tombstones` is also
-refused, as before (D-C-004).
+they are; it reads the session cookie (`get_current_session`). A deleted learner needs no extra
+check: `delete_account` removes the account and its sessions physically (WP25, D-C-170), so the
+cookie no longer resolves.
 
 Routers attach `get_current_learner_id` at router level, so a request without a session gets
 `401 UNAUTHENTICATED` before body validation (T-A2). Tests override only this dependency.
@@ -18,29 +18,17 @@ from typing import Annotated, Literal, Protocol
 from uuid import UUID
 
 from fastapi import Depends, Request, WebSocket
-from sqlalchemy import text
 
 from quack.api.errors import ApiError
 from quack.api.resources import get_resources
 from quack.config import Settings
 from quack.db import Db
 
-# Phase 3 deletion (D-C-004) until WP25 moves it to `Db`.
-_DELETED_LEARNER_SQL = text(
-    "SELECT 1 WHERE EXISTS (SELECT 1 FROM auth.users WHERE id = :id AND deleted_at IS NOT NULL) "
-    "OR EXISTS (SELECT 1 FROM ops.deletion_tombstones WHERE learner_id = :id)"
-)
-
 
 async def get_current_learner_id(request: Request) -> UUID:
-    """FastAPI dependency: the learner of the live session of the cookie, not deleted;
+    """FastAPI dependency: the learner of the live session of the cookie;
     `ApiError(UNAUTHENTICATED, 401)` otherwise."""
-    session = await get_current_session(request)
-    async with get_resources(request).session_factory() as db_session:
-        deleted = await db_session.scalar(_DELETED_LEARNER_SQL, {"id": session.learner_id})
-    if deleted is not None:
-        raise _unauthenticated("learner deleted")
-    return session.learner_id
+    return (await get_current_session(request)).learner_id
 
 
 # --- Sessions of Phase 4 (ТЗ Ф4 WP18.3, WP18.4) ------------------------------------------

@@ -29,7 +29,7 @@
 | `fast` | CI job `fast`, без служб | `uv sync --frozen`, `ruff check`, `ruff format --check`, `pyright`, `pytest -q` **без** `QUACK_TEST_REQUIRE_INFRA`: тесты на Postgres, Neo4j и Redis пропускаются, остальное идёт (~1100 тестов, ~1 мин) | каждое событие: pull request и push в `main`, `phase-4`, `phase-4-a`, `phase-4-b`, `phase-4-c` |
 | `full` | CI job `backend`, службы Postgres 16, Neo4j, Redis | те же тесты с `QUACK_TEST_REQUIRE_INFRA=1`: ничего не пропускается (~8 мин) | pull request и push в `main`, `phase-4`; на push в ветки потоков не идёт |
 
-`compute` и `images` всегда сообщают результат, но тяжёлые шаги выполняют, только если изменились `compute/` (для `images` — `backend/` или `compute/`) или сам workflow; без базы сравнения (новая ветка) идёт всё. `publish` ждёт `backend`, `fast`, `squawk`, `compute`, `images` и работает только на push в `main` и `phase-4`. Контроль: `tests/test_ci_layers.py`, `tests/test_ci_squawk.py`.
+`compute` и `images` всегда сообщают результат, но тяжёлые шаги выполняют, только если изменились `compute/` (для `images` — `backend/` или `compute/`) или сам workflow; без базы сравнения (новая ветка) идёт всё. `publish` ждёт `backend`, `fast`, `squawk`, `compute`, `images` и работает только на push в `main` и `phase-4`. Job `frontend-types` (только PR; типы фронтенда из `backend/openapi.json`, ожидаемо красный до перевода фронтенда) не входит в `needs` у `publish`; `modal/` проверяется в `fast`; изоляция и один писатель идут отдельными шагами job `backend` (D-C-210). Контроль: `tests/test_ci_layers.py`, `tests/test_ci_squawk.py`, `tests/test_deploy_order.py` (T-OPS8).
 
 Локально (из `backend/`):
 

@@ -81,6 +81,7 @@ type TurnIntent = Literal[
     "answer_question",
     "plan",
     "wrap_up",
+    "split_topic",
 ]
 type Approach = Literal[
     "example_first",
@@ -99,7 +100,13 @@ type VerdictStance = Literal["code", "formative"]
 type BranchType = Literal["corrective", "curiosity", "external"]
 type ExposureKind = Literal["explained", "example", "method_named", "solution_shown"]
 type AgentKind = Literal[
-    "viz", "illustration", "task_generation", "solution_space", "artifact", "known_check"
+    "viz",
+    "illustration",
+    "task_generation",
+    "solution_space",
+    "artifact",
+    "known_check",
+    "topic_split",
 ]
 
 

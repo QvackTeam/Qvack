@@ -51,8 +51,8 @@ from quack.config import Settings
 from quack.db import Db
 from quack.graph.read import GraphReader, TopicMemory, create_graph_reader
 from quack.graph.read.materials import ChunkHit, materials_prefetch
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.llm.gateway import LLMGateway
 from quack.llm.labels import LabelKind, LabelMap
 from quack.logging import get_logger

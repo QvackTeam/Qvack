@@ -23,6 +23,151 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-A-233. WP3.4: ошибки бюджета обработчика в исполнителе Фазы 4 (шов S3)
+- Класс: A
+- WP / место: WP3.4, Т-§13.2; `quack/jobs/executor_p4.py`
+- Контекст: `LLMBudgetExceededError` (`quack/llm/errors.py`) несёт `scope`; шов S3 требует разных исходов. `JobRunner` Фазы 3 маршрутизировал их, `executor_p4` — нет: обработчик, исчерпавший бюджет, шёл на обычные повторы и жёг попытки (найдено при переносе `test_budget_errors_route…`, D-A-232).
+- Решение: `budget_outcome(exc, settings)` в `_finish`: `session` → `JobFailedPermanently` (бюджет сессии не восстанавливается); `daily` и `pool` → `JobDeferred` до ближайшей полуночи UTC плюс джиттер `daily_budget_defer_jitter_s`, попытка не тратится. `skipped_budget` в `claim_next` (D-A-222) остаётся для задач, ещё не начатых.
+- Почему: шов S3, Т-§13.2, WP3.4, D-B-211 (режим `judges_only` — `pool`).
+- Обратимость: полная.
+- Тесты: `tests/jobs/test_executor_p4.py::test_budget_errors_route_to_defer_or_failure`.
+- Требует подтверждения владельцем: нет (D-A-232 назвала это пробелом «для владельца»: решение принято по тексту шва)
+
+### D-A-232. WP1.3 шаг 5, часть 2: `test_dispatcher.py` — на `DispatcherP4`; правила `session.digest_created` в Фазе 4 нет; два пробела, о которых решает владелец
+- Класс: A
+- WP / место: WP1.3, §8.15; `tests/test_dispatcher.py`
+- Контекст: задание велело сохранить покрытие правила `session.digest_created → artifact.refresh_cheatsheet` «из `jobs/rules_p4.py`». Там его нет: вид `artifact.refresh_cheatsheet` лежит в `REMOVED_JOB_KINDS`, события `session.digest_created` в реестре Фазы 4 нет (есть `digest.written`). Правило заменяют `session.ended → artifact.topic_refresh` (Т-§17.7) и `digest.written → analyst.deep` (только при расхождении плана). Два пробела найдены при переносе: (а) `executor_p4` не переводит `LLMBudgetExceededError`, брошенный обработчиком, в «отложить до полуночи UTC» (дневной) и «провалить без повторов» (сессионный), как делал `JobRunner` Фазы 3 (WP3.4); в Фазе 4 бюджет сессии проверяет `claim_next` (`skipped_budget`), дневной — шлюз перед вызовом, а обработчик при исчерпании получит обычную ошибку и пойдёт на повторы с паузой; (б) `POST /v1/topics/{id}/cheatsheet/refresh` (зона C, `artifacts/cheatsheets.py`) всё ещё ставит задачу `artifact.refresh_cheatsheet` в очередь Фазы 3 через `session_factory`; в очереди Фазы 4 такого вида нет.
+- Решение: `test_dispatcher.py` переписан на `Db`, `DispatcherP4` и события Фазы 4. Перенесены T-D2 (`offset_and_jobs_commit_together`: сбой постановки откатывает пачку, метка стоит, следующий проход повторяет), T-D5, T-D6 (сбой диспетчера не останавливает `ProjectorP4`; `supervise` берётся из `quack.runtime.phase4`, чтобы импорт пережил перенос функции), T-D7 (неизвестная версия схемы — пропуск с записью в лог), `lag`. Удалены: `test_dispatcher_turns_events_into_jobs`, `…_checkpoint_follows_last_checkpoint_turn`, `…_required_seq_is_trigger_seq` (виды `turn.extract`, `session.checkpoint`, `session.finish_artifacts`, `artifact.refresh_cheatsheet` сняты; строки таблицы Т-§13.3 — `test_dispatcher_p4.py`, `test_rules_p4.py`), `…_replay_is_idempotent` (T-D4: `test_dispatcher_p4.py::test_a_replay_of_the_log_adds_no_event_no_job_no_coverage`, `test_queue_p4.py::test_enqueue_is_idempotent_by_job_key`), `test_cheatsheet_refresh_endpoint_enqueues_directly` (T-D8: код Фазы 3 у C; маршрут держат `tests/artifacts/test_artifact_isolation.py`, `test_artifacts_search_export.py::test_cheatsheet_refresh_is_versioned_and_notifies`, `e2e/routes/c.py`). В коде пробелы (а), (б) не правились: (а) — решение владельца, нужно ли отложение по бюджету в Фазе 4 (`executor_p4._finish`, `Settings.daily_budget_defer_jitter_s`); (б) — передать C.
+- Почему: §8.15 п.1, красная линия 5; Т-§13.3 (таблица правил); Т-§17.7.
+- Обратимость: полная (git).
+- Тесты: `tests/test_dispatcher.py` (5), `tests/jobs/test_rules_p4.py::test_digest_with_divergence_puts_analyst_deep`, `::test_artifact_topic_refresh_after_the_session_and_after_hints`, `test_dispatcher_p4.py::test_session_end_refreshes_the_topics_the_session_touched`.
+- Требует подтверждения владельцем: да — пробел (а) (отложение по дневному бюджету)
+
+### D-A-231. WP1.3 шаг 5, часть 2: тесты очереди и исполнителя Фазы 3 — на очередь Фазы 4
+- Класс: A
+- WP / место: WP1.3, §8.15; `tests/test_jobs_phase3.py`, `tests/test_jobs_and_llm_gateway.py`, `tests/jobs/test_executor_p4.py`
+- Контекст: `JobRunner`, `quack.jobs.queue` (`enqueue_job`, `claim_next_job`, …) и `ops.jobs` Фазы 3 снимаются; их тесты нужно перенести либо удалить с названным эквивалентом.
+- Решение: в `test_executor_p4.py` добавлены четыре теста на `JobWorker`/`run_claimed`: `test_a_deferred_job_yields_to_a_waiting_duplicate` (из `test_job_deferred_merges_into_queued_duplicate`), `test_pressure_flag_holds_back_the_kinds_of_that_model` и `test_without_redis_no_kind_is_held_back` (T-Q10, WP5.3), `test_a_stop_waits_for_the_grace_period_then_returns_the_rest_to_the_queue` (T-Q6, WP3.5); `JobDeferred` и `JobFailedPermanently` — из `quack.jobs.types`. В `test_jobs_phase3.py` оставлены T-Q7 (два теста; «любой вид» — `agent.viz` вместо снятого `artifact.refresh_cheatsheet`) и T-Q9 (теперь вызов `enqueue` очереди Фазы 4 тоже запрещён в продуктовом коде: задачи ставит диспетчер). В `test_jobs_and_llm_gateway.py` остались реестр подсказок и шлюз; `test_backoff_formula` — на `queue_p4.backoff_seconds` (шаг, разброс ±25 %, потолок). `tests/jobs/conftest.py`: снята фикстура `seeded_learner` (журнал Фазы 3), её никто не использовал.
+- Почему: §8.15 п.1 и п.3, красная линия 5.
+- Обратимость: полная (git).
+- Тесты: перечислены выше.
+- Правки тестов (§8.15):
+  | Файл | Что удалено | Эквивалент Фазы 4 |
+  | :-- | :-- | :-- |
+  | `tests/test_jobs_phase3.py` | `test_claim_waits_for_projection` (T-Q1/Q2) | `test_queue_p4.py::test_job_waits_for_the_projector`, `::test_projector_of_another_learner_does_not_release_the_job`, `::test_job_that_reads_only_the_log_does_not_wait` |
+  | | `test_coalesce_keeps_max_required_seq` | `test_queue_p4.py::test_coalesce_greatest`, `::test_coalesce_null_required_seq_stays_null` |
+  | | `test_coalesced_cheatsheet_job_keeps_the_latest_session` | поведение иное: в Фазе 4 нагрузка склеенной задачи не меняется (`test_coalesce_greatest`, строка про `payload`) |
+  | | `test_job_deferred_requeues_without_attempt` (T-Q3) | `test_queue_p4.py::test_defer_and_release_do_not_spend_the_attempt`, `test_executor_p4.py::test_permanent_failure_and_deferral` |
+  | | `test_budget_errors_route_to_defer_or_dlq` (T-Q8) | `test_queue_p4.py::test_skipped_budget`, `::test_budget_is_per_session_and_inclusive_of_the_limit`, `::test_budget_follows_the_pool_mode` (бюджет сессии на выдаче); отложение по дневному бюджету — пробел (а) D-A-232 |
+  | | `test_requeue_on_shutdown_only_by_the_owner` | `test_queue_p4.py::test_stale_worker_cannot_finish_a_job_it_lost` (`release` чужого — `None`) |
+  | | `test_worker_graceful_shutdown_requeues_unfinished`, `test_pressure_flag_blocks_kinds_using_that_model`, `test_pressure_flags_without_redis_block_nothing` | перенесены на `JobWorker` (см. «Решение») |
+  | `tests/test_jobs_and_llm_gateway.py` | `test_job_kind_catalog` (приоритеты видов Фазы 3) | `test_rules_p4.py::test_every_kind_of_the_spec_is_listed_once_and_removed_ones_are_gone`, `::test_rule_table`; период — `test_queue_p4.py::test_periodic_keys` |
+  | | `test_coalesce_updates_queued_job_instead_of_duplicating`, `test_coalesce_only_while_queued` | `test_queue_p4.py::test_coalesce_greatest`, `::test_enqueue_is_idempotent_by_job_key` |
+  | | `test_jobs_without_coalesce_key_are_not_merged` | `test_queue_p4.py::test_claim_orders_by_class_then_age` (задачи без `coalesce_key` — отдельные строки по `job_key`) |
+  | | `test_enqueue_inside_append_transaction_rolls_back_together` | `tests/test_dispatcher.py::test_dispatcher_offset_and_jobs_commit_together` (D-A-232) |
+  | | `test_lock_key_mutual_exclusion`, `test_concurrent_claims_never_run_same_lock_twice` | `test_queue_p4.py::test_one_running_job_per_lock_key`, `::test_concurrent_claims_respect_one_lock_key` |
+  | | `test_priority_then_age_ordering`, `test_claim_filters_by_kind_and_run_after` | `test_queue_p4.py::test_claim_orders_by_class_then_age`, `::test_kinds_filter`, `::test_future_run_at_is_not_claimed` |
+  | | `test_heartbeat_and_completion_require_owner` | `test_queue_p4.py::test_stale_worker_cannot_finish_a_job_it_lost` |
+  | | `test_retry_with_backoff_then_dlq`, `test_stale_job_at_max_attempts_goes_to_dlq` (`ops.dlq` снят) | `test_queue_p4.py::test_failed_writes_agent_completed` (пауза растёт, затем `failed` и `agent.completed`), `::test_reaper_fails_a_job_out_of_attempts_and_cancels_a_stale_cancel` |
+  | | `test_stale_running_jobs_are_reaped` | `test_queue_p4.py::test_fresh_pulse_is_not_reaped`, `::test_reaper_fails_a_job_out_of_attempts_and_cancels_a_stale_cancel` |
+  | | `test_retry_of_coalesced_job_merges_with_newer_queued` | `test_queue_p4.py::test_requeue_of_a_coalescing_job_yields_to_a_waiting_one` |
+- Требует подтверждения владельцем: нет
+
+### D-A-230. WP1.3 шаг 5, часть 2: тесты инфраструктуры, ленты ученика, сбоя Neo4j и обработчиков — на `Db` Фазы 4
+- Класс: A
+- WP / место: WP1.3, §8.15; `tests/test_infra.py`, `test_learner_stream.py`, `test_neo4j_outage.py`, `test_worker_and_ops.py`, `tests/jobs/test_job_context.py`
+- Контекст: в этих файлах оставались фикстуры `db` (`SessionFactory`), `ensure_user`, `quack.db.locks`, `ProjectorWorker`, `JobRunner`, `quack.events.append`.
+- Решение: (1) `test_infra.py`: индексы-контракты и поиск по тексту проверяются на базе Фазы 4 (`pg_db`: `uq_jobs_running_lock`, `uq_jobs_queued_coalesce`, `idx_events_fts_en`, `idx_events_session_seq`, уникальность `(learner_id, idempotency_key)`; индексов `uq_sessions_one_active`, `uq_artifacts_topic_cheatsheet` в схеме Фазы 4 нет — не проверяются); два теста `advisory_lock` Фазы 3 — на `Db.advisory_lock` (прямого теста у него не было); `/health/ready` проверяется на базе Фазы 4 (`p4_database`); из `test_settings_require_secrets_in_prod` убраны `sqlalchemy_dsn` и четыре порога Фазы 3 (`llm_semaphore_limit`, `daily_token_limit_per_learner`, `session_token_limit`, `turn_lock_ttl_sec`), которых никто не читает. Оставлены: схема Neo4j, клиент вычислений, формат ошибок, идентификатор запроса, SSE, CLI, журнал. (2) `test_learner_stream.py`, `test_neo4j_outage.py`: убраны `db`, `session_factory`, `ensure_user` и помощники журнала Фазы 3 (`_append`, `_learner`). `AppResources.engine` по-прежнему строится из `pg_engine` (так же в `test_infra.py::test_api_error_format_and_request_id`): `get_current_learner_id` (`quack/api/auth.py`, зона C) читает пометку удаления Фазы 3 через `session_factory`, а `/health/*` — через `engine`; это снимется, когда C переведёт `api/auth.py` и `app.py` на `Db` (WP25). (3) `test_worker_and_ops.py`: тесты `ProjectorWorker` и `JobRunner` удалены; остались реестр `register_job_handler` и переходник `bind_handlers` (теперь и на повтор после отказа, и на пропуск вида без обработчика), добавлен `test_a_job_of_the_new_queue_in_the_shape_the_handlers_read` (`as_phase3_job`). (4) `test_job_context.py` оставлен без правок: `JobContext` ещё в `quack/jobs/runner.py` вместе с полями `engine` и `session_factory`; при переносе и снятии полей правятся строка импорта и `WORKERS_FIELDS`.
+- Почему: §8.15, красная линия 5, WP1.3 шаг 5.
+- Обратимость: полная (git).
+- Тесты: перечислены в решении.
+- Правки тестов (§8.15):
+  | Файл | Что удалено | Эквивалент Фазы 4 |
+  | :-- | :-- | :-- |
+  | `tests/test_worker_and_ops.py` | `test_worker_projects_log_into_neo4j` (`ProjectorWorker`, снимок `Neo4jGraphStore`) | `graph/test_projection_runner.py::test_batches_of_any_size_give_one_graph`, `::test_materials_and_vectors_reach_neo4j`, `::test_changed_topics_are_published_after_commit`, `::test_projector_process_walks_the_lagging_learners`; свёртка в памяти — `graph/test_projection_batches.py` |
+  | | `test_poison_event_stops_learner_until_replay` | `graph/test_projection_runner.py::test_unknown_type_stops_stream` (T-P6: строка в `ops.projector_failures`, остальные ученики идут, `resume` снимает остановку) |
+  | | `test_job_runner_executes_and_retries` | `jobs/test_executor_p4.py::test_worker_runs_only_kinds_with_a_handler_and_admission`, `::test_a_failing_handler_is_retried_then_failed_with_the_event`; через переходник — `test_bound_handlers_run_on_the_worker_and_a_failure_is_retried` |
+  | `tests/test_infra.py` | убраны `sqlalchemy_dsn` и четыре порога Фазы 3 в `test_settings_require_secrets_in_prod`; индексы `uq_sessions_one_active`, `uq_artifacts_topic_cheatsheet` | схема Фазы 4: `db/test_baseline_migration.py` (состав таблиц); таких индексов в ней нет |
+### D-A-229. WP1.3 шаг 5, ч.2: закон 4 и READ-сессии — на Фазу 4
+- Класс: A
+- WP / место: WP1.3 шаг 5; `tests/graph/test_evidence_law4.py`, `tests/test_neo4j_read_session.py`
+- Контекст: оба файла держали импорты Фазы 3 (`events.catalog`, `graph.projector`, `graph.neo4j_store`, `tests.factories`). `evidence_validation.to_extracted_element`, `payloads.ExtractedElement`, `session.schemas.ExtractorOutputV2` живы (`session/extraction.py` — зона B), поэтому их тесты остаются.
+- Решение: `test_evidence_law4.py`: остаются `T-W1` (две схемы `extractor@2`) и `T-W4` (проверки `to_extracted_element`); добавлены `T-W1` для `ExtractorOutputV3` (`test_extractor_v3_output_schema_has_no_weights`; ТЗ Ф4 расширяет `T-W1` на схемы Фазы 4) и `test_skill_ref_requires_exactly_one_form` (из тестов каталога Фазы 3); `T-W3` перенесён на свёртку `rules@3` (`test_evidence_weight_formula` — те же десять строк таблицы, `test_evidence_weight_changes_only_through_settings` — те же пять подмен настроек, через `FoldParams.from_settings`). `test_neo4j_read_session.py`: два теста `read_session` без изменений; `test_graph_store_reads_through_read_session` (`Neo4jGraphStore._read`) заменён на `test_batch_reads_of_the_projector_open_read_sessions` — шесть чтений `graph/projection/store.py` открывают READ-сессии (драйвер-«шпион» записывает режим доступа).
+- Почему: §8.15 п.1–3, красная линия 5 (утверждения не слабее), WP1.3 шаг 5 ч.2.
+- Обратимость: полная (git).
+- Тесты: сами.
+- Правки тестов (§8.15):
+  | Что | Куда ушло |
+  | :-- | :-- |
+  | `test_turn_extracted_v2_is_in_the_catalog` | каталог Фазы 4 — `events/test_catalog.py::test_catalog_matches_spec` (`observation.extracted@1`) |
+  | `test_tier_assignment_by_source` (`T-W2`, `assign_tier`) | `graph/test_projection_rules3.py::test_tier_by_verification_and_second_opinion`, `::test_card_self_assessment_is_t4_evidence_of_level_1`, `::test_observation_extracted_gives_t3_evidence_and_supersedes_the_earlier_one` (T1 код, T2/T3 модель, T3 экстрактор, T4 карточка) |
+  | `test_rejected_elements_create_no_evidence` (`T-W4`, проектор) | отвергнутые элементы лежат в отдельном поле `observation.extracted.rejected` (`events/test_rejected_element.py`), обработчик читает только `elements` (`test_projection_rules3.py::test_observation_extracted_gives_t3_evidence…`) |
+  | `test_evidence_time_from_source_event` (`T-W5`) | там же: `atMs`/`sourceSeq` берутся из `at_ms`/`events` элемента (проверка `atMs=1000, sourceSeq=7`) |
+  | `test_v1_and_v2_extracted_events_both_apply` (`T-W6`) | в Фазе 4 одна версия схем (`SCHEMA_VERSION == 1`); неизвестная версия — ошибка: `test_projection_rules3.py::test_unknown_type_or_newer_schema_is_an_error`, `events/test_catalog.py::test_unknown_type_or_version_is_rejected` |
+  | `test_rules2_rebuild_equals_incremental` (`T-W7`) | `T-P1`: `graph/test_projection_batches.py::test_batches_equal_rebuild_hypothesis`, `test_projector_properties.py`, `graph/test_projection_runner.py::test_batches_of_any_size_give_one_graph`, `::test_rules3_stale_rebuild` |
+  | `test_model_strength_does_not_change_the_state` | модель в Фазе 4 не задаёт силу вовсе: `T-W1` для `ExtractorOutputV3` и `T-W3` на свёртке |
+  | `test_v2_hint_penalty_is_counted_once` | `test_evidence_weight_formula` (строки `hint_step`), `graph/test_skill_fold.py::test_weights_and_novelty_in_fold` |
+  | `test_graph_store_reads_through_read_session` | `test_batch_reads_of_the_projector_open_read_sessions` |
+- Требует подтверждения владельцем: нет
+
+### D-A-228. WP1.3 шаг 5, ч.2: тесты проектора, наложения и `read_consistent_slice`
+- Класс: A
+- WP / место: WP1.3 шаг 5; `tests/test_projector_determinism.py`, `tests/test_projector_properties.py`, `tests/test_session_overlay.py`, `tests/graph/test_read_neo4j_core.py`
+- Контекст: файлы держали `graph.projector`, `phase_a`, `neo4j_store`, `overlay.build_session_overlay`, фикстуру `db` и сценарий из 36 типов. `SessionOverlay` (датакласс) остаётся: его принимает читатель (`graph/read`) и строят `session/turn_source.py`, `session/replay.py`. `build_session_overlay` и `apply_overlay_events` не вызывает никто в `quack/` (проверено `grep`): `turn_source` собирает пустое наложение, а перевод наложения на обработчики `rules@3` (ТЗ Ф4 WP2.3, `Т-§2.6`) ещё не сделан.
+- Решение: (1) `test_read_neo4j_core.py` — без изменений (`SessionOverlay` — датакласс, остаётся). (2) `test_projector_determinism.py` — убраны тесты проектора и `Neo4jGraphStore` (эквиваленты ниже); остались тесты `InMemoryGraph`, мутаций и компилятора Cypher (модули живы: читатель и сидирование тестов читателя), добавлены `test_deterministic_id_is_the_uuid5_of_learner_seq_and_item` и `test_superseded_evidence_is_as_if_it_never_existed` (фаза B `rules@3`: вытесненное свидетельство не входит в свёртку навыка и заблуждения; активное меняет оба). (3) `test_projector_properties.py` — то же свойство на `rules@3`: случайная часть сценария `graph/test_projection_batches.py` (`seq` сохраняются — события ссылаются друг на друга по `seq`) в пачках случайных границ равна применению разом; сильнее `T-P1`, который режет только целый сценарий. (4) `test_session_overlay.py` — остаются шесть тестов `read_consistent_slice` (без `session_factory`); тест «`min_seq=None` — хвост журнала» заменён существующим `graph/test_projection_runner.py::test_slice_waits_for_the_journal_of_phase_4`; два теста наложения сняты без замены — кода Фазы 4, который строит наложение из журнала, нет. Когда он появится (WP2.3, наложение на новые обработчики), нужны его тесты: свежие события сессии поверх отстающей проекции, пустое наложение при догнавшем проекторе, отсутствие записи в базовый срез.
+- Почему: §8.15 п.1–3; красная линия 5; D-A-212 («`SessionOverlay` — нужна `Db`-версия»).
+- Обратимость: полная (git); два снятых теста наложения возвращаются из git вместе с новой функцией.
+- Тесты: сами.
+- Правки тестов (§8.15):
+  | Что | Куда ушло |
+  | :-- | :-- |
+  | `test_scenario_covers_all_36_event_types` | `graph/test_projection_batches.py::test_script_reaches_every_phase`, `events/test_catalog.py::test_samples_cover_catalog` |
+  | `test_batch_size_and_rebuild_equivalence`, `test_merged_skill_evidence_refreshes_every_topic_of_the_target`, `test_reapplying_already_applied_events_changes_nothing`, `test_projection_is_reproducible_across_runs`, `test_neo4j_merged_skill_evidence_refreshes_every_topic`, `test_neo4j_projection_equals_in_memory` | `T-P1`: `graph/test_projection_batches.py` (`test_batches_equal_rebuild_hypothesis`, `test_applying_a_batch_again_changes_nothing`), `graph/test_projection_runner.py::test_batches_of_any_size_give_one_graph` |
+  | `test_deterministic_uuid5_ids` | `test_deterministic_id_is_the_uuid5_of_learner_seq_and_item` и ожидаемые id в `graph/test_projection_rules3.py` |
+  | `test_inline_provisional_skills_reuse_by_normalized_name` | `graph/test_projection_rules3.py::test_a_description_with_the_name_of_a_skill_of_the_domain_is_that_skill`, `::test_task_created_with_markup_options_and_new_skills` |
+  | `test_alias_resolution_after_merges`, `test_skill_merge_moves_history_into_target_fold` | `T-P5`: `test_alias_and_empty_apply`, `test_skill_merged_moves_relations_and_leaves_an_alias`, `test_topic_merged_moves_skills_and_hub_membership`, `test_misconception_merged_moves_manifestations_and_traps`, `test_edge_between_merged_skills_is_not_a_loop` |
+  | `test_superseded_evidence_equals_history_without_it` | `test_superseded_evidence_is_as_if_it_never_existed` (фаза B) |
+  | `test_topic_aggregates_present_after_projection` | `graph/test_projection_batches.py::test_no_missing_properties` (`T-P2`), `graph/test_skill_fold.py::test_topic_status_visibility` |
+  | `test_rules_guard_skips_learner_until_rebuild`, `test_neo4j_rules_guard` | `graph/test_projection_runner.py::test_rules3_stale_rebuild` (`T-P8`) |
+  | `test_analyze_batch_collects_needed_ids` | `graph/test_projection_rules3.py::test_needs_of_a_batch_join`, `::test_handler_reads_only_the_events_it_needs` |
+  | `test_overlay_shows_fresh_session_events_over_lagging_projection`, `test_overlay_is_empty_when_projection_caught_up` | **эквивалента нет** (см. «Решение», п. 4); чтение наложения читателем — `graph/test_read_neo4j_core.py::test_overlay_patches_state_while_the_projector_lags` |
+  | `test_slice_uses_last_seq_when_min_seq_is_none` | `graph/test_projection_runner.py::test_slice_waits_for_the_journal_of_phase_4` |
+- Требует подтверждения владельцем: нет
+
+### D-A-227. WP1.3 шаг 5, ч.2: тесты журнала событий на Фазу 4
+- Класс: A
+- WP / место: WP1.3 шаг 5; `tests/test_events_and_append.py` (снят), `tests/events/test_catalog.py`
+- Контекст: `test_events_and_append.py` проверял каталог из 36 типов Фазы 3, `append_events` на SQLAlchemy и проекции в `core.domains/sessions/task_bank/artifacts` (`events/projections.py`). Каталога, функции и таблиц в Фазе 4 нет.
+- Решение: файл снят целиком. Правила, общие для любого каталога, перенесены в `events/test_catalog.py` без ослабления: `test_type_names_follow_the_naming_rule` (шаблон имени), `test_unknown_type_or_version_is_rejected`, `test_bounded_fields_are_checked` (отрезок 0..1 у `edge.added.confidence`, ступень 1..3 у `hint.shown`), `test_valid_actors`/`test_invalid_actors` (все значения Фазы 3 плюс `agent:<вид>`), `test_payload_hash_is_canonical_and_order_independent`. В `test_catalog_matches_spec` перечень типов Фазы 1–3 вместо импорта `quack.events.catalog` — литерал `REMOVED_PHASE_1_3_TYPES` (31 имя; то же утверждение).
+- Почему: §8.15 п.1–3, красная линия 5.
+- Обратимость: полная (git).
+- Тесты: сами.
+- Правки тестов (§8.15):
+  | Что | Куда ушло |
+  | :-- | :-- |
+  | `test_catalog_has_exactly_36_event_types` | `events/test_catalog.py::test_catalog_matches_spec` (каталог Фазы 4) и `::test_type_names_follow_the_naming_rule` |
+  | `test_sample_payloads_cover_whole_catalog`, `test_every_event_type_validates_its_payload`, `…rejects_unknown_fields`, `…rejects_missing_required_field`, `test_text_events_use_text_field` | `events/test_catalog.py::test_samples_cover_catalog`, `::test_invalid_payload_rejected` (пример валиден, лишнее поле и каждое обязательное поле отвергаются), `::test_text_types_have_text_and_match_index` |
+  | `test_unknown_event_type_is_rejected` | `::test_unknown_type_or_version_is_rejected`, `db/test_append_events.py::test_unknown_type_and_duplicate_keys_are_rejected` |
+  | `test_skill_ref_requires_exactly_one_form` | `graph/test_evidence_law4.py` (`SkillRef` жив, пока жив `to_extracted_element`) |
+  | `test_unit_interval_fields_are_bounded` | `::test_bounded_fields_are_checked` |
+  | `test_valid_actors`, `test_invalid_actors` | `::test_valid_actors`, `::test_invalid_actors`; `db/test_append_events.py::test_actor_versions_and_agents` |
+  | `test_payload_hash_is_canonical_and_order_independent` | `::test_payload_hash_is_canonical_and_order_independent` |
+  | `test_append_assigns_monotonic_gapless_seq`, `…stores_envelope_and_hash`, `test_idempotent_retry_returns_existing_event`, `test_idempotency_conflict_on_changed_payload`, `test_mixed_batch_returns_existing_and_appends_new`, `test_invalid_payload_writes_nothing`, `test_event_types_seen_recorded`, `test_concurrent_appends_for_one_learner_are_serialized` | `db/test_append_events.py` (одноимённые, `T-DB5`), `events/test_catalog.py::test_invalid_payload_is_not_written`, `::test_derived_key_retry_returns_same_event` |
+  | `test_wakeup_is_published_after_commit`, `test_wakeup_not_published_on_rollback` | `db/test_append_events.py::test_signal_is_published_after_commit`, `::test_signal_not_published_on_rollback` |
+  | `test_domain_projection_follows_events`, `test_session_projection_follows_events`, `test_task_bank_projection`, `test_artifact_projections` | проекции `core.*` Фазы 3 заменены графом: `graph/test_projection_rules3.py` (`test_domain_created_makes_the_domain…`, `test_task_created_with_markup_options_and_new_skills`, `test_digest_written_replaces_the_digest_of_the_domain`), строки сессий — `session/test_sessions_db.py` |
+  | `test_only_one_active_session_per_learner` | правило снято: в Фазе 4 новая сессия не закрывает открытую — `session/test_sessions_db.py::test_a_new_session_does_not_end_the_open_one` |
+- Требует подтверждения владельцем: нет
+
+### D-A-226. WP8.2: `split_topic` и `topic_split` — правка v1 перечней; задача `agent.topic_split`; порядок пачки (по #245 B)
+- Класс: C (схема события после G1, красная линия 2 — по прецеденту D-A-196/D-A-121: значения перечней v1, событий Фазы 4 в проде нет)
+- WP / место: WP8.2 «Разделить (фразой в чат)»; `quack/events/records.py` (`TurnIntent`, `AgentKind`), `quack/jobs/rules_p4.py`
+- Контекст: строка контракта WP8.2 требует: учитель размечает намерение → сверка предлагает распределение → `topic.split`. В перечнях `TurnIntent` и `AgentKind` для этого значений нет; B не может писать ход с таким намерением (`TurnHeadRecord` отвергает весь ход).
+- Решение: `TurnIntent` += `split_topic`; `AgentKind` += `topic_split`; `JOB_KIND_SPECS` += `agent.topic_split` (P2, видимая, роль `builder`), `AGENT_JOB_KINDS["topic_split"] = "agent.topic_split"`. Правило `agent.requested`: без `params.topic_id` задач нет; иначе граф-задача под замком `domain:{domain_id}` с `topic_id` в нагрузке. Версия схем остаётся 1. Порядок событий в одной пачке для темы с одним навыком: сначала `topic.split` (создаёт части), затем `skill.split` (его части ложатся в созданные темы); обратный порядок теряет часть (`_skill_split` пропускает часть, чьей темы нет) — тест это фиксирует.
+- Почему: ТЗ Ф4 WP8.2, §6.3 (`topic.split`, `skill.split`), D-A-131, D-A-196; патч B из #245.
+- Обратимость: полная до первых событий в проде (значения перечней можно убрать).
+- Тесты: `tests/jobs/test_rules_p4.py::test_topic_split_request_is_a_graph_job_of_the_domain`, `tests/graph/test_projection_rules3.py::test_split_of_a_one_skill_topic_in_one_batch_needs_the_topics_first`; счётчик видов в `test_every_kind_of_the_spec…` 24 → 25 (+5 периодических).
+- Требует подтверждения владельцем: да — **подтверждено владельцем 2026-11-04** (чат сессии; отмечено в #245)
+
 ### D-A-225. WP1.3 шаг 5, часть 1: что из кода Фазы 3 остаётся до части 2
 - Класс: A
 - WP / место: WP1.3, §7.3, §8.15; `quack/graph/worker.py`, `quack/jobs/dispatcher.py`, `quack/jobs/dispatcher_rules.py`, `quack/graph/projector.py`

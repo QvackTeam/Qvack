@@ -23,6 +23,58 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-C-212. WP9.5: `GET /internal/status` в приложении `api`
+- Класс: C
+- WP / место: WP9.5, Д-§9.1; `quack/api/app.py` (`_internal_router`), `tests/e2e/routes/c.py`, `tests/test_ops_p4_status.py`
+- Контекст: ТЗ WP9.5 требует внутренний эндпоинт сводки с содержимым `ops status`; в коде его не было (Caddyfile уже отдаёт `/internal/*` кодом 404).
+- Решение: `GET /internal/status` вызывает `collect_status` на ресурсах процесса и отвечает отчётом: 200, либо 503, если Postgres не отвечает (код 2 команды). Маршрут вне схемы OpenAPI (`include_in_schema=False`), без входа ученика: защита — сеть Docker и Caddy, который его не проксирует. Вне реестра маршрутов `tests/e2e/routes` (реестр сверяется со схемой OpenAPI).
+- Почему: ТЗ Ф4 WP9.5, Д-§9.1.
+- Обратимость: код.
+- Тесты: `test_internal_status_serves_the_report_of_ops_status`.
+- Требует подтверждения владельцем: нет.
+
+### D-C-211. WP9.6: `orphan-objects`, `resume`, `replay-deletions`, `rebuild --concurrency`
+- Класс: C (определение «есть ссылка в Postgres» для `orphan-objects` в документах не дано)
+- WP / место: WP9.6, Д-§8.3, Д-§8.7; `quack/ops/orphan_objects.py`, `quack/cli.py`, `deploy/README.md`
+- Контекст: функции A из S15 влиты (`replay_deletions`, `reconcile_deletions` в `deletion/journal.py`, `resume` в `graph/projection/runner.py`); функции `orphan_objects` у A нет, она в зоне C (ops).
+- Решение: `ops resume --learner`, `ops replay-deletions --since` (печатает `{"replayed": N}`), `ops rebuild ... --concurrency N` (по умолчанию `rebuild_concurrency`; ученики пересобираются по N одновременно, код выхода 1, если хоть один не `rebuilt`). `ops orphan-objects --since [--dry-run]` смотрит объекты `learners/` новее метки: объект держат ссылки: ключ в `content.materials.object_key`, `material_pages.image_key`, `exports.object_key`; ключ в `payload` события или в `content` версии артефакта того же ученика; для кусков холста `learners/{l}/canvas/{s}/{c}/…` - строка `content.canvas_boards` (куски находятся по префиксу, ключа в базе нет). Остальное удаляется (при `--dry-run` только список). Печатает JSON `{checked, orphans, deleted, dry_run}`. Поиск ключа в событиях идёт по ученику ключа (`strpos(payload::text, key)`): дорого на большом журнале, но команда одноразовая, после восстановления, и объектов новее дампа немного.
+- Почему: ТЗ Ф4 WP9.6, Д-§8.3 шаги 5 и 8, Д-§8.7; T-OPS4.
+- Обратимость: код. Удаление необратимо, поэтому в README команде предшествует `--dry-run`. Если появятся новые места ссылок на ключи (таблица, колонка), их надо добавить в `orphan_objects.py`, иначе команда удалит живой файл.
+- Тесты: `tests/test_ops_p4_recovery.py`.
+- Требует подтверждения владельцем: да (риск удаления файлов ученика при неполном списке ссылок).
+
+### D-C-210. WP9.3: шаги CI (типы фронтенда, `modal/`, изоляция и один писатель), тесты порядка выкатки, ссылки OpenAPI
+- Класс: C (зона C: `.github`, `deploy`, `openapi.json`)
+- WP / место: WP9.3, WP9.4; `.github/workflows/ci.yml`, `quack/api/openapi.py`, `tests/test_ci_layers.py`, `tests/test_deploy_order.py` (T-OPS8), `tests/test_app_assembly.py`
+- Контекст: п.7 `Д-§5.2` («типы фронтенда из OpenAPI совпадают») требует Node, пакета нет в ТЗ §4.6; `modal/` не имел проверок; изоляция и один писатель шли только внутри полного прогона; `backend/openapi.json` не собирался генератором типов: у `/auth/*` и `/companion/pair` в ответе 422 остался `$ref` на удалённый `HTTPValidationError`.
+- Решение: (1) job `frontend-types` (только pull_request, не в `needs` у `publish`, ожидаемо красный до перевода фронтенда, R4-2): `npm ci --ignore-scripts` в `frontend/` по его lock-файлу (генератор `openapi-typescript` уже в `frontend/package.json`, новых зависимостей и actions нет, файлы фронтенда не меняются), генерация из `backend/openapi.json` теми же флагами, что в `api:types`, и `cmp` с `frontend/lib/api/schema.d.ts`. (2) `modal/` в job `fast`: `ruff check`, `ruff format --check` с настройками backend и `pyright ../modal` (пакет `modal` есть в backend, ТЗ §4.6). (3) Перед полным прогоном job `backend` отдельные шаги: изоляция (T-DB4, T-E3) и один писатель (T-A9a, T-A9b). (4) Выкатка (WP9.4): job `deploy` с окружением `production`, `concurrency: deploy` и пропуском при `DEPLOY_FREEZE` уже были; добавлены тесты (`test_ci_layers`) и `test_deploy_order.py` (T-OPS8): порядок шагов `Д-§6.1` и запрет автоотката при новых событиях, правилах, миграциях читаются по тексту `deploy.sh` (режима проверки в скрипте нет). (5) `quack/api/openapi.py`: ссылка 422 на удалённую модель заменена на `ErrorResponse` для всех маршрутов; тест `test_openapi_refs_all_resolve`; `openapi.json` пересобран.
+- Почему: `Д-§5.2` п.5, п.7, ТЗ Ф4 WP9.3, WP9.4, R4-2, §4.6, §8.13 (T-OPS8).
+- Обратимость: код и workflow.
+- Тесты: `tests/test_ci_layers.py`, `tests/test_deploy_order.py`, `tests/test_app_assembly.py::test_openapi_refs_all_resolve`.
+- Требует подтверждения владельцем: нет (обязательным `frontend-types` делает владелец после перевода фронтенда).
+
+### D-C-170. WP1.3 шаг 3 C: артефакты и сборка API без SQLAlchemy - маршруты Фазы 3 сняты, `AppResources` без `engine` и `session_factory`
+- Класс: C (зона C; формат событий и схемы БД не менялись); две правки в зоне A - п.5
+- WP / место: WP1.3 шаг 3 (issue #215, #235), WP23, WP25, §6.4 «Что заменено»; `quack/artifacts/{notes,cheatsheets,search,store,deps,router}.py` (удалены), `quack/artifacts/schemas.py`, `quack/api/{app,resources,auth}.py`, `tests/support/resources.py`, `tests/e2e/routes/c.py`
+- Контекст: план WP1.3 велел перевести модули C на `Db` «или снять, если их заменяет Фаза 4». Модули `notes`, `cheatsheets`, `search`, `store`, `deps` читали и писали `core.artifacts`/`core.events` через SQLAlchemy; в схеме dbmate этих таблиц нет (артефакты - `content.artifacts` и `content.artifact_versions`, WP23.1). Таблица §6.4 «Что заменено» называет замены: конспект блоками, карточки, cheat sheet хаба, `GET /v1/search`.
+- Решение:
+  1. Сняты без переноса на `Db`: `POST/PATCH/DELETE /v1/artifacts/notes`, `GET /v1/artifacts`, `GET /v1/artifacts/search` (замена - `GET /v1/topics/{id}/notes`, блоки, `GET /v1/search`), `GET /v1/topics/{id}/cheatsheet` и `POST …/cheatsheet/refresh` (замена - `GET/POST /v1/hubs/{id}/cheatsheet`), обработчики `session.finish_artifacts` и `artifact.refresh_cheatsheet` (дайджест сессии заменён итогом `GET …/summary`; cheat sheet обновляет `artifact.cheatsheet`).
+  2. `GET /v1/domains/{id}/export` Фазы 3 снят: он собирал `pMastery` и `core.domains`, которых в Фазе 4 нет; новый экспорт - WP23.7 (T-AR5, не начат), в STATUS строка WP23.7 это называет.
+  3. `quack/artifacts/schemas.py` оставляет `ArtifactGenOutput` (схема выхода роли `artifacts@1`, её читают контракты промптов и `scripts/meta_smoke.py`); модели запросов и ответов сняты.
+  4. `AppResources` без `engine` и `session_factory`; `/health/ready` и `/healthz` спрашивают Postgres через `resources.db` (`SELECT 1`, тот же срок `health_check_timeout_s`). `get_current_learner_id` читает только сессию-cookie: `_DELETED_LEARNER_SQL` (надгробия `auth.users`, `ops.deletion_tombstones`) снят, аккаунт удаляется физически через `delete_account` вместе с `core.auth_sessions`, cookie перестаёт разбираться.
+  5. Шлюз: `LLMGateway(..., db=db)` собран с `db=` (D-B-197), но его первый аргумент `session_factory` остаётся обязательным (outbox `core.llm_outbox`); API держит для него одно ленивое соединение SQLAlchemy (`_outbox_session_factory`, `pool_size=1`). Уходит с аргументом в шаге 4 потока B. Правки в зоне A: из `quack/jobs/kinds.py` убраны виды `session.finish_artifacts` и `artifact.refresh_cheatsheet` (как B убрал `turn.extract`), из `quack/runtime/__init__.py` - модуль `quack.artifacts.cheatsheets`; без этого `T-Q7` падал бы на лишнем виде. Фабрики видов и правила `dispatcher_rules` Фазы 3 остаются до шага 5 A.
+  6. `tests/support/resources.py`: `build_app_resources` и `build_job_context` передают `db=` в шлюз, если `db` дан; аргументы `engine` и `session_factory` только строят шлюз.
+- Почему: ТЗ Ф4 WP1.3, §6.4, §8.15 п.1, D-A-103, D-B-197, D-C-146 (политика тестов).
+- Обратимость: код - откатом коммита; данных Фазы 3 в боевой базе нет (чистый старт, D-C-160).
+- Тесты: `tests/test_app_assembly.py` (`test_healthz_depends_only_on_postgres` - через `Db`, T-A3 на `/v1/me`, `test_search_limits_come_from_settings` на `/v1/search`), `tests/e2e/routes/c.py` (T-A1, T-E2, T-E3 без маршрутов Фазы 3, заметки Фазы 4 в изоляции), `tests/storage/test_s1_resources.py::test_app_resources_fields` (набор полей `AppResources` без `engine` и `session_factory`).
+- Правки тестов (§8.15 п.1, тест Фазы 3 удалён вместе с кодом; свойство теперь проверяет тест Фазы 4):
+  - `tests/artifacts/test_artifacts_search_export.py` (заметки Markdown, `finish_artifacts`, обновление cheat sheet темы, поиск по `core.artifacts`, экспорт домена) → блоки и версии: `test_documents_wp23.py`, `test_topic_refresh_wp23.py`; cheat sheet хаба: `test_cheatsheet_wp23_5.py`; поиск: `tests/materials/test_materials_routes.py` (`GET /v1/search`); экспорт - T-AR5 в WP23.7;
+  - `tests/artifacts/test_artifact_isolation.py` (шпаргалка чужой темы - 404, `T-E3`) → `tests/e2e/test_isolation_and_idempotency.py::test_cross_learner_isolation` (все маршруты с id в пути, включая блоки заметок и cheat sheet хаба) и `test_cheatsheet_routes_wp23_5.py`;
+  - `tests/artifacts/conftest.py` (стенд Фазы 3: `Seeder`, `worker_deps`, `client`) - без потребителей, удалён;
+  - `tests/e2e/test_isolation_and_idempotency.py`: заметка Markdown и её поиск `T-E3` сняты (изоляция заметок Фазы 4 - `isolation=(_topic_with_notes,)` потока C); `tests/e2e/routes/c.py`: пять маршрутов Фазы 3 сняты из реестра `T-A1`/`T-E2`;
+  - `tests/test_dispatcher.py::test_cheatsheet_refresh_endpoint_enqueues_directly` (T-D8 Фазы 3, `POST /v1/topics/{id}/cheatsheet/refresh`) - вместе с маршрутом; кнопка «собери сам» хаба и согласие - `test_cheatsheet_routes_wp23_5.py`;
+  - `tests/test_jobs_phase3.py` (`T-Q7`: `test_all_job_kinds_have_handlers`, `test_worker_exits_with_code_1_on_handler_mismatch`): вид, чей пропуск проверяется, - `artifact.topic_refresh` вместо `artifact.refresh_cheatsheet` (его нет в `JOB_KINDS`); свойство то же;
+  - `tests/test_app_assembly.py`: `test_search_limits_come_from_settings` переведён с `/v1/artifacts/search` на `/v1/search` (лимиты те же), проба `T-A3` `/v1/artifacts` → `/v1/me`.
 ### D-C-203. WP20.2: фото конспекта, слой 1 `material_parser@1`, правка файлов B
 - Класс: B (форма данных и черновик промпта; доктрина — по D-C-132)
 - WP / место: WP20.2, S8; `quack/materials/parse.py` (`SheetReading`), `quack/prompts/material_parser/v1.md`, `tests/llm/prompt_contracts.py`, `scripts/meta_smoke.py`, `PROMPT_CONTRACTS.md`, `manifest.json`

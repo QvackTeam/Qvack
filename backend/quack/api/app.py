@@ -14,7 +14,6 @@ from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import text
 
 from quack.api.errors import install_error_handlers
 from quack.api.learner_stream import router as learner_stream_router
@@ -24,7 +23,6 @@ from quack.api.resources import AppResources, create_app_resources
 from quack.artifacts.cards_routes import router as cards_router
 from quack.artifacts.hub_cheatsheet_routes import router as hub_cheatsheet_router
 from quack.artifacts.notes_routes import router as notes_router
-from quack.artifacts.router import router as artifacts_router
 from quack.auth.consents import has_current_terms
 from quack.auth.google import AuthlibGoogleOIDC, GoogleOIDC
 from quack.auth.router import router as auth_router
@@ -35,6 +33,7 @@ from quack.deletion.router import router as deletion_router
 from quack.domains.router import router as domains_router
 from quack.logging import configure_logging, get_logger, log_context
 from quack.materials.router import router as materials_router
+from quack.ops.status import collect_status
 from quack.review.router import router as review_router
 from quack.session.router import router as session_router
 
@@ -86,8 +85,7 @@ def _health_router() -> APIRouter:
         else:
 
             async def postgres() -> None:
-                async with resources.engine.connect() as conn:
-                    await conn.execute(text("SELECT 1"))
+                await resources.db.fetch_one("SELECT 1")
 
             async def redis() -> None:
                 if resources.redis is None:
@@ -128,11 +126,29 @@ def _healthz_router() -> APIRouter:
         if resources is not None:
 
             async def postgres() -> None:
-                async with resources.engine.connect() as conn:
-                    await conn.execute(text("SELECT 1"))
+                await resources.db.fetch_one("SELECT 1")
 
             status = await _check(postgres, resources.settings.health_check_timeout_s)
         return JSONResponse({"status": status}, status_code=200 if status == "ok" else 503)
+
+    return router
+
+
+def _internal_router() -> APIRouter:
+    """`GET /internal/status` (WP9.5, `Д-§9.1`): the report of `ops status`, for the Docker
+    network only. Caddy does not proxy `/internal/*` (D-C-212), and the route is not in the
+    OpenAPI snapshot of the frontend."""
+    router = APIRouter(prefix="/internal", include_in_schema=False)
+
+    @router.get("/status")
+    async def status(request: Request) -> JSONResponse:
+        resources: AppResources | None = getattr(request.app.state, "resources", None)
+        if resources is None:
+            return JSONResponse({"status": "error"}, status_code=503)
+        report, code = await collect_status(
+            resources.settings, resources.db, resources.neo4j, resources.redis
+        )
+        return JSONResponse(report, status_code=200 if code == 0 else 503)
 
     return router
 
@@ -202,13 +218,13 @@ def create_app(
     )
     app.include_router(_health_router())
     app.include_router(_healthz_router())
+    app.include_router(_internal_router())
     # Domains and artifacts attach authentication and the `actions` limit in their routers
     # (public `register`/`login` carry the `auth` limit); the session router is wrapped here.
     app.include_router(domains_router)
     app.include_router(review_router)
     app.include_router(deletion_router)
     app.include_router(session_router, dependencies=[Depends(enforce_action_rate_limit)])
-    app.include_router(artifacts_router)
     app.include_router(notes_router)
     app.include_router(cards_router)
     app.include_router(hub_cheatsheet_router)

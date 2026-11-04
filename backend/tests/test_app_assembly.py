@@ -27,8 +27,8 @@ from quack.api.app import create_app, write_openapi
 from quack.api.errors import ErrorResponse
 from quack.api.openapi import render_openapi
 from quack.config import Settings
-from quack.db import Db
-from quack.db.postgres import SessionFactory, create_engine
+from quack.db import Db, open_db
+from quack.db.postgres import SessionFactory
 from quack.db.redis import ratelimit_key
 from tests.e2e.routes import declared_routers, expected_routes
 from tests.support.auth import session_cookie, session_token
@@ -47,7 +47,7 @@ PUBLIC_ROUTES = {
 REDIRECT_ONLY_ROUTES = {("GET", "/auth/google/start")}
 PATH_PARAM = re.compile(r"\{[^}]+\}")
 # One GET route of each product package (T-A3).
-PACKAGE_PROBES = ("/v1/domains", "/v1/sessions/active", "/v1/artifacts")
+PACKAGE_PROBES = ("/v1/domains", "/v1/sessions/active", "/v1/me")
 
 
 type AppFactory = Callable[..., FastAPI]
@@ -148,7 +148,7 @@ async def test_every_protected_route_requires_auth_before_validation(
 async def test_single_session_contract_across_packages(
     api: httpx.AsyncClient, sign_in: SignIn
 ) -> None:
-    """T-A3: one session works in domains, session and artifacts; after `DELETE /v1/learner`
+    """T-A3: one session works in domains, session and the account; after `DELETE /v1/learner`
     and with an unknown cookie it gets 401 in all three (ТЗ Ф4 WP18.3)."""
     _, headers = await sign_in()
 
@@ -310,18 +310,16 @@ async def test_search_limits_come_from_settings(make_app: AppFactory, sign_in: S
     app = make_app(search_min_query_len=4, search_default_limit=7, search_max_limit=9)
     async with _client(app) as client:
         _, headers = await sign_in()
-        too_short = await client.get("/v1/artifacts/search", params={"q": "abc"}, headers=headers)
+        too_short = await client.get("/v1/search", params={"q": "abc"}, headers=headers)
         assert too_short.status_code == 422, too_short.text
         assert too_short.json()["error"]["code"] == "VALIDATION_ERROR"
         too_many = await client.get(
-            "/v1/artifacts/search", params={"q": "abcd", "limit": 10}, headers=headers
+            "/v1/search", params={"q": "abcd", "limit": 10}, headers=headers
         )
         assert too_many.status_code == 422, too_many.text
-        ok = await client.get(
-            "/v1/artifacts/search", params={"q": "abcd", "limit": 9}, headers=headers
-        )
+        ok = await client.get("/v1/search", params={"q": "abcd", "limit": 9}, headers=headers)
         assert ok.status_code == 200, ok.text
-        default = await client.get("/v1/artifacts/search", params={"q": "abcd"}, headers=headers)
+        default = await client.get("/v1/search", params={"q": "abcd"}, headers=headers)
         assert default.status_code == 200, default.text
 
 
@@ -355,24 +353,37 @@ async def test_health_probe_timeout_comes_from_settings(
 
 
 async def test_healthz_depends_only_on_postgres(
-    settings: Settings, pg_engine: AsyncEngine, db: SessionFactory
+    settings: Settings, pg_engine: AsyncEngine, db: SessionFactory, pg_db: Db
 ) -> None:
-    """T-A8: Neo4j and Redis broken → `/healthz` 200; Postgres unreachable → 503. No auth."""
+    """T-A8: Neo4j and Redis broken → `/healthz` 200; Postgres unreachable → 503. No auth.
+    Postgres is asked through the `Db` of the resources (WP1.3), not the SQLAlchemy engine,
+    which stays alive in the second half of the test."""
     resources = build_app_resources(
-        settings, pg_engine, BrokenNeo4jDriver(), BrokenRedis(), session_factory=db
+        settings, pg_engine, BrokenNeo4jDriver(), BrokenRedis(), db=pg_db, session_factory=db
     )
     async with _client(create_app(settings, resources=resources)) as client:
         ok = await client.get("/healthz")
     assert (ok.status_code, ok.json()) == (200, {"status": "ok"}), ok.text
 
-    dead = create_engine(settings.model_copy(update={"postgres_dsn": DEAD_POSTGRES_DSN}))
+    dead_db = await open_db(
+        settings.model_copy(update={"postgres_dsn": DEAD_POSTGRES_DSN}), wait=False
+    )
     try:
-        broken = build_app_resources(settings, dead, BrokenNeo4jDriver(), BrokenRedis())
+        broken = build_app_resources(
+            settings,
+            pg_engine,
+            BrokenNeo4jDriver(),
+            BrokenRedis(),
+            db=dead_db,
+            session_factory=db,
+        )
         async with _client(create_app(settings, resources=broken)) as client:
             down = await client.get("/healthz")
+            ready = await client.get("/health/ready")
     finally:
-        await dead.dispose()
+        await dead_db.close()
     assert (down.status_code, down.json()) == (503, {"status": "error"}), down.text
+    assert ready.status_code == 503 and ready.json()["checks"]["postgres"] == "error", ready.text
 
 
 DEAD_POSTGRES_DSN = "postgresql://quack:quack@127.0.0.1:1/quack_test"
@@ -463,6 +474,16 @@ def test_openapi_documents_every_response() -> None:
                 expected.add("422")
             assert set(errors) == expected, f"{what}: {sorted(errors)} != {sorted(expected)}"
             assert all(ref == ERROR_REF for ref in errors.values()), what
+
+
+def test_openapi_refs_all_resolve() -> None:
+    """Д-§5.2 п.7 (D-C-210): the schema feeds the type generator of the frontend, which fails on
+    a `$ref` to a component that is not there (the stripped `HTTPValidationError` was left on
+    `/auth/*` and `/companion/pair`)."""
+    schema = _snapshot_app().openapi()
+    components = set(schema["components"]["schemas"])
+    refs = set(re.findall(r'"#/components/schemas/([^"]+)"', json.dumps(schema)))
+    assert refs - components == set()
 
 
 def test_sse_endpoints_document_event_stream() -> None:
