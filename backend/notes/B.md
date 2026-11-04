@@ -23,6 +23,17 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-B-178. Отдача страницы визуализации: `GET /v1/viz/{id}` с CSP (WP16.5, #201)
+- Класс: B
+- WP / место: WP16.5, `Т-§13.6`, `T-AG6`, §7.3 п.3; тело `quack/practice/viz_page.py` (`load_viz_page`, `content_security_policy`), объявление `quack/artifacts/viz_routes.py` (в `quack/api/app.py` одна строка `include_router`), строка в `tests/e2e/routes/b.py`
+- Контекст: `Т-§13.6` — скрипты только с нашего статического адреса, а страница `viz_builder` держит логику во встроенных скриптах (D-B-177). Владелец выбрал вариант 1 в #201 (2026-11-04)
+- Решение: (а) `{id}` — `request_id` запроса `agent.viz`; страница — объект, на который указывает `agent.completed {kind: viz, ok: true}` этого ученика. Нет события, сборка провалена, объекта нет или он чужой — один 404 (закон 8); ключ вне префикса ученика — тоже 404. (б) CSP: `default-src 'none'`; `script-src` и `style-src` — `viz_static_base_url` и `'unsafe-inline'`; `connect-src 'none'`; `form-action 'none'`, `base-uri 'none'`; шрифты и картинки — статика и `data:`; директива `sandbox allow-scripts` в самом заголовке (без `allow-same-origin`), так что страница без iframe тоже не получает прав источника. (в) Клиент показывает страницу в `<iframe sandbox="allow-scripts">`. (г) Ответ `text/html`, `X-Content-Type-Options: nosniff`, `Cache-Control: private, max-age=3600` (ключ объекта неизменяем, Т-§3.3). (д) Тело в `practice`, потому что `artifacts` не может импортировать `agents` (§4.1)
+- Почему: решение владельца, §0.4.3 п.2, `Т-§13.6`
+- Обратимость: одна функция заголовка; вариант 3 (данные + наш рендерер) — отдельное решение
+- Тесты: `tests/session/test_viz_page.py` (1): страница и CSP, 404 на провал, неизвестный и чужой id, 401 без входа; `T-E*` изоляции ученика и снимок `openapi.json` зелёные
+- Требует подтверждения владельцем: нет (подтверждено в #201)
+- Не решено: файлы и версии `deploy/static/viz/` и `viz_libraries` — C (WP9.2); `viz_static_base_url` пуст — тогда `script-src` только `'unsafe-inline'`
+
 ### D-B-214. Живой прогон Meta API (WP10.7, DoD п.6a) 2026-11-04; конец стрима `data: [DONE]`
 - Класс: B
 - WP / место: WP10.7, DoD п.6a; `quack/llm/responses_client.py::_data_event`, `scripts/meta_smoke.py` (`--only`)
