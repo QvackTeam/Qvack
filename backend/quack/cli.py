@@ -29,6 +29,7 @@ from quack.db.redis import create_redis
 from quack.graph.projection.rebuild import rebuild_learner
 from quack.graph.projection.runner import RULES_VERSION
 from quack.graph.projection.store import stale_learners
+from quack.graph.read.reader import create_graph_reader
 from quack.llm.gateway import LLMGateway
 from quack.llm.responses_client import ResponsesClient
 from quack.logging import configure_logging, get_logger

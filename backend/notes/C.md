@@ -43,6 +43,7 @@
   - `tests/artifacts/conftest.py` (стенд Фазы 3: `Seeder`, `worker_deps`, `client`) - без потребителей, удалён;
   - `tests/e2e/test_isolation_and_idempotency.py`: заметка Markdown и её поиск `T-E3` сняты (изоляция заметок Фазы 4 - `isolation=(_topic_with_notes,)` потока C); `tests/e2e/routes/c.py`: пять маршрутов Фазы 3 сняты из реестра `T-A1`/`T-E2`;
   - `tests/test_dispatcher.py::test_cheatsheet_refresh_endpoint_enqueues_directly` (T-D8 Фазы 3, `POST /v1/topics/{id}/cheatsheet/refresh`) - вместе с маршрутом; кнопка «собери сам» хаба и согласие - `test_cheatsheet_routes_wp23_5.py`;
+  - `tests/test_jobs_phase3.py` (`T-Q7`: `test_all_job_kinds_have_handlers`, `test_worker_exits_with_code_1_on_handler_mismatch`): вид, чей пропуск проверяется, - `artifact.topic_refresh` вместо `artifact.refresh_cheatsheet` (его нет в `JOB_KINDS`); свойство то же;
   - `tests/test_app_assembly.py`: `test_search_limits_come_from_settings` переведён с `/v1/artifacts/search` на `/v1/search` (лимиты те же), проба `T-A3` `/v1/artifacts` → `/v1/me`.
 - Требует подтверждения владельцем: нет
 
