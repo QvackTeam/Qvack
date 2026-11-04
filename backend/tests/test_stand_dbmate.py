@@ -101,9 +101,8 @@ def test_deploy_migrates_after_the_dump_and_before_it_starts_the_processes() -> 
 
 
 def _settings(dsn: str) -> Settings:
-    return Settings(  # type: ignore[call-arg]
-        _env_file=None, env="test", postgres_dsn=dsn, meta_api_key=SecretStr("k")
-    )
+    values: dict[str, Any] = {"env": "test", "postgres_dsn": dsn, "meta_api_key": SecretStr("k")}
+    return Settings(_env_file=None, **values)  # type: ignore[call-arg]
 
 
 def test_dbmate_url_adds_sslmode_disable_only_when_the_dsn_has_none() -> None:
