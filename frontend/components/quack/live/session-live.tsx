@@ -107,24 +107,45 @@ export function SessionLive({ id }: { id: string }) {
       let degraded: string | null = null;
       let turnId = studentId;
       try {
-        await sse(
-          "POST",
-          `/v1/sessions/${id}/turns`,
-          { text, related_task_id: task?.task_id ?? null, idempotency_key: idem() },
-          ({ event, data }) => {
-            if (event === "turn_started") turnId = String(data.turn_id);
-            else if (event === "status") setThinking(data.state === "thinking");
-            else if (event === "token") {
-              reply += String(data.delta ?? "");
-              setStreaming(reply);
-            } else if (event === "task_evaluated") {
-              setVerdict(data as unknown as Verdict);
-              setTask(null);
-            } else if (event === "task_assigned") setTask(data as unknown as Task);
-            else if (event === "turn_completed") degraded = (data.degraded_mode as string | null) ?? null;
-            else if (event === "error") throw new ApiError(500, String(data.code ?? "ERROR"), String(data.message ?? ""));
-          },
-        );
+        const onEvent = ({ event, data }: { event: string; data: Record<string, unknown> }) => {
+          if (event === "turn_started" || event === "action_recorded") {
+            turnId = String(data.turn_id ?? data.seq ?? studentId);
+          } else if (event === "status") {
+            setThinking(data.state === "thinking" || data.status === "thinking");
+          } else if (event === "token") {
+            reply += String(data.delta ?? data.text ?? "");
+            setStreaming(reply);
+          } else if (event === "task_evaluated" || event === "verdict") {
+            setVerdict(data as unknown as Verdict);
+            setTask(null);
+          } else if (event === "task_assigned") {
+            setTask(data as unknown as Task);
+          } else if (event === "turn_completed" || event === "turn_committed") {
+            degraded = (data.degraded_mode as string | null) ?? null;
+          } else if (event === "error") {
+            throw new ApiError(500, String(data.code ?? "ERROR"), String(data.message ?? ""));
+          }
+        };
+
+        try {
+          await sse(
+            "POST",
+            `/v1/sessions/${id}/actions`,
+            { kind: "message", text, idempotency_key: idem() },
+            onEvent,
+          );
+        } catch (actErr) {
+          if (actErr instanceof ApiError && (actErr.status === 404 || actErr.status === 405)) {
+            await sse(
+              "POST",
+              `/v1/sessions/${id}/turns`,
+              { text, related_task_id: task?.task_id ?? null, idempotency_key: idem() },
+              onEvent,
+            );
+          } else {
+            throw actErr;
+          }
+        }
         setLines((l) => [...l, { id: `t-${turnId}`, role: "teacher", text: reply, degraded }]);
       } catch (e) {
         setError(e instanceof ApiError && e.code === "TURN_LOCKED" ? t.turnLocked : errorText(e));

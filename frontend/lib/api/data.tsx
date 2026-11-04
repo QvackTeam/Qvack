@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useMocks, useT } from "@/lib/i18n/provider";
 import type { Domain } from "@/lib/mock/types";
 import { domainFromApi } from "./adapters";
-import { API_MODE, ApiError, get, getToken, idem, patch, setToken, sse, type S } from "./client";
+import { API_MODE, ApiError, fetchMe, get, getToken, idem, patch, setToken, sse, type S } from "./client";
 
 /** Projection updates come in bursts (one turn → several events): re-read once they settle */
 const LIVE_SETTLE_MS = 600;
@@ -19,6 +19,8 @@ type Data = {
   ready: boolean;
   error: string | null;
   domains: Domain[];
+  graphs: Record<string, S["DomainGraphResponse"]>;
+  history: S["SessionListItem"][];
   me: S["LearnerMeResponse"] | null;
   active: S["ActiveSession"] | null;
   /**
@@ -52,6 +54,8 @@ function MockData({ children }: { children: React.ReactNode }) {
       ready: true,
       error: null,
       domains,
+      graphs: {},
+      history: [],
       me: null,
       active: null,
       appliedSeq: 0,
@@ -110,7 +114,7 @@ function ApiData({ children }: { children: React.ReactNode }) {
   const reload = useCallback(async () => {
     try {
       const [meRes, list, act, hist] = await Promise.all([
-        get<S["LearnerMeResponse"]>("/v1/auth/me"),
+        fetchMe(),
         get<S["DomainListResponse"]>("/v1/domains"),
         get<S["ActiveSession"] | null>("/v1/sessions/active"),
         get<S["SessionListResponse"]>("/v1/sessions"),
@@ -227,8 +231,8 @@ function ApiData({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   const value = useMemo<Data>(
-    () => ({ ready, error, domains, me, active, appliedSeq, reload, loadGraph, setActive, savePreferences, logout }),
-    [ready, error, domains, me, active, appliedSeq, reload, loadGraph, setActive, savePreferences, logout],
+    () => ({ ready, error, domains, graphs, history, me, active, appliedSeq, reload, loadGraph, setActive, savePreferences, logout }),
+    [ready, error, domains, graphs, history, me, active, appliedSeq, reload, loadGraph, setActive, savePreferences, logout],
   );
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }

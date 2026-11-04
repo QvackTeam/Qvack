@@ -1,3 +1,14 @@
+import type {
+  DisplayCode,
+  GraphHub,
+  GraphModel,
+  GraphTopic,
+  HubLink,
+  RequiresEdge,
+  TodayRec,
+  TopicStatus,
+  TopicVisibility,
+} from "@/lib/graph/types";
 import type { Domain, Session, TodayItem, Topic, TopicState } from "@/lib/mock/types";
 import type { S } from "./client";
 
@@ -105,3 +116,158 @@ export function domainFromApi(
 
 /** Placeholder while the list is loading or empty: the shell always has some domain */
 export const EMPTY_DOMAIN: Domain = { id: "", title: "", titleDat: "", hubs: [], topics: [], outside: [], sessions: [], today: [] };
+
+/** Maps Phase 3 and Phase 4 display states to DisplayCode */
+export function displayCodeFromApi(display: unknown): DisplayCode {
+  if (typeof display === "object" && display !== null && "state" in display) {
+    display = (display as { state: unknown }).state;
+  }
+  switch (display) {
+    case "confused_with":
+    case "persistent_error":
+    case "struggling":
+    case "inconsistent":
+    case "solved_independently":
+    case "known_from_other_domain":
+    case "in_progress":
+    case "not_tested":
+      return display as DisplayCode;
+    case "solid":
+      return "solved_independently";
+    case "rusty":
+      return "struggling";
+    case "in_progress":
+      return "in_progress";
+    case "available":
+    case "locked":
+    default:
+      return "not_tested";
+  }
+}
+
+/** Translates Phase 3 and Phase 4 backend graph response into GraphModel */
+export function graphModelFromApi(
+  domainId: string,
+  domainName: string,
+  raw: any,
+  history: S["SessionListItem"][] = [],
+  nowMs = Date.now(),
+): GraphModel {
+  const topics: GraphTopic[] = (raw?.topics ?? []).map((t: any) => {
+    const rawStatus = String(t.status ?? "active");
+    let status: TopicStatus = "active";
+    let visibility: TopicVisibility = "shown";
+
+    if (rawStatus === "proposed") {
+      status = "proposed";
+      visibility = "pale";
+    } else if (rawStatus === "archived" || rawStatus === "skipped" || rawStatus === "hidden") {
+      status = "hidden";
+      visibility = "hidden";
+    } else if (rawStatus === "off_domain") {
+      status = "off_domain";
+      visibility = "shown";
+    }
+
+    if (t.visibility) {
+      visibility = t.visibility as TopicVisibility;
+    }
+
+    const displayState = displayCodeFromApi(t.display ?? t.display_state);
+    const dueMs =
+      typeof t.nearest_due_at_ms === "number" && t.nearest_due_at_ms > 0
+        ? t.nearest_due_at_ms
+        : typeof t.nearest_review_at === "number" && t.nearest_review_at > 0
+          ? t.nearest_review_at
+          : displayState === "struggling"
+            ? nowMs - DAY_MS
+            : undefined;
+
+    return {
+      id: String(t.topic_id),
+      name: String(t.name ?? ""),
+      status,
+      visibility,
+      displayState,
+      nearestDueAtMs: dueMs,
+    };
+  });
+
+  const allHubId = allTopicsHubId(domainId);
+  const hubs: GraphHub[] = [
+    {
+      id: "all",
+      name: domainName || "All Topics",
+      kind: "domain_all",
+    },
+  ];
+
+  if (Array.isArray(raw?.hubs)) {
+    for (const h of raw.hubs) {
+      hubs.push({
+        id: String(h.hub_id ?? h.id),
+        name: String(h.name ?? h.title ?? ""),
+        kind: h.kind ?? (h.deadline ? "deadline" : "material"),
+        deadlineAtMs: h.deadline ? Date.parse(h.deadline.date ?? h.deadline) : undefined,
+      });
+    }
+  }
+
+  const includes: HubLink[] = topics
+    .filter((t) => t.visibility !== "hidden")
+    .map((t) => ({ hubId: "all", topicId: t.id }));
+
+  const requires: RequiresEdge[] = [];
+  if (Array.isArray(raw?.requires)) {
+    // Phase 4: requires [{ topic_id, requires_topic_id }]
+    for (const r of raw.requires) {
+      requires.push({
+        topicId: String(r.topic_id),
+        requiresId: String(r.requires_topic_id),
+      });
+    }
+  } else if (Array.isArray(raw?.prereqs)) {
+    // Phase 3: prereqs [{ from_topic_id, to_topic_id }]: from precedes to
+    for (const p of raw.prereqs) {
+      requires.push({
+        topicId: String(p.to_topic_id),
+        requiresId: String(p.from_topic_id),
+      });
+    }
+  }
+
+  const recentSessions = history
+    .filter((s) => s.domain_id === domainId)
+    .map((s) => ({
+      id: s.session_id,
+      atMs: Date.parse(s.started_at),
+      topicIds: s.topic_id ? [s.topic_id] : [],
+    }));
+
+  const endOfDay = new Date(nowMs).setHours(24, 0, 0, 0);
+  const today: TodayRec[] = topics
+    .filter((t) => t.visibility !== "hidden" && t.nearestDueAtMs !== undefined && t.nearestDueAtMs < endOfDay)
+    .sort((a, b) => (a.nearestDueAtMs ?? 0) - (b.nearestDueAtMs ?? 0))
+    .slice(0, TODAY_MAX)
+    .map((t) => ({
+      id: t.id,
+      kind: "item",
+      topicId: t.id,
+      name: t.name,
+      action: "review",
+      minutes: 15,
+    }));
+
+  return {
+    domainId,
+    domainName,
+    topics,
+    hubs,
+    includes,
+    requires,
+    otherDomain: raw?.other_domain ?? [],
+    recentSessions,
+    today,
+    nowMs,
+  };
+}

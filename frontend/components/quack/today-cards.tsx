@@ -93,7 +93,7 @@ export function TodayCards({
                   type="button"
                   disabled={busy}
                   onClick={() =>
-                    API_MODE && r.topicId && (r.action === "learn" || r.action === "review")
+                    API_MODE && r.topicId && (r.action === "learn" || r.action === "review" || r.action === "practice")
                       ? void start({ domainId: domain.id, topicId: r.topicId, mode: r.action })
                       : soon(t.soon.session(label ?? ""))
                   }

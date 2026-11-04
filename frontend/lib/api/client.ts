@@ -77,6 +77,7 @@ export async function api<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: 
     method,
     headers: headers(body !== undefined),
     body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: "include",
   });
   if (!res.ok) throw await toError(res);
   if (res.status === 204) return undefined as T;
@@ -134,6 +135,7 @@ export function sse<P extends WritePath<"post">>(
   signal?: AbortSignal,
 ): Promise<void>;
 export function sse(method: "GET", path: string, body: undefined, onEvent: (e: SseEvent) => void, signal?: AbortSignal): Promise<void>;
+export function sse(method: "POST", path: string, body: unknown, onEvent: (e: SseEvent) => void, signal?: AbortSignal): Promise<void>;
 export async function sse(
   method: "GET" | "POST",
   path: string,
@@ -146,6 +148,7 @@ export async function sse(
     headers: { ...headers(body !== undefined), Accept: "text/event-stream" },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
+    credentials: "include",
   });
   if (!res.ok || !res.body) throw await toError(res);
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -172,5 +175,40 @@ export async function sse(
         onEvent({ event, data: { raw: data.join("\n") } });
       }
     }
+  }
+}
+
+/** Transitional post helper for Phase 4 endpoints */
+export const postRaw = <T = unknown>(path: string, body?: unknown) => api<T>("POST", path, body);
+
+/** Phase 4: send magic link to email */
+export async function sendMagicLink(email: string): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>("POST", "/auth/link", { email });
+}
+
+/** Phase 4: verify magic link token and set session cookie */
+export async function verifyMagicLink(token: string): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>("POST", "/auth/link/verify", { token });
+}
+
+/** Phase 4: logout session (clears cookie) */
+export async function logoutApi(): Promise<void> {
+  setToken(null);
+  try {
+    await api("POST", "/auth/logout");
+  } catch {
+    // ignore if already logged out
+  }
+}
+
+/** Fetches current learner: Phase 4 (/v1/me) with fallback to Phase 3 (/v1/auth/me) */
+export async function fetchMe(): Promise<S["LearnerMeResponse"]> {
+  try {
+    return await api<S["LearnerMeResponse"]>("GET", "/v1/me");
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      return await api<S["LearnerMeResponse"]>("GET", "/v1/auth/me");
+    }
+    throw e;
   }
 }
