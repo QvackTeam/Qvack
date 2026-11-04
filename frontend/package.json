@@ -4,6 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:stub": "node dev/run.mjs stub",
+    "dev:real": "node dev/run.mjs real",
+    "dev:mock": "node dev/run.mjs mock",
+    "dev:fixtures": "node dev/export-mocks.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
