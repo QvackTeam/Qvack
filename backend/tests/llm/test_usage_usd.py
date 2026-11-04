@@ -93,7 +93,8 @@ async def test_text_and_voice_calls_write_a_usage_row_with_cost(
 
 
 async def test_budgets_in_dollars(db: SessionFactory, pg_db: Db) -> None:
-    gw, learner, session = _gateway(db, pg_db), uuid4(), uuid4()
+    gw = _gateway(db, pg_db, session_agent_budget_usd=0.5, learner_daily_budget_usd=3.0)
+    learner, session = uuid4(), uuid4()
     sql = (
         "INSERT INTO ops.llm_usage (learner_id, session_id, role, model, status, cost_usd) "
         "VALUES (%(l)s, %(s)s, %(r)s, 'm', 'ok', %(c)s)"
@@ -118,3 +119,53 @@ def test_cost_without_prices_is_zero_and_budgets_stay_quiet() -> None:
     settings = Settings(env="test")
     cost = call_cost_usd(settings, "unpriced", input_tokens=10, cached_tokens=0, output_tokens=5)
     assert cost == 0.0
+
+
+async def test_pool_tightens_then_keeps_the_models_for_judges(
+    db: SessionFactory, pg_db: Db
+) -> None:
+    """D-B-211: a pool of 1000 $ with 920 $ spent is `tight` (the budgets of Т-§11.4); with
+    960 $ spent it is `judges_only` — a learner without `meta_judge` is refused every role, one
+    click (`preference.set`) lets them in."""
+    from quack.events.log import NewEvent, append_events
+    from quack.llm.access import reset_pool_cache
+
+    before = await pg_db.fetch_one(
+        "SELECT COALESCE(sum(cost_usd), 0)::float8 AS s FROM ops.llm_usage", {}
+    )
+    pool = 1000.0 + (float(before["s"]) if before else 0.0)
+    over = {"llm_pool_budget_usd": pool, "llm_pool_cache_s": 0.0}
+    gw, learner, session = _gateway(db, pg_db, **over), uuid4(), uuid4()
+    await pg_db.execute(
+        "INSERT INTO core.learners (learner_id, email) VALUES (%(l)s, %(e)s)",
+        {"l": learner, "e": f"{learner}@test.invalid"},
+    )
+    spend = (
+        "INSERT INTO ops.llm_usage (learner_id, session_id, role, model, status, cost_usd) "
+        "VALUES (%(l)s, %(s)s, 'teacher', 'm', 'ok', %(c)s)"
+    )
+    await pg_db.execute(spend, {"l": uuid4(), "s": uuid4(), "c": 919.0})
+    await pg_db.execute(spend, {"l": learner, "s": session, "c": 1.0})
+    reset_pool_cache()
+    await pg_db.execute(
+        "INSERT INTO ops.llm_usage (learner_id, session_id, role, model, status, cost_usd) "
+        "VALUES (%(l)s, %(s)s, 'task_generator', 'm', 'ok', 0.6)",
+        {"l": learner, "s": session},
+    )
+    with pytest.raises(LLMBudgetExceededError) as tight:
+        await _ask(gw, "task_generator", learner, session)  # 0.6 $ > the tight 0.5 $
+    assert tight.value.scope == "session"
+
+    await pg_db.execute(spend, {"l": uuid4(), "s": uuid4(), "c": 40.0})
+    with pytest.raises(LLMBudgetExceededError) as judges:
+        await _ask(gw, "teacher", learner, session)
+    assert judges.value.scope == "pool"
+
+    judge = NewEvent(
+        type="preference.set",
+        payload={"key": "meta_judge", "value": True},
+        actor="learner",
+        idempotency_key=f"preference:{uuid4()}",
+    )
+    await append_events(pg_db, learner, [judge])
+    await _ask(gw, "teacher", learner, session)
