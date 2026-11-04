@@ -49,8 +49,8 @@ from quack.runtime import (
     create_job_context,
     register_all_handlers,
 )
-from quack.runtime.phase4 import projector_process, workers_process
 from quack.runtime.event_registry import can_rollback, seen_pairs, write_event_registry
+from quack.runtime.phase4 import projector_process, workers_process
 from quack.session.replay import replay_session, session_learner
 
 log = get_logger(__name__)
@@ -107,7 +107,8 @@ def build_parser() -> argparse.ArgumentParser:
     ops_sub.add_parser(
         "restore-check", help="Neo4j must not be ahead of the event log after a restore"
     )
-    ops_sub.add_parser("alerts", help="check the conditions of Д-§9.3 and announce them")
+    alerts_p = ops_sub.add_parser("alerts", help="check the conditions of Д-§9.3 and announce them")
+    alerts_p.add_argument("--test", action="store_true", help="send a test alert message")
     ops_sub.add_parser("db-roles", help="create or update the Postgres roles and grants")
     ops_sub.add_parser("status", help="print the state of the system as one JSON object")
     registry = ops_sub.add_parser("event-registry", help="write the event registry JSON")
@@ -429,8 +430,20 @@ async def _status(settings: Settings) -> int:
     return code
 
 
-async def _alerts(settings: Settings) -> int:
+async def _alerts(settings: Settings, *, test: bool = False) -> int:
     """Д-§9.3: Postgres and Redis only (the `alerts` container has no Neo4j secret, Д-§7)."""
+    if test:
+        from quack.ops.notify import post_alert
+
+        try:
+            await post_alert(
+                settings, "INFO: Test alert from Quack ops alerts — Telegram alerts work!"
+            )
+            print("Test alert sent successfully.")
+            return 0
+        except Exception as exc:
+            print(f"Failed to send test alert: {exc}", file=sys.stderr)
+            return 1
     db = await open_db(settings, wait=False)
     redis = create_redis(settings)
     try:
@@ -475,7 +488,7 @@ async def _ops(settings: Settings, args: argparse.Namespace) -> int:
     if args.op == "restore-check":
         return await _restore_check(settings)
     if args.op == "alerts":
-        return await _alerts(settings)
+        return await _alerts(settings, test=getattr(args, "test", False))
     if args.op == "openapi":
         # Imported here: the function is stream C's (WP8.7) and needs no resources.
         from quack.api.app import write_openapi
