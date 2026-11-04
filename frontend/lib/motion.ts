@@ -6,7 +6,6 @@ import { useSyncExternalStore } from "react";
 export const EASE_OUT = "cubic-bezier(0.16, 1, 0.3, 1)";
 
 const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
-const PRELOADER_KEY = "quack:preloader";
 
 function subscribeReducedMotion(onChange: () => void) {
   // на всякий случай: старые браузеры без matchMedia
@@ -31,26 +30,4 @@ export function usePrefersReducedMotion(): boolean {
     getReducedMotionSnapshot,
     getServerReducedMotionSnapshot,
   );
-}
-
-/** Показывать прелоадер? Раз за сессию вкладки */
-export function shouldShowPreloader(): boolean {
-  try {
-    return window.sessionStorage.getItem(PRELOADER_KEY) === null;
-  } catch {
-    // storage недоступен — лучше показать, чем упасть
-    return true;
-  }
-}
-
-/** Прелоадер пошёл на выход: под его шторкой уже можно показывать интерфейс */
-export const PRELOADER_EXIT_EVENT = "quack:preloader-exit";
-
-/** Отметить, что прелоадер уже показан в этой вкладке */
-export function markPreloaderShown(): void {
-  try {
-    window.sessionStorage.setItem(PRELOADER_KEY, "1");
-  } catch {
-    // storage недоступен — ничего не делаем
-  }
 }
