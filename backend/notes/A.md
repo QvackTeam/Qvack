@@ -23,6 +23,16 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-A-233. WP3.4: ошибки бюджета обработчика в исполнителе Фазы 4 (шов S3)
+- Класс: A
+- WP / место: WP3.4, Т-§13.2; `quack/jobs/executor_p4.py`
+- Контекст: `LLMBudgetExceededError` (`quack/llm/errors.py`) несёт `scope`; шов S3 требует разных исходов. `JobRunner` Фазы 3 маршрутизировал их, `executor_p4` — нет: обработчик, исчерпавший бюджет, шёл на обычные повторы и жёг попытки (найдено при переносе `test_budget_errors_route…`, D-A-232).
+- Решение: `budget_outcome(exc, settings)` в `_finish`: `session` → `JobFailedPermanently` (бюджет сессии не восстанавливается); `daily` и `pool` → `JobDeferred` до ближайшей полуночи UTC плюс джиттер `daily_budget_defer_jitter_s`, попытка не тратится. `skipped_budget` в `claim_next` (D-A-222) остаётся для задач, ещё не начатых.
+- Почему: шов S3, Т-§13.2, WP3.4, D-B-211 (режим `judges_only` — `pool`).
+- Обратимость: полная.
+- Тесты: `tests/jobs/test_executor_p4.py::test_budget_errors_route_to_defer_or_failure`.
+- Требует подтверждения владельцем: нет (D-A-232 назвала это пробелом «для владельца»: решение принято по тексту шва)
+
 ### D-A-232. WP1.3 шаг 5, часть 2: `test_dispatcher.py` — на `DispatcherP4`; правила `session.digest_created` в Фазе 4 нет; два пробела, о которых решает владелец
 - Класс: A
 - WP / место: WP1.3, §8.15; `tests/test_dispatcher.py`

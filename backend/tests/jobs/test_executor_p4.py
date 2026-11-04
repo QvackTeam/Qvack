@@ -16,9 +16,10 @@ from quack.config import Settings
 from quack.db import Db
 from quack.db.redis import llm_pressure_key
 from quack.jobs import queue_p4 as q
-from quack.jobs.executor_p4 import JobWorker, run_claimed
+from quack.jobs.executor_p4 import JobWorker, budget_outcome, run_claimed
 from quack.jobs.rules_p4 import KIND_LLM_ROLES, JobPlan
 from quack.jobs.types import JobDeferred, JobFailedPermanently
+from quack.llm.errors import LLMBudgetExceededError
 from tests.db.fixtures import create_learner
 
 SETTINGS = Settings(job_heartbeat_interval_sec=1, job_max_attempts=2, consumer_poll_ms=50)
@@ -169,6 +170,39 @@ async def test_permanent_failure_and_deferral(jobs_db: Db) -> None:
     assert await _status(jobs_db) == "failed"
     (event,) = await jobs_db.fetch_all("SELECT payload FROM core.events")
     assert event["payload"]["error"] == "session budget"
+
+
+async def test_budget_errors_route_to_defer_or_failure(jobs_db: Db) -> None:
+    """WP3.4, seam S3 (D-A-233): a session budget fails the job at once; a daily or pool budget
+    defers it to the next UTC midnight plus a jitter, the attempt unspent."""
+    learner = await create_learner(jobs_db)
+    session_job = await _put(jobs_db, learner, "s")
+
+    async def over_session() -> None:
+        raise LLMBudgetExceededError("session", 1.0, 0.5, "usd")
+
+    assert await run_claimed(jobs_db, SETTINGS, session_job, over_session) == "failed"
+
+    daily_job = await _put(jobs_db, learner, "d")
+
+    async def over_daily() -> None:
+        raise LLMBudgetExceededError("daily", 3.0, 2.0, "usd")
+
+    assert await run_claimed(jobs_db, SETTINGS, daily_job, over_daily) == "deferred"
+    row = await jobs_db.fetch_one(
+        "SELECT status, attempts, run_at FROM ops.jobs WHERE job_key = 'd'"
+    )
+    assert row is not None and (row["status"], row["attempts"]) == ("queued", 0)
+    now = datetime.now(UTC)
+    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    assert (
+        midnight - timedelta(minutes=1)
+        <= row["run_at"]
+        <= midnight + timedelta(seconds=SETTINGS.daily_budget_defer_jitter_s + 60)
+    )
+
+    pool = budget_outcome(LLMBudgetExceededError("pool", 0, 0, "usd"), SETTINGS, now)
+    assert isinstance(pool, JobDeferred) and pool.delay_sec >= (midnight - now).total_seconds()
 
 
 async def test_shutdown_returns_the_job_to_the_queue(jobs_db: Db) -> None:
