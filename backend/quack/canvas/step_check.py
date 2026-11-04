@@ -370,12 +370,12 @@ def _mark_of(diagnosis: DiagnosisRecord, method: str) -> Mark | None:
     return "question" if diagnosis.kind == "question" else None
 
 
-async def _written(env: StepEnv, line: CanvasLineCommitted) -> StepOutcome | None:
+async def _written(env: StepEnv, line: CanvasLineCommitted, learner_id: UUID) -> StepOutcome | None:
     """The diagnosis of this reading of the line, if the log has one: a repeated check (the
     request "проверь", a reconnect) does not ask compute or the model again and cannot write a
     second diagnosis (law 5)."""
     row = await env.db.fetch_one(
-        _DIAGNOSED, {"learner_id": env.learner_id, "key": _diagnosed_key(env, line)}
+        _DIAGNOSED, {"learner_id": learner_id, "key": _diagnosed_key(env, line)}
     )
     if row is None:
         return None
@@ -427,7 +427,7 @@ async def check_step(
     context = await task_context(env)
     if context is None:
         return nothing
-    if (written := await _written(env, line)) is not None:
+    if (written := await _written(env, line, env.learner_id)) is not None:
         return written
     usable = [p for p in earlier if not p.crossed_out]
     previous = usable[-1] if usable else None
