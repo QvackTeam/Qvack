@@ -526,6 +526,32 @@
         "title": "Body_upload_photo_v1_canvases__canvas_id__photos_post",
         "type": "object"
       },
+      "Body_upload_voice_v1_sessions__session_id__voice_post": {
+        "properties": {
+          "audio": {
+            "contentMediaType": "application/octet-stream",
+            "title": "Audio",
+            "type": "string"
+          },
+          "ended_at_ms": {
+            "minimum": 0.0,
+            "title": "Ended At Ms",
+            "type": "integer"
+          },
+          "started_at_ms": {
+            "minimum": 0.0,
+            "title": "Started At Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "audio",
+          "started_at_ms",
+          "ended_at_ms"
+        ],
+        "title": "Body_upload_voice_v1_sessions__session_id__voice_post",
+        "type": "object"
+      },
       "CanvasList": {
         "properties": {
           "canvases": {
@@ -761,6 +787,71 @@
         "title": "CheatsheetRefreshResponse",
         "type": "object"
       },
+      "CheatsheetResponse": {
+        "description": "The sheet at its current version and whether to offer it now (D-C-144).",
+        "properties": {
+          "artifact_id": {
+            "format": "uuid",
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "blocks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "hub_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hub Id"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "offer": {
+            "title": "Offer",
+            "type": "boolean"
+          },
+          "topic_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Id"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "kind",
+          "topic_id",
+          "hub_id",
+          "version",
+          "blocks",
+          "offer"
+        ],
+        "title": "CheatsheetResponse",
+        "type": "object"
+      },
       "CheckSkipAction": {
         "additionalProperties": false,
         "properties": {
@@ -965,6 +1056,21 @@
           "idempotency_key"
         ],
         "title": "ConsentRequest",
+        "type": "object"
+      },
+      "ConsentResponse": {
+        "description": "The consent request; a repeat with the same key gives the same one.",
+        "properties": {
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "ConsentResponse",
         "type": "object"
       },
       "ConsentRevocation": {
@@ -2551,10 +2657,64 @@
         "title": "LearnerAnswer",
         "type": "object"
       },
+      "LearnerDrawing": {
+        "additionalProperties": false,
+        "description": "A drawing cut from a sheet photo (WP22.3 step 5; Т-§16.3 п.4, D-C-153): the image without\nits paper in the store and the box of the area as shares of the sheet.",
+        "properties": {
+          "bbox": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Bbox",
+            "type": "array"
+          },
+          "drawing_id": {
+            "title": "Drawing Id",
+            "type": "string"
+          },
+          "object_key": {
+            "title": "Object Key",
+            "type": "string"
+          },
+          "photo_id": {
+            "format": "uuid",
+            "title": "Photo Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "drawing_id",
+          "photo_id",
+          "object_key",
+          "bbox"
+        ],
+        "title": "LearnerDrawing",
+        "type": "object"
+      },
       "LearnerLayer": {
         "additionalProperties": false,
-        "description": "The learner's strokes are in the journal; here — what the learner typed.",
+        "description": "The learner's strokes are in the journal; here — what the learner typed and the drawings\ncut from the photos of the sheet.",
         "properties": {
+          "drawings": {
+            "items": {
+              "$ref": "#/components/schemas/LearnerDrawing"
+            },
+            "title": "Drawings",
+            "type": "array"
+          },
           "typed_formulas": {
             "items": {
               "$ref": "#/components/schemas/TypedFormula"
@@ -3654,6 +3814,75 @@
           "reason"
         ],
         "title": "ResetFrame",
+        "type": "object"
+      },
+      "ReviewResponse": {
+        "description": "The sheet after the review; `remarks` — the system blocks added to the learner's sheet.",
+        "properties": {
+          "artifact_id": {
+            "format": "uuid",
+            "title": "Artifact Id",
+            "type": "string"
+          },
+          "blocks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Blocks",
+            "type": "array"
+          },
+          "hub_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hub Id"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "remarks": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Remarks",
+            "type": "array"
+          },
+          "topic_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Id"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "kind",
+          "topic_id",
+          "hub_id",
+          "version",
+          "blocks",
+          "remarks"
+        ],
+        "title": "ReviewResponse",
         "type": "object"
       },
       "Scaffold": {
@@ -5180,6 +5409,42 @@
           "is_task"
         ],
         "title": "VisualizationElement",
+        "type": "object"
+      },
+      "VoiceView": {
+        "description": "WP21.6: what was heard; `seq` is the `voice.transcribed` event, `null` for silence.",
+        "properties": {
+          "ended_at_ms": {
+            "title": "Ended At Ms",
+            "type": "integer"
+          },
+          "seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seq"
+          },
+          "started_at_ms": {
+            "title": "Started At Ms",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "started_at_ms",
+          "ended_at_ms",
+          "seq"
+        ],
+        "title": "VoiceView",
         "type": "object"
       },
       "WhyChoiceElement": {
@@ -8528,6 +8793,283 @@
         ]
       }
     },
+    "/v1/hubs/{hub_id}/cheatsheet": {
+      "get": {
+        "operationId": "get_hub_cheatsheet_v1_hubs__hub_id__cheatsheet_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hub_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Hub Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheatsheetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Get Hub Cheatsheet",
+        "tags": [
+          "artifacts"
+        ]
+      },
+      "post": {
+        "operationId": "agree_to_hub_cheatsheet_v1_hubs__hub_id__cheatsheet_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hub_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Hub Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Agree To Hub Cheatsheet",
+        "tags": [
+          "artifacts"
+        ]
+      }
+    },
+    "/v1/hubs/{hub_id}/cheatsheet/review": {
+      "post": {
+        "operationId": "review_cheatsheet_v1_hubs__hub_id__cheatsheet_review_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "hub_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Hub Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeyedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Review Cheatsheet",
+        "tags": [
+          "artifacts"
+        ]
+      }
+    },
     "/v1/hubs/{hub_id}/grade": {
       "post": {
         "operationId": "grade_endpoint_v1_hubs__hub_id__grade_post",
@@ -10201,6 +10743,110 @@
           }
         },
         "summary": "Session Summary Route"
+      }
+    },
+    "/v1/sessions/{session_id}/voice": {
+      "post": {
+        "description": "WP21.6: one segment of speech (WAV) with its start and end by the device clock; the\naudio is not stored (П-14.1). The companion has no voice (T-CP1: 403). A session of another\nlearner is 404; compressed audio is 415; the same segment again gives the same answer.",
+        "operationId": "upload_voice_v1_sessions__session_id__voice_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_voice_v1_sessions__session_id__voice_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "IDEMPOTENCY_CONFLICT or TURN_LOCKED"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "RATE_LIMITED; details.retry_after_sec"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Upload Voice",
+        "tags": [
+          "canvas"
+        ]
       }
     },
     "/v1/topics/{topic_id}": {

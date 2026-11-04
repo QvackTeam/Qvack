@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
@@ -18,6 +19,8 @@ from uuid import UUID
 import structlog
 
 from quack.agents.extraction_eval import compare_reports, evaluate_extraction, load_eval_set
+from quack.agents.judge import release_judge
+from quack.agents.metrics import metrics
 from quack.config import Settings, get_settings
 from quack.db import open_db
 from quack.db.neo4j import create_driver, verify_schema
@@ -26,6 +29,7 @@ from quack.db.redis import create_redis
 from quack.graph.projection.rebuild import rebuild_learner
 from quack.graph.projection.runner import RULES_VERSION
 from quack.graph.projection.store import stale_learners
+from quack.graph.read.reader import create_graph_reader
 from quack.llm.gateway import LLMGateway
 from quack.llm.responses_client import ResponsesClient
 from quack.logging import configure_logging, get_logger
@@ -36,6 +40,7 @@ from quack.ops.db_roles import DbRolesRefused, RolePasswords, apply_db_roles
 from quack.ops.restore_check import restore_check
 from quack.ops.seed import SeedRefusedError, seed_learners, write_learners
 from quack.ops.status import collect_status
+from quack.prompts.registry import PromptNotFoundError
 from quack.runtime import (
     JobHandlersMismatchError,
     check_handlers_complete,
@@ -44,6 +49,7 @@ from quack.runtime import (
     register_all_handlers,
 )
 from quack.runtime.event_registry import can_rollback, seen_pairs, write_event_registry
+from quack.session.replay import replay_session, session_learner
 
 log = get_logger(__name__)
 
@@ -65,6 +71,15 @@ def process_settings(settings: Settings, role: ProcessRole) -> Settings:
     configured = settings.model_copy(update={"process_role": role})
     structlog.contextvars.bind_contextvars(process=role, version=configured.quack_version)
     return configured
+
+
+def _since(value: str) -> datetime:
+    """`--since`: ISO 8601; a time without a zone is UTC."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"not an ISO 8601 time: {value!r}") from exc
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -119,6 +134,21 @@ def build_parser() -> argparse.ArgumentParser:
     extraction.add_argument("--out", help="path of the report JSON to write")
     extraction.add_argument(
         "--against", help="report of the previous version: compare, exit 1 unless nothing fell"
+    )
+    ops_metrics = ops_sub.add_parser(
+        "metrics", help="metrics of Т-§18.2 and Т-§18.3 over the events from a time, as JSON"
+    )
+    ops_metrics.add_argument(
+        "--since", type=_since, required=True, help="ISO 8601 time; no zone means UTC"
+    )
+    replay_s = ops_sub.add_parser(
+        "replay-session", help="replay the teacher turns of a session with another prompt"
+    )
+    replay_s.add_argument("--session", type=UUID, required=True, help="session id")
+    replay_s.add_argument("--teacher", required=True, help="prompt of the teacher role, name@N")
+    replay_s.add_argument("--renderer", type=int, help="renderer version N (renderer@N)")
+    replay_s.add_argument(
+        "--out", help="report path (default: replay-session-<session id>.json in the cwd)"
     )
     return parser
 
@@ -269,6 +299,70 @@ async def _seed_learners(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+async def _metrics(settings: Settings, args: argparse.Namespace) -> int:
+    """WP16.7: the metrics of the window as one JSON object on stdout. The reader of the Brier
+    score is bound to the database (`state_at` replays the log)."""
+    db = await open_db(settings)
+    driver = create_driver(settings)
+    try:
+        report = await metrics(
+            db,
+            args.since,
+            settings=settings,
+            reader=lambda learner_id: create_graph_reader(
+                driver, settings, learner_id=learner_id, db=db
+            ),
+        )
+    finally:
+        await driver.close()
+        await db.close()
+    print(json.dumps(report, sort_keys=True, default=str))
+    return 0
+
+
+async def _replay_session(settings: Settings, args: argparse.Namespace) -> int:
+    """WP16.7: exit code 2 when the session is unknown, the prompt is not registered or there is
+    no model key (the replay calls the model; the `ops` role has none in prod, so run it where
+    `META_API_KEY` is set). The report goes to `--out`, its summary to stdout."""
+    if not settings.meta_api_key.get_secret_value():
+        log.error("replay_session_needs_meta_api_key")
+        return 2
+    out = Path(args.out) if args.out else Path(f"replay-session-{args.session}.json")
+    db = await open_db(settings)
+    driver = create_driver(settings)
+    engine = create_engine(settings)
+    provider = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
+    llm = LLMGateway(create_session_factory(engine), provider, settings, db=db)
+    try:
+        learner_id = await session_learner(db, args.session)
+        if learner_id is None:
+            log.error("replay_session_unknown_session", session_id=str(args.session))
+            return 2
+        try:
+            report = await replay_session(
+                db,
+                learner_id=learner_id,
+                session_id=args.session,
+                teacher=args.teacher,
+                llm=llm,
+                settings=settings,
+                reader=lambda lid: create_graph_reader(driver, settings, learner_id=lid, db=db),
+                judge=release_judge(llm),
+                out=out,
+                renderer=args.renderer,
+            )
+        except (PromptNotFoundError, ValueError) as exc:
+            log.error("replay_session_refused", reason=str(exc))
+            return 2
+    finally:
+        await llm.aclose()
+        await driver.close()
+        await engine.dispose()
+        await db.close()
+    print(json.dumps({"out": str(out), "summary": report["summary"]}, sort_keys=True, default=str))
+    return 0
+
+
 def _read_report(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -383,6 +477,10 @@ async def _ops(settings: Settings, args: argparse.Namespace) -> int:
 
         write_openapi(Path(args.out))
         return 0
+    if args.op == "metrics":
+        return await _metrics(settings, args)
+    if args.op == "replay-session":
+        return await _replay_session(settings, args)
     if args.op == "rebuild":
         return await _rebuild(settings, args)
     if args.op == "extraction-eval":

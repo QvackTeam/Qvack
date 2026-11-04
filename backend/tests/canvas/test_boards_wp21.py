@@ -101,7 +101,7 @@ def test_board_layers_are_separate_structures() -> None:
     """П-9.4, Т-§15.1: the learner layer and the teacher layer are different structures of the
     document; a teacher item cannot be put into the learner layer and back."""
     doc = BoardDoc.empty(task_id=None)
-    assert doc.learner.model_dump() == {"typed_formulas": []}
+    assert doc.learner.model_dump() == {"typed_formulas": [], "drawings": []}
     assert set(doc.teacher.model_dump()) == {"marks", "hints", "visualizations", "scaffolds"}
     mark = {"mark_id": "m1", "line_id": "l1", "kind": "question", "text": "Check the sign?"}
     with pytest.raises(ValidationError):

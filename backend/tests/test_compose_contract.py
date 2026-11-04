@@ -122,6 +122,25 @@ def test_secrets_reach_only_the_services_of_d_7(compose: dict[str, Any]):
     assert _holders(compose, "META_API_KEY") == {"api", "workers"}
     assert _holders(compose, "BACKUP_S3_ACCESS_KEY") == {"backup"}
     assert _holders(compose, "NEO4J_PASSWORD") == {"api", "workers", "projector"}
+    # D-B-198, D-B-201: the model price table and the LangSmith key — the processes that call
+    # models; the load stand (profile `loadtest`, meta-mock) gets neither (Д-§11).
+    assert _holders(compose, "LLM_PRICES") == {"api", "workers"}
+    assert _holders(compose, "LANGSMITH_API_KEY") == {"api", "workers"}
+    for name in ("LLM_PRICES", "LANGSMITH_API_KEY"):
+        assert compose["services"]["meta-mock"].get("environment", {}).get(name) is None
+
+
+def test_price_and_tracing_variables_are_listed_in_the_env_examples():
+    """D-B-198: names only (Д-§7); `deploy/env.example` is the union, `backend/.env.example` is
+    the developer's list."""
+    root = COMPOSE.parent
+    for path in (root / "deploy" / "env.example", root / "backend" / ".env.example"):
+        names = {
+            line.split("=", 1)[0]
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if "=" in line and not line.startswith("#")
+        }
+        assert {"LLM_PRICES", "LANGSMITH_API_KEY"} <= names, path
 
 
 def test_alerts_is_short_lived_and_holds_no_model_or_storage_secret(compose: dict[str, Any]):

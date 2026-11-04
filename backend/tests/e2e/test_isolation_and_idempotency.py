@@ -15,6 +15,7 @@ from tests.e2e.routes import (
     Ids,
     body_for,
     files_for,
+    form_for,
     isolation_prepares,
     no_key_routes,
     path_for,
@@ -159,7 +160,9 @@ async def test_cross_learner_isolation(system: System) -> None:
         if method == "GET":
             response = await system.client.get(url, headers=b.headers)
         elif files is not None:
-            response = await system.client.request(method, url, files=files, headers=b.headers)
+            response = await system.client.request(
+                method, url, files=files, data=form_for(method, path), headers=b.headers
+            )
         else:
             body = body_for(method, path, ids, f"te3:b:{method}:{path}")
             response = await system.client.request(method, url, json=body, headers=b.headers)
