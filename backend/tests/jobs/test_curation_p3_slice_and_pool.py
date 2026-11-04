@@ -13,7 +13,7 @@ import pytest
 
 from quack.config import Settings
 from quack.db.postgres import SessionFactory
-from quack.domains import curation
+from quack.jobs import curation_p3 as curation
 from quack.jobs.queue import ClaimedJob
 from tests.support.resources import build_job_context
 

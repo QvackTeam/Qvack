@@ -81,7 +81,7 @@ async def test_turn_survives_neo4j_outage(
 ) -> None:
     """T-H1 (WP6.1, Т-§20.7): turn 1 assigns task X; with a broken Neo4j driver turn 2
     returns the full SSE with `degraded_mode = "memory_unavailable"`, its events are written,
-    X is not assigned again, the memory slot carries the marker; the graph view → 503."""
+    X is not assigned again, the memory slot carries the marker."""
     learner = seeded_domain.learner_id
     task_x = seeded_domain.math_task_ids[0]
     start = await client.post(
@@ -161,9 +161,8 @@ async def test_turn_survives_neo4j_outage(
     prompt = fake_llm.calls_for("teacher")[-1].prompt
     assert MEMORY_UNAVAILABLE_MARKER in prompt
 
-    graph = await client.get(f"/v1/domains/{seeded_domain.domain_id}/graph", headers=auth_headers)
-    assert graph.status_code == 503, graph.text
-    assert graph.json()["error"]["code"] == "SERVICE_UNAVAILABLE"
+    # The graph view with Neo4j down → 503: `tests/test_neo4j_outage.py` (the route is on the
+    # Phase 4 log since D-A-207; this Phase 3 domain is not there).
 
 
 # --- T-H9 (table part) -----------------------------------------------------------------

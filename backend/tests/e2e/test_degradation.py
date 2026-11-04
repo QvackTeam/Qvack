@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from uuid import UUID, uuid4
+from uuid import UUID, uuid5
 
 from sqlalchemy import text
 
-from quack.events.append import append_events
+from quack.graph.ids import QUACK_UUID_NS
 from tests.e2e.journey import first, ok, onboard, turn
 from tests.e2e.system import System
-from tests.factories import new_event
 
 
 async def test_journey_without_redis(system_without_redis: System) -> None:
@@ -66,7 +65,7 @@ async def test_journey_without_redis(system_without_redis: System) -> None:
         (
             await system.client.patch(
                 "/v1/learner/preferences",
-                json={"preferences": {"n": i}, "idempotency_key": f"te8:limit:{i}"},
+                json={"key": "n", "value": i, "idempotency_key": f"te8:limit:{i}"},
                 headers=limited.headers,
             )
         ).status_code
@@ -94,62 +93,9 @@ async def test_journey_without_llm(system_without_llm: System) -> None:
     api = system.client
     learner = await system.register()
     h = learner.headers
-    domain = ok(
-        await api.post(
-            "/v1/domains", json={"name": "Algebra", "idempotency_key": "te9:d"}, headers=h
-        ),
-        201,
-    )
-    domain_id = UUID(domain["domain_id"])
-    proposal = ok(
-        await api.post(
-            f"/v1/domains/{domain_id}/structure/propose",
-            json={
-                "goals": "Pass",
-                "background": "None",
-                "focus_areas": ["Linear equations", "Quadratics"],
-                "idempotency_key": "te9:propose",
-            },
-            headers=h,
-        )
-    )
-    assert proposal["degraded"] is True
-    assert [t["name"] for t in proposal["topics"]] == ["Linear equations", "Quadratics"]
-    ok(
-        await api.post(
-            f"/v1/domains/{domain_id}/structure/confirm",
-            json={"structure_version": proposal["structure_version"], "idempotency_key": "te9:c"},
-            headers=h,
-        )
-    )
-    topic_id = UUID(proposal["topics"][0]["topic_id"])
-    skill_id = next(s["skill_id"] for s in proposal["skills"] if s["topic_id"] == str(topic_id))
-
-    task_id = uuid4()
-    async with system.session_factory() as s, s.begin():
-        await append_events(
-            s,
-            learner.learner_id,
-            [
-                new_event(
-                    "task.generated",
-                    {
-                        "task_id": str(task_id),
-                        "domain_id": str(domain_id),
-                        "topic_id": str(topic_id),
-                        "family_id": "bank-choice",
-                        "difficulty": 0.5,
-                        "kind": "choice",
-                        "prompt_text": "Pick A",
-                        "reference_solution": {"option": "A", "answer": "A", "options": ["A", "B"]},
-                        "target_skills": [{"skill": {"skill_id": skill_id}, "weight": 1.0}],
-                    },
-                    key=f"te9:task:{task_id}",
-                )
-            ],
-            publish_wakeup=True,
-            redis=system.redis,
-        )
+    domain_id, topic_id = await onboard(system, learner, "te9")
+    # The bank task `onboard()` leaves (D-A-209): the only candidate, so the pick is not a draw.
+    task_id = uuid5(QUACK_UUID_NS, f"{domain_id}:bank-task")
     await system.settle()
 
     session = ok(
