@@ -46,7 +46,7 @@
 | :-- | :-- | :-: | :-- | :-- | :-- | :-- |
 | WP1.1 | dbmate и базовая схема | влит | `db/migrations/…baseline.sql` + 3 расширяющие миграции (#78, #142) | — | — | T-DB1 |
 | WP1.2 | `Db` и репозитории | влит | `quack.db.Db`, `append_events`, блокировки на psycopg (#78, #107) | — | — | T-DB2, T-DB4, T-DB5 |
-| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1: процессы Фазы 4 за `phase4_processes` (D-A-200, D-A-206, #224); шаг 3 A: `graph/read` на `Db`, `sweep_inactive` в `periodic_p4` (D-A-210…212, #225), `quack/domains/**` на `Db`, интервью и диагностика удалены (D-A-207…209, #226); план — #215 | шаг 2 — стенд на dbmate (C, #223); шаг 3 B — #222 (D-B-210, модули B на `Db`); шаг 3 C; шаг 4 B (шлюз на `Db`); шаг 5 A — снять код Фазы 3 (перечень D-A-212), `graph.curate` Фазы 3, флаг, `sqlalchemy`/`asyncpg`/`alembic`; владелец `quack/ops/*` — #215 | #223 | T-DB3 (G4) |
+| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1: процессы Фазы 4 за `phase4_processes` (D-A-200, D-A-206, #224); шаг 3 A: `graph/read` на `Db`, `sweep_inactive` в `periodic_p4` (D-A-210…212, #225), `quack/domains/**` на `Db`, интервью и диагностика удалены (D-A-207…209, #226); план — #215 | шаг 2 сделан: стенд на dbmate, `PHASE4_PROCESSES=true` (C, D-C-160, #239); `ops status` и др. читают таблицы Фазы 3 до шага 3 C; шаг 3 B — #222 (D-B-210, модули B на `Db`); шаг 3 C; шаг 4 B (шлюз на `Db`); шаг 5 A — снять код Фазы 3 (перечень D-A-212), `graph.curate` Фазы 3, флаг, `sqlalchemy`/`asyncpg`/`alembic`; владелец `quack/ops/*` — #215 | #223 | T-DB3 (G4) |
 | WP1.4 | squawk | влит | `backend/.squawk.toml` (#185), job `squawk` в CI (#189) | — | — | T-DB7 |
 | WP2.1 | Модели payload и реестр | влит | 65 типов, S3 заморожен (#80, #94, #119, #130) | — | D-A-121 (класс C) | T-EV1, T-EV2, T-EV3 |
 | WP2.2 | Ход и последствия вместе | влит | Пачка хода одним `append_events` (#109, `session/turn_commit.py`) | — | — | T-EV4 |
@@ -144,7 +144,7 @@
 | :-- | :-- | :-: | :-- | :-- | :-- | :-- |
 | WP0 | Вход и аудит (зоны A, B выполнены) | влит | `main` зелёный, чистый старт подтверждён владельцем 2026-11-02, п.3а–3е закрыты (#71, #72) | — | — | T-A9b |
 | WP9.1 | compose | частично | `compose.yaml`: Caddy, сети, лимиты, секреты ролей (#102, #174) | сервис `alerts` и таймер; сверить состав с `Д-§3` | — | T-OPS1, T-OPS6 |
-| WP9.2 | Caddy и образы | влит | `deploy/Caddyfile`, Dockerfile с `dbmate`, `pg_dump 16`, `age`, CORS (#120, #177) | — | — | — |
+| WP9.2 | Caddy и образы | влит | `deploy/Caddyfile`, Dockerfile с `pg_dump 16`, `age`, CORS (#120, #177); `dbmate` и `db/migrations` в образе - D-C-160 | — | — | — |
 | WP9.3 | CI | частично | Jobs: backend, squawk, compute, images, publish в GHCR (#77, #171, #178, #189) | шаги: реестр событий (с A), типы фронтенда из OpenAPI, `modal/`, изоляция и один писатель отдельно; job выкатки | — | T-DB7 |
 | WP9.4 | Выкатка и откат | частично | `deploy/deploy.sh` (#120) | job выкатки в окружении `production`, `DEPLOY_FREEZE`; проверка порядка шагов | — | T-OPS8 |
 | WP9.5 | Бэкапы и тревоги | частично | `ops backup`, сервис и таймер `backup`, вебхук тревог (#122, #126) | `ops alerts` и `alerts`-контейнер, `GET /internal/status` | — | T-OPS5, T-OPS7 |
