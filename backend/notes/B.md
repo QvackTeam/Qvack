@@ -23,6 +23,15 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-B-219. Лассо в разговоре учителя (WP14.3, `Т-§15.6`)
+- Класс: B
+- WP / место: WP14.3, WP21.6 (остаток «лассо в `message`»), `Т-§15.6`; `quack/session/conversation.py` (`_lasso`, `_Lines.known`)
+- Контекст: действие `message` уже несёт `canvas_refs` и пишется в `message.sent`; разговор учителя ссылки не показывал
+- Решение: сообщение с ссылками получает строку «Learner points at: …»: строка канваса — `canvas line L{n}` по номеру в сессии (тот же счёт, что у `canvas.line_committed`), неизвестная строка — `a canvas line` (номер не выдумываем), блок доски — `block {id}`. Номера не создаются ссылкой: новая строка получает номер только своим событием
+- Почему: `Т-§15.6`, `Т-§10.3`
+- Обратимость: одна функция
+- Тесты: `tests/session/test_teacher_context.py::test_lasso_refs_in_the_conversation` (1)
+- Требует подтверждения владельцем: нет
 ### D-B-218. Задачи семинара: `create_seminar_task` (WP12.5, WP20.2, #271)
 - Класс: B
 - WP / место: WP12.5, WP20.2 п.5, `Т-§5.6`, `Т-§5.3`; `quack/practice/seminar_tasks.py` (`SeminarTask`, `create_seminar_task`, `seminar_task_id`), `quack/prompts/task_generator/v1.md` (пункт про назначение «seminar», черновик слоя 1 правится на месте, D-B-132)
