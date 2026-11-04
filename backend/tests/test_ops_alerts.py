@@ -96,7 +96,9 @@ def test_team_spend_above_the_daily_threshold_is_a_warning():
         snapshot(status_patch={"llm": {"cost_last_day_usd": 60.0}}), team_daily_alert_usd=60.0
     )
     # Absence is not zero (law 8): no figure, no alert.
-    assert alerts.TEAM_SPEND not in by_key(snapshot(status_patch={"llm": {"cost_last_day_usd": None}}))
+    assert alerts.TEAM_SPEND not in by_key(
+        snapshot(status_patch={"llm": {"cost_last_day_usd": None}})
+    )
 
 
 @pytest.mark.parametrize("age_s", [None, 6 * 3600 + 31 * 60])

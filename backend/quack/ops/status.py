@@ -10,10 +10,11 @@ carries the one JSON object.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, LiteralString
 
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
+
 from quack.config import Settings
 from quack.db import Db
 from quack.db.neo4j import read_session
@@ -67,7 +68,7 @@ _LLM = (
 )
 
 
-async def _row(db: Db, query: str) -> dict[str, Any]:
+async def _row(db: Db, query: LiteralString) -> dict[str, Any]:
     row = await db.fetch_one(query)
     assert row is not None  # an aggregate without GROUP BY always yields a row
     return row

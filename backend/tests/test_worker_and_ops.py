@@ -26,7 +26,7 @@ from quack.graph.projector import project_in_memory
 from quack.graph.rebuild import rebuild_learner
 from quack.graph.worker import ProjectorWorker
 from quack.jobs import kinds
-from quack.jobs.queue import ClaimedJob, JobSpec, claim_next_job, enqueue_job, fail_or_retry_job
+from quack.jobs.queue import ClaimedJob, enqueue_job
 from quack.jobs.runner import JobContext, JobRunner, register_job_handler
 from quack.ops.purge_job import purge_deleted
 from tests.scenario import build_scenario
@@ -130,7 +130,9 @@ async def test_poison_event_stops_learner_until_replay(
     monkeypatch.setattr(projector_module, "apply_event_to_trace", original)
     # `ops replay-dlq` is gone with the Phase 3 queue; releasing the stream is the same update.
     async with db() as session, session.begin():
-        await session.execute(text("UPDATE ops.dlq SET replayed_at = now() WHERE source = 'projector'"))
+        await session.execute(
+            text("UPDATE ops.dlq SET replayed_at = now() WHERE source = 'projector'")
+        )
     assert await worker.pending_learners() == [learner]
     await _drain(worker)
     wm = await Neo4jGraphStore(neo4j, str(learner)).load_watermark(str(learner))

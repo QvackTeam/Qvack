@@ -105,9 +105,9 @@ async def apply_db_roles(db: Db, passwords: RolePasswords) -> list[str]:
         # What `quack_migrator` creates from now on (Д-§7: it owns the schemas and the tables).
         for grantee in (app, reader):
             await db.execute(
-                sql.SQL(
-                    "ALTER DEFAULT PRIVILEGES FOR ROLE {} GRANT USAGE ON SCHEMAS TO {}"
-                ).format(migrator, grantee)
+                sql.SQL("ALTER DEFAULT PRIVILEGES FOR ROLE {} GRANT USAGE ON SCHEMAS TO {}").format(
+                    migrator, grantee
+                )
             )
         await db.execute(
             sql.SQL(
@@ -117,7 +117,8 @@ async def apply_db_roles(db: Db, passwords: RolePasswords) -> list[str]:
         )
         await db.execute(
             sql.SQL(
-                "ALTER DEFAULT PRIVILEGES FOR ROLE {} GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO {}"
+                "ALTER DEFAULT PRIVILEGES FOR ROLE {} "
+                "GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO {}"
             ).format(migrator, app)
         )
         # What exists already (the superuser created it before the roles did).
@@ -133,7 +134,9 @@ async def apply_db_roles(db: Db, passwords: RolePasswords) -> list[str]:
                         what, ident(schema, rel["relname"]), migrator
                     )
                 )
-            await db.execute(sql.SQL("GRANT USAGE ON SCHEMA {} TO {}, {}").format(name, app, reader))
+            await db.execute(
+                sql.SQL("GRANT USAGE ON SCHEMA {} TO {}, {}").format(name, app, reader)
+            )
             await db.execute(
                 sql.SQL(
                     "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {} TO {}"

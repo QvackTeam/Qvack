@@ -46,7 +46,7 @@
 | :-- | :-- | :-: | :-- | :-- | :-- | :-- |
 | WP1.1 | dbmate и базовая схема | влит | `db/migrations/…baseline.sql` + 3 расширяющие миграции (#78, #142) | — | — | T-DB1 |
 | WP1.2 | `Db` и репозитории | влит | `quack.db.Db`, `append_events`, блокировки на psycopg (#78, #107) | — | — | T-DB2, T-DB4, T-DB5 |
-| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1: процессы Фазы 4 за `phase4_processes` (D-A-200, D-A-206, #224); шаг 3 A: `graph/read` на `Db`, `sweep_inactive` в `periodic_p4` (D-A-210…212, #225), `quack/domains/**` на `Db`, интервью и диагностика удалены (D-A-207…209, #226); план — #215 | шаг 2 сделан: стенд на dbmate, `PHASE4_PROCESSES=true` (C, D-C-160, #239); `ops status` и др. читают таблицы Фазы 3 до шага 3 C; шаг 3 B — #222 (D-B-210, модули B на `Db`); шаг 3 C; шаг 4 B (шлюз на `Db`); шаг 5 A — снять код Фазы 3 (перечень D-A-212), `graph.curate` Фазы 3, флаг, `sqlalchemy`/`asyncpg`/`alembic`; владелец `quack/ops/*` — #215 | #223 | T-DB3 (G4) |
+| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1: процессы Фазы 4 за `phase4_processes` (D-A-200, D-A-206, #224); шаг 3 A: `graph/read` на `Db`, `sweep_inactive` в `periodic_p4` (D-A-210…212, #225), `quack/domains/**` на `Db`, интервью и диагностика удалены (D-A-207…209, #226); план — #215 | шаг 2 сделан: стенд на dbmate, `PHASE4_PROCESSES=true` (C, D-C-160, #239); шаг 3 C, ops и CLI: `ops status`, `restore-check`, `seed-learners`, `alerts`, `db-roles` на `Db`, `cli.py` без движка, команды `replay-dlq` и `purge-deleted` сняты (D-C-180, D-C-181, ветка phase-4-c-step3-ops); шаг 3 B — #222 (D-B-210, модули B на `Db`); шаг 3 C, остаток: `artifacts`, `api/resources.py`; шаг 4 B (шлюз на `Db`); шаг 5 A — снять код Фазы 3 (перечень D-A-212), `graph.curate` Фазы 3, флаг, `sqlalchemy`/`asyncpg`/`alembic`; владелец `quack/ops/*` — #215 | #223 | T-DB3 (G4) |
 | WP1.4 | squawk | влит | `backend/.squawk.toml` (#185), job `squawk` в CI (#189) | — | — | T-DB7 |
 | WP2.1 | Модели payload и реестр | влит | 65 типов, S3 заморожен (#80, #94, #119, #130) | — | D-A-121 (класс C) | T-EV1, T-EV2, T-EV3 |
 | WP2.2 | Ход и последствия вместе | влит | Пачка хода одним `append_events` (#109, `session/turn_commit.py`) | — | — | T-EV4 |
@@ -56,7 +56,7 @@
 | WP3.2 | Обработчики фазы А | влит | Обработчики 38 строк S5 (#135, #185) | — | — | T-P2, T-P3, T-P4, T-P5 |
 | WP3.3 | Фазы А–В, срез | влит | Фазы А–В, запись разницей, остановка потока (#185) | в процесс `projector` не подключён (WP1.3) | — | T-P6 |
 | WP3.4 | Режимы | влит | Пачки = пересборка (#185) | — | — | T-P1 |
-| WP3.5 | Пересборка | влит | Пересборка на rules@3, `--stale-rules` в `graph/projection` (#185) | `ops rebuild` в `cli.py` при `phase4_processes` на `graph/projection` (C, #232, D-C-165); без флага — код Фазы 3 до шага 2 WP1.3 (#223) | — | T-P8 |
+| WP3.5 | Пересборка | влит | Пересборка на rules@3, `--stale-rules` в `graph/projection` (#185) | `ops rebuild` в `cli.py` при `phase4_processes` на `graph/projection` (C, #232, D-C-165); путь Фазы 3 в `ops rebuild` снят (D-C-180) | — | T-P8 |
 | WP3.6 | Версия правил | влит | `RULES_VERSION = rules@3` в `projection/runner.py` | старая константа rules@2 в `graph/ids.py` уходит с WP1.3 | — | — |
 | WP4.1 | Свидетельство и ярус | влит | `projection/skill_fold.py` (#185, D-A-182) | — | — | T-F2 |
 | WP4.2 | Вычисляемые свойства | влит | Веса, окно «горит», новизна, delayed (#185) | — | — | T-F3, T-F9 |

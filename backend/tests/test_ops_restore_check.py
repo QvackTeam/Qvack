@@ -81,9 +81,7 @@ async def test_restore_check_compares_postgres_with_neo4j(pg_db: Db, neo4j: Asyn
     assert (by_id[ghost].applied_seq, by_id[ghost].log_seq) == (2, 0)
 
 
-async def test_a_learner_node_without_a_watermark_is_not_a_violation(
-    pg_db: Db, neo4j: AsyncDriver
-):
+async def test_a_learner_node_without_a_watermark_is_not_a_violation(pg_db: Db, neo4j: AsyncDriver):
     """A node the projector has not committed to yet has no `projectedSeq`: absence is not zero
     ahead of the log, it is nothing to compare."""
     nameless = str(uuid4())

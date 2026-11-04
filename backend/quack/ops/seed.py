@@ -125,6 +125,13 @@ _COUNT_REAL = (
 )
 
 
+async def _insert_learner(db: Db, learner_id: UUID, email: str) -> None:
+    await db.execute(
+        _INSERT_LEARNER,
+        {"learner_id": learner_id, "email": email, "settings": Jsonb(SEEDED_SETTINGS)},
+    )
+
+
 async def _check_prod(db: Db, settings: Settings, confirm: bool) -> None:
     """Д-§11: on prod only with `--confirm` and only before real learners exist."""
     if settings.env != "prod":
@@ -151,14 +158,7 @@ async def seed_learners(
     for i in range(count):
         learner_id, domain_id, topic_ids, events = seed_events(i, data)
         async with db.transaction():
-            await db.execute(
-                _INSERT_LEARNER,
-                {
-                    "learner_id": learner_id,
-                    "email": seed_email(i),
-                    "settings": Jsonb(SEEDED_SETTINGS),
-                },
-            )
+            await _insert_learner(db, learner_id, seed_email(i))
             await append_events(db, learner_id, events)
         token = await open_session(db, settings, learner_id=learner_id, now=datetime.now(UTC))
         seeded.append(SeededLearner(learner_id, token, domain_id, topic_ids))

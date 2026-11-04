@@ -19,11 +19,12 @@ from uuid import UUID
 
 import structlog
 
+import quack.db
 from quack.agents.extraction_eval import compare_reports, evaluate_extraction, load_eval_set
 from quack.agents.judge import release_judge
 from quack.agents.metrics import metrics
 from quack.config import Settings, get_settings
-from quack.db import Db, open_db
+from quack.db import open_db
 from quack.db.neo4j import create_driver, verify_schema
 from quack.db.postgres import create_engine, create_session_factory
 from quack.db.redis import create_redis
@@ -171,7 +172,7 @@ def _run_api(settings: Settings) -> int:
 
 
 @asynccontextmanager
-async def _gateway(settings: Settings, db: Db) -> AsyncIterator[LLMGateway]:
+async def _gateway(settings: Settings, db: quack.db.Db) -> AsyncIterator[LLMGateway]:
     """The model gateway of `ops extraction-eval` and `ops replay-session`. It still takes the
     session factory of Phases 1-3 (`LLMGateway.__init__`, stream B, WP1.3 step 4 removes it with
     the outbox); this is the only place of the CLI that builds an engine, and it is not used on

@@ -45,9 +45,7 @@ async def scratch(settings: Settings) -> AsyncIterator[str]:
     try:
         yield dsn
     finally:
-        await admin.execute(
-            sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name))
-        )
+        await admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
         await admin.close()
 
 

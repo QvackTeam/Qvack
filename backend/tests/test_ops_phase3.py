@@ -13,7 +13,6 @@ from quack.config import Settings
 from quack.events.catalog import EVENT_TYPE_VERSIONS
 from quack.ops.registry import can_rollback, event_registry, registry_gaps, write_event_registry
 
-
 # --- T-O4: CLI of Phase 3 --------------------------------------------------------------
 
 
@@ -61,7 +60,9 @@ def test_the_processes_run_on_phase_4(settings: Settings) -> None:
 
     try:
         for role in ("api", "projector", "workers", "ops"):
-            configured = cli.process_settings(settings.model_copy(update={"phase4_processes": False}), role)
+            configured = cli.process_settings(
+                settings.model_copy(update={"phase4_processes": False}), role
+            )
             assert configured.phase4_processes is True
     finally:
         structlog.contextvars.unbind_contextvars("process", "version")

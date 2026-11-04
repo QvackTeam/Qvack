@@ -10,6 +10,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from psycopg.abc import QueryNoTemplate as Query
 
 from quack import cli
 from quack.auth.sessions import resolve_session
@@ -28,7 +29,7 @@ _ACTORS = "SELECT DISTINCT actor FROM core.events WHERE learner_id = %(learner_i
 _SESSIONS = "SELECT count(*) AS n FROM core.auth_sessions"
 
 
-async def _n(db: Db, query: str) -> int:
+async def _n(db: Db, query: Query) -> int:
     row = await db.fetch_one(query)
     assert row is not None
     return int(row["n"])
@@ -77,7 +78,13 @@ async def test_seed_learners(pg_db: Db, settings: Settings, tmp_path: Path) -> N
     assert await _n(pg_db, _SESSIONS) == sessions + 3
 
 
-async def test_seed_learners_refuses_on_prod(pg_db: Db, settings: Settings, tmp_path: Path) -> None:
+async def test_seed_learners_refuses_on_prod(
+    pg_db: Db, settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def open_db(settings: Settings, **_: Any) -> _Shared:
+        return _Shared(pg_db)
+
+    monkeypatch.setattr(cli, "open_db", open_db)
     prod = settings.model_copy(update={"env": "prod"})
     with pytest.raises(SeedRefusedError):
         await seed_learners(pg_db, prod, count=1)  # no --confirm
@@ -90,7 +97,9 @@ async def test_seed_learners_refuses_on_prod(pg_db: Db, settings: Settings, tmp_
     out = tmp_path / "x.json"
     parser = cli.build_parser()
     for extra in ([], ["--confirm"]):
-        args = parser.parse_args(["ops", "seed-learners", "--count", "1", "--out", str(out), *extra])
+        args = parser.parse_args(
+            ["ops", "seed-learners", "--count", "1", "--out", str(out), *extra]
+        )
         assert await cli._ops(prod, args) == 2  # pyright: ignore[reportPrivateUsage]
     assert not out.exists()
 
@@ -113,6 +122,8 @@ async def test_the_command_writes_the_file(
 
     monkeypatch.setattr(cli, "open_db", open_db)
     out = tmp_path / "learners.json"
-    args = cli.build_parser().parse_args(["ops", "seed-learners", "--count", "2", "--out", str(out)])
+    args = cli.build_parser().parse_args(
+        ["ops", "seed-learners", "--count", "2", "--out", str(out)]
+    )
     assert await cli._ops(settings, args) == 0  # pyright: ignore[reportPrivateUsage]
     assert len(json.loads(out.read_text(encoding="utf-8"))) == 2

@@ -3,9 +3,9 @@
 After a restore from a dump or a disk snapshot Neo4j can be ahead of the event log: the graph saw
 events that the restored log no longer has, and new events would get the same numbers. The check
 compares, for every learner, `projectedSeq` in Neo4j with `seq` in `core.learners`. A learner
-with `projectedSeq` above the log (or absent from the log) is a violation: the exit code is not 0 and
-the list is printed; the cure is `ops rebuild --all` (Д-§8.7). A Neo4j that lags is not a violation,
-the projector catches up by itself.
+with `projectedSeq` above the log (or absent from the log) is a violation: the exit code is not
+0 and the list is printed; the cure is `ops rebuild --all` (Д-§8.7). A Neo4j that lags is not a
+violation, the projector catches up by itself.
 """
 
 from __future__ import annotations
