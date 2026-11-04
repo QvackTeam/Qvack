@@ -7,7 +7,7 @@ import { NodeCard } from "./node-card";
 import { Headline, Rise, useInView } from "./reveal";
 import { DuckStage } from "./scene-duck";
 import { approach, cellSize, rand, sceneForm } from "./scene-utils";
-import { storyForm, storyVisible, type Win } from "./story";
+import { storyStore } from "./story";
 
 const NODES = 5;
 
@@ -16,14 +16,14 @@ const NODES = 5;
  * цепочку узлов; изредка рядом бьёт молния. На узлы можно навестись — карточка с одним из принципов платформы.
  * Графика собирается из точек, когда экран въезжает, и рассыпается, когда уезжает.
  */
-export function EfficiencyScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElement | null>; win?: Win }) {
+export function EfficiencyScene({ scrollRef, slot }: { scrollRef: RefObject<HTMLElement | null>; slot?: number }) {
   const t = useT().landing.story.efficiency;
   const secRef = useRef<HTMLElement>(null);
   const cvRef = useRef<HTMLCanvasElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const [textRef, ioIn] = useInView<HTMLDivElement>(0.35);
   const [pinIn, setPinIn] = useState(false);
-  const inView = win ? pinIn : ioIn; // закреплённый режим: текст выезжает, когда сцена собрана
+  const inView = slot !== undefined ? pinIn : ioIn; // закреплённый режим: текст выезжает, когда сцена собрана
   const [hot, setHot] = useState(-1);
   const hotRef = useRef(-1);
   const nodesText = t.nodes;
@@ -34,7 +34,7 @@ export function EfficiencyScene({ scrollRef, win }: { scrollRef: RefObject<HTMLE
     const ctx = cv?.getContext("2d");
     const scroller = scrollRef.current;
     if (!sec || !cv || !ctx || !scroller) return;
-    const formOf = () => (win ? storyForm(scroller, win) : sceneForm(sec));
+    const formOf = () => (slot !== undefined ? storyStore.forms[slot] : sceneForm(sec));
     let lastForm = 0;
     let active = false;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -96,7 +96,7 @@ export function EfficiencyScene({ scrollRef, win }: { scrollRef: RefObject<HTMLE
       const now = still ? 2.2 : (performance.now() - t0) / 1000;
       const form = formOf();
       lastForm = form;
-      if (win) {
+      if (slot !== undefined) {
         const a = form > 0.8 ? true : form < 0.6 ? false : active; // текст уходит, как только сцена начала рассыпаться
         if (a !== active) {
           active = a;
@@ -191,7 +191,7 @@ export function EfficiencyScene({ scrollRef, win }: { scrollRef: RefObject<HTMLE
       setHover(-1);
     };
     // закреплённые сцены лежат друг на друге и не ловят указатель сами — слушаем весь прокручиваемый контейнер
-    const evt: HTMLElement = win ? scroller : sec;
+    const evt: HTMLElement = slot !== undefined ? scroller : sec;
     evt.addEventListener("pointermove", onMove);
     evt.addEventListener("pointerdown", onMove);
     evt.addEventListener("pointerleave", onLeave);
@@ -219,7 +219,7 @@ export function EfficiencyScene({ scrollRef, win }: { scrollRef: RefObject<HTMLE
     };
     const io = new IntersectionObserver(
       ([e]) => {
-        if (win) return; // в закреплённом режиме видимость считается по прокрутке
+        if (slot !== undefined) return; // в закреплённом режиме видимость считается по собранности
         visible = e.isIntersecting;
         sync();
       },
@@ -236,17 +236,19 @@ export function EfficiencyScene({ scrollRef, win }: { scrollRef: RefObject<HTMLE
     const onVis = () => sync();
     document.addEventListener("visibilitychange", onVis);
     const onScroll = () => {
-      if (win) {
-        const v = storyVisible(scroller, win);
+      if (slot !== undefined) {
+        const v = storyStore.forms[slot] > 0.002;
         if (v !== visible) {
           visible = v;
           sync();
+          if (!v) frame(0, true); // сцена ушла: один раз стираем холсты и прячем текст, дальше кадры не считаем
         }
       }
       if (reduced && !raf) frame(0, true);
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
-    if (win) visible = storyVisible(scroller, win);
+    scroller.addEventListener("story-form", onScroll);
+    if (slot !== undefined) visible = storyStore.forms[slot] > 0.002;
 
     if (layout()) {
       chain.reset(duckX - duckPx * 0.5, H * 0.5);
@@ -260,17 +262,18 @@ export function EfficiencyScene({ scrollRef, win }: { scrollRef: RefObject<HTMLE
       ro.disconnect();
       document.removeEventListener("visibilitychange", onVis);
       scroller.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("story-form", onScroll);
       evt.removeEventListener("pointermove", onMove);
       evt.removeEventListener("pointerdown", onMove);
       evt.removeEventListener("pointerleave", onLeave);
       stage.dispose();
     };
-  }, [scrollRef, win]);
+  }, [scrollRef, slot]);
 
   const card = hot >= 0 ? nodesText[hot] : null;
 
   return (
-    <section ref={secRef} id="efficiency" className={`overflow-hidden ${win ? "pointer-events-none absolute inset-0" : "relative h-full min-h-[680px] shrink-0"}`}>
+    <section ref={secRef} id="efficiency" className={`overflow-hidden ${slot !== undefined ? "pointer-events-none absolute inset-0" : "relative h-full min-h-[680px] shrink-0"}`}>
       <canvas ref={cvRef} aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" />
       <div className="pointer-events-none relative z-10 mx-auto flex h-full max-w-[1600px] items-start px-5 pb-10 pt-24 sm:px-10 lg:items-center lg:justify-end lg:pt-14">
         <div ref={textRef} className="w-full lg:w-[44%] lg:max-w-[40rem]">

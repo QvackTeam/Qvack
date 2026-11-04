@@ -5,7 +5,7 @@ import { useEffect, useRef, type RefObject } from "react";
 import { useT } from "@/lib/i18n/provider";
 import { HeroDuck } from "./hero-duck/hero-duck";
 import { smoothstep } from "./scenes/scene-utils";
-import { goToScene } from "./scenes/story";
+import { goToScene, storyStore } from "./scenes/story";
 
 /** Первый экран лендинга: заголовок «Quack! – Learning Hub», под ним утка из глифов, которая говорит «Quack!» */
 export function Hero({ scrollRef, pinned = false }: { scrollRef: RefObject<HTMLElement | null>; pinned?: boolean }) {
@@ -18,13 +18,17 @@ export function Hero({ scrollRef, pinned = false }: { scrollRef: RefObject<HTMLE
     const root = scrollRef.current;
     if (!root) return;
     const update = () => {
-      const o = String(1 - smoothstep(0.03, 0.4, root.scrollTop / Math.max(1, root.clientHeight)));
+      const o = String(root.dataset.pinned === "true" ? storyStore.forms[0] : 1 - smoothstep(0.03, 0.4, root.scrollTop / Math.max(1, root.clientHeight)));
       if (titleRef.current) titleRef.current.style.opacity = o;
       if (chevronRef.current) chevronRef.current.style.opacity = o;
     };
     update();
     root.addEventListener("scroll", update, { passive: true });
-    return () => root.removeEventListener("scroll", update);
+    root.addEventListener("story-form", update);
+    return () => {
+      root.removeEventListener("scroll", update);
+      root.removeEventListener("story-form", update);
+    };
   }, [scrollRef]);
 
   return (

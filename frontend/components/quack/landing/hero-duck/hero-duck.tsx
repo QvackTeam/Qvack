@@ -8,6 +8,7 @@ import { drawShore } from "./lake";
 import { drawFlowers, drawPads } from "./flowers";
 import { drawReeds } from "./reeds";
 import { NodeField } from "./nodes";
+import { storyStore } from "../scenes/story";
 
 /**
  * Утка первого экрана. 3D-модель (duck-rig) рендерится в маленькую текстуру, плотная гекс-решётка читает из неё
@@ -584,7 +585,8 @@ export function HeroDuck({ scrollRef, label }: { scrollRef: RefObject<HTMLElemen
     const draw = (now: number, dt: number) => {
       if (!sprites) return;
       const scroller = scrollRef.current;
-      const away = scroller ? smoothstep(0.04, 0.55, scroller.scrollTop / Math.max(1, scroller.clientHeight)) : 0;
+      // закреплённый режим: собранность первого экрана ведёт контроллер сцен; иначе — по прокрутке
+      const away = scroller?.dataset.pinned === "true" ? 1 - storyStore.forms[0] : scroller ? smoothstep(0.04, 0.55, scroller.scrollTop / Math.max(1, scroller.clientHeight)) : 0;
       // сцена полностью рассыпалась и погасла: один раз стираем холсты и больше ничего не считаем и не рисуем
       if (away > 0.995) {
         if (!awayCleared) {

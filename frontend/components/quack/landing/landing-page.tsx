@@ -6,8 +6,8 @@ import { Hero } from "./hero";
 import { LandingNav } from "./nav";
 import { EfficiencyScene } from "./scenes/efficiency-scene";
 import { GraphScene } from "./scenes/graph-scene";
-import { useSnapScroll } from "./scenes/snap-scroll";
 import { STORY, usePinned } from "./scenes/story";
+import { useStoryController } from "./scenes/story-controller";
 
 /**
  * Лендинг: панель, первый экран, две сцены и подвал. На большом экране сцены закреплены: первый экран и обе сцены лежат
@@ -18,7 +18,7 @@ import { STORY, usePinned } from "./scenes/story";
 export function LandingPage() {
   const scrollRef = useRef<HTMLElement>(null);
   const pinned = usePinned();
-  useSnapScroll(scrollRef, pinned);
+  useStoryController(scrollRef, pinned);
   return (
     <main
       ref={scrollRef}
@@ -30,8 +30,8 @@ export function LandingPage() {
         <div className="relative" style={{ height: `${(STORY.end + 1) * 100}dvh` }}>
           <div className="sticky top-0 h-dvh overflow-hidden">
             <Hero scrollRef={scrollRef} pinned />
-            <EfficiencyScene scrollRef={scrollRef} win={STORY.efficiency} />
-            <GraphScene scrollRef={scrollRef} win={STORY.how} />
+            <EfficiencyScene scrollRef={scrollRef} slot={1} />
+            <GraphScene scrollRef={scrollRef} slot={2} />
           </div>
         </div>
       ) : (

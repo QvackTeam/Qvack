@@ -8,7 +8,7 @@ import { NodeCard } from "./node-card";
 import { Headline, Rise, useInView } from "./reveal";
 import { DuckStage } from "./scene-duck";
 import { approach, cellSize, rand, sceneForm } from "./scene-utils";
-import { storyForm, storyVisible, type Win } from "./story";
+import { storyStore } from "./story";
 
 /** Узлы большого графа: положение в долях рамки графа (x, y), цвет палитры, главный ли */
 const NODES: { x: number; y: number; color: number; hub?: boolean }[] = [
@@ -49,7 +49,7 @@ type GNode = { x: number; y: number; vx: number; vy: number; hx: number; hy: num
  * как устроена эта часть), под ним ходит небольшая утка и время от времени дёргает за нижние узлы — граф откликается
  * пружинами. Сверху по центру заголовок, слева и справа по короткому тексту.
  */
-export function GraphScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElement | null>; win?: Win }) {
+export function GraphScene({ scrollRef, slot }: { scrollRef: RefObject<HTMLElement | null>; slot?: number }) {
   const t = useT().landing.story.how;
   const secRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -59,12 +59,13 @@ export function GraphScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElemen
   const [leftRef, leftIo] = useInView<HTMLDivElement>(0.35);
   const [rightRef, rightIo] = useInView<HTMLDivElement>(0.35);
   const [pinIn, setPinIn] = useState(false);
-  const topIn = win ? pinIn : topIo; // закреплённый режим: текст выезжает, когда сцена собрана
-  const leftIn = win ? pinIn : leftIo;
-  const rightIn = win ? pinIn : rightIo;
+  const topIn = slot !== undefined ? pinIn : topIo; // закреплённый режим: текст выезжает, когда сцена собрана
+  const leftIn = slot !== undefined ? pinIn : leftIo;
+  const rightIn = slot !== undefined ? pinIn : rightIo;
   const [hot, setHot] = useState(-1);
   const hotRef = useRef(-1);
   const nodesText = t.nodes;
+  const pin = slot !== undefined; // закреплённый режим: рамка ровно в окно, на узком окне тексты уходят под граф в два столбца
 
   useEffect(() => {
     const sec = secRef.current;
@@ -73,7 +74,7 @@ export function GraphScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElemen
     const ctx = cv?.getContext("2d");
     const scroller = scrollRef.current;
     if (!sec || !stageEl || !cv || !ctx || !scroller) return;
-    const formOf = () => (win ? storyForm(scroller, win) : sceneForm(sec));
+    const formOf = () => (slot !== undefined ? storyStore.forms[slot] : sceneForm(sec));
     let lastForm = 0;
     let active = false;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -294,7 +295,7 @@ export function GraphScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElemen
       nowRef = now;
       const form = formOf();
       lastForm = form;
-      if (win) {
+      if (slot !== undefined) {
         const a = form > 0.8 ? true : form < 0.6 ? false : active; // текст уходит, как только сцена начала рассыпаться
         if (a !== active) {
           active = a;
@@ -388,7 +389,7 @@ export function GraphScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElemen
       pointer = null;
       setHover(-1);
     };
-    const evt: HTMLElement = win ? scroller : sec;
+    const evt: HTMLElement = slot !== undefined ? scroller : sec;
     evt.addEventListener("pointermove", onMove);
     evt.addEventListener("pointerdown", onMove);
     evt.addEventListener("pointerleave", onLeave);
@@ -416,7 +417,7 @@ export function GraphScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElemen
     };
     const io = new IntersectionObserver(
       ([e]) => {
-        if (win) return;
+        if (slot !== undefined) return;
         visible = e.isIntersecting;
         sync();
       },
@@ -431,17 +432,19 @@ export function GraphScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElemen
     const onVis = () => sync();
     document.addEventListener("visibilitychange", onVis);
     const onScroll = () => {
-      if (win) {
-        const v = storyVisible(scroller, win);
+      if (slot !== undefined) {
+        const v = storyStore.forms[slot] > 0.002;
         if (v !== visible) {
           visible = v;
           sync();
+          if (!v) frame(0, true); // сцена ушла: один раз стираем холсты и прячем текст, дальше кадры не считаем
         }
       }
       if (reduced && !raf) frame(0, true);
     };
     scroller.addEventListener("scroll", onScroll, { passive: true });
-    if (win) visible = storyVisible(scroller, win);
+    scroller.addEventListener("story-form", onScroll);
+    if (slot !== undefined) visible = storyStore.forms[slot] > 0.002;
 
     if (layout()) frame(0, true);
 
@@ -451,19 +454,20 @@ export function GraphScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElemen
       ro.disconnect();
       document.removeEventListener("visibilitychange", onVis);
       scroller.removeEventListener("scroll", onScroll);
+      scroller.removeEventListener("story-form", onScroll);
       evt.removeEventListener("pointermove", onMove);
       evt.removeEventListener("pointerdown", onMove);
       evt.removeEventListener("pointerleave", onLeave);
       duck.dispose();
     };
-  }, [scrollRef, nodesText, win]);
+  }, [scrollRef, nodesText, slot]);
 
   const card = hot >= 0 ? nodesText[hot] : null;
 
   return (
-    <section ref={secRef} id="how" className={`overflow-hidden font-sans ${win ? "pointer-events-none absolute inset-0" : "relative min-h-full shrink-0 lg:h-full lg:min-h-[760px]"}`}>
+    <section ref={secRef} id="how" className={`overflow-hidden font-sans ${slot !== undefined ? "pointer-events-none absolute inset-0" : "relative min-h-full shrink-0 lg:h-full lg:min-h-[760px]"}`}>
       <canvas ref={cvRef} aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" />
-      <div className="pointer-events-none relative z-10 mx-auto flex min-h-full max-w-[1600px] flex-col items-center px-5 pb-10 pt-20 sm:px-10 lg:h-full lg:pb-8 lg:pt-16">
+      <div className={`pointer-events-none relative z-10 mx-auto flex max-w-[1600px] flex-col items-center px-5 pt-20 sm:px-10 lg:h-full lg:pb-8 lg:pt-16 ${pin ? "h-full pb-6" : "min-h-full pb-10"}`}>
         <div ref={topRef} className="text-center">
           <Rise inView={topIn} as="p" className="font-mono text-[0.8125rem] uppercase tracking-[0.18em] text-[#8d8273]">
             {t.eyebrow}
@@ -473,7 +477,7 @@ export function GraphScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElemen
             {t.sub}
           </Rise>
         </div>
-        <div className="mt-6 grid min-h-0 w-full flex-1 items-center gap-6 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)_minmax(0,16rem)] lg:gap-8">
+        <div className={`mt-4 grid min-h-0 w-full flex-1 items-center gap-x-6 gap-y-3 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)_minmax(0,16rem)] lg:grid-rows-1 lg:gap-8 ${pin ? "grid-cols-2 grid-rows-[minmax(0,1fr)_auto]" : "gap-y-6"}`}>
           <div ref={leftRef} className="order-2 lg:order-1">
             <Rise inView={leftIn} as="p" className="font-sans text-[1.0625rem] font-semibold tracking-[-0.01em] text-[#f1e4d6]">
               {t.left.title}
@@ -482,7 +486,7 @@ export function GraphScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElemen
               {t.left.text}
             </Rise>
           </div>
-          <div ref={stageRef} className="order-1 h-[26rem] w-full lg:order-2 lg:h-full lg:min-h-[28rem]" />
+          <div ref={stageRef} className={`order-1 w-full lg:order-2 lg:col-span-1 lg:h-full lg:min-h-[28rem] ${pin ? "col-span-2 h-full min-h-0" : "h-[26rem]"}`} />
           <div ref={rightRef} className="order-3 lg:text-right">
             <Rise inView={rightIn} as="p" className="font-sans text-[1.0625rem] font-semibold tracking-[-0.01em] text-[#f1e4d6]">
               {t.right.title}
