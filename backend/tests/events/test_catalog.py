@@ -11,7 +11,8 @@ import pytest
 from pydantic import ValidationError
 
 from quack.db import Db
-from quack.events.catalog import EVENT_TYPES as PHASE_1_3_TYPES
+from quack.events.actor import is_valid_actor
+from quack.events.hashing import payload_hash
 from quack.events.keys import (
     check_failed_key,
     embedding_key,
@@ -26,6 +27,7 @@ from quack.events.registry import (
     SCHEMA_VERSION,
     SPECS,
     TEXT_TYPES,
+    UnknownEventTypeError,
     payload_model,
     validate_payload,
 )
@@ -102,6 +104,21 @@ CATALOG: dict[str, tuple[bool, bool]] = {
     "embedding.ready": (True, False),
 }
 NOT_REGISTERED = ("domain.assigned", "hub.suggested", "hub.accepted", "topic.moved")
+# The types of Phases 1–3 that §6.3 does not name (the names it reuses are new definitions).
+REMOVED_PHASE_1_3_TYPES = frozenset(
+    {
+        "artifact.cheatsheet_updated", "artifact.note_created", "artifact.note_deleted",
+        "artifact.note_updated", "diagnostic.completed", "diagnostic.question_answered",
+        "diagnostic.started", "domain.archived", "evidence.superseded",
+        "learner.preferences_updated", "learner.registered", "misconception.resolved",
+        "session.abandoned", "session.checkpointed", "session.completed",
+        "session.digest_created", "skill.promoted", "structure.confirmed", "structure.edited",
+        "structure.interview_completed", "structure.proposed", "task.assigned",
+        "task.evaluated", "task.generated", "task.hint_given", "task.submitted",
+        "teacher.concept_explained", "topic.status_changed", "turn.extracted",
+        "turn.student_replied", "turn.teacher_replied",
+    }
+)  # fmt: skip
 
 
 def _loaded() -> dict[tuple[str, int], Any]:
@@ -114,13 +131,82 @@ def test_catalog_matches_spec() -> None:
     assert {t for t, _ in registry} == set(CATALOG)
     assert {v for _, v in registry} == {SCHEMA_VERSION} == {1}
     # No type of С-§5 that §6.3 does not name (names §6.3 reuses are new definitions).
-    assert not (set(PHASE_1_3_TYPES) - set(CATALOG)) & {t for t, _ in registry}
+    assert not REMOVED_PHASE_1_3_TYPES & {t for t, _ in registry}
     for name in NOT_REGISTERED:
         assert (name, 1) not in registry
 
 
 def test_samples_cover_catalog() -> None:
     assert set(SAMPLES) == set(CATALOG)
+
+
+def test_type_names_follow_the_naming_rule() -> None:
+    """The catalog names are `noun.verb` in snake case (carried over from the Phase 3 catalog
+    test, D-A-227)."""
+    for name in CATALOG:
+        assert re.fullmatch(r"[a-z]+(_[a-z]+)*\.[a-z]+(_[a-z]+)*", name), name
+
+
+def test_unknown_type_or_version_is_rejected() -> None:
+    """Т-§2.4: an unknown type or a schema version the code does not know is an error, never a
+    skip (carried over from the Phase 3 catalog test, D-A-227)."""
+    with pytest.raises(UnknownEventTypeError):
+        validate_payload("nope.done", {})
+    with pytest.raises(UnknownEventTypeError):
+        validate_payload("domain.created", sample_payload("domain.created"), 2)
+
+
+def test_bounded_fields_are_checked() -> None:
+    """Closed ranges are enforced when the payload is validated (carried over from the Phase 3
+    catalog test, D-A-227): a confidence in 0..1, a hint step in 1..3."""
+    edge = {**sample_payload("edge.added"), "confidence": 1.5}
+    with pytest.raises(ValidationError):
+        validate_payload("edge.added", edge)
+    hint = {**sample_payload("hint.shown"), "step": 4}
+    with pytest.raises(ValidationError):
+        validate_payload("hint.shown", hint)
+
+
+def _noted(actor: str) -> NewEvent:
+    return NewEvent(type="message.sent", payload={}, actor=actor, idempotency_key="k")
+
+
+@pytest.mark.parametrize(
+    "actor",
+    ["learner", "system", "code", "teacher@1", "extractor@12", "structurer@1", "agent:analyst"],
+)
+def test_valid_actors(actor: str) -> None:
+    assert is_valid_actor(actor)
+    assert _noted(actor).actor == actor
+
+
+@pytest.mark.parametrize(
+    "actor",
+    [
+        "",
+        "teacher",
+        "teacher@",
+        "teacher@0",
+        "Teacher@1",
+        "admin",
+        "extractor@v1",
+        "agent:",
+        "Agent:x",
+    ],
+)
+def test_invalid_actors(actor: str) -> None:
+    assert not is_valid_actor(actor)
+    with pytest.raises(ValidationError):
+        _noted(actor)
+
+
+def test_payload_hash_is_canonical_and_order_independent() -> None:
+    a = {"b": 1, "a": {"y": [1, 2], "x": "z"}, "c": None}
+    b = {"c": None, "a": {"x": "z", "y": [1, 2]}, "b": 1}
+    assert payload_hash(a) == payload_hash(b)
+    assert re.fullmatch(r"[0-9a-f]{64}", payload_hash(a))
+    assert payload_hash(a) != payload_hash({**a, "b": 2})
+    assert payload_hash({"a": [1, 2]}) != payload_hash({"a": [2, 1]})
 
 
 @pytest.mark.parametrize("event_type", sorted(CATALOG))
