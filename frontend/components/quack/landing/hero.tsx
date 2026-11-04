@@ -1,30 +1,25 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
-import Link from "next/link";
+import type { RefObject } from "react";
 import { useT } from "@/lib/i18n/provider";
+import { HeroDuck } from "./hero-duck/hero-duck";
 
-/** Первый экран лендинга: заголовок, подзаголовок и кнопка; утка и графы рисует общий фон (Backdrop) */
-export function Hero() {
+/** Первый экран лендинга: заголовок «Quack! – Learning Hub», под ним утка из глифов, которая говорит «Quack!» */
+export function Hero({ scrollRef }: { scrollRef: RefObject<HTMLElement | null> }) {
   const t = useT().landing;
 
-  const head = t.title.slice(0, -1);
-  const mark = t.title.slice(-1);
-
   return (
-    <section id="top" className="relative h-full shrink-0 overflow-hidden">
-      <div className="relative mx-auto flex max-w-3xl flex-col items-center gap-5 px-6 pt-24 text-center sm:pt-28 lg:pt-32">
-        <h1 className="font-mono text-[clamp(3.5rem,11vw,8.5rem)] font-extrabold leading-[0.85] tracking-[-0.06em] text-[#f6eadc] [text-shadow:0_0_40px_#ff7a1a40]">
-          {head}
-          <span className="text-[#ff8a2a]">{mark}</span>
-        </h1>
-        <p className="max-w-[30ch] font-mono text-[clamp(0.9375rem,1.4vw,1.1875rem)] leading-snug tracking-[-0.01em] text-[#bba995]">{t.tagline}</p>
-        <Link
-          href="/signup"
-          className="mt-3 inline-flex h-16 w-[13.75rem] items-center justify-center rounded-pill bg-[#ff8a2a] font-mono text-[1.5rem] font-bold leading-none tracking-[-0.03em] text-[#1a0a02] shadow-[0_0_40px_#ff7a1a55] transition-[background-color,transform] duration-(--dur-s) ease-(--ease-out) outline-none hover:bg-[#ff9d4d] focus-visible:ring-4 focus-visible:ring-[#ff8a2a]/50 active:translate-y-px sm:h-[4.5rem] sm:w-[15.5rem] sm:text-[1.625rem]"
-        >
-          {t.cta}
-        </Link>
+    <section id="top" className="relative flex h-full shrink-0 flex-col items-center justify-center overflow-x-clip px-4 pt-14 pb-12">
+      {/* сразу под шапкой: утка остаётся по центру экрана, между ними — воздух с растениями.
+          Archivo Expanded SemiBold прописными, цвет между янтарём утки и цветом растений, лёгкое свечение.
+          На телефоне — в две строки */}
+      <h1 className="absolute inset-x-4 top-[calc(3.5rem+clamp(0.5rem,4vh,2.75rem))] z-10 text-center font-[family-name:var(--font-archivo)] text-[clamp(1rem,2vw,1.85rem)] font-semibold uppercase leading-[1.1] tracking-[0.02em] text-[#daa05f] [font-stretch:125%] [text-shadow:0_0_12px_#daa05f59]">
+        {t.hero.brand} –<br className="sm:hidden" /> {t.hero.title}
+      </h1>
+
+      <div className="flex w-full justify-center">
+        <HeroDuck scrollRef={scrollRef} label={t.hero.duck} />
       </div>
 
       <button

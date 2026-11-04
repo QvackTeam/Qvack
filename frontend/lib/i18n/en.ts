@@ -225,6 +225,7 @@ export const en = {
     tagline: "Something more than usual study preparation",
     cta: "Get started",
     scroll: "Scroll down",
+    hero: { brand: "Quack!", title: "Learning Hub", duck: "Poke the duck" },
     compare: {
       lecture: {
         title: "Slides from the professor",

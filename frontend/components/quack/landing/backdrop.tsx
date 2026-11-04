@@ -5,11 +5,6 @@ import { createGlyphField } from "./glyph-field";
 
 const ASSEMBLE_MS = 2600;
 
-const smoothstep = (a: number, b: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
-
 /**
  * Фон лендинга на всю страницу: поле из символов с уткой, графами и нодами. Закреплён на экране, поэтому графы и ноды
  * остаются за любой секцией; утка и тёплое пятно под ней рассыпаются, когда первый экран уезжает вверх.
@@ -42,8 +37,10 @@ export function Backdrop({ scrollRef }: { scrollRef: RefObject<HTMLElement | nul
       const p = reduced ? 1 : Math.min(1, Math.max(0, (performance.now() - t0 - 200) / ASSEMBLE_MS));
       const intro = Math.pow(1 - p, 3); // easeOutCubic: быстро собирается, долго «доезжает»
       const scroll = root.scrollTop / Math.max(1, root.clientHeight);
-      const away = smoothstep(0.1, 0.8, scroll); // утка рассыпается по мере ухода первого экрана
-      glow.style.opacity = String(1 - away);
+      const away = 1; // утку теперь рисует первый экран (HeroDuck), здесь остаются только графы и ноды
+      glow.style.opacity = "0";
+      // на первом экране фон не спорит с уткой: графы проявляются, когда он уезжает вверх
+      canvas.style.opacity = String(Math.min(1, Math.max(0, (scroll - 0.25) / 0.5)));
       field.render(sec, {
         pointerX: pointer.x,
         pointerY: pointer.y,
