@@ -16,8 +16,8 @@ from sqlalchemy import text
 from quack.config import Settings
 from quack.db.postgres import SessionFactory
 from quack.db.redis import presence_key
-from quack.domains.curation import handle_graph_curate
 from quack.jobs import kinds
+from quack.jobs.curation_p3 import handle_graph_curate
 from quack.jobs.queue import enqueue_job
 from quack.jobs.runner import JobRunner
 from tests.support.resources import build_job_context

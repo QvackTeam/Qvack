@@ -121,16 +121,6 @@ async def test_cross_learner_isolation(system: System) -> None:
     )
     turn_started = first(j.turns[-1], "turn_started")
     assert turn_started is not None
-    async with system.session_factory() as session:
-        diag = (
-            await session.execute(
-                text(
-                    "SELECT payload->>'session_id' AS sid FROM core.events "
-                    "WHERE learner_id = :l AND type = 'diagnostic.started' LIMIT 1"
-                ),
-                {"l": a.learner_id},
-            )
-        ).one()
     ids = Ids(
         domain_id=j.domain_id,
         topic_id=j.topic_id,
@@ -138,9 +128,6 @@ async def test_cross_learner_isolation(system: System) -> None:
         task_id=j.practice_task_id,
         turn_id=UUID(turn_started["turn_id"]),
         artifact_id=UUID(note["artifact_id"]),
-        diagnostic_session_id=UUID(diag.sid),
-        diagnostic_task_id=j.assigned_task_id,
-        structure_version=1,
     )
     for prepare in isolation_prepares():
         ids = await prepare(system, a, ids)

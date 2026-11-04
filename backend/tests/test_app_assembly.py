@@ -81,8 +81,8 @@ type SignIn = Callable[[], Awaitable[tuple[str, dict[str, str]]]]
 @pytest.fixture
 def sign_in(db: SessionFactory, pg_db: Db, settings: Settings) -> SignIn:
     """A new learner with a Phase 4 session (ТЗ Ф4 WP18.3): `(learner_id, headers)`.
-    `/v1/auth/register` is removed (D-A-113); the `auth.users` row stays for the Phase 3
-    deletion until WP25."""
+    `/v1/auth/register` is removed (D-A-113); the `core.learners` row is what the log of Phase 4
+    needs (domains, preferences, D-A-207), the `auth.users` row is the Phase 3 account."""
 
     async def make() -> tuple[str, dict[str, str]]:
         learner_id = uuid4()
@@ -91,6 +91,10 @@ def sign_in(db: SessionFactory, pg_db: Db, settings: Settings) -> SignIn:
                 text("INSERT INTO auth.users (id, email, password_hash) VALUES (:id, :e, '!')"),
                 {"id": learner_id, "e": f"{learner_id}@test.invalid"},
             )
+        await pg_db.execute(
+            "INSERT INTO core.learners (learner_id, email) VALUES (%(id)s, %(email)s)",
+            {"id": learner_id, "email": f"{learner_id}@test.invalid"},
+        )
         token = await session_token(pg_db, learner_id, settings)
         return str(learner_id), session_cookie(token)
 

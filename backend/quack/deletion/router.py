@@ -1,4 +1,5 @@
-"""Route of the physical deletion of a domain (ТЗ Ф4 WP25, §6.4; product package, ТЗ §4.1)."""
+"""Routes of physical deletion: a domain, a topic, the whole account (ТЗ Ф4 WP25, §6.4; product
+package, ТЗ §4.1)."""
 
 from __future__ import annotations
 
@@ -13,8 +14,10 @@ from quack.api.auth import get_current_learner_id
 from quack.api.errors import ApiError
 from quack.api.ratelimit import enforce_action_rate_limit
 from quack.api.resources import get_resources
+from quack.deletion import account as account_deletion
 from quack.deletion import domain as deletion
 from quack.deletion import topic as topic_deletion
+from quack.llm.tracing import learner_pseudonym
 from quack.storage.deletions import DeletionJournalUnavailable
 
 router = APIRouter(
@@ -71,4 +74,23 @@ async def delete_topic_endpoint(
                        status_code=503) from exc  # fmt: skip
     if done is None:
         raise _not_yours()
+    return DeletionResponse(deletion_id=done.deletion_id, copies_days=done.copies_days)
+
+
+@router.delete("/learner", response_model=DeletionResponse, status_code=200)
+async def delete_learner_endpoint(
+    request: Request, learner_id: CurrentLearnerId
+) -> DeletionResponse:
+    """WP25 п.3: the whole account — rows, objects, the subgraph, the learner's traces by their
+    pseudonym (D-A-206). The session goes with the rows: the next request is `401`."""
+    r = get_resources(request)
+    pseudonym = learner_pseudonym(r.settings.langsmith_pseudonym_ns, learner_id)
+    try:
+        done = await account_deletion.delete_account(
+            r.db, r.neo4j, r.deletions, r.storage, learner_id, datetime.now(UTC),
+            redis=r.redis, tracer=r.llm.tracer, pseudonym=pseudonym,
+        )  # fmt: skip
+    except (DeletionJournalUnavailable, deletion.DeletionBusy) as exc:
+        raise ApiError("SERVICE_UNAVAILABLE", "deletion is not possible now, repeat later",
+                       status_code=503) from exc  # fmt: skip
     return DeletionResponse(deletion_id=done.deletion_id, copies_days=done.copies_days)
