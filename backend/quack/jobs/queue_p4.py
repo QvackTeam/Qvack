@@ -41,6 +41,7 @@ from quack.db import Db
 from quack.db.redis import learner_signal_channel
 from quack.events.log import NewEvent, append_events
 from quack.jobs.rules_p4 import JobPlan
+from quack.llm.access import access_mode, budgets_for
 from quack.logging import get_logger
 
 log = get_logger(__name__)
@@ -274,7 +275,11 @@ async def _over_budget(db: Db, settings: Settings, job: ClaimedJob) -> bool:
     row = await db.fetch_one(
         _SESSION_SPEND, {"session_id": job.session_id, "roles": budget_roles(settings)}
     )
-    return row is not None and float(row["spent"]) > settings.session_agent_budget_usd
+    if row is None:
+        return False
+    # D-B-211 (#236, D-A-222): the session limit of the pool mode (`tight` — the lower one).
+    limit = budgets_for(settings, await access_mode(db, settings)).session_usd
+    return float(row["spent"]) > limit
 
 
 async def claim_next(
