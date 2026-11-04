@@ -24,7 +24,6 @@ from quack.storage.objects import create_object_store
 # WP2.2: modules that hold `@register_job_handler` (kind -> module is checked by T-Q7).
 HANDLER_MODULES: tuple[str, ...] = (
     "quack.session.lifecycle",
-    "quack.artifacts.cheatsheets",
     "quack.artifacts.topic_refresh",
     "quack.artifacts.hub_cheatsheet",
     "quack.agents.viz",
