@@ -6,6 +6,8 @@
 //
 // Scenarios (STUB_SCENARIO=...):  full (default) | empty (no subjects: the "new subject" flow) | terms (terms gate first)
 // Slow the teacher down: STUB_DELAY=ms per token (default 35). Reset state: POST /__stub/reset
+// Growth of the graph (to look at the "New" indicator): `npm run dev:grow` adds the next step to Calculus, the open graph
+// refreshes by itself; STUB_STAGE=n starts the stub with the first n steps already applied (the graph "grew" since the last visit).
 //
 // Shapes follow lib/api/openapi.json; when the backend contract changes, regenerate the types (npm run api:types)
 // and adjust the fixtures here: tsc on the frontend does not check this file.
@@ -57,7 +59,23 @@ function toDomain(m) {
     sessions: m.sessions,
   };
 }
-const DOMAINS_FIXTURE = MOCK.domains.map(toDomain);
+
+// What "New" has to show: each step is one of the four kinds of change it lights
+const mk = (key, name, state = "not_tested", line = "") => ({ key, name, state, level: 0, dueMin: null, skills: [name], line, simple: `${name}.`, about: "" });
+const GROWTH = [
+  { say: "a new topic in the Series chapter: Taylor polynomials", apply: (d) => {
+    d.hubs.find((h) => h.key === "series").topics.push(mk("taylor-poly", "Taylor polynomials"));
+    d.requires.push(["radius", "taylor-poly"]);
+  } },
+  { say: "a new link between known topics: Standard limits -> Comparison tests", apply: (d) => d.requires.push(["remarkable", "comparison"]) },
+  { say: "a topic that had no links got one: Complex numbers needs Limit of a function", apply: (d) => d.requires.push(["lim-fn", "complex-numbers"]) },
+  { say: "a new chapter with three topics: Differential equations", apply: (d) => {
+    d.hubs.push({ key: "diffeq", name: "Differential equations", deadlineMs: null, topics: [mk("ode-first", "First-order equations"), mk("ode-sep", "Separable equations"), mk("ode-lin", "Linear equations")] });
+    d.requires.push(["taylor-poly", "ode-first"], ["ode-first", "ode-sep"], ["ode-first", "ode-lin"]);
+  } },
+  { say: "a new topic with no links: Fourier series (preview)", apply: (d) => d.free.push(mk("fourier", "Fourier series (preview)")) },
+];
+
 
 const TEACHER_LINES = [
   "Good question. Think of it this way: you are not asking what the function equals at the point, you are asking where it is heading as you get closer. ",
@@ -67,8 +85,8 @@ const TEACHER_LINES = [
 // ---- state ----------------------------------------------------------------------------------------------------------
 let S;
 function fresh() {
-  const domains = SCENARIO === "empty" ? [] : DOMAINS_FIXTURE.map((d) => ({ ...d, did: id("d-" + d.key), createdSeq: 1, createdAt: ago(60 * 24 * 14) }));
-  S = { terms: SCENARIO !== "terms", settings: {}, domains, sessions: [], events: {}, seq: 100, notes: {}, cheats: {} };
+  const domains = SCENARIO === "empty" ? [] : MOCK.domains.map(toDomain).map((d) => ({ ...d, did: id("d-" + d.key), createdSeq: 1, createdAt: ago(60 * 24 * 14) }));
+  S = { terms: SCENARIO !== "terms", settings: {}, domains, sessions: [], events: {}, seq: 100, notes: {}, cheats: {}, stage: 0 };
   const first = domains[0];
   if (!first) return;
   // history: the sessions of the mocks, finished
@@ -92,7 +110,19 @@ function fresh() {
   const sheet = MOCK.cheatSheets.series;
   if (sheet) S.cheats["series"] = [{ block_id: id("b-ch-series"), kind: "text", content: "## Series cheat sheet\n\n" + sheet.formulas.map((f) => `- **${f.name}**: $${f.tex}$`).join("\n"), owner: "system" }];
 }
+function grow() {
+  const d = S.domains[0];
+  const step = GROWTH[S.stage];
+  if (!d || !step) return null;
+  step.apply(d);
+  S.stage += 1;
+  S.seq += 5;
+  for (const r of streams) r.write(`event: projection_advanced\ndata: ${JSON.stringify({ applied_seq: S.seq })}\n\n`);
+  return step.say;
+}
+const streams = new Set();
 fresh();
+for (let i = 0; i < Number(process.env.STUB_STAGE ?? 0); i++) grow();
 
 const domainByKey = (k) => S.domains.find((d) => d.key === k);
 const domainById = (did) => S.domains.find((d) => d.did === did);
@@ -211,8 +241,17 @@ const server = http.createServer(async (req, res) => {
   console.log(`${m} ${p}${url.search}`);
   let g;
 
+  if (p === "/__stub/grow" && m === "POST") {
+    const said = grow();
+    return json(res, 200, said ? { ok: true, stage: S.stage, added: said } : { ok: false, message: "nothing more to add, POST /__stub/reset starts over" });
+  }
   if (p === "/__stub/reset" && m === "POST") {
     fresh();
+    S.seq += 5;
+    for (const r of streams) r.write(`event: projection_advanced
+data: ${JSON.stringify({ applied_seq: S.seq })}
+
+`);
     return json(res, 200, { ok: true, scenario: SCENARIO });
   }
 
@@ -237,8 +276,12 @@ const server = http.createServer(async (req, res) => {
   if (p === "/v1/learner/stream") {
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
     res.write(`event: projection_advanced\ndata: ${JSON.stringify({ applied_seq: S.seq })}\n\n`);
+    streams.add(res);
     const t = setInterval(() => res.write(": ping\n\n"), 15000);
-    req.on("close", () => clearInterval(t));
+    req.on("close", () => {
+      clearInterval(t);
+      streams.delete(res);
+    });
     return;
   }
 

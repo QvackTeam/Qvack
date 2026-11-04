@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { GAP_X, GAP_Y, layoutGraph, loadPositions, savePositions } from "@/lib/graph/layout";
 import { onGraph, type GraphModel, type GraphTopic } from "@/lib/graph/types";
-import { clearIndicators, getIndicators, getIndicatorsServer, publishIndicators, subscribeIndicators, unmountIndicators } from "@/lib/graph/indicator-store";
+import { clearIndicators, flashIndicator, getIndicators, getIndicatorsServer, publishIndicators, subscribeIndicators, unmountIndicators } from "@/lib/graph/indicator-store";
 import { computeIndicators, INDICATORS, type IndicatorId } from "@/lib/graph/indicators";
-import { enterDomain, getVisit, LEARNER, leaveDomain, saveAllVisits, subscribeVisit, updateDomain } from "@/lib/graph/visit-store";
+import { enterDomain, getVisit, LEARNER, leaveDomain, saveAllVisits, subscribeVisit, takeBlink, updateDomain } from "@/lib/graph/visit-store";
 import { loadCamera, restoreCenter, saveCamera, type SavedCamera } from "@/lib/graph/visit";
 import { useT } from "@/lib/i18n/provider";
 import type { Domain, TopicState } from "@/lib/mock/types";
@@ -137,6 +137,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const activeRef = useRef<ReadonlySet<IndicatorId>>(new Set());
   const before = useRef<View | null>(null);
   const prevActive = useRef<ReadonlySet<IndicatorId>>(new Set());
+  const prevBlink = useRef(false);
   const arrowSig = useRef("");
   const arrowAt = useRef(0);
   const camTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -813,6 +814,14 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   }, [model.domainId, selections]);
   useEffect(() => () => unmountIndicators(model.domainId), [model.domainId]);
 
+  // Coming to the graph after something changed: "New" blinks for a moment, so the learner knows the graph was updated
+  // The blink belongs to the entry only: it is spent at the first look even when there is nothing to show, so a change that
+  // comes while the learner is here does not blink (it pulses on the graph instead)
+  useEffect(() => {
+    if (!visit.entered || !takeBlink(model.domainId)) return;
+    if (visit.baseline && selections.new.topics.length + selections.new.hubs.length > 0) flashIndicator("new");
+  }, [model.domainId, visit, selections]);
+
   useEffect(() => {
     const m = new Map<string, IndicatorId[]>();
     for (const id of ind.active) {
@@ -829,7 +838,9 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   useEffect(() => {
     const act = ind.active;
     const was = prevActive.current;
+    const wasBlink = prevBlink.current;
     prevActive.current = act;
+    prevBlink.current = ind.flashing;
     if (act === was) return;
     if (act.size === 0) {
       if (before.current) {
@@ -838,7 +849,9 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       }
       return;
     }
-    if (was.size === 0 && !before.current) before.current = viewTween.current?.to ?? view.current;
+    // a blink on entering does not move the camera
+    if (ind.flashing) return;
+    if ((was.size === 0 || wasBlink) && !before.current) before.current = viewTween.current?.to ?? view.current;
     const pts: Pt[] = [];
     for (const id of act) {
       const s = ind.selections[id];
