@@ -91,7 +91,7 @@ export function DomainView() {
   const graph = useRef<GraphHandle>(null);
 
   useEffect(() => {
-    const title = view === "canvases" ? tx.meta.canvasesTitle(domain.title) : tx.meta.title(domain.title);
+    const title = !domain.id ? "Qvack!" : view === "canvases" ?tx.meta.canvasesTitle(domain.title) : tx.meta.title(domain.title);
     // Next возвращает заголовок из metadata после навигации — держим свой, пока виден этот вид
     const apply = () => {
       document.querySelectorAll("title").forEach((el) => {
@@ -102,7 +102,7 @@ export function DomainView() {
     const mo = new MutationObserver(apply);
     mo.observe(document.head, { childList: true, characterData: true, subtree: true });
     return () => mo.disconnect();
-  }, [view, domain.title, tx]);
+  }, [view, domain.id, domain.title, tx]);
 
   const setView = (v: View) => {
     if (v === view) return;
@@ -149,6 +149,20 @@ export function DomainView() {
   if (seenDomain !== domain.id) {
     setSeenDomain(domain.id);
     setQuery("");
+  }
+
+  // No subject yet: just the chat, the duck and the input, like in an empty subject
+  if (!domain.id) {
+    return (
+      <>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-4 pb-3 md:px-7 md:pt-5">
+          <EmptyDomain titleDat="" />
+        </div>
+        <div className="px-4 pb-4 md:px-7 md:pb-5">
+          <Composer label={tx.domain.composerLabelNew} onSend={startSession} />
+        </div>
+      </>
+    );
   }
 
   return (

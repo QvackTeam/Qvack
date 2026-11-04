@@ -21,7 +21,7 @@ export function EmptyDomain({ titleDat, setupHref }: { titleDat: string; setupHr
       </div>
       <div className="flex max-w-md flex-col items-center gap-3">
         <h2 className="display-caps text-display text-paper">{setupHref ? t.live.setupTitle : t.empty.title}</h2>
-        <p className="text-paper-dim">{setupHref ? t.live.setupBody : t.empty.body(titleDat)}</p>
+        <p className="text-paper-dim">{setupHref ? t.live.setupBody : titleDat ? t.empty.body(titleDat) : t.empty.bodyAny}</p>
         {setupHref && (
           <Link
             href={setupHref}

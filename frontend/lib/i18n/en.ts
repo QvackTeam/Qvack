@@ -79,6 +79,7 @@ export const en = {
     title: "Nothing here yet, and that's fine",
     body: (subject: string) =>
       `Drop in a lecture, a problem, or just ask something about ${subject}. The duck will sort it out, and the topic graph grows as you go.`,
+    bodyAny: "Drop in a lecture, a problem, or just ask something. The duck will sort it out, and the topic graph grows as you go.",
   },
   topicCard: {
     study: "Study",
@@ -309,6 +310,7 @@ export const en = {
     noDeadlines: "No deadlines yet",
     ready: "ready",
     composerLabel: (title: string) => `Message, starts a new session in “${title}”`,
+    composerLabelNew: "Message, starts a new session",
   },
   graph: {
     noChapter: "No chapter",
