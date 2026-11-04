@@ -20,7 +20,7 @@ from quack.prompts.registry import PromptRegistry, PromptTemplate
 
 PRICES = {
     "m": ModelPrice(input=2.0, cached_input=0.5, output=8.0),
-    "voice-m": ModelPrice(per_minute=0.01),
+    "voice-m": ModelPrice(input=0, cached_input=0, output=0, per_minute=0.01),
 }
 
 

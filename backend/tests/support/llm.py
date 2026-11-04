@@ -23,6 +23,13 @@ from quack.llm.errors import (
     ProviderRateLimitedError,
     ProviderUnavailableError,
 )
+from quack.llm.media import (
+    IllustrationRequest,
+    ImageResponse,
+    SegmentRequest,
+    TranscribeRequest,
+    TranscribeResponse,
+)
 from quack.llm.provider import ProviderRequest, ProviderResponse
 from quack.llm.streaming import (
     OutputItemDone,
@@ -346,6 +353,14 @@ class ScriptedLLMProvider:
     tool_steps: dict[str, tuple[ScriptedToolStep, ...]] = field(default_factory=dict)
     stream_calls: list[StreamRequest] = field(default_factory=list)
     body_before_head: bool = False
+    # Non-text roles (D-B-187; the gateway wants `segment`, `transcribe`, `illustrate`): the
+    # journals, the special-token text `sam-3.1` answers with and the transcript of the audio,
+    # each a constant or a function of the request; `media_error` is raised by every call.
+    segment_calls: list[SegmentRequest] = field(default_factory=list)
+    transcribe_calls: list[TranscribeRequest] = field(default_factory=list)
+    segment_text: str | Callable[[SegmentRequest], str] = ""
+    transcript: str | Callable[[TranscribeRequest], str] = "scripted transcript"
+    media_error: Exception | None = None
 
     def __post_init__(self) -> None:
         for schema_name, item in _default_responses().items():
@@ -398,6 +413,23 @@ class ScriptedLLMProvider:
             failure.times -= 1
             return failure
         return None
+
+    async def segment(self, request: SegmentRequest) -> ProviderResponse:
+        self.segment_calls.append(request)
+        if self.media_error is not None:
+            raise self.media_error
+        text = self.segment_text(request) if callable(self.segment_text) else self.segment_text
+        return ProviderResponse(text, 100, 10, 0, request.model)
+
+    async def transcribe(self, request: TranscribeRequest) -> TranscribeResponse:
+        self.transcribe_calls.append(request)
+        if self.media_error is not None:
+            raise self.media_error
+        text = self.transcript(request) if callable(self.transcript) else self.transcript
+        return TranscribeResponse(text, 0, 0, 0, request.model, audio_duration_ms=1000)
+
+    async def illustrate(self, request: IllustrationRequest) -> ImageResponse:
+        raise AssertionError("ScriptedLLMProvider: `illustrator` is not scripted")
 
     async def complete_structured(self, request: ProviderRequest) -> ProviderResponse:
         self.calls.append(request)

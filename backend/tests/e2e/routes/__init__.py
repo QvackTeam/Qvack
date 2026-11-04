@@ -97,6 +97,8 @@ class Route:
     no_other_body: str | None = None
     # A multipart route: the files of a valid request.
     files: Files | None = None
+    # The form fields next to `files` of a multipart route (the voice segment has its time).
+    form: Mapping[str, str] | None = None
     # Ids the walk must have created before this step (their value is not the placeholder).
     requires: tuple[str, ...] = ()
     # Path parameter -> id name, where they differ (`session_id` -> `action_session_id`).
@@ -210,6 +212,11 @@ def body_for(method: str, path: str, ids: Ids, key: str, variant: int = 0) -> di
     elif route.body_key == "text":
         body["idempotency_key"] = key
     return body
+
+
+def form_for(method: str, path: str) -> Mapping[str, str] | None:
+    route = route_of(method, path)
+    return None if route is None else route.form
 
 
 def files_for(method: str, path: str) -> Files | None:

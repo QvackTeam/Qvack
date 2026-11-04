@@ -31,7 +31,7 @@
    ```
    Дальше `ALLOW_NO_DUMP` не нужен: перед миграцией скрипт делает дамп (`ops backup now`).
 
-**Схема и процессы (WP1.3, D-C-160).** Сервис `migrate` (`ops migrate`) запускает `dbmate up` на `/app/db/migrations` образа; `api`, `projector` и `workers` ждут его завершения и стартуют с `PHASE4_PROCESSES=true`. Стенд с базой Фаз 1-3 (Alembic) не мигрируется: `ops migrate` видит `public.alembic_version`, отказывает с кодом 1, выкатка останавливается, сервисы остаются на старой версии. Чистый старт: остановить стек и пересоздать базу (`docker compose down`, `docker volume rm quack_postgres-data`), затем `ALLOW_NO_DUMP=1 ./deploy/deploy.sh <sha>`. Пока `ops status` не переведён на схему Фазы 4 (шаг 3 C), проверка выкатки после `migrate` даёт код 2.
+**Схема и процессы (WP1.3, D-C-160).** Сервис `migrate` (`ops migrate`) запускает `dbmate up` на `/app/db/migrations` образа; `api`, `projector` и `workers` ждут его завершения и стартуют с `PHASE4_PROCESSES=true`. Стенд с базой Фаз 1-3 (Alembic) не мигрируется: `ops migrate` видит `public.alembic_version`, отказывает с кодом 1, выкатка останавливается, сервисы остаются на старой версии. Чистый старт: остановить стек и пересоздать базу (`docker compose down`, `docker volume rm quack_postgres-data`), затем `ALLOW_NO_DUMP=1 ./deploy/deploy.sh <sha>`. `ops status` читает схему Фазы 4 (D-C-181): проверка выкатки после `migrate` проходит.
 
 Журнал выкаток — `/srv/quack/deploy.log`, текущий релиз — `/srv/quack/release.env`.
 

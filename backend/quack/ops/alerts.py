@@ -7,8 +7,7 @@ every run is a fresh container. A condition is announced when it has held for it
 repeated no more often than `alert_renotify_s`. After the run the heartbeat URL is pinged, so a
 dead server or timer is noticed from outside (Д-§9.1).
 
-Not yet here, their data does not exist: the team spend per day against `team_daily_alert_usd`
-(needs `ops.llm_usage`, WP10.4), the objects of `quack-deletions` without a row in
+Not yet here, their data does not exist: the objects of `quack-deletions` without a row in
 `ops.deletion_log` (WP25) and the Contabo payment date. A failed backup is announced by `ops
 backup` itself.
 """
@@ -49,6 +48,7 @@ QUEUE_OLD = "queue_old"
 JOBS_FAILING = "jobs_failing"
 PRESSURE = "model_pressure"
 CIRCUIT_OPEN = "circuit_open"
+TEAM_SPEND = "team_spend"
 
 
 @dataclass(frozen=True)
@@ -151,6 +151,17 @@ def conditions(snapshot: Snapshot, settings: Settings) -> list[Alert]:
                 "warning",
                 f"Meta API pressure flag is set for {', '.join(pressure)}: we hit the limits",
                 hold_s=settings.alert_pressure_hold_s,
+            )
+        )
+
+    spent = _dig(status, "llm", "cost_last_day_usd")
+    if spent is not None and spent > settings.team_daily_alert_usd:
+        found.append(
+            Alert(
+                TEAM_SPEND,
+                "warning",
+                f"the team spent ${spent:.0f} on models in the last day "
+                f"(threshold ${settings.team_daily_alert_usd:.0f})",
             )
         )
 

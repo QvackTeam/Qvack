@@ -23,6 +23,49 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-A-225. WP1.3 шаг 5, часть 1: что из кода Фазы 3 остаётся до части 2
+- Класс: A
+- WP / место: WP1.3, §7.3, §8.15; `quack/graph/worker.py`, `quack/jobs/dispatcher.py`, `quack/jobs/dispatcher_rules.py`, `quack/graph/projector.py`
+- Контекст: задание шага 5 велит удалять модули, которые «никто не импортирует». Проверка `grep quack.<модуль> quack tests` показала, что проектор и диспетчер Фазы 3 ещё держат тесты зоны C: `tests/artifacts/conftest.py` (`Seeder.project` — `ProjectorWorker`), `tests/support/dispatch.py` → `tests/artifacts/test_artifacts_search_export.py` (`dispatch`: правило `session.digest_created → artifact.refresh_cheatsheet` живёт только в `dispatcher_rules.py`; в правилах Фазы 4 такого вида нет) и стенд `tests/e2e/system.py`. Перевести их — значит менять утверждения тестов артефактов C (красная линия 5), это шаг 3 C.
+- Решение: остаются до части 2 (после шага 3 C): `graph/worker.py`, `jobs/dispatcher.py` (`supervise` берёт `runtime/phase4.py`), `jobs/dispatcher_rules.py`, `graph/projector.py` (`project_events` нужен `graph/overlay.py`; `run_projector_batch`/`project_in_memory` — тестам), `graph/projector_rows.py` (таблица `ROWS` нужна тестам `rules@3`), `test_dispatcher.py`. Из `dispatcher_rules.py` убрано правило `graph.curate` (вида нет). Стенд e2e по-прежнему запускает проектор, диспетчер и `JobRunner` Фазы 3 на базе Фазы 3 (тесты `tests/e2e` зелёные без перевода на процессы Фазы 4); снят только планировщик. Модули списка «не удалять» после п.1–2 имеют импортёров в `quack/`, ни один не осиротел.
+- Почему: §7.3 (чужие тесты правит их владелец), красная линия 5, §8.15 п.1 (код снимается вместе с последним потребителем).
+- Обратимость: полная (перечень).
+- Тесты: нет новых.
+- Требует подтверждения владельцем: нет
+
+### D-A-224. WP1.3 шаг 5, часть 1: код Фазы 3 снят — планировщик, пересборка, `graph.curate`, `account.purge_deleted`, `ops/registry.py`
+- Класс: A
+- WP / место: WP1.3, §8.15 п.1; D-A-208, D-A-212, D-A-206; файлы ниже
+- Контекст: C согласился (#215), что в шаге 5 A снимает `ops/purge_job.py`, `ops/registry.py`, `account.purge_deleted`, код Фазы 3 зоны A и ветки флага в `cli.py`. `DELETE /v1/learner` удаляет сразу (D-A-207), тело `purge_deleted` не нужно.
+- Решение: удалены `quack/jobs/periodic.py`, `quack/graph/rebuild.py`, `quack/jobs/curation_p3.py`, `quack/domains/curation.py`, `quack/ops/purge_job.py`, `quack/ops/registry.py`. Из `quack/jobs/kinds.py` — `graph_curate`, `account_purge_deleted`, виды `graph.curate` и `account.purge_deleted` в `JOB_KINDS` и `KIND_LLM_ROLES`; из `HANDLER_MODULES` — две строки; из `Settings` — `purge_deleted_interval_s`; `REMOVED_JOB_KINDS` в `rules_p4.py` остаётся (это список снятых видов). Схемы `CuratorPromotion`, `CuratorMerge`, `CuratorOutput` переехали из `curation_p3.py` в конец `quack/domains/schemas.py`: их используют тесты и скрипт B (`prompt_contracts`, `test_llm_runtime`, `meta_smoke`) до снятия роли `curator` (D-A-208 п.2). Реестр событий `cli.py` берёт из `quack.runtime.event_registry` (с #237). `ProjectorContext`, `create_projector_context`, `close_projector_context` в `runtime/__init__.py` удалены (никто не вызывает).
+- Почему: §8.15 п.1, WP1.3 шаг 5, согласие C в #215.
+- Обратимость: полная (git).
+- Тесты: `tests/jobs/test_queue_p4.py`, `test_rules_p4.py` (виды `graph.curate`/`account.purge_deleted` в `REMOVED_JOB_KINDS`), `test_ops_p4_registry.py`.
+- Правки тестов (§8.15):
+  | Файл | Что | Куда ушло |
+  | :-- | :-- | :-- |
+  | `tests/jobs/test_curation_p3_{graph,keys_and_actor,slice_and_pool,thresholds}.py` (4 файла) | удалены вместе с обработчиком `graph.curate` Фазы 3 | гигиена графа — `agents/test_hygiene.py` (`T-AG4`) |
+  | `tests/fixtures/event_registry.json` | удалён | реестр Фазы 4 — `test_ops_p4_registry.py` |
+  | `tests/test_ops_phase3.py` | удалены `test_event_registry_and_can_rollback_of_phase3`, `test_event_registry_has_handlers_and_rules` (библиотека `ops/registry.py`); `graph_curate` → `artifact_refresh_cheatsheet` в `test_ops_status_report` | `test_ops_p4_registry.py` (`can-rollback`), новый `test_every_catalog_type_has_a_handler_and_a_rule` (`registry_gaps` Фазы 4, T-O6) |
+  | `tests/test_jobs_phase3.py` | удалены `test_periodic_scheduler_runs_once_per_bucket`, `test_purge_job_removes_learner_completely`; `graph.curate`/`account.purge_deleted` как «любой вид» очереди заменены на `artifact.refresh_cheatsheet` (утверждения те же) | периодика Фазы 4 — `jobs/test_queue_p4.py::test_periodic_keys`; удаление аккаунта — `domains/test_domains_routes.py` (T-E10) |
+  | `tests/test_worker_and_ops.py` | удалены `test_rules_mismatch_skips_until_rebuild`, `test_chunked_rebuild_respects_presence` (`graph/rebuild.py`) | `graph/test_projection_runner.py::test_rules3_stale_rebuild`, новый `::test_chunked_rebuild_respects_presence` на `rebuild_learner` Фазы 4 |
+  | `tests/test_dispatcher.py` | из `_expected`, `required_seq` и пропуска неизвестного события убран `graph.curate` | — |
+  | `tests/test_jobs_and_llm_gateway.py` | из `test_job_kind_catalog` убран блок `graph_curate`; в `test_priority_then_age_ordering` низкий приоритет — `session.sweep_inactive` | — |
+  | `tests/test_contracts.py` | из `NEO4J_WRITERS` убран `quack.graph.rebuild` | — |
+  | `tests/test_ops_p4_registry.py` (зона C, правка с её согласия в #215: `cli.py`) | флаг снят: `_settings(phase4_processes=True)` → `_settings()`, удалён `test_rebuild_without_the_flag_stays_on_phase3`, подмена `rebuild_learner` Фазы 3 | — |
+  | `tests/e2e/system.py` (зона C) | из стенда снят `PeriodicScheduler` вместе с `SystemClock`, `System.clock`, `advance_time` (никто не вызывает после T-E10) | — |
+- Требует подтверждения владельцем: нет
+
+### D-A-223. WP1.3 шаг 5, часть 1: флаг `phase4_processes` снят — процессы всегда на Фазе 4
+- Класс: A
+- WP / место: WP1.3 шаг 5; D-A-200, D-A-206, D-C-160; `quack/config.py`, `quack/cli.py`, `quack/runtime/__init__.py`
+- Контекст: стенд и compose уже на dbmate и `PHASE4_PROCESSES=true` (C, #239); C согласился (#215), что `cli.py` меняет A.
+- Решение: `Settings.phase4_processes` удалена. `projector`/`workers`/`worker` всегда зовут `runtime.phase4.projector_process`/`workers_process`; `ops rebuild` всегда на `graph.projection.rebuild.rebuild_learner` (`_rebuild_p4` стала `_rebuild`); ветки Фазы 3 и импорты `ProjectorWorker`, `Dispatcher`, `PeriodicScheduler`, `JobRunner`, `graph.rebuild`, `find_learners_with_rules` из `cli.py` убраны. `create_job_context` всегда передаёт `db=` шлюзу (одна схема — одна таблица учёта `ops.llm_usage`). Переменная `PHASE4_PROCESSES` в compose теперь ничего не читает (`Settings` — `extra="ignore"`): её, README и проверку `tests/test_stand_dbmate.py` снимает C.
+- Почему: D-A-200 («флаг уходит с остатком WP1.3»).
+- Обратимость: полная.
+- Тесты: `tests/test_ops_p4_registry.py` (`ops rebuild`), `tests/graph/test_projection_runner.py` (процесс `projector`).
+- Требует подтверждения владельцем: нет
+
 ### D-A-222. WP7.4: `skipped_budget` по лимиту режима пула (D-B-211, #236)
 - Класс: A
 - WP / место: WP7.4 (T-D7); `quack/jobs/queue_p4.py::_over_budget`

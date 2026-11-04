@@ -16,14 +16,20 @@ without Redis a socket gets only its own acks (§4.2).
 `line_ready` is recognized in the background (`quack.canvas.recognition`, WP21.3): the socket
 keeps acknowledging batches while Spark reads the line; the result is `canvas.line_committed`
 and `line_recognized` to every device of the canvas. `typed_formula` goes to the log as LaTeX;
-erasing every stroke of a recognized line writes `canvas.line_erased`. `check_request` — step
-checks and interventions, WP21.4–21.5.
+erasing every stroke of a recognized line writes `canvas.line_erased`.
+
+On a canvas opened by a task every new line goes through the step check (`quack.canvas.
+step_check`, WP21.4) and the marks it earns through the gate of interventions (`quack.canvas.
+interventions`, WP21.5): server messages `mark {mark_id, line_id, kind}` (`kind: null` - taken
+off quietly) and `hint {step, line_id, text}`. `check_request` checks every line and shows
+every mark at once, bypassing the grace, the limits and the quiet mode (D-C-159).
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -37,12 +43,29 @@ from redis.exceptions import RedisError
 from quack.api.auth import CurrentSession
 from quack.api.resources import AppResources
 from quack.canvas.boards import Canvas
+from quack.canvas.interventions import (
+    Action,
+    InterventionGate,
+    canvas_quiet,
+    clear_mark,
+    mark_id,
+    show_first_hint,
+    show_mark,
+    task_finished,
+)
 from quack.canvas.recognition import (
     LineBook,
     commit_typed,
     erase_line,
     line_recognized,
     recognize_line,
+)
+from quack.canvas.step_check import (
+    StepEnv,
+    canvas_lines,
+    check_step,
+    second_opinion,
+    solution_space_of,
 )
 from quack.canvas.strokes import (
     Erasure,
@@ -52,6 +75,8 @@ from quack.canvas.strokes import (
     StrokeJournal,
     chunk_max_batches,
 )
+from quack.events.event_types import CanvasLineCommitted
+from quack.graph.read import GraphReader, create_graph_reader
 from quack.logging import get_logger
 
 log = get_logger(__name__)
@@ -65,6 +90,16 @@ CLOSE_INVALID = 1007
 # of WP21.2 only `task_closed` is a status; recognitions, marks, hints and layers are the
 # content of the solution (D-C-124).
 COMPANION_KINDS = frozenset({"task_closed"})
+
+# The clock of the interventions (seconds); a test replaces it.
+clock = time.monotonic
+
+
+def memory_reader(resources: AppResources, learner_id: UUID) -> GraphReader:
+    """The memory read of the step check: the diagnoser's known misconceptions."""
+    return create_graph_reader(
+        resources.neo4j, resources.settings, learner_id=learner_id, db=resources.db
+    )
 
 
 def canvas_channel(canvas_id: UUID) -> str:
@@ -193,7 +228,127 @@ async def serve_canvas(
         if committed is not None:
             book.recognized(committed)
         await deliver(line_recognized(line.line_id, committed))
+        if committed is not None:
+            committed_line(committed)
 
+    env = StepEnv(
+        db=resources.db,
+        llm=resources.llm,
+        compute=resources.compute,
+        settings=resources.settings,
+        learner_id=session.learner_id,
+        session_id=canvas.session_id,
+        canvas_id=canvas.canvas_id,
+        task_id=canvas.task_id,
+        reader=memory_reader(resources, session.learner_id) if canvas.task_id else None,
+        redis=resources.redis,
+    )
+    checks = canvas.task_id is not None and session.scope == "full"
+    gate = InterventionGate(
+        resources.settings,
+        shown_before=len(canvas.doc.teacher.marks) + len(canvas.doc.teacher.hints),
+    )
+    wake = asyncio.Event()
+
+    async def perform(action: Action) -> None:
+        """An action of the gate on the board and to every device."""
+        if action.kind == "mark" and action.line_id and action.mark:
+            await show_mark(
+                resources.db,
+                learner_id=session.learner_id,
+                canvas_id=canvas.canvas_id,
+                line_id=action.line_id,
+                kind=action.mark,
+            )
+            await deliver(_mark_message(action.line_id, action.mark))
+        elif action.kind == "clear" and action.line_id:
+            await clear_mark(
+                resources.db,
+                learner_id=session.learner_id,
+                canvas_id=canvas.canvas_id,
+                line_id=action.line_id,
+            )
+            await deliver(_mark_message(action.line_id, None))
+        elif action.kind == "hint" and canvas.task_id is not None:
+            text = await show_first_hint(
+                resources.db,
+                learner_id=session.learner_id,
+                session_id=canvas.session_id,
+                canvas_id=canvas.canvas_id,
+                task_id=canvas.task_id,
+                space=await solution_space_of(env),
+                line_id=action.line_id,
+            )
+            if text is not None:
+                await deliver({"type": "hint", "step": 1, "line_id": action.line_id, "text": text})
+
+    async def analyze(line: CanvasLineCommitted) -> None:
+        """The cascade for a committed line, its second opinion, then the gate (WP21.4-21.5)."""
+        lines = await canvas_lines(
+            resources.db, learner_id=session.learner_id, canvas_id=canvas.canvas_id
+        )
+        ids = [item.line_id for item in lines]
+        if line.line_id not in ids:
+            return  # erased meanwhile
+        earlier = lines[: ids.index(line.line_id)]
+        outcome = await check_step(env, line, earlier)
+        if outcome.mark is None:
+            return
+        gate.propose(line.line_id, outcome.mark, clock())
+        wake.set()
+        if outcome.mark != "question":
+            return
+        agreed = await second_opinion(env, line, outcome, earlier)
+        for action in gate.second_opinion(line.line_id, agreed):
+            await perform(action)
+        wake.set()
+
+    def start(coroutine: Any) -> None:
+        task = asyncio.create_task(coroutine)
+        pending.add(task)
+        task.add_done_callback(pending.discard)
+
+    def committed_line(line: CanvasLineCommitted) -> None:
+        """A line is in the log: waiting marks may fall due, and the line is checked."""
+        if not checks:
+            return
+        gate.line_written(line.line_id, clock())
+        wake.set()
+        start(analyze(line))
+
+    async def check_all() -> None:
+        """The check request: every line is checked and every mark shown (Т-§15.5)."""
+        lines = await canvas_lines(
+            resources.db, learner_id=session.learner_id, canvas_id=canvas.canvas_id
+        )
+        for index, line in enumerate(lines):
+            outcome = await check_step(env, line, lines[:index])
+            mark = outcome.mark
+            if mark == "question":
+                agreed = await second_opinion(env, line, outcome, lines[:index])
+                mark = "error" if agreed else None if agreed is False else "question"
+            shown = gate.prompted(line.line_id, mark) if mark else None
+            if shown is not None:
+                await perform(shown)
+
+    async def ticker() -> None:
+        """Marks and hints fall due by the clock, not by the next message of the client."""
+        while True:
+            delay = gate.next_due_in(clock())
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(wake.wait(), delay)
+            wake.clear()
+            gate.quiet = await canvas_quiet(resources.db, learner_id=session.learner_id)
+            if canvas.task_id is not None:
+                gate.finished = await task_finished(
+                    resources.db, learner_id=session.learner_id, task_id=canvas.task_id
+                )
+                space = await solution_space_of(env)
+                gate.can_hint = space is not None and bool(space.hints)
+            for action in gate.due(clock()):
+                await perform(action)
+
+    ticking = asyncio.create_task(ticker()) if checks else None
     relay = (
         asyncio.create_task(
             _relay(
@@ -229,32 +384,58 @@ async def serve_canvas(
                     batch = message.batch()
                     journal.add(batch, now=datetime.now(UTC))
                     await acknowledge(await journal.flush_due(now=datetime.now(UTC)))
-                    for line_id, line_text in book.add(batch):
+                    gone = book.add(batch)
+                    for line_id, line_text in gone:
                         await erase_line(resources.db, line_id=line_id, text=line_text, **where)
+                    if checks:
+                        _watch_strokes(gate, book, batch)
+                        for line_id, _ in gone:
+                            for action in gate.line_erased(line_id):
+                                await perform(action)
+                        wake.set()
             elif isinstance(message, LineReadyIn):
                 task = asyncio.create_task(recognize(message))
                 pending.add(task)
                 task.add_done_callback(pending.discard)
             elif isinstance(message, TypedFormulaIn):
-                await commit_typed(
+                typed = await commit_typed(
                     resources.db,
                     block_id=message.block_id,
                     latex=message.latex,
                     at_ms=int(datetime.now(UTC).timestamp() * 1000),
                     **where,
                 )
-            else:
-                log.info("canvas_message_pending", kind=message.type)  # WP21.4–21.5
+                committed_line(typed)
+            elif checks:  # check_request
+                start(check_all())
     except WebSocketDisconnect:
         pass
     finally:
         if pending:  # lines already sent are still recognized and written
             await asyncio.gather(*pending, return_exceptions=True)
+        if ticking is not None:
+            ticking.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await ticking
         if relay is not None:
             relay.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await relay
         await journal.flush()  # the client is gone: written, but nobody to acknowledge
+
+
+def _mark_message(line_id: str, kind: str | None) -> dict[str, Any]:
+    """The server message `mark`; `kind: null` takes the mark off (WP21.5)."""
+    return {"type": "mark", "mark_id": mark_id(line_id), "line_id": line_id, "kind": kind}
+
+
+def _watch_strokes(gate: InterventionGate, book: LineBook, batch: StrokeBatch) -> None:
+    """What the strokes of a batch tell the gate: the learner writes, or erases a place."""
+    now = clock()
+    if batch.strokes:
+        gate.strokes(now)
+    for box in book.erasure_boxes(batch):
+        gate.erased_place(box, now)
 
 
 async def _relay(redis: Redis, canvas_id: UUID, send: Any, kinds: frozenset[str] | None) -> None:

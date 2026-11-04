@@ -244,7 +244,6 @@ NEO4J_WRITERS: dict[str, frozenset[str] | None] = {
     "quack.graph.projection.store": frozenset(
         {"write_batch", "replace_learner", "delete_learner_graph"}
     ),
-    "quack.graph.rebuild": None,
     "quack.db.neo4j": frozenset({"verify_schema", "read_session"}),
 }
 # Files of stream B that still open sessions on the driver themselves (ТЗ §7.3: stream C does

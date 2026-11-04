@@ -45,10 +45,22 @@ class TypedFormula(_Strict):
     latex: str
 
 
+class LearnerDrawing(_Strict):
+    """A drawing cut from a sheet photo (WP22.3 step 5; Т-§16.3 п.4, D-C-153): the image without
+    its paper in the store and the box of the area as shares of the sheet."""
+
+    drawing_id: str  # `{photo_id}:{n}`, n — the number of the drawing among those of the photo
+    photo_id: UUID
+    object_key: str
+    bbox: tuple[float, float, float, float]
+
+
 class LearnerLayer(_Strict):
-    """The learner's strokes are in the journal; here — what the learner typed."""
+    """The learner's strokes are in the journal; here — what the learner typed and the drawings
+    cut from the photos of the sheet."""
 
     typed_formulas: list[TypedFormula] = Field(default_factory=list)
+    drawings: list[LearnerDrawing] = Field(default_factory=list)
 
 
 class Mark(_Strict):
