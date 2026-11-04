@@ -27,8 +27,10 @@ from quack.config import Settings, get_settings
 from quack.db import open_db
 from quack.db.neo4j import create_driver, verify_schema
 from quack.db.redis import create_redis
+from quack.deletion.journal import replay_deletions
 from quack.graph.projection.rebuild import rebuild_learner
 from quack.graph.projection.runner import RULES_VERSION
+from quack.graph.projection.runner import resume as resume_stream
 from quack.graph.projection.store import stale_learners
 from quack.graph.read.reader import create_graph_reader
 from quack.llm.gateway import LLMGateway
@@ -38,6 +40,7 @@ from quack.ops.alerts import run_alerts
 from quack.ops.backup import run_backup
 from quack.ops.commands import AlembicSchemaFound, migrate
 from quack.ops.db_roles import DbRolesRefused, RolePasswords, apply_db_roles
+from quack.ops.orphan_objects import orphan_objects
 from quack.ops.restore_check import restore_check
 from quack.ops.seed import SeedRefusedError, seed_learners, write_learners
 from quack.ops.status import collect_status
@@ -52,6 +55,8 @@ from quack.runtime import (
 from quack.runtime.event_registry import can_rollback, seen_pairs, write_event_registry
 from quack.runtime.phase4 import projector_process, workers_process
 from quack.session.replay import replay_session, session_learner
+from quack.storage.deletions import create_deletion_journal
+from quack.storage.objects import create_object_store
 
 log = get_logger(__name__)
 
@@ -84,6 +89,16 @@ def _since(value: str) -> datetime:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        parsed = 0
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"not a positive integer: {value!r}")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m quack.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -100,6 +115,11 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--learner", help="learner id")
     target.add_argument("--stale-rules", action="store_true", help="learners on other rules@N")
     target.add_argument("--all", action="store_true", help="every learner")
+    rebuild.add_argument(
+        "--concurrency",
+        type=_positive_int,
+        help="learners rebuilt at the same time (default: rebuild_concurrency)",
+    )
     backup = ops_sub.add_parser("backup", help="encrypted Postgres dump to R2 and local copies")
     backup.add_argument("when", nargs="?", choices=["now"], help="an out-of-schedule dump")
     ops_sub.add_parser(
@@ -108,6 +128,21 @@ def build_parser() -> argparse.ArgumentParser:
     alerts_p = ops_sub.add_parser("alerts", help="check the conditions of Д-§9.3 and announce them")
     alerts_p.add_argument("--test", action="store_true", help="send a test alert message")
     ops_sub.add_parser("db-roles", help="create or update the Postgres roles and grants")
+    resume = ops_sub.add_parser("resume", help="release the stopped projector stream of a learner")
+    resume.add_argument("--learner", type=UUID, required=True, help="learner id")
+    replay_d = ops_sub.add_parser(
+        "replay-deletions", help="run the deletion journal again after a restore (Д-§8.3)"
+    )
+    replay_d.add_argument(
+        "--since", type=_since, required=True, help="ISO 8601 time of the dump; no zone means UTC"
+    )
+    orphans = ops_sub.add_parser(
+        "orphan-objects", help="delete learner files newer than a time without a record in Postgres"
+    )
+    orphans.add_argument(
+        "--since", type=_since, required=True, help="ISO 8601 time of the dump; no zone means UTC"
+    )
+    orphans.add_argument("--dry-run", action="store_true", help="list, delete nothing")
     ops_sub.add_parser("status", help="print the state of the system as one JSON object")
     registry = ops_sub.add_parser("event-registry", help="write the event registry JSON")
     registry.add_argument("--out", required=True, help="path of the registry to write")
@@ -232,13 +267,20 @@ async def _worker(settings: Settings) -> int:
     return max(codes)
 
 
-async def _rebuild_each(learners: list[UUID], rebuild: Callable[[UUID], Awaitable[Any]]) -> int:
-    """Every learner is tried; anything but `rebuilt` (busy, active session, failed) is exit 1."""
-    failed = 0
-    for learner_id in learners:
-        outcome = await rebuild(learner_id)
+async def _rebuild_each(
+    learners: list[UUID], rebuild: Callable[[UUID], Awaitable[Any]], concurrency: int = 1
+) -> int:
+    """Every learner is tried, `concurrency` at a time; anything but `rebuilt` (busy, active
+    session, failed) is exit 1."""
+    gate = asyncio.Semaphore(concurrency)
+
+    async def one(learner_id: UUID) -> int:
+        async with gate:
+            outcome = await rebuild(learner_id)
         log.info("rebuild_outcome", learner_id=str(learner_id), status=outcome.status)
-        failed += outcome.status != "rebuilt"
+        return int(outcome.status != "rebuilt")
+
+    failed = sum(await asyncio.gather(*(one(learner_id) for learner_id in learners)))
     return 1 if failed else 0
 
 
@@ -259,7 +301,9 @@ async def _rebuild(settings: Settings, args: argparse.Namespace) -> int:
             rows = await db.fetch_all("SELECT learner_id FROM core.learners ORDER BY learner_id")
             learners = [UUID(str(row["learner_id"])) for row in rows]
         return await _rebuild_each(
-            learners, lambda lid: rebuild_learner(db, neo4j, settings, lid, redis=redis)
+            learners,
+            lambda lid: rebuild_learner(db, neo4j, settings, lid, redis=redis),
+            args.concurrency or settings.rebuild_concurrency,
         )
     finally:
         await redis.aclose()
@@ -408,6 +452,60 @@ async def _restore_check(settings: Settings) -> int:
     return 1 if violations else 0
 
 
+async def _resume(settings: Settings, args: argparse.Namespace) -> int:
+    """WP9.6, Д-§8.7: the projector goes on with the learner from the failed event."""
+    db = await open_db(settings, wait=False)
+    try:
+        await resume_stream(db, args.learner)
+    finally:
+        await db.close()
+    log.info("projector_stream_resumed", learner_id=str(args.learner))
+    return 0
+
+
+async def _replay_deletions(settings: Settings, args: argparse.Namespace) -> int:
+    """WP9.6, Д-§8.3 step 5: every record of `quack-deletions` since the dump runs again."""
+    db = await open_db(settings)
+    neo4j = create_driver(settings)
+    redis = create_redis(settings)
+    store = create_object_store(settings)
+    journal = create_deletion_journal(settings)
+    try:
+        done = await replay_deletions(db, neo4j, settings, journal, store, args.since, redis=redis)
+    finally:
+        await journal.aclose()
+        await store.aclose()
+        await redis.aclose()
+        await neo4j.close()
+        await db.close()
+    print(json.dumps({"replayed": done}, sort_keys=True))
+    return 0
+
+
+async def _orphan_objects(settings: Settings, args: argparse.Namespace) -> int:
+    """WP9.6, Д-§8.3 step 8: files of learners newer than the dump with no record are deleted
+    (`--dry-run` only lists them)."""
+    db = await open_db(settings)
+    store = create_object_store(settings)
+    try:
+        report = await orphan_objects(db, store, args.since, dry_run=args.dry_run)
+    finally:
+        await store.aclose()
+        await db.close()
+    print(
+        json.dumps(
+            {
+                "checked": report.checked,
+                "orphans": report.orphans,
+                "deleted": report.deleted,
+                "dry_run": args.dry_run,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 async def _status(settings: Settings) -> int:
     """Д-§9.1: the report on stdout; exit code 2 when Postgres does not answer. The pool opens
     without waiting, so a dead Postgres is a report with code 2, not a traceback."""
@@ -481,6 +579,12 @@ async def _ops(settings: Settings, args: argparse.Namespace) -> int:
         return await _db_roles(settings)
     if args.op == "restore-check":
         return await _restore_check(settings)
+    if args.op == "resume":
+        return await _resume(settings, args)
+    if args.op == "replay-deletions":
+        return await _replay_deletions(settings, args)
+    if args.op == "orphan-objects":
+        return await _orphan_objects(settings, args)
     if args.op == "alerts":
         return await _alerts(settings, test=getattr(args, "test", False))
     if args.op == "openapi":

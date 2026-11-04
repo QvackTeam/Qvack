@@ -455,6 +455,16 @@ def test_openapi_documents_every_response() -> None:
             assert all(ref == ERROR_REF for ref in errors.values()), what
 
 
+def test_openapi_refs_all_resolve() -> None:
+    """Д-§5.2 п.7 (D-C-210): the schema feeds the type generator of the frontend, which fails on
+    a `$ref` to a component that is not there (the stripped `HTTPValidationError` was left on
+    `/auth/*` and `/companion/pair`)."""
+    schema = _snapshot_app().openapi()
+    components = set(schema["components"]["schemas"])
+    refs = set(re.findall(r'"#/components/schemas/([^"]+)"', json.dumps(schema)))
+    assert refs - components == set()
+
+
 def test_sse_endpoints_document_event_stream() -> None:
     """WP8.7: SSE endpoints (`С-§8.5`) describe a `text/event-stream` body."""
     paths = _snapshot_app().openapi()["paths"]

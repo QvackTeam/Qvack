@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import random
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from redis.asyncio import Redis
@@ -31,6 +33,7 @@ from quack.db import Db
 from quack.jobs import queue_p4 as q
 from quack.jobs.rules_p4 import KIND_LLM_ROLES
 from quack.jobs.types import JobDeferred, JobFailedPermanently
+from quack.llm.errors import LLMBudgetExceededError
 from quack.logging import get_logger
 
 log = get_logger(__name__)
@@ -81,6 +84,20 @@ async def _stop(task: asyncio.Future[None]) -> None:
         await task
 
 
+def budget_outcome(
+    exc: LLMBudgetExceededError, settings: Settings, now: datetime | None = None
+) -> JobDeferred | JobFailedPermanently:
+    """WP3.4 (seam S3): a session budget does not recover — the job fails without retries; the
+    daily budget and the closed pool recover at the next UTC midnight — the job waits for it
+    (plus a jitter, so that the day's jobs do not return in one second)."""
+    if exc.scope == "session":
+        return JobFailedPermanently(str(exc))
+    now = now or datetime.now(UTC)
+    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    jitter = random.uniform(0, settings.daily_budget_defer_jitter_s)
+    return JobDeferred((midnight - now).total_seconds() + jitter, str(exc))
+
+
 async def _finish(
     db: Db, settings: Settings, job: q.ClaimedJob, task: asyncio.Future[None], redis: Redis | None
 ) -> RunResult:
@@ -92,6 +109,8 @@ async def _finish(
     if error is None:
         await q.complete(db, job, redis=redis)
         return "succeeded"
+    if isinstance(error, LLMBudgetExceededError):
+        error = budget_outcome(error, settings)  # seam S3, WP3.4 (D-A-233)
     if isinstance(error, JobDeferred):
         log.info("job_deferred", kind=job.kind, job_key=job.job_key, reason=error.reason)
         decision = await q.defer(db, job, error.delay_sec, error.reason, redis=redis)

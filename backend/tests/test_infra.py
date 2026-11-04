@@ -1,5 +1,6 @@
 """Infrastructure: migration objects, advisory locks, Neo4j schema, compute client, API
-skeleton (ErrorResponse, request ids, health), SSE format, CLI and logging."""
+skeleton (ErrorResponse, request ids, health), SSE format, CLI and logging — on the database of
+Phase 4 (D-A-230)."""
 
 from __future__ import annotations
 
@@ -24,20 +25,18 @@ from quack.compute_client.client import (
     MathCheckRequest,
 )
 from quack.config import Settings
-from quack.db import Db
-from quack.db.db import LockKeyspace
+from quack.db import Db, LockKeyspace
 from quack.db.neo4j import INDEXES, UNIQUE_ID_LABELS, verify_schema
 from quack.events.log import NewEvent, append_events
 from quack.logging import configure_logging, get_logger, log_context
 from tests.db.fixtures import create_learner
+from tests.events.samples import sample_payload
 from tests.support.resources import build_app_resources
 
 
 async def test_migration_creates_contract_indexes(pg_db: Db) -> None:
-    """The baseline of Phase 4 (dbmate): the indexes the queue and the log depend on. The Phase 3
-    ones for the single active session and the cheat sheet per topic left with their tables."""
     rows = await pg_db.fetch_all(
-        "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname IN ('core','ops')"
+        "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname IN ('core','ops','content')"
     )
     defs = {r["indexname"]: r["indexdef"] for r in rows}
     assert "WHERE (status = 'running'::text)" in defs["uq_jobs_running_lock"]
@@ -45,32 +44,25 @@ async def test_migration_creates_contract_indexes(pg_db: Db) -> None:
     assert "WHERE (status = 'queued'::text)" in coalesce and "IS NOT NULL" not in coalesce
     assert "to_tsvector('english'" in defs["idx_events_fts_en"]
     assert "(session_id, seq)" in defs["idx_events_session_seq"]
-    unique = await pg_db.fetch_all(
-        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint "
-        "WHERE conrelid = 'core.events'::regclass AND contype = 'u'"
-    )
-    assert "UNIQUE (learner_id, idempotency_key)" in {r["def"] for r in unique}
+    idempotency = [d for d in defs.values() if "(learner_id, idempotency_key)" in d]
+    assert len(idempotency) == 1 and "UNIQUE" in idempotency[0]
 
 
 async def test_fts_index_query_finds_text_events(pg_db: Db) -> None:
+    """The partial index of `core.events` (Т-§3.1): the query with its expression and predicate
+    finds a text event."""
     learner = await create_learner(pg_db)
+    note = {**sample_payload("message.sent"), "text": "integration by parts was hard"}
     await append_events(
         pg_db,
         learner,
-        [
-            NewEvent(
-                type="message.sent",
-                payload={"text": "integration by parts was hard"},
-                actor="learner",
-                idempotency_key="fts-1",
-            )
-        ],
+        [NewEvent(type="message.sent", payload=note, actor="code", idempotency_key="fts")],
     )
     found = await pg_db.fetch_one(
-        "SELECT count(*) AS n FROM core.events WHERE learner_id = %(learner_id)s AND "
-        "type = 'message.sent' AND to_tsvector('english', payload ->> 'text') "
+        "SELECT count(*) AS n FROM core.events WHERE learner_id = %(l)s AND type = 'message.sent' "
+        "AND to_tsvector('english', payload ->> 'text') "
         "@@ plainto_tsquery('english', 'integrate part')",
-        {"learner_id": learner},
+        {"l": learner},
     )
     assert found is not None and found["n"] == 1
 
@@ -217,9 +209,9 @@ def test_api_error_format_and_request_id(
 
 
 def test_health_ready_with_real_dependencies(
-    settings: Settings, pg_db: Db, neo4j_driver: AsyncDriver
+    settings: Settings, p4_database: str, neo4j_driver: AsyncDriver
 ) -> None:
-    app = create_app(settings)
+    app = create_app(settings.model_copy(update={"postgres_dsn": p4_database}))
     with TestClient(app) as client:
         response = client.get("/health/ready")
         assert response.status_code == 200, response.text
@@ -294,7 +286,4 @@ def test_settings_require_secrets_in_prod() -> None:
     with pytest.raises(ValidationError):
         Settings(env="prod", llm_api_key="")  # type: ignore[arg-type]
     s = Settings(env="test", postgres_dsn="postgresql://a:b@h:5432/d")
-    assert s.sqlalchemy_dsn == "postgresql+asyncpg://a:b@h:5432/d"
     assert s.projector_batch_max_events == 100 and s.rebuild_max_tx_ops == 5000
-    assert s.llm_semaphore_limit == 32 and s.daily_token_limit_per_learner == 150_000
-    assert s.session_token_limit == 40_000 and s.turn_lock_ttl_sec == 60

@@ -389,15 +389,20 @@ def _failure(exc: Exception) -> str:
     return f"{type(exc).__name__}:{getattr(exc, 'reason', '')}"
 
 
-async def run_smoke(settings: Settings, db: Db, provider: LLMProvider) -> list[dict[str, Any]]:
+async def run_smoke(
+    settings: Settings, db: Db, provider: LLMProvider, only: frozenset[str] = frozenset()
+) -> list[dict[str, Any]]:
     """Run every smoke call once; one report row per role (the table order), then the Phase 3
-    prompts and the stream probe."""
+    prompts and the stream probe. `only` — just these rows (a re-check of a failed one)."""
     recorder = _Recorder(provider)
     gateway = LLMGateway(recorder, settings, db=db)
     registry = PromptRegistry()
     learner, run = uuid4(), uuid4().hex[:8]
     calls = {call.role: call for call in smoke_calls(settings)}
     rows: list[dict[str, Any]] = []
+
+    def wanted(name: str) -> bool:
+        return not only or name in only
 
     async def structured(call: SmokeCall) -> dict[str, Any]:
         started = time.monotonic()
@@ -439,6 +444,8 @@ async def run_smoke(settings: Settings, db: Db, provider: LLMProvider) -> list[d
         return _row(role, None, settings, status, recorder.last, started)
 
     for role, table_row in settings.llm_roles.items():
+        if not wanted(role):
+            continue
         if role in MEDIA_ROLES:
             rows.append(await media(role))
         elif role in calls:
@@ -455,9 +462,10 @@ async def run_smoke(settings: Settings, db: Db, provider: LLMProvider) -> list[d
                 _row(role, table_row.prompt, settings, f"skipped:{reason}", None, time.monotonic())
             )
     for call in calls.values():
-        if call.role not in settings.llm_roles:
+        if call.role not in settings.llm_roles and wanted(call.role):
             rows.append(await structured(call))
-    rows.append(await stream_probe(gateway, settings, learner))
+    if wanted(STREAM_ROW):
+        rows.append(await stream_probe(gateway, settings, learner))
     return rows
 
 
@@ -517,7 +525,7 @@ async def stream_probe(gateway: LLMGateway, settings: Settings, learner: UUID) -
             status = "NoToolCall:"
         elif value != PROBE_VALUE:
             status = "WrongToolResult:"
-    except (LLMError, ProviderIncompleteError, ValidationError) as exc:
+    except Exception as exc:  # a live smoke reports a broken probe, never aborts
         status = _failure(exc)
     return _row(
         STREAM_ROW,
@@ -563,7 +571,9 @@ def unchecked_report() -> str:
     return f"{NOT_CHECKED}\n\n    {LIVE_COMMAND}"
 
 
-async def run(settings: Settings | None = None) -> tuple[int, str]:
+async def run(
+    settings: Settings | None = None, only: frozenset[str] = frozenset()
+) -> tuple[int, str]:
     """The whole run: the report text and the exit code. Without `META_API_KEY` nothing is
     called — the report is «Не проверено» with the command."""
     settings = settings or Settings()
@@ -572,7 +582,7 @@ async def run(settings: Settings | None = None) -> tuple[int, str]:
     db = await open_db(settings)
     client = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
     try:
-        rows = await run_smoke(settings, db, client)
+        rows = await run_smoke(settings, db, client, only)
     finally:
         await client.aclose()
         await db.close()
@@ -582,8 +592,9 @@ async def run(settings: Settings | None = None) -> tuple[int, str]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Live smoke of the Meta API (WP10.7).")
     parser.add_argument("--out", type=Path, default=None, help="also write the report to a file")
+    parser.add_argument("--only", nargs="*", default=[], help="just these rows")
     args = parser.parse_args(argv)
-    code, report = asyncio.run(run())
+    code, report = asyncio.run(run(only=frozenset(args.only)))
     print(report)
     if args.out is not None:
         args.out.write_text(report + "\n", encoding="utf-8")
