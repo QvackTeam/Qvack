@@ -76,14 +76,14 @@
 | WP7.2 | Эпизоды | влит | `jobs/episodes.py` (#182) | — | issue #193 | T-D2 |
 | WP7.3 | Покрытие | влит | `jobs/coverage.py`, `mark_covered` (#133, #182) | — | — | T-D3, T-X4 |
 | WP7.4 | Очередь по `Т-§13.1` | частично | `queue_p4`, `executor_p4`, `visible_jobs`, `jobs_changed` (#182, #186); `GET /v1/sessions/{id}/jobs` (B, issue #212, D-B-207) | подключена: процесс `workers` на `JobWorker` и `DispatcherP4` (WP1.3, D-A-200) | — | T-D4–D8, T-D10 |
-| WP7.5 | Периодические задачи | влит | `periodic_p4.py`; `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201), `session.sweep_inactive` (D-A-211), `exports.cleanup` (D-A-215), `calibration.weekly` — предложение `p_*` в лог (D-A-219…221) | предложение весов видов свидетельств — нет правила в документах (D-A-221) | — | T-D9 |
+| WP7.5 | Периодические задачи | влит | `periodic_p4.py`; `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201), `session.sweep_inactive` (D-A-211), `exports.cleanup` (D-A-215), `calibration.weekly` — предложение `p_*` и базовых весов ярусов Т1–Т4 в лог (D-A-219, D-A-220, D-A-245; D-A-221 заменено) | — | — | T-D9 |
 | WP8.1 | Оспаривания, «описка» | влит | `POST /v1/disputes`, `POST /v1/verdicts/{seq}/typo` (#185, D-A-192) | — | — | T-ED1, T-ED2 |
 | WP8.2 | Правки тем, «я это знаю» | влит | Пять маршрутов правок (#185, D-A-193), `episode.reassigned`, `check.known_claim` (B), обработчик `topic.split`; перечни и вид `agent.topic_split` (D-A-226) | — (намерение учителя `split_topic` и обработчик `agent.topic_split` — B, #245, D-B-213) | B | T-ED3, T-ED4 |
 | WP8.3 | Состояние на момент N | влит | `state_at` на rules@3 (D-A-191); `GET /v1/sessions/{id}/summary` «до и после» в кодах (D-A-213, D-A-217, T-ED5) | e2e T-E13 целиком — с T-E1 (C, WP26.1) | — | T-ED5, T-E13 |
 | WP17.1 | Кандидаты на повторение | влит | `review_candidates` в `graph.read` (#179, D-A-151) | — | — | T-RV1 |
 | WP17.2 | «Сегодня» | влит | `GET /v1/domains/{id}/today`: лимиты, оценка времени, `today.shown` (D-A-195) | — | — | T-RV2 |
 | WP17.3 | Готовность и темп | влит | `topic_readiness`; прогноз темпа и предупреждение `pace_*` в «Сегодня» (D-A-203) | — | — | T-RV3 |
-| WP17.4 | Режим подготовки | частично | `prep_context`; `POST /v1/hubs/{id}/prep-mode` (D-A-195); слот 6 в режиме подготовки (B, D-B-216) | пробник с таймером (задачи по охвату, B); материалы контроля в графе (A, D-A-152) | D-A-152 | T-RV4 |
+| WP17.4 | Режим подготовки | частично | `prep_context`; `POST /v1/hubs/{id}/prep-mode` (D-A-195); слот 6 в режиме подготовки и раздел 7 промпта учителя про пробник (B, D-B-216) | материалы контроля в графе (A, D-A-152) | D-A-152 | T-RV4 |
 | WP17.5 | После дедлайна | влит | `POST /v1/hubs/{id}/grade`, предложение оценки (D-A-195) | — | — | T-RV4 |
 | WP17.6 | Повторение в ходе учителя (реализует B) | влит | `session/review_turn.py`: кандидаты `review_candidates` в картине памяти, намерение `review`, «давай 5 минут», подбор `select_tasks` (#208, D-B-189, D-B-190) | явное поле лимита времени во входе хода (сейчас — из текста, D-B-189) | — | — |
 | WP25 | Удаление и журнал удалений | влит | Домен, тема, аккаунт (`DELETE /v1/learner` на `delete_account`, трассы), сверка и повтор, `deletions.reconcile` (D-A-197, D-A-201, D-A-202, D-A-205…207) | снять `account.purge_deleted` Фазы 3 — шаг 5 WP1.3 | — | T-DL1, T-DL2, T-DL3, T-E12 |
@@ -188,7 +188,7 @@
 
 1. **WP1.3, шаг 5 ч.2** — сделан (PR #258, D-A-234…238). Остаток — устаревшие комментарии про `session_factory` в `quack/api/resources.py` и `tests/storage/test_s1_resources.py` (C); `graph/projector_rows.py`, `events/payloads.py`, `jobs/kinds.py` остаются, пока на них опираются тесты и пакеты.
 2. **WP2.3 / WP3.4, режим «наложение сессии»** — сделан на `rules@3` (PR #259, D-A-239): `graph/overlay_build.build_session_overlay`, `read_session_tail`, `load_batch_inputs`/`run_batch` общие с проектором. Подключение в `session/turn_source.py` — сделано B (D-B-215, #260).
-3. **Владелец:** `D-A-196` (класс C); `D-A-221` (правило весов свидетельств).
+3. **Владелец:** `D-A-196` (класс C).
 
 ### Поток B
 
@@ -201,6 +201,7 @@
 6. **WP16.7, хвост** — регистрация команды оценки извлечения `agents/extraction_eval.py` (C, S15); выгрузка наборов LangSmith — оператор.
 7. **WP8.3 со стороны B** — `db=ctx.db` в читатель при первом отчёте «до и после» (issue #190); Q-A-4.
 8. **WP2.3 / WP3.4, наложение сессии** — подключено в `session/turn_source.py` (D-B-215, #260).
+9. **WP12.5 / WP20.2, задачи семинара** — функция B: принять `seminar_tasks` из разбора материала, разметить, записать `task.created {source: material}` (D-B-217, #271); обработчик `second_opinion.diagnosis` — C.
 
 ### Поток C
 
@@ -229,7 +230,6 @@
 | D-A-196 | Поля `hub_id` и `artifact` в `agent.requested` v1 (класс C, issue #191) |
 | Слой 1: 7 пунктов | Текст заготовок `verdict_proof`, `second_opinion`, `verdict_free`, `extractor`, `analyst`, `builder` и общий блок диагностики — раздел «Промпты» заметок |
 | Q-C-1 | Два теста `compute` падали при параллельном прогоне с backend (таймаут `pebble`) |
-| D-A-221 | Правило пересчёта весов видов свидетельств (`Т-§7.4`, `Т-§18.5`) в `calibration.weekly`: в документах нет; сейчас предлагаются только вероятности `p_*` |
 | Q-A-4 | A → B: на что указывает `confidence.reported.target_seq`; порог `calibrated` |
 
 Класс C подтверждает владелец на G4. Действия владельца вне кода: сервер, DNS, секреты окружения `production`, клиент Google OIDC, ключи Modal и Resend, ручной прогон на живой модели (DoD п.6a) — `deploy/README.md`.
