@@ -6,13 +6,10 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy.ext.asyncio import AsyncEngine
-
 from quack.artifacts.cards import topic_cards
 from quack.artifacts.topic_refresh import refresh_topic, refresh_topic_cards
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.log import NewEvent, append_events
 from quack.practice.task_store import get_task
 from tests.artifacts.test_topic_refresh_wp23 import DOMAIN, LIMIT, TopicReader, _prefetch
@@ -60,9 +57,7 @@ def _writer(provider: ScriptedLLMProvider, cards: list[dict[str, Any]]) -> None:
     provider.respond("ArtifactWriterOutput", lambda _r: {"blocks": [], "cards": cards})
 
 
-async def test_cards_are_tasks_of_the_bank_with_markup(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_cards_are_tasks_of_the_bank_with_markup(pg_db: Db, settings: Settings) -> None:
     """Т-§17.5, Т-§17.3: every card is a task with markup in the bank (`task.created`, skill label
     turned into an id); an unknown label is a violation — one more generation, then the card is
     dropped; the writer is asked for cards; a repeated job writes no new version and no task."""
@@ -70,9 +65,7 @@ async def test_cards_are_tasks_of_the_bank_with_markup(
     topic_id = await _topic(pg_db, learner)
     provider = ScriptedLLMProvider()
     _writer(provider, [_card("When the ratio test?"), _card("Which skill?", skill="S9")])
-    resources = build_app_resources(
-        settings, pg_engine, None, None, db=pg_db, session_factory=db, provider=provider
-    )
+    resources = build_app_resources(settings, None, None, db=pg_db, provider=provider)
     reader = TopicReader(topic_id, 1)
 
     version = await refresh_topic_cards(
@@ -105,9 +98,7 @@ async def test_cards_are_tasks_of_the_bank_with_markup(
     assert len(await _task_events(pg_db, learner)) == 1
 
 
-async def test_cards_per_topic_max_stops_the_writing(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_cards_per_topic_max_stops_the_writing(pg_db: Db, settings: Settings) -> None:
     """Т-§17.5: no more than `cards_per_topic_max` on a topic — cards beyond it get no task and no
     place; a topic that is full is not sent to the model at all."""
     learner = await create_learner(pg_db)
@@ -115,9 +106,7 @@ async def test_cards_per_topic_max_stops_the_writing(
     capped = settings.model_copy(update={"cards_per_topic_max": 2})
     provider = ScriptedLLMProvider()
     _writer(provider, [_card(f"Card {i}", skill="S2") for i in range(3)])
-    resources = build_app_resources(
-        capped, pg_engine, None, None, db=pg_db, session_factory=db, provider=provider
-    )
+    resources = build_app_resources(capped, None, None, db=pg_db, provider=provider)
     reader = TopicReader(topic_id, 1)
 
     version = await refresh_topic_cards(
@@ -139,9 +128,7 @@ async def test_cards_per_topic_max_stops_the_writing(
     assert await get_task(pg_db, learner_id=learner, task_id=cards.cards[1].card_id) is not None
 
 
-async def test_one_job_refreshes_notes_and_cards(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_one_job_refreshes_notes_and_cards(pg_db: Db, settings: Settings) -> None:
     """Т-§17.7: after a session the topic gets new notes and new cards (`artifact:{topic}`); an
     unknown topic gets nothing."""
     learner = await create_learner(pg_db)
@@ -151,9 +138,7 @@ async def test_one_job_refreshes_notes_and_cards(
     provider.respond(
         "ArtifactWriterOutput", lambda _r: {"blocks": [block], "cards": [_card("Recall?")]}
     )
-    resources = build_app_resources(
-        settings, pg_engine, None, None, db=pg_db, session_factory=db, provider=provider
-    )
+    resources = build_app_resources(settings, None, None, db=pg_db, provider=provider)
 
     notes, cards = await refresh_topic(
         resources.db, resources.llm, TopicReader(topic_id, 1), _prefetch, settings,

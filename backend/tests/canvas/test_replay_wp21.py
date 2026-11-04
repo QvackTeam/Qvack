@@ -7,7 +7,6 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import httpx
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.canvas.boards import open_canvas
@@ -39,7 +38,7 @@ def _batch(batch_no: int) -> StrokeBatch:
 
 
 async def test_replay_links_the_chunks_of_the_canvas_in_written_order(
-    pg_db: Db, pg_engine: AsyncEngine, settings: Settings
+    pg_db: Db, settings: Settings
 ) -> None:
     """Т-§15.7: signed links to the stroke chunks of this canvas only, oldest first by the ULID
     (a new socket starts the chunk number again); another learner's canvas is 404."""
@@ -70,7 +69,7 @@ async def test_replay_links_the_chunks_of_the_canvas_in_written_order(
     written = [key for key in storage.objects if key.startswith(prefix)]
     assert [key.removeprefix(prefix).split("-")[0] for key in written] == ["0", "1", "0"]
 
-    resources = build_app_resources(settings, pg_engine, None, None, db=pg_db, storage=storage)
+    resources = build_app_resources(settings, None, None, db=pg_db, storage=storage)
     app = create_app(settings, resources=resources)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"

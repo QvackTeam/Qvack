@@ -8,7 +8,6 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.ratelimit import enforce_action_rate_limit
@@ -32,16 +31,14 @@ def provider() -> ScriptedLLMProvider:
 
 @pytest.fixture
 async def client_for(
-    settings: Settings, pg_engine: AsyncEngine, pg_db: Db, provider: ScriptedLLMProvider
+    settings: Settings, pg_db: Db, provider: ScriptedLLMProvider
 ) -> AsyncIterator[ClientFor]:
     """The API over `pg_db`, signed in with a real session; the memory of the hub is fixed."""
     opened: list[httpx.AsyncClient] = []
 
     async def make(learner_id: UUID, hub_id: UUID) -> httpx.AsyncClient:
         app = create_app(settings)
-        app.state.resources = build_app_resources(
-            settings, pg_engine, None, None, db=pg_db, provider=provider
-        )
+        app.state.resources = build_app_resources(settings, None, None, db=pg_db, provider=provider)
         app.dependency_overrides[enforce_action_rate_limit] = lambda: None
         app.dependency_overrides[get_memory] = lambda: Memory(HubReader(hub_id), prefetch)
         cookie = session_cookie(await session_token(pg_db, learner_id, settings))

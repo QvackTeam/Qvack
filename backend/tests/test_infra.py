@@ -13,8 +13,6 @@ from fastapi.testclient import TestClient
 from neo4j import AsyncDriver
 from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.errors import ApiError
@@ -26,78 +24,77 @@ from quack.compute_client.client import (
     MathCheckRequest,
 )
 from quack.config import Settings
-from quack.db.locks import LockKeyspace, advisory_lock
+from quack.db import Db
+from quack.db.db import LockKeyspace
 from quack.db.neo4j import INDEXES, UNIQUE_ID_LABELS, verify_schema
-from quack.db.postgres import SessionFactory
+from quack.events.log import NewEvent, append_events
 from quack.logging import configure_logging, get_logger, log_context
+from tests.db.fixtures import create_learner
 from tests.support.resources import build_app_resources
 
 
-async def test_migration_creates_contract_indexes(
-    pg_engine: AsyncEngine, db: SessionFactory
-) -> None:
-    async with db() as session:
-        rows = (
-            await session.execute(
-                text(
-                    "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname IN ('core','ops')"
-                )
-            )
-        ).all()
-    defs = {name: definition for name, definition in rows}
+async def test_migration_creates_contract_indexes(pg_db: Db) -> None:
+    """The baseline of Phase 4 (dbmate): the indexes the queue and the log depend on. The Phase 3
+    ones for the single active session and the cheat sheet per topic left with their tables."""
+    rows = await pg_db.fetch_all(
+        "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname IN ('core','ops')"
+    )
+    defs = {r["indexname"]: r["indexdef"] for r in rows}
     assert "WHERE (status = 'running'::text)" in defs["uq_jobs_running_lock"]
     coalesce = defs["uq_jobs_queued_coalesce"]
     assert "WHERE (status = 'queued'::text)" in coalesce and "IS NOT NULL" not in coalesce
-    assert "WHERE (status = 'active'::text)" in defs["uq_sessions_one_active"]
-    assert "cheatsheet" in defs["uq_artifacts_topic_cheatsheet"]
     assert "to_tsvector('english'" in defs["idx_events_fts_en"]
-    assert "UNIQUE" in defs["uq_events_idempotency"]
-    assert "(learner_id, session_id, seq)" in defs["idx_events_session_seq"]
+    assert "(session_id, seq)" in defs["idx_events_session_seq"]
+    unique = await pg_db.fetch_all(
+        "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint "
+        "WHERE conrelid = 'core.events'::regclass AND contype = 'u'"
+    )
+    assert "UNIQUE (learner_id, idempotency_key)" in {r["def"] for r in unique}
 
 
-async def test_fts_index_query_finds_text_events(db: SessionFactory) -> None:
-    from quack.events import append_events
-    from tests.factories import new_event, sample_payloads
-
-    learner = uuid4()
-    note = dict(sample_payloads()["artifact.note_created"])
-    note["text"] = "integration by parts was hard"
-    async with db() as session, session.begin():
-        await append_events(session, learner, [new_event("artifact.note_created", note)])
-    async with db() as session:
-        found = (
-            await session.execute(
-                text(
-                    "SELECT count(*) FROM core.events WHERE learner_id = :l AND "
-                    "to_tsvector('english', coalesce(payload->>'text', '')) "
-                    "@@ plainto_tsquery('english', 'integrate part')"
-                ),
-                {"l": learner},
+async def test_fts_index_query_finds_text_events(pg_db: Db) -> None:
+    learner = await create_learner(pg_db)
+    await append_events(
+        pg_db,
+        learner,
+        [
+            NewEvent(
+                type="message.sent",
+                payload={"text": "integration by parts was hard"},
+                actor="learner",
+                idempotency_key="fts-1",
             )
-        ).scalar_one()
-    assert found == 1
+        ],
+    )
+    found = await pg_db.fetch_one(
+        "SELECT count(*) AS n FROM core.events WHERE learner_id = %(learner_id)s AND "
+        "type = 'message.sent' AND to_tsvector('english', payload ->> 'text') "
+        "@@ plainto_tsquery('english', 'integrate part')",
+        {"learner_id": learner},
+    )
+    assert found is not None and found["n"] == 1
 
 
-async def test_advisory_locks_are_exclusive_per_keyspace(pg_engine: AsyncEngine) -> None:
+async def test_advisory_locks_are_exclusive_per_keyspace(pg_db: Db) -> None:
     learner = uuid4()
-    async with advisory_lock(pg_engine, LockKeyspace.LEARNER_PROJECTION, learner) as first:
+    async with pg_db.advisory_lock(LockKeyspace.LEARNER_PROJECTION, learner) as first:
         assert first is True
-        async with advisory_lock(pg_engine, LockKeyspace.LEARNER_PROJECTION, learner) as second:
+        async with pg_db.advisory_lock(LockKeyspace.LEARNER_PROJECTION, learner) as second:
             assert second is False
-        async with advisory_lock(pg_engine, LockKeyspace.SESSION_TURN, learner) as other_space:
+        async with pg_db.advisory_lock(LockKeyspace.SESSION_TURN, learner) as other_space:
             assert other_space is True
-        async with advisory_lock(pg_engine, LockKeyspace.LEARNER_PROJECTION, uuid4()) as other:
+        async with pg_db.advisory_lock(LockKeyspace.LEARNER_PROJECTION, uuid4()) as other:
             assert other is True
-    async with advisory_lock(pg_engine, LockKeyspace.LEARNER_PROJECTION, learner) as again:
+    async with pg_db.advisory_lock(LockKeyspace.LEARNER_PROJECTION, learner) as again:
         assert again is True
 
 
-async def test_advisory_lock_released_on_error(pg_engine: AsyncEngine) -> None:
+async def test_advisory_lock_released_on_error(pg_db: Db) -> None:
     learner = uuid4()
     with pytest.raises(RuntimeError):
-        async with advisory_lock(pg_engine, LockKeyspace.LEARNER_PROJECTION, learner):
+        async with pg_db.advisory_lock(LockKeyspace.LEARNER_PROJECTION, learner):
             raise RuntimeError("boom")
-    async with advisory_lock(pg_engine, LockKeyspace.LEARNER_PROJECTION, learner) as acquired:
+    async with pg_db.advisory_lock(LockKeyspace.LEARNER_PROJECTION, learner) as acquired:
         assert acquired is True
 
 
@@ -190,12 +187,11 @@ def _app_with_test_routes(app: FastAPI) -> FastAPI:
 
 def test_api_error_format_and_request_id(
     settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
+    pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
 ) -> None:
-    res = build_app_resources(settings, pg_engine, neo4j, redis, session_factory=db)
+    res = build_app_resources(settings, neo4j, redis, db=pg_db)
     app = _app_with_test_routes(create_app(settings, resources=res))
     with TestClient(app) as client:
         response = client.get("/test/boom", headers={"X-Request-ID": "req-123"})
@@ -221,7 +217,7 @@ def test_api_error_format_and_request_id(
 
 
 def test_health_ready_with_real_dependencies(
-    settings: Settings, pg_engine: AsyncEngine, neo4j_driver: AsyncDriver
+    settings: Settings, pg_db: Db, neo4j_driver: AsyncDriver
 ) -> None:
     app = create_app(settings)
     with TestClient(app) as client:
