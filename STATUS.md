@@ -187,7 +187,7 @@
 ### Поток A
 
 1. **WP1.3, шаг 5 ч.2** — сделан (PR #258, D-A-234…238). Остаток — устаревшие комментарии про `session_factory` в `quack/api/resources.py` и `tests/storage/test_s1_resources.py` (C); `graph/projector_rows.py`, `events/payloads.py`, `jobs/kinds.py` остаются, пока на них опираются тесты и пакеты.
-2. **WP2.3 / WP3.4, режим «наложение сессии»** — сделан на `rules@3` (PR #259, D-A-239): `graph/overlay_build.build_session_overlay`, `read_session_tail`, `load_batch_inputs`/`run_batch` общие с проектором. Подключение в `session/turn_source.py` — B (issue #260).
+2. **WP2.3 / WP3.4, режим «наложение сессии»** — сделан на `rules@3` (PR #259, D-A-239): `graph/overlay_build.build_session_overlay`, `read_session_tail`, `load_batch_inputs`/`run_batch` общие с проектором. Подключение в `session/turn_source.py` — сделано B (D-B-215, #260).
 3. **Владелец:** `D-A-196` (класс C); `D-A-221` (правило весов свидетельств).
 
 ### Поток B
@@ -200,6 +200,7 @@
 5. **WP10.4, хвост** — `db=` в `LLMGateway` при WP1.3 (A/C), снятие `ops.llm_ledger` и outbox на SQLAlchemy.
 6. **WP16.7, хвост** — регистрация команды оценки извлечения `agents/extraction_eval.py` (C, S15); выгрузка наборов LangSmith — оператор.
 7. **WP8.3 со стороны B** — `db=ctx.db` в читатель при первом отчёте «до и после» (issue #190); Q-A-4.
+8. **WP2.3 / WP3.4, наложение сессии** — подключено в `session/turn_source.py` (D-B-215, #260).
 
 ### Поток C
 
