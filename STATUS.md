@@ -78,7 +78,7 @@
 | WP7.4 | Очередь по `Т-§13.1` | частично | `queue_p4`, `executor_p4`, `visible_jobs`, `jobs_changed` (#182, #186); `GET /v1/sessions/{id}/jobs` (B, issue #212, D-B-207) | подключение к `workers` (WP1.3) | WP1.3 | T-D4–D8, T-D10 |
 | WP7.5 | Периодические задачи | влит | `periodic_p4.py`; `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201), `session.sweep_inactive` (D-A-211), `exports.cleanup` (D-A-215), `calibration.weekly` — предложение `p_*` в лог (D-A-219…221) | предложение весов видов свидетельств — нет правила в документах (D-A-221) | — | T-D9 |
 | WP8.1 | Оспаривания, «описка» | влит | `POST /v1/disputes`, `POST /v1/verdicts/{seq}/typo` (#185, D-A-192) | — | — | T-ED1, T-ED2 |
-| WP8.2 | Правки тем, «я это знаю» | частично | Пять маршрутов правок (#185, D-A-193), `episode.reassigned` | обработчик `check.known_claim` (короткая проверка, WP12.6) не зарегистрирован; разбиение темы из чата (WP13) | — | T-ED3, T-ED4 |
+| WP8.2 | Правки тем, «я это знаю» | частично | Пять маршрутов правок (#185, D-A-193), `episode.reassigned`, `check.known_claim` (B, #208), обработчик проектора `topic.split` | производитель `topic.split` из хода — B (issue «WP8.2: разделение темы из чата») | B | T-ED3, T-ED4 |
 | WP8.3 | Состояние на момент N | влит | `state_at` на rules@3 (D-A-191); `GET /v1/sessions/{id}/summary` «до и после» в кодах (D-A-213, D-A-217, T-ED5) | e2e T-E13 целиком — с T-E1 (C, WP26.1) | — | T-ED5, T-E13 |
 | WP17.1 | Кандидаты на повторение | влит | `review_candidates` в `graph.read` (#179, D-A-151) | — | — | T-RV1 |
 | WP17.2 | «Сегодня» | влит | `GET /v1/domains/{id}/today`: лимиты, оценка времени, `today.shown` (D-A-195) | — | — | T-RV2 |
@@ -187,7 +187,7 @@
 ### Поток A
 
 1. **WP1.3, шаг 5 ч.2** — после шага 3 C (`artifacts/*`, `api/*`, `cli`, `ops/*` на `Db`; тесты `tests/artifacts` и `tests/support/dispatch.py` без Фазы 3) и шага 4 B (шлюз без `session_factory`): снять `graph/worker.py`, `jobs/dispatcher.py`, `jobs/dispatcher_rules.py`, `jobs/queue.py`, `events/append|reader|catalog|projections`, `db/postgres.py`, `db/locks.py`, зависимости `sqlalchemy`, `asyncpg`, `alembic` (T-DB3); `supervise` — в `runtime/phase4.py`.
-2. **WP8.2** — разбиение темы из чата (с WP13 B).
+2. **WP8.2** — A-часть готова; разделение темы из хода — B.
 3. **Владелец:** `D-A-196` (класс C); `D-A-221` (правило весов свидетельств).
 
 ### Поток B
