@@ -33,7 +33,14 @@ from quack.db.db import Db
 from quack.events.event_types import MessageSent, SessionStarted, TaskClosed, TaskCreated
 from quack.events.log import StoredEvent
 from quack.events.values import AnswerSpec, Level, Verdict
-from quack.graph.read import GraphReader, HubGoal, MemorySlice, SliceFocus, TopicMemory
+from quack.graph.read import (
+    GraphReader,
+    HubGoal,
+    MemorySlice,
+    ReviewCandidate,
+    SliceFocus,
+    TopicMemory,
+)
 from quack.graph.read.materials import materials_prefetch
 from quack.graph.read.neo4j_reader import Neo4jGraphReader
 from quack.llm.gateway import LLMGateway
@@ -45,9 +52,11 @@ from quack.session.conversation import render_conversation
 from quack.session.memory_picture import (
     MEMORY_UNAVAILABLE,
     PictureInputs,
+    ReviewTask,
     RevisedCheck,
     render_memory_picture,
 )
+from quack.session.review_turn import bank_for_review, review_for_turn
 from quack.session.spoiler_guard import answer_in_text, remove_answer_sentences
 from quack.session.teacher_context import (
     SessionGoal,
@@ -348,6 +357,49 @@ class MemoryTurnContextSource:
             return MemorySlice(learner_id=request.learner_id, projected_seq=0), True
         return found, False
 
+    async def _review(
+        self,
+        reader: GraphReader,
+        request: TurnRequest,
+        journal: SessionJournal,
+        goal_skill_ids: Sequence[UUID],
+    ) -> list[ReviewCandidate]:
+        """Candidates to repeat (WP17.6); unreadable memory — none (the slice reports it)."""
+        try:
+            return await review_for_turn(
+                reader,
+                learner_id=request.learner_id,
+                now_ms=self._clock(),
+                goal=journal.goal,
+                goal_skill_ids=goal_skill_ids,
+                texts=[t.text for t in journal.learner_texts],
+                settings=self._settings,
+            )
+        except NEO4J_UNAVAILABLE:
+            return []
+
+    async def _bank(
+        self,
+        reader: GraphReader,
+        learner_id: UUID,
+        review: Sequence[ReviewCandidate],
+        targets: dict[UUID, list[Level]],
+    ) -> dict[UUID, list[ReviewTask]]:
+        if self._neo4j is None or not review:
+            return {}
+        try:
+            return await bank_for_review(
+                self._neo4j,
+                self._db,
+                reader,
+                self._settings,
+                learner_id=learner_id,
+                candidates=review,
+                targets=targets,
+            )
+        except NEO4J_UNAVAILABLE:
+            return {}
+
     async def _chunks(self, learner_id: UUID, skill_ids: Sequence[UUID]) -> list[MaterialChunk]:
         if self._neo4j is None:
             return []
@@ -412,9 +464,15 @@ class MemoryTurnContextSource:
             topic_ids=topics,
             domain_id=request.domain_id,
         )
+        review = await self._review(reader, request, journal, topic_skills)
+        read_focus = focus.model_copy(
+            update={
+                "skill_ids": list(dict.fromkeys([*focus.skill_ids, *(c.skill_id for c in review)]))
+            }
+        )
         (memory_slice, unavailable), chunks, answers, digest, completed = await asyncio.gather(
-            self._slice(reader, request, focus),
-            self._chunks(learner_id, focus.skill_ids),
+            self._slice(reader, request, read_focus),
+            self._chunks(learner_id, read_focus.skill_ids),
             self._answers(learner_id, journal.open_tasks),
             self._digest(learner_id, request.domain_id),
             self._completed(learner_id, journal.requests),
@@ -423,14 +481,15 @@ class MemoryTurnContextSource:
         freeze = snapshot is None
         frozen = frozen_slots(snapshot or snapshot_slots(now, timezone), now, timezone)
         skill_ids = list(
-            dict.fromkeys([*focus.skill_ids, *(s.skill_id for s in memory_slice.skills)])
+            dict.fromkeys([*read_focus.skill_ids, *(s.skill_id for s in memory_slice.skills)])
         )
         hub_topics = [t.topic_id for hub in hubs for t in hub.topics]
+        bank = {} if unavailable else await self._bank(reader, learner_id, review, targets)
         labels = LabelMap.build(
             settings,
             skills=skill_ids,
             topics=list(dict.fromkeys([*topics, *hub_topics])),
-            tasks=journal.open_tasks,
+            tasks=[*journal.open_tasks, *(t.task_id for ts in bank.values() for t in ts)],
             misconceptions=[m.misconception_id for m in memory_slice.misconceptions],
             hubs=[hub.hub_id for hub in hubs],
             chunks=[chunk.chunk_id for chunk in chunks],
@@ -456,6 +515,8 @@ class MemoryTurnContextSource:
                         if r in completed
                     ],
                     revised_checks=journal.revised,
+                    review=[c.skill_id for c in review],
+                    review_tasks=bank,
                 ),
                 labels,
                 settings,

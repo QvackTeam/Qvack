@@ -67,6 +67,25 @@ CROSS_LEARNER_ALLOWED |= (
         "quack/jobs/cleanup_p4.py:_DELETE_OLD": "the periodic cleanup of every learner",
     }
 )
+# D-B-195 (WP16.7): `ops metrics` measures the whole system over a window (Т-§18.2, Т-§18.3);
+# D-B-194: the operator's `ops replay-session` names only the session.
+CROSS_LEARNER_ALLOWED |= {
+    f"quack/agents/metrics.py:{name}": "system metrics over every learner (Т-§18.2, Т-§18.3)"
+    for name in (
+        "_TURNS",
+        "_VERDICTS",
+        "_COUNT_OF_TYPE",
+        "_DISPUTES",
+        "_SECOND_OPINIONS",
+        "_EXTRACTED",
+        "_TEMPORARY_SKILLS",
+        "_COST",
+        "_HOURS",
+        "_ATTEMPTS",
+    )
+} | {
+    "quack/session/replay.py:_SESSION_LEARNER": "learner of a session named by the operator",
+}
 
 
 def _modules() -> Iterator[tuple[Path, ast.Module]]:

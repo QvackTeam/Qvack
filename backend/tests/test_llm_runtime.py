@@ -173,7 +173,13 @@ def _settings(**over: Any) -> Settings:
     base: dict[str, Any] = {
         "env": "test",
         "llm_default_model": SPARK,
-        "llm_role_models": {"teacher": WONDER, "teacher_fallback": SPARK},
+        # D-B-188: a role of `llm_roles` takes its row's model unless named here.
+        "llm_role_models": {
+            "teacher": WONDER,
+            "teacher_fallback": SPARK,
+            "extractor": SPARK,
+            "solution_space": SPARK,
+        },
         "llm_retry_base_ms": 1,
         "llm_rate_limit_base_ms": 1,
         "llm_rate_limit_max_wait_s": 0.5,
@@ -325,7 +331,7 @@ async def test_429_sets_pressure_flag_and_retries(
 ) -> None:
     """T-L4 (а)–(д)."""
     model = f"m-{uuid4().hex}"
-    over: dict[str, Any] = {"llm_default_model": model, "pressure_default_ttl_s": 3}
+    over: dict[str, Any] = {"llm_role_models": {"extractor": model}, "pressure_default_ttl_s": 3}
 
     async def flagged(retry_after: str | None) -> float:
         await redis.delete(llm_pressure_key(model))
@@ -400,7 +406,7 @@ async def test_circuit_breaker_opens_short_circuits_and_probes(
     """T-L5."""
     model = f"m-{uuid4().hex}"
     over: dict[str, Any] = {
-        "llm_default_model": model,
+        "llm_role_models": {"extractor": model},
         "circuit_failures": 5,
         "circuit_open_s": 0.5,
         "llm_retry_attempts": 0,
@@ -548,8 +554,7 @@ async def test_pressure_flag_from_ratelimit_headers(
     """T-L13."""
     model, other = f"m-{uuid4().hex}", f"m-{uuid4().hex}"
     over: dict[str, Any] = {
-        "llm_default_model": model,
-        "llm_role_models": {"teacher": other},
+        "llm_role_models": {"extractor": model, "teacher": other},
         "pressure_remaining_share": 0.2,
         "pressure_header_ttl_s": 1,
     }
@@ -718,8 +723,8 @@ async def test_responses_request_contract(
         "strict": True,
         "schema": to_strict_json_schema(model),
     }
-    assert body["reasoning"] == {"effort": settings.llm_role_reasoning[role]}
-    assert body["max_output_tokens"] == settings.llm_role_max_output_tokens[role]
+    assert body["reasoning"] == {"effort": settings.effort_for_role(role)}
+    assert body["max_output_tokens"] == settings.max_output_tokens_for_role(role)
     assert body["prompt_cache_key"] == f"{prompt_role or role}@1"
     forbidden = {
         "temperature",
@@ -786,7 +791,7 @@ async def test_output_items_parsing(db: SessionFactory, settings: Settings) -> N
             )
         ).one()
     assert (row.cached_input_tokens, row.reasoning_tokens) == (120, 300)
-    assert row.reasoning_effort == settings.llm_role_reasoning["teacher"]
+    assert row.reasoning_effort == settings.effort_for_role("teacher")
 
     only_commentary = _MockResponses(
         httpx2.Response(200, json=_responses_body("", commentary="Thinking it over.")),
