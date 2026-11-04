@@ -2,9 +2,8 @@
 
 Codes and parameters, not text (`Т-§22.2`): the state of a topic is `TopicDisplay`, levels are
 statuses. Every read is of the learner's own nodes — another learner's id is «not found» (law
-1). `GET /v1/domains/{id}/graph` and `GET /v1/topics/{id}` of Phase 4 replace the routes of Phase 3
-at the switch of the processes (WP1.3): until then `topic_view` serves `…/why` and is ready for
-that route; the routes mounted now are the ones Phase 3 does not have.
+1). `topic_view` serves `GET /v1/topics/{id}` and `…/why` (the graph of a domain is
+`quack.domains.graph_view`; D-A-198, D-A-207).
 """
 
 from __future__ import annotations
@@ -125,6 +124,18 @@ def _skill(props: dict[str, Any]) -> SkillView:
     )
 
 
+def topic_display(topic: dict[str, Any]) -> TopicDisplay:
+    """The code and the parameters the projector wrote on a `Topic` (phase C, `Т-§22.2`)."""
+    return TopicDisplay.model_validate(
+        {
+            "display_state": _str(topic.get("displayState"), "none"),
+            "display_reason": _str(topic.get("displayReason")),
+            "display_level": _int(topic.get("displayLevel")),
+            "display_domain_id": _str(topic.get("displayDomainId")),
+        }
+    )
+
+
 async def topic_view(
     db: Db, neo4j: AsyncDriver, learner_id: UUID, topic_id: UUID, *, limit: int = 200
 ) -> TopicView | None:
@@ -152,14 +163,7 @@ async def topic_view(
         )
         for r in rows
     ]
-    display = TopicDisplay.model_validate(
-        {
-            "display_state": _str(topic.get("displayState"), "none"),
-            "display_reason": _str(topic.get("displayReason")),
-            "display_level": _int(topic.get("displayLevel")),
-            "display_domain_id": _str(topic.get("displayDomainId")),
-        }
-    )
+    display = topic_display(topic)
     skills = sorted(
         (_skill(dict(s)) for s in record["skills"] if s), key=lambda s: (s.name, str(s.skill_id))
     )

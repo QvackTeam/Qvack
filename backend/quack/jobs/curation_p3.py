@@ -1,6 +1,11 @@
-"""Background graph curation worker `graph.curate`: active-session presence deferral,
+"""Background graph curation worker `graph.curate` of Phase 3: active-session presence deferral,
 deterministic provisional skill promotion and normName deduplication, and `curator@1`
-model-assisted merges (ТЗ §2.5, §4; spec §7; Т-§10).
+model-assisted merges (ТЗ Фазы 3 §2.5, §4; spec §7; Т-§10).
+
+Phase 3 code on the Phase 3 job pipeline (SQLAlchemy, `graph.curate` of the Phase 3 dispatcher):
+it moved here from `quack/domains/` with WP1.3 (D-A-208) because the package of domains is on
+`Db` now. `graph.curate` is dropped by §6.5 and replaced by `graph.hygiene` (WP16.3); this module
+goes with the Phase 3 pipeline (`kinds.graph_curate`, `dispatcher_rules`, `HANDLER_MODULES`).
 """
 
 from __future__ import annotations
@@ -12,11 +17,11 @@ from uuid import UUID
 
 import orjson
 from neo4j import AsyncDriver
+from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 
 from quack.db.neo4j import read_session
 from quack.db.redis import presence_key
-from quack.domains.schemas import CuratorOutput
 from quack.events.append import append_events
 from quack.events.models import NewEvent
 from quack.graph.phase_a import normalize_name
@@ -27,6 +32,26 @@ from quack.llm.gateway import LLMGateway
 from quack.logging import get_logger
 
 log = get_logger(__name__)
+
+
+class CuratorPromotion(BaseModel):
+    skill_id: UUID
+    topic_id: UUID
+    name: str
+    description: str = ""
+
+
+class CuratorMerge(BaseModel):
+    source_id: UUID
+    target_id: UUID
+    reason: str
+
+
+class CuratorOutput(BaseModel):
+    promotions: list[CuratorPromotion] = Field(default_factory=list)
+    skill_merges: list[CuratorMerge] = Field(default_factory=list)
+    topic_merges: list[CuratorMerge] = Field(default_factory=list)
+    misconception_merges: list[CuratorMerge] = Field(default_factory=list)
 
 
 # Module-level hook allowing tests to inject a FakeLLMProvider when running via JobRunner.

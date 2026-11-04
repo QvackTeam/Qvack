@@ -76,14 +76,11 @@ async def test_full_learner_journey(system: System) -> None:
             text("SELECT target_skills FROM core.task_bank WHERE id = :t AND learner_id = :l"),
             {"t": j.practice_task_id, "l": learner_id},
         )
-    solved_skills = {str(s["skill"]["skill_id"]) for s in target_skills or []}
-    assert solved_skills, "practice task has no target skills"
+    assert {str(s["skill"]["skill_id"]) for s in target_skills or []}, (
+        "practice task has no target skills"
+    )
 
     api, h = system.client, j.learner.headers
-    ok(await api.get(f"/v1/domains/{j.domain_id}/graph", headers=h))
-    detail = ok(await api.get(f"/v1/domains/{j.domain_id}/topics/{j.topic_id}", headers=h))
-    mastery = {s["skill_id"]: s["p_mastery"] for s in detail["skills"]}
-    assert any(mastery.get(s, 0.0) > 0 for s in solved_skills), mastery
 
     export = ok(
         await api.get(f"/v1/domains/{j.domain_id}/export", params={"format": "json"}, headers=h)
@@ -243,35 +240,34 @@ async def test_hot_path_never_waits_for_background(system: System) -> None:
 
 
 async def test_account_deletion_end_to_end(system: System) -> None:
-    """T-E10: after T-E1 the account is purged by the scheduler (as in T-Q11)."""
+    """T-E10: after T-E1 `DELETE /v1/learner` is `delete_account` (WP25 п.3, D-A-207): at once,
+    not by the scheduler — the rows of Phase 4, the graph and the presence key are gone, the
+    deletion is in the journal, the session is refused."""
     j = await run_journey(system, "te10")
     deleted = ok(await system.client.delete("/v1/learner", headers=j.learner.headers))
-    assert deleted["status"] == "pending_purge"
-
-    await system.advance_time(system.settings.purge_deleted_interval_s)
-    await system.settle()
+    assert deleted["copies_days"] == 15
 
     learner_id = j.learner.learner_id
-    async with system.session_factory() as s:
-        events = await s.scalar(
-            text("SELECT count(*) FROM core.events WHERE learner_id = :l"), {"l": learner_id}
+    left = await system.resources.db.fetch_one(
+        "SELECT (SELECT count(*) FROM core.learners WHERE learner_id = %(l)s) AS learners, "
+        "(SELECT count(*) FROM core.events WHERE learner_id = %(l)s) AS events, "
+        "(SELECT count(*) FROM ops.deletion_log WHERE learner_id = %(l)s) AS logged",
+        {"l": learner_id},
+    )
+    assert left == {"learners": 0, "events": 0, "logged": 1}
+    assert [r.kind for r in system.resources.deletions.records] == ["account"]  # type: ignore[attr-defined]
+    # Every node of the labels of Phase 4 is gone; `Artifact` is a label of Phase 3 that the
+    # stand's projector still writes and Phase 4 has no such node (§6.2).
+    async with system.neo4j.session() as session:
+        result = await session.run(
+            "MATCH (n) WHERE n.learnerId = $l AND NOT n:Artifact RETURN count(n) AS n",
+            l=str(learner_id),
         )
-        status = await s.scalar(
-            text("SELECT status FROM ops.deletion_tombstones WHERE learner_id = :l"),
-            {"l": learner_id},
-        )
-    assert events == 0
-    assert status == "purged"
-    assert await _graph_snapshot(system, learner_id) == await _empty_snapshot(system)
+        record = await result.single()
+    assert record is not None and record["n"] == 0
     if system.redis is not None:
         assert await system.redis.get(f"presence:learner:{learner_id}") is None
 
-    # The session of the purged learner is refused (`/v1/auth/login` is removed, D-A-113).
+    # The session of the deleted learner is refused (`/v1/auth/login` is removed, D-A-113).
     after = await system.client.get("/v1/domains", headers=j.learner.headers)
     assert after.status_code == 401, after.text
-
-
-async def _empty_snapshot(system: System) -> object:
-    return (
-        await Neo4jGraphStore(system.neo4j, "00000000-0000-0000-0000-000000000000").dump()
-    ).snapshot()

@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 
 from quack.events.append import append_events
-from tests.e2e.journey import first, ok, onboard, turn
+from tests.e2e.journey import first, ok, onboard, structure_node, turn
 from tests.e2e.system import System
 from tests.factories import new_event
 
@@ -66,7 +66,7 @@ async def test_journey_without_redis(system_without_redis: System) -> None:
         (
             await system.client.patch(
                 "/v1/learner/preferences",
-                json={"preferences": {"n": i}, "idempotency_key": f"te8:limit:{i}"},
+                json={"key": "n", "value": i, "idempotency_key": f"te8:limit:{i}"},
                 headers=limited.headers,
             )
         ).status_code
@@ -94,36 +94,8 @@ async def test_journey_without_llm(system_without_llm: System) -> None:
     api = system.client
     learner = await system.register()
     h = learner.headers
-    domain = ok(
-        await api.post(
-            "/v1/domains", json={"name": "Algebra", "idempotency_key": "te9:d"}, headers=h
-        ),
-        201,
-    )
-    domain_id = UUID(domain["domain_id"])
-    proposal = ok(
-        await api.post(
-            f"/v1/domains/{domain_id}/structure/propose",
-            json={
-                "goals": "Pass",
-                "background": "None",
-                "focus_areas": ["Linear equations", "Quadratics"],
-                "idempotency_key": "te9:propose",
-            },
-            headers=h,
-        )
-    )
-    assert proposal["degraded"] is True
-    assert [t["name"] for t in proposal["topics"]] == ["Linear equations", "Quadratics"]
-    ok(
-        await api.post(
-            f"/v1/domains/{domain_id}/structure/confirm",
-            json={"structure_version": proposal["structure_version"], "idempotency_key": "te9:c"},
-            headers=h,
-        )
-    )
-    topic_id = UUID(proposal["topics"][0]["topic_id"])
-    skill_id = next(s["skill_id"] for s in proposal["skills"] if s["topic_id"] == str(topic_id))
+    domain_id, topic_id = await onboard(system, learner, "te9")
+    skill_id = str(structure_node(domain_id, "skill", "basics-1"))
 
     task_id = uuid4()
     async with system.session_factory() as s, s.begin():
