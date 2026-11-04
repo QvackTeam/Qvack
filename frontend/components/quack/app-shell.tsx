@@ -1,6 +1,6 @@
 "use client";
 
-import { History, Menu, X } from "lucide-react";
+import { History, PanelLeft, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createContext, Suspense, useContext, useEffect, useRef, useState } from "react";
 import type { GraphMode } from "@/lib/graph-layout";
@@ -32,6 +32,9 @@ type Shell = {
   closeDrawer: () => void;
   /** Сделать домен текущим без перехода (страница темы или сессии реального домена) */
   focusDomain: (id: string) => void;
+  /** Клик по названию домена в левой панели: граф встаёт по центру экрана. Граф сбрасывает флаг, когда выровнялся */
+  centerPending: boolean;
+  consumeCenter: () => void;
 };
 
 const ShellContext = createContext<Shell | null>(null);
@@ -45,7 +48,10 @@ export function useShell() {
 /** Сессии пока есть только в матанализе */
 const SESSION_DOMAIN = "matan";
 
-/** «/?domain=» (ссылка из просмотра канваса) выбирает домен и убирает параметр из адреса */
+/** Вид домена (граф или канвасы) живёт здесь; «/» — экран «Все графы» */
+export const DOMAIN_PATH = "/domain";
+
+/** «/domain?domain=» (ссылка из просмотра канваса) выбирает домен и убирает параметр из адреса */
 function DomainFromQuery({ domains, onDomain }: { domains: Domain[]; onDomain: (id: string) => void }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -53,10 +59,10 @@ function DomainFromQuery({ domains, onDomain }: { domains: Domain[]; onDomain: (
   const param = search.get("domain");
   const view = search.get("view");
   useEffect(() => {
-    if (pathname !== "/" || !param) return;
+    if (pathname !== DOMAIN_PATH || !param) return;
     const id = domains.find((d) => d.id === param)?.id;
     if (id) onDomain(id);
-    router.replace(view === "canvases" ? "/?view=canvases" : "/", { scroll: false });
+    router.replace(view === "canvases" ? `${DOMAIN_PATH}?view=canvases` : DOMAIN_PATH, { scroll: false });
   }, [pathname, param, view, domains, onDomain, router]);
   return null;
 }
@@ -68,9 +74,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const inSettings = pathname.startsWith("/settings");
+  // «Все графы» (первый экран), как и настройки, не про один предмет: панели сессий нет
+  const noSessions = inSettings || pathname === "/";
   const inSession = /^\/(session|topic|hub|canvas)\//.test(pathname);
   // Доска канваса занимает весь экран: ни панели доменов, ни панели сессий
   const fullscreen = pathname.startsWith("/canvas/");
+  // Живой режим: пока данные грузятся (или «/» без предметов — сейчас уведёт на создание) — пустой центр; ошибка — плашка
+  const busy = API_MODE && (!data.ready || (!data.error && data.domains.length === 0 && (pathname === "/" || pathname === DOMAIN_PATH)));
+  const failed = API_MODE && !busy && !!data.error;
 
   const [domainId, setDomainId] = useState(domains[0].id);
   const [pending, setPending] = useState<string | null>(null);
@@ -79,6 +90,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [sessionsPref, setSessionsPref] = useState<boolean | null>(null);
   const [graphMode, setGraphMode] = useState<GraphMode>({ kind: "overview" });
   const [drawer, setDrawer] = useState<"domains" | "sessions" | null>(null);
+  const [centerPending, setCenterPending] = useState(false);
   const trigger = useRef<HTMLElement | null>(null);
   const closeBtn = useRef<HTMLButtonElement | null>(null);
   const openDrawer = (side: "domains" | "sessions", el: HTMLElement) => {
@@ -131,13 +143,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setDomainId(id);
     setGraphMode({ kind: "overview" });
     setDrawer(null);
-    if (pathname !== "/") router.push("/");
+    setCenterPending(true);
+    if (pathname !== DOMAIN_PATH) router.push(DOMAIN_PATH);
   };
 
   const openGraph = (m: GraphMode) => {
     setGraphMode(m);
     setDrawer(null);
-    if (pathname !== "/" || window.location.search.includes("view=canvases")) router.push("/");
+    if (pathname !== DOMAIN_PATH || window.location.search.includes("view=canvases")) router.push(DOMAIN_PATH);
   };
 
   const startSession = (text: string, topicId: string | null = null) => {
@@ -172,14 +185,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Suspense fallback={null}>
         <DomainFromQuery domains={domains} onDomain={setDomainId} />
       </Suspense>
-      <ShellContext.Provider value={{ domain, selectDomain, pending, pendingTopic, startSession, graphMode, setGraphMode, openGraph, closeDrawer: () => setDrawer(null), focusDomain: setDomainId }}>
+      <ShellContext.Provider value={{ domain, selectDomain, pending, pendingTopic, startSession, graphMode, setGraphMode, openGraph, closeDrawer: () => setDrawer(null), focusDomain: setDomainId, centerPending, consumeCenter: () => setCenterPending(false) }}>
         <a
           href="#main"
           onClick={(e) => {
             e.preventDefault();
             document.getElementById("main")?.focus();
           }}
-          className="fixed top-2 left-2 z-[60] -translate-y-16 rounded-control border border-seam bg-cloth-raised px-4 py-2.5 text-body font-semibold text-paper focus:translate-y-0"
+          className="caps fixed top-2 left-2 z-[60] -translate-y-16 rounded-pill border border-seam bg-cloth-raised px-4 py-2.5 text-paper focus:translate-y-0"
         >
           {t.shell.skip}
         </a>
@@ -193,35 +206,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <main id="main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
             {!fullscreen && <div className="flex items-center gap-1 border-b border-seam-soft px-2 py-1.5 md:hidden">
               <IconButton label={t.shell.subjects} onClick={(e) => openDrawer("domains", e.currentTarget)}>
-                <Menu />
+                <PanelLeft />
               </IconButton>
-              <p className="font-serif text-body font-bold">Quack!</p>
-              {!inSettings && <IconButton label={t.shell.sessions} className="ml-auto" onClick={(e) => openDrawer("sessions", e.currentTarget)}>
+              <p className="display-caps text-[1.125rem] text-paper">Qvack!</p>
+              {!noSessions && <IconButton className="ml-auto" label={t.shell.sessions} onClick={(e) => openDrawer("sessions", e.currentTarget)}>
                 <History />
               </IconButton>}
             </div>}
-            {API_MODE && (!data.ready || (!data.error && data.domains.length === 0 && pathname === "/")) ? (
+            {busy ? (
               <div className="flex-1" aria-busy="true" />
-            ) : API_MODE && data.error ? (
+            ) : failed ? (
               <div role="alert" className="m-auto max-w-md px-6 text-center">
                 <p className="text-body text-paper">{data.error}</p>
                 <button
                   type="button"
                   onClick={() => void data.reload()}
-                  className="mt-4 inline-flex h-10 items-center rounded-control border border-seam px-4 text-body font-semibold text-paper transition-colors hover:border-rule hover:bg-cloth-hover"
+                  className="caps mt-4 inline-flex h-10 items-center rounded-pill border border-seam px-5 text-paper transition-colors hover:border-rule hover:bg-cloth-hover"
                 >
                   {t.live.retry}
                 </button>
               </div>
-            ) : (
-              children
-            )}
+            ) : null}
+            {/* Страницу рендерим всегда (и на сервере — иначе Next не может проверить instant-навигацию),
+                пока данных нет — просто прячем; обёртка постоянная, страница не пересоздаётся */}
+            <div className={busy || failed ? "hidden" : "contents"}>{children}</div>
           </main>
 
-          {!inSettings && !fullscreen && <aside
+          {!noSessions && !fullscreen && <aside
             aria-label={t.shell.sessions}
             className={cn(
-              "hidden shrink-0 border-l border-seam-soft transition-[width] duration-300 ease-out md:block",
+              "relative hidden shrink-0 border-l border-seam-soft transition-[width] duration-300 ease-out md:block",
               sessionsPref === null ? "w-14 xl:w-73" : sessionsPref ? "w-14" : "w-73",
             )}
           >
@@ -241,11 +255,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           aria-hidden
           onClick={() => setDrawer(null)}
           className={cn(
-            "fixed inset-0 z-40 bg-black/50 transition-opacity duration-300 md:hidden",
+            "fixed inset-0 z-40 bg-cloth-deep/70 transition-opacity duration-300 md:hidden",
             drawer ? "opacity-100" : "pointer-events-none opacity-0",
           )}
         />
-        {(fullscreen ? ([] as const) : inSettings ? (["domains"] as const) : (["domains", "sessions"] as const)).map((side) => {
+        {(fullscreen ? ([] as const) : noSessions ? (["domains"] as const) : (["domains", "sessions"] as const)).map((side) => {
           const open = drawer === side;
           return (
             <div
@@ -272,6 +286,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           );
         })}
+
       </ShellContext.Provider>
     </SoonProvider>
   );

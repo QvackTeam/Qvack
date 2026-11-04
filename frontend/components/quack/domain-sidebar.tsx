@@ -1,12 +1,12 @@
 "use client";
 
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight, LayoutGrid, Plus } from "lucide-react";
 import Link from "next/link";
 import type { Domain } from "@/lib/mock/types";
 import { scrollToId } from "@/lib/scroll";
 import { cn } from "@/lib/utils";
 import { usePathname } from "next/navigation";
-import { useShell } from "./app-shell";
+import { DOMAIN_PATH, useShell } from "./app-shell";
 import { ProfileMenu } from "./profile-menu";
 import { useT } from "@/lib/i18n/provider";
 
@@ -23,9 +23,10 @@ export function DomainSidebar({
   onSelect: (id: string) => void;
 }) {
   const t = useT();
-  const { graphMode, openGraph } = useShell();
+  const { graphMode, openGraph, closeDrawer } = useShell();
   const pathname = usePathname();
-  const onGraph = pathname === "/";
+  const onGraph = pathname === DOMAIN_PATH;
+  const onOverview = pathname === "/";
 
   // На телефоне вместо графа список: прокручиваем к главе
   const goHub = (hubId: string) => {
@@ -40,11 +41,29 @@ export function DomainSidebar({
 
   return (
     <nav aria-label={t.shell.subjects} className="flex h-full flex-col bg-cloth-deep px-3 pt-4 pb-3">
-      <p className="px-3 pb-5 font-serif text-body font-bold text-paper">Quack!</p>
+      <div className="flex min-h-10 items-center px-3 pb-1">
+        <p className="display-caps text-[1.375rem] text-paper">Qvack!</p>
+      </div>
+
+      {/* первый экран: графы всех предметов сразу */}
+      <Link
+        href="/"
+        onClick={closeDrawer}
+        aria-current={onOverview ? "page" : undefined}
+        className={cn(row, "mt-3", onOverview ? "bg-cloth-raised font-medium text-paper" : "text-paper-dim")}
+      >
+        <LayoutGrid aria-hidden className="size-3.5 shrink-0" />
+        <span className="truncate">{t.shell.allGraphs}</span>
+      </Link>
+
+      <p className="caps flex items-center justify-between px-3 pt-4 pb-2 text-paper-dim">
+        <span>{t.shell.subjects}</span>
+        <span className="num">{domains.length}</span>
+      </p>
 
       <ul className="flex flex-col gap-0.5 overflow-y-auto">
         {domains.map((d) => {
-          const on = d.id === activeId;
+          const on = d.id === activeId && !onOverview;
           return (
             <li key={d.id}>
               <button
@@ -82,7 +101,10 @@ export function DomainSidebar({
           );
         })}
         <li>
-          <Link href="/domains/new" className={cn(row, "text-paper-dim")}>
+          <Link
+            href="/domains/new"
+            className="caps mt-2 ml-3 inline-flex min-h-10 items-center gap-2 rounded-pill border border-seam px-4 text-paper-dim transition-colors hover:border-rule hover:bg-cloth-hover hover:text-paper"
+          >
             <Plus aria-hidden className="size-3.5" />
             {t.shell.newSubject}
           </Link>

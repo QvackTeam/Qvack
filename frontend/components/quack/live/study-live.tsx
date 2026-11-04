@@ -134,8 +134,8 @@ export function PracticeLive({ topicId }: { topicId: string }) {
       <StubHeader title={t.title(topic?.name ?? "…")} />
 
       {task ? (
-        <section aria-labelledby="task-h" aria-busy={busy} className="mt-8 rounded-[16px] border border-seam p-5">
-          <h2 id="task-h" className="num text-small text-paper-dim">
+        <section aria-labelledby="task-h" aria-busy={busy} className="mt-8 rounded-[2px] border border-seam p-5">
+          <h2 id="task-h" className="caps text-paper-dim">
             {t.task(n)}
           </h2>
           <div className="mt-2 text-body text-paper">
@@ -145,7 +145,7 @@ export function PracticeLive({ topicId }: { topicId: string }) {
           {hints.length > 0 && (
             <ol className="mt-4 space-y-2">
               {hints.map((h) => (
-                <li key={h.hint_level} className="rounded-option bg-cloth-raised px-3 py-2 text-small text-paper">
+                <li key={h.hint_level} className="rounded-[2px] border border-seam-soft px-3 py-2 text-small text-paper">
                   <span className="text-paper-dim">{t.hintNum(h.hint_level)}: </span>
                   <Inline text={h.hint_text} />
                 </li>
@@ -160,7 +160,7 @@ export function PracticeLive({ topicId }: { topicId: string }) {
               void check();
             }}
           >
-            <label htmlFor={`${id}-a`} className="mb-1.5 block text-body font-medium text-paper">
+            <label htmlFor={`${id}-a`} className="caps mb-1.5 block text-paper">
               {t.answerLabel}
             </label>
             <textarea id={`${id}-a`} value={answer} disabled={!!result} onChange={(e) => setAnswer(e.target.value)} className={cn(AREA, "min-h-16")} />
@@ -221,8 +221,8 @@ export function SessionSummaryLive({ id }: { id: string }) {
       {summary && (
         <dl className="mt-8 grid grid-cols-2 gap-3 sm:max-w-sm">
           {rows.map(([label, value]) => (
-            <div key={label} className="rounded-[14px] border border-seam p-4">
-              <dt className="text-small text-paper-dim">{label}</dt>
+            <div key={label} className="rounded-[2px] border border-seam p-4">
+              <dt className="caps text-paper-dim">{label}</dt>
               <dd className="num mt-1 text-[28px] leading-none text-paper">{value}</dd>
             </div>
           ))}
@@ -233,7 +233,7 @@ export function SessionSummaryLive({ id }: { id: string }) {
         <Link href={`/session/${id}`} className={SECONDARY_BTN}>
           {tx.live.openTranscript}
         </Link>
-        <Link href="/" className={PRIMARY_BTN}>
+        <Link href="/domain" className={PRIMARY_BTN}>
           {t.back}
         </Link>
       </div>
@@ -307,7 +307,7 @@ export function LibraryLive() {
 
   return (
     <PageShell>
-      <BackLink href="/">{domain.title || tx.shell.subjects}</BackLink>
+      <BackLink href="/domain">{domain.title || tx.shell.subjects}</BackLink>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <StubHeader title={t.title} body={domain.title} />
         <Link href={`/notes/new?domain=${domain.id}`} className={PRIMARY_BTN}>
@@ -346,7 +346,7 @@ export function LibraryLive() {
       <ul className="mt-4 border-t border-seam-soft">
         {shown.map((a) => (
           <li key={a.artifact_id} className="border-b border-seam-soft">
-            <Link href={href(a)} className="block rounded-option px-1 py-3 transition-colors hover:bg-cloth-hover">
+            <Link href={href(a)} className="block rounded-option px-1 py-3 transition-colors duration-(--dur-s) ease-out hover:bg-cloth-hover">
               <div className="flex items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-body text-paper">{a.title}</span>
                 <span className={PILL}>{kind(a.kind)}</span>
@@ -358,7 +358,7 @@ export function LibraryLive() {
         ))}
         {hits?.event_hits.map((h) => (
           <li key={`e-${h.seq}`} className="border-b border-seam-soft">
-            <Link href={h.session_id ? `/session/${h.session_id}` : "#"} className="block rounded-option px-1 py-3 transition-colors hover:bg-cloth-hover">
+            <Link href={h.session_id ? `/session/${h.session_id}` : "#"} className="block rounded-option px-1 py-3 transition-colors duration-(--dur-s) ease-out hover:bg-cloth-hover">
               <div className="flex items-center gap-2">
                 <span className="min-w-0 flex-1 line-clamp-2 text-body text-paper">{h.text}</span>
                 <span className={PILL}>{tx.live.inSession}</span>
@@ -488,7 +488,7 @@ export function NoteLive({ noteId }: { noteId: string }) {
         </Field>
         {note && (
           <details className="mt-4">
-            <summary className="cursor-pointer text-small text-paper-dim">{tx.live.preview}</summary>
+            <summary className="caps cursor-pointer text-paper-dim">{tx.live.preview}</summary>
             <Markdown text={note.content_md} className="mt-2 space-y-2 text-body text-paper" />
           </details>
         )}

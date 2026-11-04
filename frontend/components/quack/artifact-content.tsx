@@ -15,7 +15,7 @@ import { useSoon } from "./soon";
 
 const CARD_KINDS: CardKind[] = ["definition", "sign", "distinction", "myth"];
 
-const CARD_TITLE = "font-serif text-[18px] leading-tight font-bold text-paper";
+const CARD_TITLE = "display-caps text-[1.125rem] text-paper";
 const MASK_FADE = "[mask-image:linear-gradient(to_bottom,#000_55%,transparent)]";
 
 // ── Конспект ───────────────────────────────────────────────────────────
@@ -39,7 +39,7 @@ export function NotesCard({ details }: { details: TopicDetails }) {
     <ExpandableCard artifact="notes" className="w-full">
       <span className="flex flex-wrap items-baseline justify-between gap-x-4 px-5 pt-4">
         <span className={CARD_TITLE}>{t.artifacts.notesTitle}</span>
-        <span className="num text-small text-paper-dim">{notesMeta(details, t, dayLabel)}</span>
+        <span className="caps text-paper-dim">{notesMeta(details, t, dayLabel)}</span>
       </span>
       <span aria-hidden className={cn("mt-3 block h-[116px] overflow-hidden px-5 text-[15px] leading-relaxed text-paper", MASK_FADE)}>
         {details.summary && <span className="block">{details.summary}</span>}
@@ -49,7 +49,7 @@ export function NotesCard({ details }: { details: TopicDetails }) {
           </span>
         )}
       </span>
-      <span className="flex min-h-9 items-center px-5 pb-3 text-small">
+      <span className="caps flex min-h-9 items-center px-5 pb-3 [--caps-size:0.625rem]">
         {details.traps.length > 0 ? (
           <span className="text-st-confused">{t.artifacts.yourTrapsCount(details.traps.length)}</span>
         ) : (
@@ -69,14 +69,14 @@ export function NotesContent({ details }: { details: TopicDetails }) {
     <div className="mx-auto max-w-[68ch] text-[16px] leading-relaxed text-paper">
       {details.summary && (
         <>
-          <p className="num text-small tracking-wide text-paper-dim uppercase">{t.artifacts.gist}</p>
+          <p className="caps text-paper-dim">{t.artifacts.gist}</p>
           <p className="mt-1 mb-6 text-[18px] leading-snug">{details.summary}</p>
         </>
       )}
       <div className="flex flex-col gap-4">
         {details.notes.map((n, i) => (
           <div key={i}>
-            {n.kind !== "text" && <p className="text-small font-semibold text-paper-dim">{t.artifacts.noteLabel[n.kind]}</p>}
+            {n.kind !== "text" && <p className="caps mb-1 text-paper-dim">{t.artifacts.noteLabel[n.kind]}</p>}
             <RichText text={n.text} />
             {n.src && <p className="num mt-1 text-small text-paper-dim">{n.src}</p>}
           </div>
@@ -85,7 +85,7 @@ export function NotesContent({ details }: { details: TopicDetails }) {
 
       {details.when.length > 0 && (
         <div className="mt-6">
-          <h3 className="text-body font-semibold">{t.artifacts.whenToUse}</h3>
+          <h3 className="display-caps text-[1.25rem]">{t.artifacts.whenToUse}</h3>
           <ul className="mt-1.5 list-disc space-y-1 pl-5 marker:text-rule">
             {details.when.map((w, i) => (
               <li key={i}>
@@ -98,7 +98,7 @@ export function NotesContent({ details }: { details: TopicDetails }) {
 
       {details.example && (
         <div className="mt-6">
-          <h3 className="text-body font-semibold">{t.artifacts.workedExample}</h3>
+          <h3 className="display-caps text-[1.25rem]">{t.artifacts.workedExample}</h3>
           <p className="mt-1.5">
             <Inline text={details.example.title} />
           </p>
@@ -107,9 +107,9 @@ export function NotesContent({ details }: { details: TopicDetails }) {
       )}
 
       {details.traps.length > 0 && (
-        <aside aria-labelledby="traps-h" className="mt-7 rounded-[14px] bg-cloth-raised p-4 text-body">
+        <aside aria-labelledby="traps-h" className="mt-7 rounded-[2px] border border-seam bg-cloth-raised p-4 text-body">
           <div className="flex items-center justify-between gap-3">
-            <h3 id="traps-h" className="font-semibold text-paper">
+            <h3 id="traps-h" className="caps text-paper">
               {t.artifacts.yourTraps}
             </h3>
             <button type="button" onClick={() => soon(t.artifacts.editPersonalSoon)} className={cn(TEXT_BTN, "-my-1.5 -mr-2")}>
@@ -140,10 +140,10 @@ export function CheatCard({ cheat, title }: { cheat: CheatSheet; title: string }
     <ExpandableCard artifact="cheatsheet" className="w-full">
       <span className="flex flex-wrap items-baseline justify-between gap-x-4 px-5 pt-4">
         <span className={CARD_TITLE}>{title}</span>
-        <span className="num text-small text-paper-dim">{t.artifacts.cheatPages}</span>
+        <span className="caps text-paper-dim">{t.artifacts.cheatPages}</span>
       </span>
       <span aria-hidden className={cn("mt-3 block h-[132px] overflow-hidden px-5 pb-4 text-paper", MASK_FADE)}>
-        <span className="num block text-small tracking-wide text-paper-dim uppercase">{t.artifacts.formulas}</span>
+        <span className="caps block text-paper-dim">{t.artifacts.formulas}</span>
         <span className="mt-2 grid gap-x-6 gap-y-3 sm:grid-cols-2">
           {cheat.formulas.slice(0, 4).map((f) => (
             <span key={f.name} className="block">
@@ -163,7 +163,7 @@ export function CheatSheetContent({ cheat }: { cheat: CheatSheet }) {
   const t = useT();
   return (
     <div className="mx-auto max-w-[860px] text-[16px] text-paper">
-      <h3 className="num text-small tracking-wide text-paper-dim uppercase">{t.artifacts.formulas}</h3>
+      <h3 className="caps text-paper-dim">{t.artifacts.formulas}</h3>
       <dl className="mt-2 grid gap-x-8 gap-y-4 sm:grid-cols-2">
         {cheat.formulas.map((f) => (
           <div key={f.name}>
@@ -175,7 +175,7 @@ export function CheatSheetContent({ cheat }: { cheat: CheatSheet }) {
         ))}
       </dl>
 
-      <h3 className="num mt-7 text-small tracking-wide text-paper-dim uppercase">{t.artifacts.methods}</h3>
+      <h3 className="caps mt-7 text-paper-dim">{t.artifacts.methods}</h3>
       <ul className="mt-2">
         {cheat.methods.map((m, i) => (
           <li key={i} className="flex flex-wrap items-baseline gap-x-3 border-b border-seam-soft py-2 last:border-0">
@@ -190,7 +190,7 @@ export function CheatSheetContent({ cheat }: { cheat: CheatSheet }) {
         ))}
       </ul>
 
-      <h3 className="num mt-7 text-small tracking-wide text-paper-dim uppercase">{t.artifacts.commonTraps}</h3>
+      <h3 className="caps mt-7 text-paper-dim">{t.artifacts.commonTraps}</h3>
       <ul className="mt-2 list-disc space-y-1.5 pl-5 text-paper marker:text-rule">
         {cheat.traps.map((trap, i) => (
           <li key={i}>
@@ -216,19 +216,19 @@ export function DeckCard({ cards }: { cards: StudyCard[] }) {
       className="mr-3 mb-3 w-full sm:w-[272px]"
       behind={
         <>
-          <span aria-hidden className="absolute inset-0 translate-x-3 translate-y-3 rounded-[16px] border border-seam-soft bg-cloth-deep" />
-          <span aria-hidden className="absolute inset-0 translate-x-1.5 translate-y-1.5 rounded-[16px] border border-seam-soft bg-cloth-hover" />
+          <span aria-hidden className="absolute inset-0 translate-x-3 translate-y-3 rounded-[2px] border border-seam-soft bg-cloth-deep" />
+          <span aria-hidden className="absolute inset-0 translate-x-1.5 translate-y-1.5 rounded-[2px] border border-seam-soft bg-cloth-hover" />
         </>
       }
     >
       <span className="block px-4 pt-4 pb-4">
         <span className={cn(CARD_TITLE, "flex items-baseline gap-2")}>
           {t.artifacts.cards}
-          <span className="num text-small font-normal text-paper-dim">· {cards.length}</span>
+          <span className="num text-small text-paper-dim">· {cards.length}</span>
         </span>
         <span className="mt-2.5 flex flex-wrap gap-1.5">
           {kinds.map(({ k, n }) => (
-            <span key={k} className={cn(PILL, "px-2 py-px text-[12px]")}>
+            <span key={k} className={cn(PILL, "px-2.5 py-px")}>
               {t.artifacts.cardKind[k]}
               {n > 1 && <span className="num ml-1 text-paper">{n}</span>}
             </span>
@@ -288,7 +288,7 @@ export function DeckViewer({ cards }: { cards: StudyCard[] }) {
     const weak = cards.find((_, k) => rated[k] !== null && (rated[k] as number) <= 1);
     return (
       <div className="mx-auto max-w-[640px]">
-        <p className="font-serif text-[26px] leading-tight font-bold text-paper">
+        <p className="display-caps text-[1.625rem] text-paper">
           {t.artifacts.score(good, cards.length, verdict)}
         </p>
         {weak && (
@@ -310,7 +310,7 @@ export function DeckViewer({ cards }: { cards: StudyCard[] }) {
           type="button"
           autoFocus
           onClick={restart}
-          className="mt-6 inline-flex h-11 items-center rounded-control bg-ribbon px-5 text-body font-semibold text-on-ribbon transition-colors hover:bg-ribbon-hover"
+          className="caps mt-6 inline-flex h-11 items-center rounded-pill bg-ribbon px-6 text-on-ribbon transition-colors duration-(--dur-s) ease-(--ease-out) hover:bg-ribbon-hover"
         >
           {t.artifacts.again}
         </button>
@@ -328,7 +328,7 @@ export function DeckViewer({ cards }: { cards: StudyCard[] }) {
         <span className={PILL}>{t.artifacts.cardKind[card.kind]}</span>
       </div>
 
-      <div className="mt-3 min-h-[280px] rounded-[18px] border border-seam bg-cloth-raised p-6 md:p-8">
+      <div className="mt-3 min-h-[280px] rounded-[2px] border border-seam bg-cloth-raised p-6 md:p-8">
         <p className="text-[22px] leading-snug text-paper">
           <Inline text={card.front} />
         </p>
@@ -351,7 +351,7 @@ export function DeckViewer({ cards }: { cards: StudyCard[] }) {
                 type="button"
                 autoFocus={r === 0}
                 onClick={() => rate(r)}
-                className="inline-flex h-10 items-center rounded-full border border-seam px-4 text-small text-paper transition-colors hover:border-rule hover:bg-cloth-hover"
+                className="caps inline-flex h-10 items-center rounded-pill border border-seam px-5 text-paper transition-colors duration-(--dur-s) ease-(--ease-out) hover:border-ribbon hover:bg-cloth-hover"
               >
                 {label}
               </button>
@@ -362,7 +362,7 @@ export function DeckViewer({ cards }: { cards: StudyCard[] }) {
             type="button"
             autoFocus
             onClick={() => setRevealed(true)}
-            className="inline-flex h-11 flex-1 items-center justify-center rounded-control bg-ribbon px-5 text-body font-semibold text-on-ribbon transition-colors hover:bg-ribbon-hover sm:flex-none"
+            className="caps inline-flex h-11 flex-1 items-center justify-center rounded-pill bg-ribbon px-6 text-on-ribbon transition-colors duration-(--dur-s) ease-(--ease-out) hover:bg-ribbon-hover sm:flex-none"
           >
             {t.artifacts.reveal}
           </button>

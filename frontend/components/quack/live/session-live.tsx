@@ -61,7 +61,7 @@ export function NewSessionLive() {
   return (
     <div className="flex min-h-0 flex-1 flex-col px-4 pt-4 md:px-7 md:pt-6">
       <header className={MEASURE}>
-        <h1 className="font-serif text-display font-bold tracking-[-0.01em] text-paper">{tx.session.newTitle}</h1>
+        <h1 className="display-caps text-display text-paper">{tx.session.newTitle}</h1>
         <p role={error ? "alert" : "status"} className={cn("mt-1.5", error ? "text-st-confused" : "text-paper-dim")}>
           {error ?? tx.session.newThinking}
         </p>
@@ -107,24 +107,45 @@ export function SessionLive({ id }: { id: string }) {
       let degraded: string | null = null;
       let turnId = studentId;
       try {
-        await sse(
-          "POST",
-          `/v1/sessions/${id}/turns`,
-          { text, related_task_id: task?.task_id ?? null, idempotency_key: idem() },
-          ({ event, data }) => {
-            if (event === "turn_started") turnId = String(data.turn_id);
-            else if (event === "status") setThinking(data.state === "thinking");
-            else if (event === "token") {
-              reply += String(data.delta ?? "");
-              setStreaming(reply);
-            } else if (event === "task_evaluated") {
-              setVerdict(data as unknown as Verdict);
-              setTask(null);
-            } else if (event === "task_assigned") setTask(data as unknown as Task);
-            else if (event === "turn_completed") degraded = (data.degraded_mode as string | null) ?? null;
-            else if (event === "error") throw new ApiError(500, String(data.code ?? "ERROR"), String(data.message ?? ""));
-          },
-        );
+        const onEvent = ({ event, data }: { event: string; data: Record<string, unknown> }) => {
+          if (event === "turn_started" || event === "action_recorded") {
+            turnId = String(data.turn_id ?? data.seq ?? studentId);
+          } else if (event === "status") {
+            setThinking(data.state === "thinking" || data.status === "thinking");
+          } else if (event === "token") {
+            reply += String(data.delta ?? data.text ?? "");
+            setStreaming(reply);
+          } else if (event === "task_evaluated" || event === "verdict") {
+            setVerdict(data as unknown as Verdict);
+            setTask(null);
+          } else if (event === "task_assigned") {
+            setTask(data as unknown as Task);
+          } else if (event === "turn_completed" || event === "turn_committed") {
+            degraded = (data.degraded_mode as string | null) ?? null;
+          } else if (event === "error") {
+            throw new ApiError(500, String(data.code ?? "ERROR"), String(data.message ?? ""));
+          }
+        };
+
+        try {
+          await sse(
+            "POST",
+            `/v1/sessions/${id}/actions`,
+            { kind: "message", text, idempotency_key: idem() },
+            onEvent,
+          );
+        } catch (actErr) {
+          if (actErr instanceof ApiError && (actErr.status === 404 || actErr.status === 405)) {
+            await sse(
+              "POST",
+              `/v1/sessions/${id}/turns`,
+              { text, related_task_id: task?.task_id ?? null, idempotency_key: idem() },
+              onEvent,
+            );
+          } else {
+            throw actErr;
+          }
+        }
         setLines((l) => [...l, { id: `t-${turnId}`, role: "teacher", text: reply, degraded }]);
       } catch (e) {
         setError(e instanceof ApiError && e.code === "TURN_LOCKED" ? t.turnLocked : errorText(e));
@@ -224,7 +245,7 @@ export function SessionLive({ id }: { id: string }) {
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-8 md:px-7 md:pt-6">
         <header className={cn("flex items-start justify-between gap-3", MEASURE)}>
           <div className="min-w-0">
-            <h1 className="line-clamp-2 font-serif text-display font-bold tracking-[-0.01em] text-paper">{title}</h1>
+            <h1 className="line-clamp-2 display-caps text-display text-paper">{title}</h1>
             <p className="mt-1.5 text-paper-dim">
               {domain?.title}
               {domain && " · "}
@@ -237,7 +258,7 @@ export function SessionLive({ id }: { id: string }) {
               type="button"
               disabled={busy}
               onClick={() => void finish()}
-              className="inline-flex h-10 shrink-0 items-center rounded-control border border-seam px-4 text-body font-semibold text-paper transition-colors hover:border-rule hover:bg-cloth-hover disabled:opacity-50"
+              className="caps inline-flex h-10 shrink-0 items-center rounded-pill border border-seam px-6 text-paper transition-colors duration-(--dur-s) ease-out hover:border-ribbon hover:text-ribbon disabled:opacity-50"
             >
               {tx.stubs.summary.finish}
             </button>
@@ -274,8 +295,8 @@ export function SessionLive({ id }: { id: string }) {
             </p>
           )}
           {task && (
-            <section aria-label={t.taskFromTeacher} className="rounded-[16px] border border-seam p-4">
-              <p className="num text-small text-paper-dim">{t.taskFromTeacher}</p>
+            <section aria-label={t.taskFromTeacher} className="rounded-[2px] border border-seam p-4">
+              <p className="caps text-paper-dim">{t.taskFromTeacher}</p>
               <div className="mt-2 text-paper">
                 <RichText text={task.prompt_text} />
               </div>
@@ -308,7 +329,7 @@ function StudentLine({ text }: { text: string }) {
   const tx = useT();
   return (
     <p className="flex gap-3 border-y border-seam-soft py-3 whitespace-pre-wrap text-paper">
-      <span className="num shrink-0 pt-0.5 text-small text-paper-dim">{tx.session.you}</span>
+      <span className="caps shrink-0 pt-1 text-paper-dim">{tx.session.you}</span>
       <span>{text}</span>
     </p>
   );
@@ -318,7 +339,7 @@ function Dots() {
   return (
     <span aria-hidden className="inline-flex gap-0.5">
       {[0, 1, 2].map((i) => (
-        <span key={i} className="size-1 animate-pulse rounded-full bg-paper-dim" style={{ animationDelay: `${i * 180}ms` }} />
+        <span key={i} className="size-1 animate-pulse rounded-pill bg-paper-dim" style={{ animationDelay: `${i * 180}ms` }} />
       ))}
     </span>
   );

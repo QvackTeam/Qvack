@@ -8,7 +8,6 @@ export const API_MODE = process.env.NEXT_PUBLIC_QUACK_API === "1";
 
 /** Requests go through the Next.js proxy (`next.config.ts` rewrites `/api/*` to the backend), so no CORS */
 const BASE = "/api";
-const TOKEN_KEY = "quack.token";
 
 export class ApiError extends Error {
   constructor(
@@ -20,37 +19,18 @@ export class ApiError extends Error {
   }
 }
 
-export function getToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setToken(token: string | null) {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    // private mode: the session lives until the tab closes
-  }
-}
-
 /** Every write on the backend is idempotent by key */
 export const idem = () => crypto.randomUUID();
 
+/** The session is the `quack_session` cookie (HttpOnly, sent through the same-origin proxy): no token in JS */
 function headers(json: boolean): HeadersInit {
   const h: Record<string, string> = {};
   if (json) h["Content-Type"] = "application/json";
-  const token = getToken();
-  if (token) h.Authorization = `Bearer ${token}`;
   return h;
 }
 
-/** A missing or expired token sends the user to the login screen */
+/** No cookie or an expired one sends the user to the login screen */
 function onUnauthorized() {
-  setToken(null);
   if (typeof window !== "undefined" && !/^\/(login|signup)/.test(window.location.pathname)) {
     // full reload on purpose: no router here, and all in-memory data belongs to the old token
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
@@ -77,6 +57,7 @@ export async function api<T>(method: "GET" | "POST" | "PATCH" | "DELETE", path: 
     method,
     headers: headers(body !== undefined),
     body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: "include",
   });
   if (!res.ok) throw await toError(res);
   if (res.status === 204) return undefined as T;
@@ -134,6 +115,7 @@ export function sse<P extends WritePath<"post">>(
   signal?: AbortSignal,
 ): Promise<void>;
 export function sse(method: "GET", path: string, body: undefined, onEvent: (e: SseEvent) => void, signal?: AbortSignal): Promise<void>;
+export function sse(method: "POST", path: string, body: unknown, onEvent: (e: SseEvent) => void, signal?: AbortSignal): Promise<void>;
 export async function sse(
   method: "GET" | "POST",
   path: string,
@@ -146,6 +128,7 @@ export async function sse(
     headers: { ...headers(body !== undefined), Accept: "text/event-stream" },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
+    credentials: "include",
   });
   if (!res.ok || !res.body) throw await toError(res);
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -173,4 +156,26 @@ export async function sse(
       }
     }
   }
+}
+
+/** Transitional post helper for Phase 4 endpoints */
+export const postRaw = <T = unknown>(path: string, body?: unknown) => api<T>("POST", path, body);
+
+/** Phase 4: send magic link to email */
+export async function sendMagicLink(email: string): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>("POST", "/auth/link", { email });
+}
+
+/** Phase 4: logout (the backend drops the HttpOnly cookie) */
+export async function logoutApi(): Promise<void> {
+  try {
+    await api("POST", "/auth/logout");
+  } catch {
+    // ignore if already logged out
+  }
+}
+
+/** Current learner (Phase 4 `/v1/me`); the type is still the Phase 3 one until the screens move to the new schema */
+export async function fetchMe(): Promise<S["LearnerMeResponse"]> {
+  return api<S["LearnerMeResponse"]>("GET", "/v1/me");
 }

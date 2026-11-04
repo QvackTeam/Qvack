@@ -23,7 +23,7 @@ type Loaded = {
 
 const pct = (x: number) => Math.round(x * 100);
 const ACTION_BTN =
-  "inline-flex h-10 items-center justify-center rounded-control px-4 text-body font-semibold transition-colors disabled:opacity-50";
+  "caps inline-flex h-10 items-center justify-center rounded-pill px-6 transition-colors duration-(--dur-s) ease-out disabled:opacity-50";
 
 /** Topic page on backend data: state, skills, mix-ups, notes and the cheat sheet */
 export function TopicLive({ id }: { id: string }) {
@@ -131,13 +131,13 @@ export function TopicLive({ id }: { id: string }) {
         <Crumbs domainTitle={domainTitle} />
 
         <header className="mt-2">
-          <h1 className="font-serif text-display font-bold tracking-[-0.01em] text-paper">{topic.name}</h1>
+          <h1 className="display-caps text-display text-paper">{topic.name}</h1>
         </header>
 
         <div className="mt-4 flex items-start gap-4">
           <MemoryRing state={state} retention={topic.mastery} size={40} />
           <div className="min-w-0">
-            <p className="font-semibold text-paper">{tx.states[state].toLowerCase()}</p>
+            <p className="display-caps text-paper">{tx.states[state].toLowerCase()}</p>
             {topic.description && <p className="mt-0.5 text-paper-dim">{topic.description}</p>}
             {activeMix[0] && <p className="mt-1.5 text-st-confused">{activeMix[0].name}</p>}
             <p className="num mt-2 text-small text-paper-dim">{t.masteryLine(pct(topic.mastery), pct(topic.coverage))}</p>
@@ -149,13 +149,13 @@ export function TopicLive({ id }: { id: string }) {
             type="button"
             disabled={busy}
             onClick={() => void begin("learn")}
-            className={cn(ACTION_BTN, state === "new" ? "bg-ribbon text-on-ribbon hover:bg-ribbon-hover" : "border border-seam text-paper hover:border-rule hover:bg-cloth-hover")}
+            className={cn(ACTION_BTN, state === "new" ? "bg-ribbon text-on-ribbon hover:bg-ribbon-hover" : "border border-seam text-paper hover:border-ribbon hover:text-ribbon")}
           >
             {tx.topicCard.study}
           </button>
           <Link
             href={`/practice/${topic.topic_id}`}
-            className={cn(ACTION_BTN, state !== "new" && state !== "review" ? "bg-ribbon text-on-ribbon hover:bg-ribbon-hover" : "border border-seam text-paper hover:border-rule hover:bg-cloth-hover")}
+            className={cn(ACTION_BTN, state !== "new" && state !== "review" ? "bg-ribbon text-on-ribbon hover:bg-ribbon-hover" : "border border-seam text-paper hover:border-ribbon hover:text-ribbon")}
           >
             {tx.topicCard.practice}
           </Link>
@@ -163,7 +163,7 @@ export function TopicLive({ id }: { id: string }) {
             type="button"
             disabled={busy}
             onClick={() => void begin("review")}
-            className={cn(ACTION_BTN, state === "review" ? "bg-ribbon text-on-ribbon hover:bg-ribbon-hover" : "border border-seam text-paper hover:border-rule hover:bg-cloth-hover")}
+            className={cn(ACTION_BTN, state === "review" ? "bg-ribbon text-on-ribbon hover:bg-ribbon-hover" : "border border-seam text-paper hover:border-ribbon hover:text-ribbon")}
           >
             {tx.topicCard.review}
           </button>
@@ -217,7 +217,7 @@ export function TopicLive({ id }: { id: string }) {
             <div className="grid gap-3 sm:grid-cols-2">
               {docs.map((a) => (
                 <ExpandableCard key={a.artifact_id} artifact={`a-${a.artifact_id}`}>
-                  <span className="block px-4 pt-3 font-semibold text-paper">{a.title}</span>
+                  <span className="display-caps block px-4 pt-3 text-paper">{a.title}</span>
                   <span aria-hidden className="mt-1 block h-[72px] overflow-hidden px-4 text-small leading-relaxed text-paper-dim [mask-image:linear-gradient(to_bottom,#000_55%,transparent)]">
                     {plainText(a.content_md)}
                   </span>

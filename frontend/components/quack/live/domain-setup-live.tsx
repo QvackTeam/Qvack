@@ -195,7 +195,7 @@ export function StructureLive({ domainId }: { domainId: string }) {
   if (domain.status === "active" && !proposal) {
     return (
       <PageShell>
-        <BackLink href="/">{domain.title}</BackLink>
+        <BackLink href="/domain">{domain.title}</BackLink>
         <StubHeader title={t.title(domain.title)} body={tx.live.alreadyActive} />
         <ErrorLine text={error} />
         {archiveBlock}
@@ -209,7 +209,7 @@ export function StructureLive({ domainId }: { domainId: string }) {
   if (!proposal) {
     return (
       <PageShell>
-        <BackLink href="/">{domain.title}</BackLink>
+        <BackLink href="/domain">{domain.title}</BackLink>
         <StubHeader title={tx.stubs.newDomain.title} body={tx.stubs.newDomain.body} />
         <ProposeForm domainId={domainId} onDone={setProposal} />
         {archiveBlock}
@@ -258,7 +258,7 @@ export function StructureLive({ domainId }: { domainId: string }) {
 
   return (
     <PageShell>
-      <BackLink href="/">{domain.title}</BackLink>
+      <BackLink href="/domain">{domain.title}</BackLink>
       <StubHeader title={t.title(domain.title)} body={proposal.degraded ? `${t.body} ${tx.live.proposalDegraded}` : t.body} />
 
       <PageSection id="structure-topics" title={t.topics} count={kept}>
@@ -280,7 +280,7 @@ export function StructureLive({ domainId }: { domainId: string }) {
                 <button
                   type="button"
                   onClick={() => toggle(topic.topic_id)}
-                  className="inline-flex h-10 items-center rounded-control px-3 text-small text-paper-dim transition-colors hover:bg-cloth-hover hover:text-paper"
+                  className="caps inline-flex h-10 items-center rounded-pill px-4 text-paper-dim transition-colors duration-(--dur-s) ease-out hover:bg-cloth-hover hover:text-paper"
                 >
                   {off ? t.restore : t.skip}
                 </button>
@@ -294,7 +294,7 @@ export function StructureLive({ domainId }: { domainId: string }) {
               <button
                 type="button"
                 onClick={() => setAdded((a) => a.filter((_, k) => k !== i))}
-                className="inline-flex h-10 items-center rounded-control px-3 text-small text-paper-dim transition-colors hover:bg-cloth-hover hover:text-paper"
+                className="caps inline-flex h-10 items-center rounded-pill px-4 text-paper-dim transition-colors duration-(--dur-s) ease-out hover:bg-cloth-hover hover:text-paper"
               >
                 {t.skip}
               </button>
@@ -423,13 +423,13 @@ export function DiagnosticLive({ domainId }: { domainId: string }) {
       {done ? (
         <div className="mt-8">
           <p className="text-body text-paper">{t.done}</p>
-          <Link href="/" className={cn(PRIMARY_BTN, "mt-4")}>
+          <Link href="/domain" className={cn(PRIMARY_BTN, "mt-4")}>
             {t.toGraph}
           </Link>
         </div>
       ) : q ? (
-        <section className="mt-8 rounded-[16px] border border-seam p-5" aria-labelledby="diag-q" aria-busy={busy}>
-          <p className="num text-small text-paper-dim">{tx.live.questionNum(n)}</p>
+        <section className="mt-8 rounded-[2px] border border-seam p-5" aria-labelledby="diag-q" aria-busy={busy}>
+          <p className="caps text-paper-dim">{tx.live.questionNum(n)}</p>
           <p id="diag-q" className="mt-2 text-body text-paper">
             <Inline text={q.prompt_text} />
           </p>
@@ -444,8 +444,8 @@ export function DiagnosticLive({ domainId }: { domainId: string }) {
                   disabled={!!result}
                   onClick={() => setAnswer(o)}
                   className={cn(
-                    "flex min-h-11 items-center rounded-option border px-3 text-left text-body text-paper transition-colors",
-                    answer === o ? "border-ribbon" : "border-seam hover:bg-cloth-hover",
+                    "flex min-h-11 items-center rounded-control border px-3 text-left text-body text-paper transition-colors duration-(--dur-s) ease-out",
+                    answer === o ? "border-ribbon" : "border-seam hover:border-ribbon",
                     result && answer === o && (result.is_correct ? "border-st-solid" : "border-st-confused"),
                   )}
                 >
@@ -488,7 +488,7 @@ export function DiagnosticLive({ domainId }: { domainId: string }) {
         <>
           <ErrorLine text={error} />
           {!busy && (
-            <Link href="/" className={cn(SECONDARY_BTN, "mt-6")}>
+            <Link href="/domain" className={cn(SECONDARY_BTN, "mt-6")}>
               {t.toGraph}
             </Link>
           )}

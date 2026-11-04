@@ -84,7 +84,7 @@ function StructureMock({ domainId }: { domainId: string }) {
 
   return (
     <PageShell>
-      <BackLink href={`/?domain=${domain.id}`}>{domain.title}</BackLink>
+      <BackLink href={`/domain?domain=${domain.id}`}>{domain.title}</BackLink>
       <StubHeader title={t.title(domain.title)} body={t.body} />
 
       <PageSection id="structure-topics" title={t.topics} count={domain.topics.length + added.length - skipped.size}>
@@ -98,7 +98,7 @@ function StructureMock({ domainId }: { domainId: string }) {
                   <p className={cn("text-body text-paper", off && "line-through")}>{clean(topic.title)}</p>
                   {topic.requires.length > 0 && <p className="truncate text-small text-paper-dim">{t.requires(topic.requires.map(titleOf).join(", "))}</p>}
                 </div>
-                <button type="button" onClick={() => toggle(topic.id)} className="inline-flex h-10 items-center rounded-control px-3 text-small text-paper-dim transition-colors hover:bg-cloth-hover hover:text-paper">
+                <button type="button" onClick={() => toggle(topic.id)} className="caps inline-flex h-10 items-center rounded-pill px-4 text-paper-dim transition-colors duration-(--dur-s) ease-out hover:bg-cloth-hover hover:text-paper">
                   {off ? t.restore : t.skip}
                 </button>
               </li>
@@ -174,19 +174,19 @@ function DiagnosticMock({ domainId }: { domainId: string }) {
 
   return (
     <PageShell>
-      <BackLink href={`/?domain=${domainId}`}>{tx.shell.subjects}</BackLink>
+      <BackLink href={`/domain?domain=${domainId}`}>{tx.shell.subjects}</BackLink>
       <StubHeader title={t.title} body={t.body} />
 
       {done ? (
         <div className="mt-8">
           <p className="text-body text-paper">{t.done}</p>
-          <Link href={`/?domain=${domainId}`} className={cn(PRIMARY_BTN, "mt-4")}>
+          <Link href={`/domain?domain=${domainId}`} className={cn(PRIMARY_BTN, "mt-4")}>
             {t.toGraph}
           </Link>
         </div>
       ) : (
-        <section className="mt-8 rounded-[16px] border border-seam p-5" aria-labelledby="diag-q">
-          <p className="num text-small text-paper-dim">{t.progress(i + 1, questions.length)}</p>
+        <section className="mt-8 rounded-[2px] border border-seam p-5" aria-labelledby="diag-q">
+          <p className="caps text-paper-dim">{t.progress(i + 1, questions.length)}</p>
           <p id="diag-q" className="mt-2 text-body text-paper">
             <Inline text={q.prompt} />
           </p>
@@ -203,8 +203,8 @@ function DiagnosticMock({ domainId }: { domainId: string }) {
                   disabled={answered}
                   onClick={() => setPicked(k)}
                   className={cn(
-                    "flex min-h-11 items-center rounded-option border px-3 text-left text-body text-paper transition-colors",
-                    picked === k ? "border-ribbon" : "border-seam hover:bg-cloth-hover",
+                    "flex min-h-11 items-center rounded-control border px-3 text-left text-body text-paper transition-colors duration-(--dur-s) ease-out",
+                    picked === k ? "border-ribbon" : "border-seam hover:border-ribbon",
                     right && "border-st-solid",
                     wrong && "border-st-confused",
                   )}
