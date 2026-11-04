@@ -1,12 +1,14 @@
 import { onGraph, type GraphModel } from "./types";
 
 /** Step between neighbours, world units */
-export const GAP_X = 130;
+export const GAP_X = 110;
 export const GAP_Y = 140;
 /** Next to a topic of another hub the step is this many times wider: hubs read as separate branches */
-const FOREIGN_GAP = 2.3;
+const FOREIGN_GAP = 2;
 /** How strongly a topic is pulled to the lane of its own hub (0 = only by its links, 1 = only by the hub) */
 const HUB_PULL = 0.88;
+/** The snake of hub lanes turns round when a row would be wider than this, world units */
+const MAX_ROW_WIDTH = 2800;
 /** A hub stands this far above the highest of its topics */
 const HUB_RISE = GAP_Y * 0.9;
 /** Hubs are bigger than topics and need more room */
@@ -157,14 +159,41 @@ export function layoutGraph(model: GraphModel, stored?: StoredPositions): Layout
       for (const v of row) if (ownHub[v] >= 0) cnt.set(ownHub[v], (cnt.get(ownHub[v]) ?? 0) + 1);
       for (const [h, c] of cnt) laneWidth.set(h, Math.max(laneWidth.get(h) ?? 0, c));
     }
+    // Lanes in the order of meaning: the hub that stands lowest on the graph first. They run to the right until the row is
+    // MAX_ROW_WIDTH wide, then the chain turns round and runs back to the left, above the hubs it just passed (a snake).
+    // The hub at the turn stands over its neighbour, so hubs that follow each other in meaning stay next to each other.
+    const hubIds = [...laneWidth.keys()];
+    const lowest = (h: number) => Math.min(...topics.map((_, i) => i).filter((i) => ownHub[i] === h).map((i) => layerOf[i]));
+    hubIds.sort((a, b) => lowest(a) - lowest(b) || a - b);
     const lane = new Map<number, number>();
-    let cursor = 0;
-    for (const h of [...laneWidth.keys()].sort((a, b) => a - b)) {
+    const sep = GAP_X * FOREIGN_GAP;
+    let dir: 1 | -1 = 1;
+    let front = 0;
+    let lastLeft = 0;
+    let lastRight = 0;
+    let lo = 0;
+    let hi = 0;
+    hubIds.forEach((h, i) => {
       const w = (laneWidth.get(h)! - 1) * GAP_X;
-      lane.set(h, cursor + w / 2);
-      cursor += w + GAP_X * FOREIGN_GAP;
-    }
-    const mid = cursor ? (cursor - GAP_X * FOREIGN_GAP) / 2 : 0;
+      if (i > 0 && (dir === 1 ? front + w > MAX_ROW_WIDTH : front - w < 0)) {
+        dir = dir === 1 ? -1 : 1;
+        front = dir === 1 ? lastLeft : lastRight;
+      }
+      if (dir === 1) {
+        lane.set(h, front + w / 2);
+        lastLeft = front;
+        lastRight = front + w;
+        front += w + sep;
+      } else {
+        lane.set(h, front - w / 2);
+        lastRight = front;
+        lastLeft = front - w;
+        front -= w + sep;
+      }
+      lo = Math.min(lo, lastLeft);
+      hi = Math.max(hi, lastRight);
+    });
+    const mid = (lo + hi) / 2;
     for (const row of rows) {
       row.sort((a, b) => (ownHub[a] < 0 ? Infinity : lane.get(ownHub[a])!) - (ownHub[b] < 0 ? Infinity : lane.get(ownHub[b])!) || byComp(a, b));
       // the topics of one hub in this layer stand side by side around the hub's lane
@@ -267,7 +296,7 @@ export function loadPositions(learner: string, domainId: string): StoredPosition
     const raw = localStorage.getItem(KEY(learner, domainId));
     if (!raw) return undefined;
     const v = JSON.parse(raw) as { v?: number; pos?: StoredPositions };
-    return v.v === 3 && v.pos && typeof v.pos === "object" ? v.pos : undefined;
+    return v.v === 6 && v.pos && typeof v.pos === "object" ? v.pos : undefined;
   } catch {
     return undefined;
   }
@@ -277,7 +306,7 @@ export function savePositions(learner: string, domainId: string, layout: Layout)
   const pos: StoredPositions = {};
   for (const n of layout.nodes.values()) pos[n.key] = [Math.round(n.x * 10) / 10, n.layer];
   try {
-    localStorage.setItem(KEY(learner, domainId), JSON.stringify({ v: 3, pos }));
+    localStorage.setItem(KEY(learner, domainId), JSON.stringify({ v: 6, pos }));
   } catch {
     /* no storage: the layout is recomputed next time */
   }
