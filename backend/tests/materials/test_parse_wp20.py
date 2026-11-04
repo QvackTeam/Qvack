@@ -9,8 +9,8 @@ from collections.abc import Sequence
 from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, cast
-from zoneinfo import ZoneInfo
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import BaseModel
@@ -466,7 +466,12 @@ def _syllabus_answer(request: Any) -> dict[str, Any]:
                 "control_type": "tasks",
                 "covers": ["Integrals"],
             },
-            {"label": "Old exam", "date": "2020-01-10", "control_type": "oral_theory", "covers": []},
+            {
+                "label": "Old exam",
+                "date": "2020-01-10",
+                "control_type": "oral_theory",
+                "covers": [],
+            },
             {"label": "No year", "date": "15 June", "control_type": "tasks", "covers": []},
         ],
     }
@@ -487,14 +492,14 @@ async def test_a_syllabus_gives_hubs_with_deadlines(world: _World) -> None:
     learner, domain, material = await world.upload()
     await world.db.execute(
         "UPDATE core.learners SET settings = settings || "
-        "'{\"timezone\": \"Europe/Moscow\"}'::jsonb WHERE learner_id = %(l)s",
+        '\'{"timezone": "Europe/Moscow"}\'::jsonb WHERE learner_id = %(l)s',
         {"l": learner},
     )
     world.provider.respond("MaterialParserOutput", _syllabus_answer)
     world.pdf_pages(SYLLABUS)
     await parse_step(world.ctx, _job(learner, material))
     job = await _structure_job(world, learner, material)
-    assert len(job.payload["deadlines"]) == 5  # the answer of the parser goes to the second step
+    assert len(job.payload["deadlines"]) == 4  # a repeat of the same one is merged
 
     resolver = _Resolver()
     await structure_step(world.ctx, job, resolver)
