@@ -685,6 +685,8 @@ class Settings(BaseSettings):
     # Д-§14.3: the chat is not chosen yet, the body shape follows the setting (ops/notify.py).
     alert_webhook_format: Literal["slack", "discord", "telegram"] = "slack"
     alert_webhook_chat_id: str = ""
+    telegram_bot_token: SecretStr = SecretStr("")
+    telegram_chat_id: str = ""
     # `ops alerts` (Д-§9.3): starting values of the table; every run is a fresh container, the
     # hold times are measured in Redis.
     heartbeat_alerts_url: SecretStr = SecretStr("")
@@ -830,6 +832,7 @@ class Settings(BaseSettings):
                     self.backup_s3_secret_key,
                     self.heartbeat_backup_url,
                     self.alert_webhook_url,
+                    self.telegram_bot_token,
                     self.heartbeat_alerts_url,
                     self.app_db_password,
                     self.reader_db_password,

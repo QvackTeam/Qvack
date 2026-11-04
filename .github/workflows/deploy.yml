@@ -129,10 +129,12 @@ jobs:
           BACKUP_S3_ACCESS_KEY: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
           BACKUP_S3_SECRET_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
           HEARTBEAT_BACKUP_URL: ${{ secrets.HEARTBEAT_BACKUP_URL }}
-          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL || (secrets.TELEGRAM_BOT_TOKEN && format('https://api.telegram.org/bot{0}/sendMessage', secrets.TELEGRAM_BOT_TOKEN)) || (secrets.TELEGRAM_ALERT_BOT_TOKEN && format('https://api.telegram.org/bot{0}/sendMessage', secrets.TELEGRAM_ALERT_BOT_TOKEN)) }}
           HEARTBEAT_ALERTS_URL: ${{ secrets.HEARTBEAT_ALERTS_URL }}
-          ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
-          ALERT_WEBHOOK_CHAT_ID: ${{ vars.ALERT_WEBHOOK_CHAT_ID }}
+          ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT || secrets.ALERT_WEBHOOK_FORMAT || ((secrets.TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_ALERT_BOT_TOKEN || contains(secrets.ALERT_WEBHOOK_URL, 'api.telegram.org')) && 'telegram') }}
+          ALERT_WEBHOOK_CHAT_ID: ${{ vars.ALERT_WEBHOOK_CHAT_ID || secrets.ALERT_WEBHOOK_CHAT_ID || secrets.TELEGRAM_CHAT_ID || secrets.TELEGRAM_ALERT_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_ALERT_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.ALERT_WEBHOOK_CHAT_ID || secrets.ALERT_WEBHOOK_CHAT_ID || secrets.TELEGRAM_CHAT_ID || secrets.TELEGRAM_ALERT_CHAT_ID }}
           BACKUP_AGE_PUBLIC_KEY: ${{ vars.BACKUP_AGE_PUBLIC_KEY }}
         run: |
           bash deploy/render-env.sh deploy/env.example > "$RUNNER_TEMP/new.env"

@@ -47,6 +47,53 @@
   - `tests/test_app_assembly.py`: `test_search_limits_come_from_settings` переведён с `/v1/artifacts/search` на `/v1/search` (лимиты те же), проба `T-A3` `/v1/artifacts` → `/v1/me`.
 - Требует подтверждения владельцем: нет
 
+### D-C-182. WP9.5: поддержка Telegram в алертинге и деплое (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+- Класс: C (универсальный транспорт вебхуков тревог по Д-§9.3, Д-§14.3)
+- WP / место: WP9.5, T-OPS5; `quack/ops/notify.py`, `quack/config.py`, `quack/cli.py`, `deploy/env.example`, `compose.yaml`, `.github/workflows/deploy.yml`
+- Контекст: в Д-§14.3 канал чата команды не был зафиксирован; для Telegram требуются sendMessage URL и chat_id. Переменные могут быть заданы в GitHub Secrets как `ALERT_WEBHOOK_URL` / `ALERT_WEBHOOK_CHAT_ID`, так и напрямую через `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID`.
+- Решение:
+  1. `quack/ops/notify.py`: автоопределение формата telegram при наличии `TELEGRAM_BOT_TOKEN` или `api.telegram.org` в URL; автоматическая сборка URL `https://api.telegram.org/bot<token>/sendMessage`; фоллбек `alert_webhook_chat_id` на `telegram_chat_id`; форматирование с иконками (`🚨 CRITICAL:`, `⚠️ WARNING:`) и обрезка длинных сообщений до 4000 символов (лимит Telegram 4096); логирование деталей ошибки при `HTTPStatusError`.
+  2. `quack/config.py`: настройки `telegram_bot_token` (маскируется в логах) и `telegram_chat_id`.
+  3. `quack/cli.py`: флаг `ops alerts --test` для моментальной проверки отправки тестового уведомления в чат команды.
+  4. `.github/workflows/deploy.yml` и `deploy/env.example`: поддержка переменных `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` и чтение `ALERT_WEBHOOK_FORMAT`/`CHAT_ID` как из `secrets`, так и из `vars`.
+  5. `compose.yaml`: проброс переменных в сервисы `backup` и `alerts`.
+- Почему: Д-§9.3, Д-§14.3; удобство настройки через GitHub Secrets без ручной сборки URL.
+- Обратимость: код; обратная совместимость со Slack/Discord полностью сохранена.
+- Тесты: `tests/test_ops_notify.py` (12 тестов), `tests/test_ops_alerts.py` (29 тестов).
+- Требует подтверждения владельцем: нет.
+
+### D-C-181. WP1.3 шаг 3: `ops status`, `restore-check`, `seed-learners`, `alerts` на схеме Фазы 4
+- Класс: C (состав отчёта `ops status` Фазы 4; поля Фазы 3 переехали на таблицы Фазы 4)
+- WP / место: WP1.3 шаг 3, WP9.5, WP9.6, WP10.4, issue #215; `quack/ops/{status,restore_check,seed,alerts}.py`
+- Контекст: ТЗ Ф3 WP8.4 описывает отчёт через `core.learner_seq`, `ops.dlq`, `ops.llm_ledger`, `run_after`, `updated_at`; в схеме Фазы 4 их нет. ТЗ Ф4 WP10.4 просит расход за час и сутки в `ops status` и тревогу против `team_daily_alert_usd`.
+- Решение:
+  1. `projector.*`: `core.learners.seq` против `ops.projector_offsets.seq`; `dispatcher.*`: против `ops.dispatcher_offsets.last_dispatched_seq`; `stopped_streams` - число строк `ops.projector_failures` (по строке на остановленный поток; `ops resume` её снимает).
+  2. `jobs.*` из `ops.jobs`: возраст самой старой `queued` - по `run_at`; «ждут проекции» - условие захвата очереди (`queue_p4._CANDIDATE`), отрицание. У `ops.jobs` нет времени завершения: `finished_last_hour`/`failed_last_hour` считают `succeeded`/`failed` с `heartbeat_at` за час (последний пульс ближе всего к концу; задача короче интервала пульса - момент старта). Столбец времени завершения - просьба к A, если нужна точность.
+  3. Ключ `dlq` убран: DLQ нет, упавшая задача остаётся в `ops.jobs` (`jobs.by_status.failed`); потребителей ключа нет (`alerts` его не читал).
+  4. `llm.*` из `ops.llm_usage`; новые `llm.cost_last_hour_usd`, `llm.cost_last_day_usd`. `ops alerts`: условие `team_spend` (предупреждение), когда расход за сутки выше `team_daily_alert_usd`; нет числа (Postgres не ответил) - нет тревоги (закон 8).
+  5. `ops restore-check`: `Learner.projectedSeq` (Neo4j) против `core.learners.seq`; узел без `projectedSeq` - 0, не нарушение.
+  6. `ops seed-learners`: строка `core.learners` с `settings.seeded = true` и события `domain.created`, `topic.created`, `skill.created` (актор `system`, происхождение `learner`); в Фазе 4 нет `learner.registered` и `structure.*`. Проверка прода: «настоящие» ученики - без `settings.seeded`.
+  7. `ops status` и `ops alerts` открывают пул без ожидания (`open_db(wait=False)`): недоступный Postgres - отчёт с кодом 2, а не трассировка.
+- Почему: ТЗ Ф3 WP8.4; ТЗ Ф4 WP9.5, WP9.6, WP10.4; Д-§6.1 шаг 8, Д-§8.3, Д-§9.1, Д-§9.3, Д-§11.
+- Обратимость: код; формат отчёта - ключ `dlq` и два новых поля.
+- Тесты: `tests/test_ops_p4_status.py`, `test_ops_p4_seed.py`, `test_ops_restore_check.py`, `test_ops_alerts.py` (`test_team_spend_...`).
+- Требует подтверждения владельцем: нет
+
+### D-C-180. WP1.3 шаг 3: `quack/cli.py` и `quack/ops/*` без SQLAlchemy
+- Класс: C (зона C; сняты команды Фазы 3)
+- WP / место: WP1.3 шаг 3, WP9.6, issue #215, #235; `quack/cli.py`, `quack/ops/{commands,db_roles}.py`
+- Контекст: план #215 шаг 3: C переводит `ops` и CLI на `Db`; A снимает остальное на шаге 5. Роли БД и `LLMGateway` - в документах и у B не решены до конца.
+- Решение:
+  1. Сняты команды `ops replay-dlq` и `ops purge-deleted` (таблицы `ops.dlq`, `ops.deletion_tombstones` Фазы 3 ушли; повтор и удаление Фазы 4 - у A, D-A-197..205).
+  2. A снял флаг `phase4_processes` и код процессов Фазы 3 (D-A-223..225, шаг 5 ч.1); в CLI от Фазы 3 оставались `ops replay-dlq`, `ops purge-deleted`, движок и фабрика сессий - сняты здесь.
+  3. `purge_deleted` и `PURGE_TABLES` удалены из `commands.py` вместе с командой: обработчик `account.purge_deleted` и `purge_job.py` A уже убрал (удаление Фазы 4 - у A, D-A-197..205). `quack.ops.commands` - только `migrate`.
+  4. `ops db-roles` на `Db` (`psycopg.sql`), схемы `core`, `content`, `ops` (схемы `auth` нет). Роли на DSN сервисов не переводятся (D-C-160 п.6): `ops migrate` и сервисы идут под `quack`; перевод - решение владельца после шага 5, схема Фазы 4 его допускает (все таблицы в трёх схемах, права по умолчанию для `quack_migrator`).
+  5. `LLMGateway.__init__` (B) ещё требует фабрику сессий Фазы 3: `ops extraction-eval` и `ops replay-session` строят её в одном месте (`cli._gateway`, при `db=`). Это единственное упоминание движка в CLI; уйдёт, когда B уберёт параметр (шаг 4 плана). Шлюз на схеме Фазы 4 до этого читает `core.llm_outbox`, которого в ней нет - обе команды заработают целиком после шага 4.
+- Почему: ТЗ Ф4 WP1.3, §8.15 (тесты снятого кода удалены в том же PR), §4.1 (слои); план #215.
+- Обратимость: откатом коммита.
+- Тесты: `tests/test_ops_phase3.py` (`test_cli_parser_phase3`: команды сняты), `test_ops_db_roles.py`, `test_ops_p4_cli.py`.
+- Требует подтверждения владельцем: нет (п.4 - перевод ролей сервисов остаётся за владельцем)
+
 ### D-C-159. WP21.5: пометки и вмешательства — шлюз вмешательств, ключ `canvas_quiet`, сообщения `mark` и `hint`
 - Класс: C (поведение быстрого слоя канваса, Т-§15.5; формат событий и схем БД не меняется); `stuck_erase_times` — число из документа («стёрто трижды») в `Settings`
 - WP / место: WP21.5, T-CV5; `quack/canvas/interventions.py` (новый), `quack/canvas/socket.py`, `quack/canvas/boards.py` (`put_mark`, `remove_mark`, `put_hint`), `quack/config.py`

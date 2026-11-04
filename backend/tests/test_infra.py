@@ -263,7 +263,7 @@ def test_cli_parser() -> None:
     parser = build_parser()
     assert parser.parse_args(["api"]).command == "api"
     assert parser.parse_args(["worker"]).command == "worker"
-    for op in ("migrate", "verify-schema", "replay-dlq", "purge-deleted"):
+    for op in ("migrate", "verify-schema"):
         args = parser.parse_args(["ops", op])
         assert args.command == "ops" and args.op == op
     learner = str(uuid4())

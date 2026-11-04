@@ -94,6 +94,25 @@ CROSS_LEARNER_ALLOWED |= {
     "quack/session/replay.py:_SESSION_LEARNER": "learner of a session named by the operator",
 }
 
+# D-C-181 (WP1.3 step 3): `ops status`, `ops restore-check` and `ops seed-learners` look at the
+# whole system, not at one learner (Д-§9.1, Д-§8.3, Д-§11).
+CROSS_LEARNER_ALLOWED |= {
+    f"quack/ops/status.py:{name}": "the report of the whole system (Д-§9.1)"
+    for name in (
+        "_PROJECTOR",
+        "_DISPATCHER",
+        "_STOPPED",
+        "_BY_STATUS",
+        "_OLDEST_QUEUED",
+        "_WAITING",
+        "_FINISHED_HOUR",
+        "_LLM",
+    )
+} | {
+    "quack/ops/restore_check.py:_LOG_SEQS": "the log position of every learner (Д-§8.3)",
+    "quack/ops/seed.py:_COUNT_REAL": "learners that are not seeded, over all of them (Д-§11)",
+}
+
 
 def _modules() -> Iterator[tuple[Path, ast.Module]]:
     for path in sorted(QUACK_DIR.rglob("*.py")):
