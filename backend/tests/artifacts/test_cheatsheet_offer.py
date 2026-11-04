@@ -5,8 +5,6 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-import pytest
-
 from quack.artifacts.documents import SystemBlock, write_system_blocks
 from quack.config import Settings
 from quack.db import Db
