@@ -7,6 +7,7 @@ import { NodeCard } from "./node-card";
 import { Headline, Rise, useInView } from "./reveal";
 import { DuckStage } from "./scene-duck";
 import { approach, cellSize, rand, sceneForm } from "./scene-utils";
+import { storyForm, storyVisible, type Win } from "./story";
 
 const NODES = 5;
 
@@ -15,12 +16,14 @@ const NODES = 5;
  * цепочку узлов; изредка рядом бьёт молния. На узлы можно навестись — карточка с одним из принципов платформы.
  * Графика собирается из точек, когда экран въезжает, и рассыпается, когда уезжает.
  */
-export function EfficiencyScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | null> }) {
+export function EfficiencyScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElement | null>; win?: Win }) {
   const t = useT().landing.story.efficiency;
   const secRef = useRef<HTMLElement>(null);
   const cvRef = useRef<HTMLCanvasElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
-  const [textRef, inView] = useInView<HTMLDivElement>(0.35);
+  const [textRef, ioIn] = useInView<HTMLDivElement>(0.35);
+  const [pinIn, setPinIn] = useState(false);
+  const inView = win ? pinIn : ioIn; // закреплённый режим: текст выезжает, когда сцена собрана
   const [hot, setHot] = useState(-1);
   const hotRef = useRef(-1);
   const nodesText = t.nodes;
@@ -29,7 +32,11 @@ export function EfficiencyScene({ scrollRef }: { scrollRef: RefObject<HTMLElemen
     const sec = secRef.current;
     const cv = cvRef.current;
     const ctx = cv?.getContext("2d");
-    if (!sec || !cv || !ctx) return;
+    const scroller = scrollRef.current;
+    if (!sec || !cv || !ctx || !scroller) return;
+    const formOf = () => (win ? storyForm(scroller, win) : sceneForm(sec));
+    let lastForm = 0;
+    let active = false;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const stage = new DuckStage();
@@ -87,7 +94,16 @@ export function EfficiencyScene({ scrollRef }: { scrollRef: RefObject<HTMLElemen
 
     const frame = (dt: number, still: boolean) => {
       const now = still ? 2.2 : (performance.now() - t0) / 1000;
-      const form = sceneForm(sec);
+      const form = formOf();
+      lastForm = form;
+      if (win) {
+        const a = form > 0.85 ? true : form < 0.2 ? false : active;
+        if (a !== active) {
+          active = a;
+          setPinIn(a);
+        }
+      }
+      if (form < 0.3 && hotRef.current >= 0) setHover(-1);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, cv.width, cv.height);
       if (form <= 0.005) {
@@ -147,7 +163,7 @@ export function EfficiencyScene({ scrollRef }: { scrollRef: RefObject<HTMLElemen
     };
 
     const hit = () => {
-      if (!pointer) return -1;
+      if (!pointer || lastForm < 0.6) return -1;
       let best = -1;
       let bd = nodeR * 2.2 + 10;
       for (let i = 0; i < NODES; i++) {
@@ -174,9 +190,11 @@ export function EfficiencyScene({ scrollRef }: { scrollRef: RefObject<HTMLElemen
       pointer = null;
       setHover(-1);
     };
-    sec.addEventListener("pointermove", onMove);
-    sec.addEventListener("pointerdown", onMove);
-    sec.addEventListener("pointerleave", onLeave);
+    // закреплённые сцены лежат друг на друге и не ловят указатель сами — слушаем весь прокручиваемый контейнер
+    const evt: HTMLElement = win ? scroller : sec;
+    evt.addEventListener("pointermove", onMove);
+    evt.addEventListener("pointerdown", onMove);
+    evt.addEventListener("pointerleave", onLeave);
 
     let raf = 0;
     let visible = false;
@@ -201,6 +219,7 @@ export function EfficiencyScene({ scrollRef }: { scrollRef: RefObject<HTMLElemen
     };
     const io = new IntersectionObserver(
       ([e]) => {
+        if (win) return; // в закреплённом режиме видимость считается по прокрутке
         visible = e.isIntersecting;
         sync();
       },
@@ -216,11 +235,18 @@ export function EfficiencyScene({ scrollRef }: { scrollRef: RefObject<HTMLElemen
     ro.observe(sec);
     const onVis = () => sync();
     document.addEventListener("visibilitychange", onVis);
-    const scroller = scrollRef.current;
     const onScroll = () => {
+      if (win) {
+        const v = storyVisible(scroller, win);
+        if (v !== visible) {
+          visible = v;
+          sync();
+        }
+      }
       if (reduced && !raf) frame(0, true);
     };
-    scroller?.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    if (win) visible = storyVisible(scroller, win);
 
     if (layout()) {
       chain.reset(duckX - duckPx * 0.5, H * 0.5);
@@ -233,21 +259,21 @@ export function EfficiencyScene({ scrollRef }: { scrollRef: RefObject<HTMLElemen
       io.disconnect();
       ro.disconnect();
       document.removeEventListener("visibilitychange", onVis);
-      scroller?.removeEventListener("scroll", onScroll);
-      sec.removeEventListener("pointermove", onMove);
-      sec.removeEventListener("pointerdown", onMove);
-      sec.removeEventListener("pointerleave", onLeave);
+      scroller.removeEventListener("scroll", onScroll);
+      evt.removeEventListener("pointermove", onMove);
+      evt.removeEventListener("pointerdown", onMove);
+      evt.removeEventListener("pointerleave", onLeave);
       stage.dispose();
     };
-  }, [scrollRef]);
+  }, [scrollRef, win]);
 
   const card = hot >= 0 ? nodesText[hot] : null;
 
   return (
-    <section ref={secRef} id="efficiency" className="relative h-full min-h-[680px] shrink-0 overflow-hidden">
+    <section ref={secRef} id="efficiency" className={`overflow-hidden ${win ? "pointer-events-none absolute inset-0" : "relative h-full min-h-[680px] shrink-0"}`}>
       <canvas ref={cvRef} aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" />
       <div className="pointer-events-none relative z-10 mx-auto flex h-full max-w-[1600px] items-start px-5 pb-10 pt-24 sm:px-10 lg:items-center lg:justify-end lg:pt-14">
-        <div ref={textRef} className="pointer-events-auto w-full lg:w-[44%] lg:max-w-[40rem]">
+        <div ref={textRef} className="w-full lg:w-[44%] lg:max-w-[40rem]">
           <Headline lines={t.lines} accent={[1]} inView={inView} className="text-[clamp(2.25rem,4.8vw,4.5rem)]" />
           <Rise inView={inView} delay={0.45} as="p" className="mt-6 max-w-[34rem] font-sans text-[clamp(1rem,1.25vw,1.1875rem)] leading-[1.55] text-[#bba995]">
             {t.text}

@@ -8,6 +8,7 @@ import { NodeCard } from "./node-card";
 import { Headline, Rise, useInView } from "./reveal";
 import { DuckStage } from "./scene-duck";
 import { approach, cellSize, rand, sceneForm } from "./scene-utils";
+import { storyForm, storyVisible, type Win } from "./story";
 
 /** Узлы большого графа: положение в долях рамки графа (x, y), цвет палитры, главный ли */
 const NODES: { x: number; y: number; color: number; hub?: boolean }[] = [
@@ -48,15 +49,19 @@ type GNode = { x: number; y: number; vx: number; vy: number; hx: number; hy: num
  * как устроена эта часть), под ним ходит небольшая утка и время от времени дёргает за нижние узлы — граф откликается
  * пружинами. Сверху по центру заголовок, слева и справа по короткому тексту.
  */
-export function GraphScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | null> }) {
+export function GraphScene({ scrollRef, win }: { scrollRef: RefObject<HTMLElement | null>; win?: Win }) {
   const t = useT().landing.story.how;
   const secRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const cvRef = useRef<HTMLCanvasElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
-  const [topRef, topIn] = useInView<HTMLDivElement>(0.35);
-  const [leftRef, leftIn] = useInView<HTMLDivElement>(0.35);
-  const [rightRef, rightIn] = useInView<HTMLDivElement>(0.35);
+  const [topRef, topIo] = useInView<HTMLDivElement>(0.35);
+  const [leftRef, leftIo] = useInView<HTMLDivElement>(0.35);
+  const [rightRef, rightIo] = useInView<HTMLDivElement>(0.35);
+  const [pinIn, setPinIn] = useState(false);
+  const topIn = win ? pinIn : topIo; // закреплённый режим: текст выезжает, когда сцена собрана
+  const leftIn = win ? pinIn : leftIo;
+  const rightIn = win ? pinIn : rightIo;
   const [hot, setHot] = useState(-1);
   const hotRef = useRef(-1);
   const nodesText = t.nodes;
@@ -66,7 +71,11 @@ export function GraphScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
     const stageEl = stageRef.current;
     const cv = cvRef.current;
     const ctx = cv?.getContext("2d");
-    if (!sec || !stageEl || !cv || !ctx) return;
+    const scroller = scrollRef.current;
+    if (!sec || !stageEl || !cv || !ctx || !scroller) return;
+    const formOf = () => (win ? storyForm(scroller, win) : sceneForm(sec));
+    let lastForm = 0;
+    let active = false;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     const duck = new DuckStage();
@@ -283,7 +292,16 @@ export function GraphScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
     const frame = (dt: number, still: boolean) => {
       const now = still ? 2 : (performance.now() - t0) / 1000;
       nowRef = now;
-      const form = sceneForm(sec);
+      const form = formOf();
+      lastForm = form;
+      if (win) {
+        const a = form > 0.85 ? true : form < 0.2 ? false : active;
+        if (a !== active) {
+          active = a;
+          setPinIn(a);
+        }
+      }
+      if (form < 0.3 && hotRef.current >= 0) setHover(-1);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, cv.width, cv.height);
       if (form <= 0.005) {
@@ -344,7 +362,7 @@ export function GraphScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
     };
 
     const hit = () => {
-      if (!pointer) return -1;
+      if (!pointer || lastForm < 0.6) return -1;
       let best = -1;
       let bd = Infinity;
       nodes.forEach((n, i) => {
@@ -370,9 +388,10 @@ export function GraphScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
       pointer = null;
       setHover(-1);
     };
-    sec.addEventListener("pointermove", onMove);
-    sec.addEventListener("pointerdown", onMove);
-    sec.addEventListener("pointerleave", onLeave);
+    const evt: HTMLElement = win ? scroller : sec;
+    evt.addEventListener("pointermove", onMove);
+    evt.addEventListener("pointerdown", onMove);
+    evt.addEventListener("pointerleave", onLeave);
 
     let raf = 0;
     let visible = false;
@@ -397,6 +416,7 @@ export function GraphScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
     };
     const io = new IntersectionObserver(
       ([e]) => {
+        if (win) return;
         visible = e.isIntersecting;
         sync();
       },
@@ -410,11 +430,18 @@ export function GraphScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
     ro.observe(stageEl);
     const onVis = () => sync();
     document.addEventListener("visibilitychange", onVis);
-    const scroller = scrollRef.current;
     const onScroll = () => {
+      if (win) {
+        const v = storyVisible(scroller, win);
+        if (v !== visible) {
+          visible = v;
+          sync();
+        }
+      }
       if (reduced && !raf) frame(0, true);
     };
-    scroller?.addEventListener("scroll", onScroll, { passive: true });
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    if (win) visible = storyVisible(scroller, win);
 
     if (layout()) frame(0, true);
 
@@ -423,21 +450,21 @@ export function GraphScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
       io.disconnect();
       ro.disconnect();
       document.removeEventListener("visibilitychange", onVis);
-      scroller?.removeEventListener("scroll", onScroll);
-      sec.removeEventListener("pointermove", onMove);
-      sec.removeEventListener("pointerdown", onMove);
-      sec.removeEventListener("pointerleave", onLeave);
+      scroller.removeEventListener("scroll", onScroll);
+      evt.removeEventListener("pointermove", onMove);
+      evt.removeEventListener("pointerdown", onMove);
+      evt.removeEventListener("pointerleave", onLeave);
       duck.dispose();
     };
-  }, [scrollRef, nodesText]);
+  }, [scrollRef, nodesText, win]);
 
   const card = hot >= 0 ? nodesText[hot] : null;
 
   return (
-    <section ref={secRef} id="how" className="relative min-h-full shrink-0 overflow-hidden font-sans lg:h-full lg:min-h-[760px]">
+    <section ref={secRef} id="how" className={`overflow-hidden font-sans ${win ? "pointer-events-none absolute inset-0" : "relative min-h-full shrink-0 lg:h-full lg:min-h-[760px]"}`}>
       <canvas ref={cvRef} aria-hidden className="pointer-events-none absolute inset-0 h-full w-full" />
       <div className="pointer-events-none relative z-10 mx-auto flex min-h-full max-w-[1600px] flex-col items-center px-5 pb-10 pt-20 sm:px-10 lg:h-full lg:pb-8 lg:pt-16">
-        <div ref={topRef} className="pointer-events-auto text-center">
+        <div ref={topRef} className="text-center">
           <Rise inView={topIn} as="p" className="font-mono text-[0.8125rem] uppercase tracking-[0.18em] text-[#8d8273]">
             {t.eyebrow}
           </Rise>
@@ -447,7 +474,7 @@ export function GraphScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
           </Rise>
         </div>
         <div className="mt-6 grid min-h-0 w-full flex-1 items-center gap-6 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)_minmax(0,16rem)] lg:gap-8">
-          <div ref={leftRef} className="pointer-events-auto order-2 lg:order-1">
+          <div ref={leftRef} className="order-2 lg:order-1">
             <Rise inView={leftIn} as="p" className="font-sans text-[1.0625rem] font-semibold tracking-[-0.01em] text-[#f1e4d6]">
               {t.left.title}
             </Rise>
@@ -456,7 +483,7 @@ export function GraphScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
             </Rise>
           </div>
           <div ref={stageRef} className="order-1 h-[26rem] w-full lg:order-2 lg:h-full lg:min-h-[28rem]" />
-          <div ref={rightRef} className="pointer-events-auto order-3 lg:text-right">
+          <div ref={rightRef} className="order-3 lg:text-right">
             <Rise inView={rightIn} as="p" className="font-sans text-[1.0625rem] font-semibold tracking-[-0.01em] text-[#f1e4d6]">
               {t.right.title}
             </Rise>
@@ -465,7 +492,9 @@ export function GraphScene({ scrollRef }: { scrollRef: RefObject<HTMLElement | n
             </Rise>
           </div>
         </div>
-        <p className="mt-2 font-mono text-[0.75rem] uppercase tracking-[0.18em] text-[#8d8273]">{t.hint}</p>
+        <Rise inView={topIn} delay={0.9} as="p" className="mt-2 font-mono text-[0.75rem] uppercase tracking-[0.18em] text-[#8d8273]">
+          {t.hint}
+        </Rise>
       </div>
       <NodeCard cardRef={cardRef} title={card?.label ?? ""} text={card?.text ?? ""} visible={hot >= 0} />
     </section>

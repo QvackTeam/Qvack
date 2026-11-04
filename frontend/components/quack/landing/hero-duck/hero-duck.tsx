@@ -580,10 +580,32 @@ export function HeroDuck({ scrollRef, label }: { scrollRef: RefObject<HTMLElemen
       pose.time = now;
     };
 
+    let awayCleared = false;
     const draw = (now: number, dt: number) => {
       if (!sprites) return;
       const scroller = scrollRef.current;
       const away = scroller ? smoothstep(0.04, 0.55, scroller.scrollTop / Math.max(1, scroller.clientHeight)) : 0;
+      // сцена полностью рассыпалась и погасла: один раз стираем холсты и больше ничего не считаем и не рисуем
+      if (away > 0.995) {
+        if (!awayCleared) {
+          awayCleared = true;
+          for (const [cv, cx] of [
+            [canvas, ctx],
+            [back, bctx],
+            [front, fctx],
+            [nodesCv, nctx],
+          ] as const) {
+            cx.setTransform(1, 0, 0, 1, 0, 0);
+            cx.clearRect(0, 0, cv.width, cv.height);
+          }
+          for (const g of glowCtx) g?.clearRect(0, 0, canvas.width, canvas.height);
+          lastPlant = -1; // при возвращении растения нарисуются заново за один кадр
+          hit.style.pointerEvents = "none";
+        }
+        return;
+      }
+      awayCleared = false;
+      hit.style.pointerEvents = away > 0.3 ? "none" : "";
       if (!reduced) update(now, dt);
       rig.apply(pose);
 
@@ -736,7 +758,7 @@ export function HeroDuck({ scrollRef, label }: { scrollRef: RefObject<HTMLElemen
         if (!set) return true;
         const spread = away * away;
         const pc = li === 3 ? tgtF : tgtB; // цветы над уткой, всё остальное под ней
-        const a = pg.alpha * st.alpha * fade * (1 - away * 0.85);
+        const a = pg.alpha * st.alpha * fade * (1 - away);
         if (a < 0.06) return true; // почти невидимые точки не рисуем
         pc.globalAlpha = a;
         set.draw(pc, pg.shape, pg.bucket, ((cell.x + cell.dx * spread * 2) * dpr) | 0, ((cell.y + (cell.dy - duckPx * 0.3) * spread) * dpr) | 0);
@@ -832,7 +854,7 @@ export function HeroDuck({ scrollRef, label }: { scrollRef: RefObject<HTMLElemen
         const spread = Math.max(1 - p, away * away);
         const x = (cell.x + cell.dx * spread * (1 + away)) * dpr;
         const y = (cell.y + (cell.dy - duckPx * 0.3 * away) * spread) * dpr;
-        const alpha = g.alpha * Math.min(1, p * 1.4) * (1 - away * 0.85);
+        const alpha = g.alpha * Math.min(1, p * 1.4) * (1 - away);
         if (alpha <= 0.01) continue;
         ctx.globalAlpha = alpha;
         set.draw(ctx, p < 0.92 ? "dot" : g.shape, g.bucket, x, y, p < 0.92 ? 0.6 : 1);
