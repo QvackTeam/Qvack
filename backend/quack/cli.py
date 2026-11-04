@@ -9,6 +9,7 @@ import json
 import os
 import signal
 import socket
+import subprocess
 import sys
 from collections.abc import Awaitable, Callable
 from pathlib import Path

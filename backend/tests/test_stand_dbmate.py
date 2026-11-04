@@ -68,9 +68,7 @@ def _pins(text: str) -> tuple[str, str]:
 
 
 def test_dbmate_has_the_same_version_and_checksum_in_ci_image_and_dev_script() -> None:
-    pins = {
-        _pins(path.read_text(encoding="utf-8")) for path in (CI, DOCKERFILE, CT_SH)
-    }
+    pins = {_pins(path.read_text(encoding="utf-8")) for path in (CI, DOCKERFILE, CT_SH)}
     assert len(pins) == 1, pins
 
 
@@ -120,7 +118,7 @@ def test_dbmate_url_adds_sslmode_disable_only_when_the_dsn_has_none() -> None:
 def test_ops_migrate_runs_dbmate_up_on_the_migrations_directory() -> None:
     calls: list[tuple[list[str], dict[str, str]]] = []
 
-    def run(args: list[str], *, env: dict[str, str], check: bool):  # noqa: ANN202
+    def run(args: list[str], *, env: dict[str, str], check: bool):
         assert check is True
         calls.append((args, env))
         return subprocess.CompletedProcess(args, 0)
@@ -131,7 +129,7 @@ def test_ops_migrate_runs_dbmate_up_on_the_migrations_directory() -> None:
         has_alembic_schema=lambda dsn: False,
     )
 
-    (args, env), = calls
+    ((args, env),) = calls
     assert args[0] == "dbmate" and args[-1] == "up"
     assert "--no-dump-schema" in args
     directory = args[args.index("--migrations-dir") + 1]
@@ -155,7 +153,7 @@ def test_ops_migrate_refuses_a_database_with_the_alembic_schema() -> None:
 
 
 def test_ops_migrate_reports_a_failed_dbmate() -> None:
-    def run(args: list[str], *, env: dict[str, str], check: bool):  # noqa: ANN202
+    def run(args: list[str], *, env: dict[str, str], check: bool):
         raise subprocess.CalledProcessError(1, args)
 
     with pytest.raises(subprocess.CalledProcessError):
