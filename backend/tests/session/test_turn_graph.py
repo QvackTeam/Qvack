@@ -61,6 +61,7 @@ def _head(**fields: Any) -> dict[str, Any]:
         "targetSkills": ["S1"],
         "verdict_stance": None,
         "branchType": None,
+        "topicLabel": None,
         "approach": "none",
     }
     return {**base, **fields}

@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from psycopg.types.json import Jsonb
@@ -41,13 +41,14 @@ from quack.events.event_types import (
 )
 from quack.events.log import NewEvent, append_events
 from quack.events.values import AnswerSpec
-from quack.llm.labels import LabelMap
+from quack.graph.ids import QUACK_UUID_NS
+from quack.llm.labels import LabelMap, UnknownLabelError
 from quack.logging import get_logger
 from quack.practice.markup import markup_record
 from quack.practice.role_outputs import TaskCondition
 from quack.practice.task_store import get_task, insert_task_document, task_created_event
 from quack.session.elements import Element
-from quack.session.teacher_output import AgentRequest, DeadlineFromTalk, TurnMarkup
+from quack.session.teacher_output import AgentRequest, DeadlineFromTalk, TurnHead, TurnMarkup
 from quack.session.turn_graph import TurnToCommit
 
 log = get_logger(__name__)
@@ -236,6 +237,8 @@ def turn_batch(
     requests = [
         _request_record(r, labels) for r in output.p3_markup.agent_requests if _requestable(r)
     ]
+    if (split := _split_request(output.p1_head, labels, key)) is not None:
+        requests.append(split)
     deadline, deadline_events = (None, [])
     if output.p3_markup.deadline is not None:
         deadline, deadline_events = _deadline(
@@ -274,13 +277,14 @@ def turn_batch(
     ]
     for index, request in enumerate(requests):
         payload = AgentRequested(**request.model_dump())
+        # the split of a topic is keyed by the turn and the topic (WP8.2, D-B-213)
+        request_key = (
+            f"{key}:agent:topic_split:{request.params.topic_id}"
+            if request.kind == "topic_split"
+            else f"{key}:agent:{index}"
+        )
         events.append(
-            NewEvent(
-                type="agent.requested",
-                payload=payload,
-                idempotency_key=f"{key}:agent:{index}",
-                **common,
-            )
+            NewEvent(type="agent.requested", payload=payload, idempotency_key=request_key, **common)
         )
     events.extend(deadline_events)
     hint_task_id, close = None, None
@@ -513,6 +517,25 @@ def _requestable(request: AgentRequest) -> bool:
         log.warning("turn_known_check_without_topic")
         return False
     return True
+
+
+def _split_request(head: TurnHead, labels: LabelMap, key: str) -> records.AgentRequestRecord | None:
+    """`intent = split_topic` with a label of a topic of the learner's table (WP8.2, D-B-213):
+    the request `topic_split` that `agent.topic_split` answers. A missing, unknown or foreign
+    label writes nothing, the turn goes on."""
+    if head.intent != "split_topic":
+        return None
+    try:
+        topic_id = labels.resolve("topic", head.topic_label or "")
+    except UnknownLabelError:
+        log.warning("turn_split_topic_without_known_topic", label=head.topic_label)
+        return None
+    return records.AgentRequestRecord(
+        request_id=uuid5(QUACK_UUID_NS, f"{key}:topic_split:{topic_id}"),
+        kind="topic_split",
+        params=records.AgentParamsRecord(topic_id=topic_id),
+        needed_in_session=False,
+    )
 
 
 def _request_record(request: AgentRequest, labels: LabelMap) -> records.AgentRequestRecord:

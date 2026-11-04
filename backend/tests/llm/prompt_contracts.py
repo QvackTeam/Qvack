@@ -46,8 +46,8 @@ PROMPT_SCHEMAS: dict[str, type[BaseModel]] = {
 }
 
 # The roles of stream B in Phase 4 (ТЗ Ф4 §6.6). A prompt with two modes has one schema per
-# mode (`builder@1`: reconciliation and hygiene, D-B-140). The roles whose layer 2 stream C
-# writes (§7.3 п.2) are added with their prompts.
+# mode (`builder@1`: reconciliation, hygiene and split, D-B-140, D-B-213). The roles whose
+# layer 2 stream C writes (§7.3 п.2) are added with their prompts.
 PHASE4_PROMPT_SCHEMAS: dict[str, tuple[type[BaseModel], ...]] = {
     "teacher@2": (TeacherOutputV2,),
     "extractor@3": (agents.ExtractorOutputV3,),
@@ -59,7 +59,7 @@ PHASE4_PROMPT_SCHEMAS: dict[str, tuple[type[BaseModel], ...]] = {
     "task_arbiter@1": (role_outputs.TaskCheckOutput,),
     "solution_space@1": (role_outputs.SolutionSpace,),
     "analyst@1": (agents.AnalystOutput,),
-    "builder@1": (agents.BuilderOutput, agents.HygieneOutput),
+    "builder@1": (agents.BuilderOutput, agents.HygieneOutput, agents.SplitOutput),
     "misconception_describer@1": (agents.MisconceptionDescription,),
     "today_planner@1": (agents.TodayPlannerOutput,),
     "domain_classifier@1": (agents.DomainClassifierOutput,),
@@ -96,6 +96,7 @@ LABEL_FIELDS: dict[str, list[str]] = {
     "task_gen@1": ["options.catches", "tests.skill", "variant_of"],
     "teacher@2": [
         "p1_head.targetSkills",
+        "p1_head.topicLabel",
         "p3_markup.tasks.tests.skill",
         "p3_markup.tasks.variantOf",
         "p3_markup.tasks.options.misconception",
@@ -135,7 +136,13 @@ LABEL_FIELDS: dict[str, list[str]] = {
         "forecast.skill",
         "forecast.misconception",
     ],
-    "builder@1": ["items.target", "items.same_idea", "pairs.first", "pairs.second"],
+    "builder@1": [
+        "items.target",
+        "items.same_idea",
+        "pairs.first",
+        "pairs.second",
+        "parts.skills",
+    ],
     "today_planner@1": ["items.tasks"],
     "canvas_diagnoser@1": ["misconception", "root_cause"],
 }

@@ -144,6 +144,18 @@ class HygieneOutput(_Strict):
     pairs: list[DuplicateVerdict]
 
 
+class SplitPart(_Strict):
+    """One part of a split topic (Mode Split, WP8.2): its `name` and the labels of the skills
+    of the topic that go into it; a topic with a single skill gets empty `skills`."""
+
+    name: str
+    skills: list[str]
+
+
+class SplitOutput(_Strict):
+    parts: list[SplitPart]
+
+
 # --- misconception_describer@1 (Т-§9.3) ---
 
 

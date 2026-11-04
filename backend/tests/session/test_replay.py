@@ -38,6 +38,7 @@ def _turn_output(text: str) -> dict[str, Any]:
             "targetSkills": ["S1"],
             "verdict_stance": None,
             "branchType": None,
+            "topicLabel": None,
             "approach": "example_first",
         },
         "p2_body": {"blocks": [{"block_id": "b1", "text": text, "element_id": None}]},
