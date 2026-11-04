@@ -645,10 +645,12 @@ async def test_periodic_keys(jobs_db: Db) -> None:
     from quack.jobs.periodic_p4 import schedule_periodic
 
     monday = datetime(2026, 11, 2, 0, 5, tzinfo=UTC)
-    assert await schedule_periodic(jobs_db, monday) == 4
-    assert await schedule_periodic(jobs_db, monday + timedelta(hours=23)) == 0
-    assert await schedule_periodic(jobs_db, monday + timedelta(days=1)) == 3  # same week
-    keys = sorted(r["job_key"] for r in await _rows(jobs_db))
+    assert await schedule_periodic(jobs_db, monday) == 5
+    assert await schedule_periodic(jobs_db, monday + timedelta(seconds=59)) == 0  # one minute
+    assert await schedule_periodic(jobs_db, monday + timedelta(hours=23)) == 1  # sweep only
+    assert await schedule_periodic(jobs_db, monday + timedelta(days=1)) == 4  # same week
+    rows = await _rows(jobs_db)
+    keys = sorted(r["job_key"] for r in rows if r["kind"] != "session.sweep_inactive")
     assert keys == [
         "calibration:2026-45",
         "deletions-reconcile:2026-11-02",
@@ -657,4 +659,11 @@ async def test_periodic_keys(jobs_db: Db) -> None:
         "exports-cleanup:2026-11-03",
         "manifests-cleanup:2026-11-02",
         "manifests-cleanup:2026-11-03",
+    ]
+    minute = int(monday.timestamp()) // 60
+    sweeps = sorted(r["job_key"] for r in rows if r["kind"] == "session.sweep_inactive")
+    assert sweeps == [
+        f"sweep-inactive:{minute}",
+        f"sweep-inactive:{minute + 23 * 60}",
+        f"sweep-inactive:{minute + 24 * 60}",
     ]

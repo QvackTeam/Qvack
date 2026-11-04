@@ -751,3 +751,31 @@ async def test_delete_account(pg_db: Db, neo4j: AsyncDriver, settings: Settings)
     nodes_other, _ = await _graph(neo4j, other)
     assert nodes_mine == set() and nodes_other != set()
     assert await replay_deletions(pg_db, neo4j, settings, journal, store, now) == 1  # repeatable
+
+
+async def test_slice_waits_for_the_journal_of_phase_4(pg_db: Db) -> None:
+    """D-A-210: without `min_seq` the slice waits for the tail of `core.learners.seq` (`db=`);
+    a watermark behind it gives `lag_degraded`, at or past it — a plain answer."""
+    from quack.graph.slice import SliceDeps, read_consistent_slice
+
+    learner = await create_learner(pg_db)
+    domain = uuid4()
+    await append_events(
+        pg_db,
+        learner,
+        [_new("domain.created", {"domain_id": str(domain), "name": "A"}, "d", domain_id=domain)],
+    )
+
+    async def load() -> str:
+        return "slice"
+
+    def deps(applied: int) -> SliceDeps:
+        async def reader(_: UUID) -> int:
+            return applied
+
+        return SliceDeps(None, None, reader, db=pg_db)
+
+    behind = await read_consistent_slice(learner, None, load, 50, deps=deps(0))
+    assert (behind.min_seq, behind.lag_degraded) == (1, True)
+    caught_up = await read_consistent_slice(learner, None, load, 50, deps=deps(1))
+    assert (caught_up.min_seq, caught_up.lag_degraded) == (1, False)

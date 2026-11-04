@@ -25,7 +25,6 @@ from redis.asyncio import Redis
 from quack.config import Settings
 from quack.db import Db
 from quack.db.neo4j import cypher, read_session
-from quack.db.postgres import SessionFactory
 from quack.embeddings.client import EmbeddingClient
 from quack.events.values import GapType, Level
 from quack.graph.folds import retrievability
@@ -85,10 +84,6 @@ _STATUS: Final[dict[str, LevelStatus]] = {
 }
 _GAP_TYPES: Final = frozenset({"no_idea", "when_to_apply", "confusion", "execution", "slip",
                                "misconception"})  # fmt: skip
-
-
-def _no_session_factory() -> Any:
-    raise RuntimeError("the reader has no Postgres session factory")
 
 
 def _s(props: Mapping[str, Any], key: str, default: str = "") -> str:
@@ -206,7 +201,7 @@ class _Loaded:
 
 
 class Neo4jGraphReader(ExtraReads):
-    """The reader of a process over `ctx.neo4j`. `session_factory` (Postgres) lets
+    """The reader of a process over `ctx.neo4j`. `db` (Postgres) lets
     `slice_for_turn` wait for the whole journal of the learner; without it the wait target is
     the tail of the overlay (D-A-140). `clock` gives the current time in ms (retention is
     computed at read time, Т-§8.3)."""
@@ -217,7 +212,6 @@ class Neo4jGraphReader(ExtraReads):
         settings: Settings,
         *,
         learner_id: UUID | None = None,
-        session_factory: SessionFactory | None = None,
         redis: Redis | None = None,
         embedder: EmbeddingClient | None = None,
         clock: Callable[[], int] | None = None,
@@ -227,7 +221,6 @@ class Neo4jGraphReader(ExtraReads):
         self._neo4j = neo4j
         self._settings = settings
         self._bound = learner_id
-        self._session_factory = session_factory
         self._embedder = embedder
         self._redis = redis
         self._clock = clock or (lambda: int(time.time() * 1000))
@@ -238,7 +231,6 @@ class Neo4jGraphReader(ExtraReads):
             self._neo4j,
             self._settings,
             learner_id=learner_id,
-            session_factory=self._session_factory,
             redis=self._redis,
             clock=self._clock,
             db=self._db,
@@ -262,10 +254,11 @@ class Neo4jGraphReader(ExtraReads):
 
     def _deps(self) -> SliceDeps:
         return SliceDeps(
-            session_factory=self._session_factory or cast(Any, _no_session_factory),
-            redis=self._redis,
-            applied_seq_reader=self._projected_seq,
-            snapshot_read_retries=self._settings.snapshot_read_retries,
+            None,  # the journal of Phase 3 is not read here (D-A-210)
+            self._redis,
+            self._projected_seq,
+            self._settings.snapshot_read_retries,
+            db=self._db,
         )
 
     async def _stable[T](
@@ -625,7 +618,7 @@ class Neo4jGraphReader(ExtraReads):
         if overlay is not None:
             min_seq: int | None = overlay.overlay_seq
         else:
-            min_seq = None if self._session_factory is not None else 0
+            min_seq = None if self._db is not None else 0
         loaded, projected, stable, lag = await self._stable(learner_id, load, min_seq=min_seq)
         if overlay is not None:
             await self._apply_overlay(learner_id, loaded, overlay, projected)
