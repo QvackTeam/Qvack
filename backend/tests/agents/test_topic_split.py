@@ -1,6 +1,7 @@
 """`agent.topic_split`, WP8.2 (ТЗ Ф4; Т-§4.11; issue #245): a topic of several skills becomes
 `topic.split` (the biggest part keeps the id); a topic of one skill gets `topic.split` first,
-then `skill.split` (D-A-226); a repeat writes nothing; an answer that does not pass the check writes nothing. D-B-213."""
+then `skill.split` (D-A-226); a repeat writes nothing; an answer that does not pass the check
+writes nothing. D-B-213."""
 
 from __future__ import annotations
 
