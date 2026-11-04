@@ -18,7 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from quack.events.payloads import Unit
 from quack.graph.read.models import TopicDisplay, TopicRequires
-from quack.jobs.curation_p3 import CuratorMerge, CuratorOutput, CuratorPromotion
 
 __all__ = [
     "CreateDomainRequest",
@@ -165,3 +164,23 @@ class DiagnosticOutput(BaseModel):
     is_correct: bool = False
     score: Unit = 0.0
     tested_depth: Unit = 0.5
+
+
+class CuratorPromotion(BaseModel):
+    skill_id: UUID
+    topic_id: UUID
+    name: str
+    description: str = ""
+
+
+class CuratorMerge(BaseModel):
+    source_id: UUID
+    target_id: UUID
+    reason: str
+
+
+class CuratorOutput(BaseModel):
+    promotions: list[CuratorPromotion] = Field(default_factory=list)
+    skill_merges: list[CuratorMerge] = Field(default_factory=list)
+    topic_merges: list[CuratorMerge] = Field(default_factory=list)
+    misconception_merges: list[CuratorMerge] = Field(default_factory=list)

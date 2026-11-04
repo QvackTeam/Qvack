@@ -2,17 +2,16 @@
 
 - `create_app` with all routers over real Postgres, Neo4j and Redis; the LLM is a
   `ScriptedLLMProvider`, compute is `httpx.MockTransport` with scripted verdicts;
-- projector, dispatcher, job workers and scheduler run as asyncio tasks in the same event loop
+- projector, dispatcher and job workers run as asyncio tasks in the same event loop
   and stop when the test ends;
 - `await system.settle()` waits until the projector (and the dispatcher) caught up with the
   log of every learner and no claimable job is left: a deterministic sync point, not `sleep`;
 - `pause_background()` / `resume_background()` stop and start projector and workers (law 9);
-- `system.clock` is the replaceable time source of the scheduler.
 
 Wiring points owned by stream A are marked `# S-A:`. Handlers come from `quack.runtime`
-(WP2.2) and get one `JobContext` over the stand's resources (WP2.1). Until the dispatcher
-(WP11) and the scheduler (WP3.3) land, derived jobs are still enqueued in the event
-transaction and there are no periodic jobs; the e2e tests that need them stay red (§7.1).
+(WP2.2) and get one `JobContext` over the stand's resources (WP2.1). There is no scheduler of
+periodic jobs: the one of Phase 3 is removed with WP1.3 (D-A-224), the one of Phase 4 writes to
+the Phase 4 queue, which this stand does not run.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ import contextlib
 import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -44,7 +43,6 @@ from quack.events.append import append_events
 from quack.events.models import NewEvent
 from quack.graph.worker import ProjectorWorker
 from quack.jobs.dispatcher import Dispatcher
-from quack.jobs.periodic import PeriodicScheduler
 from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, JobHandler, JobRunner
 from quack.runtime import register_all_handlers
@@ -71,19 +69,6 @@ _BUSY_SQL = text(
 )
 
 
-@dataclass
-class SystemClock:
-    """Replaceable time source of the scheduler (`T-Q5`, `T-E10`)."""
-
-    now: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-    def __call__(self) -> datetime:
-        return self.now
-
-    def advance(self, seconds: float) -> None:
-        self.now += timedelta(seconds=seconds)
-
-
 @dataclass(frozen=True)
 class JobStart:
     """Stand log: a job handler started while the learner's projection stood at `applied_seq`."""
@@ -100,7 +85,7 @@ _APPLIED_SQL = text("SELECT applied_seq FROM ops.projector_offsets WHERE learner
 def job_handlers() -> dict[str, JobHandler]:
     """All job handlers, registered as the `workers` process does (WP2.2). The completeness
     check is `T-Q7`'s; here a missing handler leaves its jobs queued and the test that needs
-    them fails on its own assertion (S-A: `account.purge_deleted`, WP3.3)."""
+    them fails on its own assertion."""
     return register_all_handlers()
 
 
@@ -142,7 +127,6 @@ class System:
     redis: Redis | None
     llm: ScriptedLLMProvider
     compute: ComputeScenario
-    clock: SystemClock
     resources: AppResources
     app: FastAPI
     client: httpx.AsyncClient
@@ -175,22 +159,6 @@ class System:
             context=job_context(self.resources),
         )
         self._spawn(runner.run_forever)
-        # Scheduler of periodic jobs (WP3.3) on the stand clock (D-C-026).
-        scheduler = PeriodicScheduler(self.settings, self.session_factory, clock=self.clock)
-        self._spawn(scheduler.run_forever)
-
-    async def advance_time(self, seconds: float) -> None:
-        """Time passes for the scheduler and for the queue (D-C-026): the stand clock moves and
-        every waiting job comes `seconds` closer, as `JobRunner` claims by the database `now()`."""
-        self.clock.advance(seconds)
-        async with self.session_factory() as session, session.begin():
-            await session.execute(
-                text(
-                    "UPDATE ops.jobs SET run_after = run_after - make_interval(secs => :s) "
-                    "WHERE status = 'queued'"
-                ),
-                {"s": seconds},
-            )
 
     async def stop_background(self) -> None:
         self._stop.set()
@@ -328,7 +296,6 @@ async def build_system(
         redis=redis,
         llm=llm,
         compute=compute,
-        clock=SystemClock(),
         resources=resources,
         app=app,
         client=client,

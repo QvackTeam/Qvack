@@ -8,7 +8,6 @@ import contextlib
 import json
 import os
 import signal
-import socket
 import subprocess
 import sys
 from collections.abc import Awaitable, Callable
@@ -17,7 +16,6 @@ from typing import Any, Literal
 from uuid import UUID
 
 import structlog
-from sqlalchemy import text
 
 from quack.agents.extraction_eval import compare_reports, evaluate_extraction, load_eval_set
 from quack.config import Settings, get_settings
@@ -25,16 +23,9 @@ from quack.db import open_db
 from quack.db.neo4j import create_driver, verify_schema
 from quack.db.postgres import create_engine, create_session_factory
 from quack.db.redis import create_redis
-from quack.graph.ids import CURRENT_RULES_VERSION
-from quack.graph.neo4j_store import find_learners_with_rules
-from quack.graph.projection.rebuild import rebuild_learner as rebuild_learner_p4
+from quack.graph.projection.rebuild import rebuild_learner
 from quack.graph.projection.runner import RULES_VERSION
 from quack.graph.projection.store import stale_learners
-from quack.graph.rebuild import rebuild_learner
-from quack.graph.worker import ProjectorWorker
-from quack.jobs.dispatcher import Dispatcher, supervise
-from quack.jobs.periodic import PeriodicScheduler
-from quack.jobs.runner import JobRunner
 from quack.llm.gateway import LLMGateway
 from quack.llm.responses_client import ResponsesClient
 from quack.logging import configure_logging, get_logger
@@ -49,9 +40,7 @@ from quack.runtime import (
     JobHandlersMismatchError,
     check_handlers_complete,
     close_job_context,
-    close_projector_context,
     create_job_context,
-    create_projector_context,
     register_all_handlers,
 )
 from quack.runtime.event_registry import can_rollback, seen_pairs, write_event_registry
@@ -176,29 +165,9 @@ def _stop_event() -> asyncio.Event:
 async def _projector_tasks(settings: Settings, stop: asyncio.Event) -> int:
     """WP8.1: Neo4j schema check, then projector and dispatcher as two supervised tasks
     (WP11.1). On stop each finishes its current batch and starts no new one (Д-§6.1)."""
-    if settings.phase4_processes:  # WP1.3, D-A-200: rules@3 and the dispatcher on Db
-        from quack.runtime.phase4 import projector_process
+    from quack.runtime.phase4 import projector_process
 
-        return await projector_process(settings, stop)
-    context = create_projector_context(settings)
-    try:
-        missing = await verify_schema(context.neo4j)
-        if missing:
-            log.error("neo4j_schema_missing", missing=missing)
-            return 1
-        projector = ProjectorWorker(
-            settings, context.engine, context.session_factory, context.neo4j, context.redis
-        )
-        dispatcher = Dispatcher(settings, context.session_factory, context.redis)
-        pause = settings.dispatcher_restart_pause_s
-        log.info("projector_started")
-        await asyncio.gather(
-            supervise("projector", projector.run_forever, stop, restart_pause_s=pause),
-            supervise("dispatcher", dispatcher.run_forever, stop, restart_pause_s=pause),
-        )
-        return 0
-    finally:
-        await close_projector_context(context)
+    return await projector_process(settings, stop)
 
 
 async def _workers_tasks(settings: Settings, stop: asyncio.Event) -> int:
@@ -212,20 +181,9 @@ async def _workers_tasks(settings: Settings, stop: asyncio.Event) -> int:
         return 1
     context = await create_job_context(settings)
     try:
-        if settings.phase4_processes:  # WP1.3, D-A-200: the queue and executor on Db
-            from quack.runtime.phase4 import workers_process
+        from quack.runtime.phase4 import workers_process
 
-            return await workers_process(settings, stop, handlers=handlers, ctx=context)
-        worker_id = f"{socket.gethostname()}:{os.getpid()}:{id(stop)}"
-        runner = JobRunner(
-            settings, context.session_factory, worker_id, handlers=handlers, context=context
-        )
-        log.info("workers_started", worker_id=worker_id)
-        await asyncio.gather(
-            runner.run_forever(stop),
-            PeriodicScheduler(settings, context.session_factory).run_forever(stop),
-        )
-        return 0
+        return await workers_process(settings, stop, handlers=handlers, ctx=context)
     finally:
         await close_job_context(context)
 
@@ -261,7 +219,7 @@ async def _rebuild_each(learners: list[UUID], rebuild: Callable[[UUID], Awaitabl
     return 1 if failed else 0
 
 
-async def _rebuild_p4(settings: Settings, args: argparse.Namespace) -> int:
+async def _rebuild(settings: Settings, args: argparse.Namespace) -> int:
     """WP3.5, D-A-189: rules@3 on `Db`; `--stale-rules` is the learners of other rules."""
     if not (args.learner or args.stale_rules or args.all):
         log.error("rebuild_target_required")
@@ -278,41 +236,12 @@ async def _rebuild_p4(settings: Settings, args: argparse.Namespace) -> int:
             rows = await db.fetch_all("SELECT learner_id FROM core.learners ORDER BY learner_id")
             learners = [UUID(str(row["learner_id"])) for row in rows]
         return await _rebuild_each(
-            learners, lambda lid: rebuild_learner_p4(db, neo4j, settings, lid, redis=redis)
+            learners, lambda lid: rebuild_learner(db, neo4j, settings, lid, redis=redis)
         )
     finally:
         await redis.aclose()
         await neo4j.close()
         await db.close()
-
-
-async def _rebuild(settings: Settings, args: argparse.Namespace) -> int:
-    if settings.phase4_processes:
-        return await _rebuild_p4(settings, args)
-
-    async def run(engine, session_factory, driver, redis) -> int:
-        if args.learner:
-            learners = [UUID(args.learner)]
-        elif args.stale_rules:
-            learners = [
-                UUID(x)
-                for x in await find_learners_with_rules(driver, current=CURRENT_RULES_VERSION)
-            ]
-        elif args.all:
-            async with session_factory() as session:
-                rows = await session.execute(
-                    text("SELECT learner_id FROM core.learner_seq ORDER BY learner_id")
-                )
-                learners = [row[0] for row in rows]
-        else:
-            log.error("rebuild_target_required")
-            return 2
-        return await _rebuild_each(
-            learners,
-            lambda lid: rebuild_learner(settings, engine, session_factory, driver, redis, lid),
-        )
-
-    return await _with_resources(settings, run)
 
 
 async def _seed_learners(settings: Settings, args: argparse.Namespace) -> int:
