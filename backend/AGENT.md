@@ -38,7 +38,7 @@ Python 3.14, менеджер `uv`, pytest, ruff, pyright.
   пакеты читают только через `quack.graph.read`; циклические импорты запрещены.
 - **Ресурсы процесса** (ТЗ Ф4 §4.2) создаются один раз на процесс в `quack.runtime` и передаются явно; набор полей:
   `settings`, `db`, `neo4j`, `redis`, `llm`, `compute`, `storage`, `embeddings`, `email`, `deletions` (`engine` и
-  `session_factory` уходят с SQLAlchemy, WP1.3). Каждый внешний клиент имеет подмену в `tests/support/`; модульные
+  `session_factory` ушли с SQLAlchemy, WP1.3, D-A-234). Каждый внешний клиент имеет подмену в `tests/support/`; модульные
   переопределения запрещены. `projector` не получает ключей моделей, хранилищ и почты.
 - **LLM**: Responses API со строгой JSON Schema (`to_strict_json_schema`: без свободных словарей), один шлюз на процесс,
   семафоры по моделям, повторы, размыкатель, флаг давления по 429, роль `teacher_fallback`. Имена моделей — `Т-§1.3`

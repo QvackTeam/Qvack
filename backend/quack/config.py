@@ -768,15 +768,6 @@ class Settings(BaseSettings):
         return self
 
     @property
-    def sqlalchemy_dsn(self) -> str:
-        """POSTGRES_DSN rewritten for the SQLAlchemy asyncpg dialect."""
-        dsn = self.postgres_dsn
-        for prefix in ("postgresql+asyncpg://", "postgresql://", "postgres://"):
-            if dsn.startswith(prefix):
-                return "postgresql+asyncpg://" + dsn[len(prefix) :]
-        raise ValueError("POSTGRES_DSN must start with postgresql://")
-
-    @property
     def llm_api_key(self) -> SecretStr:
         """R4: the old name of `meta_api_key`, kept for readers not yet moved to it."""
         return self.meta_api_key

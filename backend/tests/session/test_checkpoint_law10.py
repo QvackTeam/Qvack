@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from quack.config import Settings
-from quack.events.models import StoredEvent
+from quack.events.log import StoredEvent
 from quack.session.checkpoint_render import (
     collapsed_turn_count,
     episode_lines,
@@ -35,19 +35,19 @@ class _Log:
         event = StoredEvent(
             learner_id=LEARNER,
             seq=seq,
-            event_id=UUID(int=seq),
+            id=seq,
             type=type_,
             schema_version=version,
             actor="test",
             session_id=SESSION,
-            turn_id=UUID(payload["turn_id"]) if "turn_id" in payload else None,
             domain_id=None,
             correlation_id=None,
-            causation_id=None,
+            causation_seq=None,
             idempotency_key=f"k{seq}",
             payload_hash="h",
             payload={"session_id": str(SESSION), **payload},
             occurred_at=datetime(2026, 11, 1, tzinfo=UTC),
+            source_refs=[],
         )
         self.events.append(event)
         return event

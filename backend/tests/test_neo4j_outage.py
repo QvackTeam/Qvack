@@ -10,7 +10,6 @@ from uuid import uuid4
 import httpx
 import pytest
 from neo4j.exceptions import ServiceUnavailable
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.errors import ErrorResponse
@@ -23,11 +22,8 @@ from tests.support.resources import build_app_resources
 
 
 @pytest.fixture
-async def api(
-    settings: Settings, pg_engine: AsyncEngine, pg_db: Db, redis: object
-) -> AsyncIterator[httpx.AsyncClient]:
-    # `pg_engine`: `get_current_learner_id` still reads the Phase 3 deletion mark (D-A-230).
-    resources = build_app_resources(settings, pg_engine, BrokenNeo4jDriver(), redis, db=pg_db)
+async def api(settings: Settings, pg_db: Db, redis: object) -> AsyncIterator[httpx.AsyncClient]:
+    resources = build_app_resources(settings, BrokenNeo4jDriver(), redis, db=pg_db)
     app = create_app(settings, resources=resources)
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     hooks = {"request": [login_hook(pg_db, settings)]}

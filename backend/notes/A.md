@@ -23,6 +23,63 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-A-238. WP1.3 шаг 5 ч.2: что оставлено из списка Фазы 3 и почему
+- Класс: A
+- WP / место: WP1.3; `quack/graph/projector_rows.py`, `quack/events/payloads.py`, `quack/jobs/kinds.py`, `quack/events/{actor,errors,hashing,keys}.py`
+- Контекст: задание велело снять `projector_rows.py`, «если больше нигде не нужен»; остальные модули в списке снятия не названы.
+- Решение: оставлены. `projector_rows.py` читают `tests/graph/test_projector_rows.py` и `test_projection_rules3.py` (таблица S5 из 38 типов, T-P3) и описывает `graph/projection/handlers.py`; `events/payloads.py` (модели Фазы 3: `Unit`, `ExtractedElement`, `TurnExtractedV2`, `TaskEvaluated`) импортируют `session`, `practice`, `domains`, `graph/evidence_validation.py`; `jobs/kinds.py` держит `JOB_KINDS` для `check_handlers_complete` и `JobSpec`; `actor/errors/hashing/keys` использует `events/log.py`. Снимать их — вместе с переносом `session`/`practice` на модели Фазы 4 (потоки B и C), не в этом шаге.
+- Почему: «если больше нигде не нужен» — он нужен; чужие потребители — зона B/C.
+- Обратимость: полная.
+- Тесты: нет.
+- Требует подтверждения владельцем: нет
+
+### D-A-237. WP1.3 шаг 5 ч.2: `quack/session/*` и тесты сессий — на `StoredEvent` Фазы 4
+- Класс: A (правка зоны B по §7.3 п.1, только замена Фазы 3 на Фазу 4)
+- WP / место: WP1.3; `quack/session/checkpoint_render.py`, `quack/session/extraction.py`, `tests/session/test_checkpoint_law10.py`, `tests/session/test_extraction_v2.py`, `tests/graph/test_profile_fold.py`
+- Контекст: `StoredEvent` Фазы 4 (`quack.events.log`) не имеет `event_id`, `turn_id`, `causation_id`; есть `id` (int), `causation_seq`, `source_refs`. Каталога Фазы 3 нет, а `turn.extracted` v2 в реестре Фазы 4 не зарегистрирован (у Фазы 4 — `observation.extracted`; перенос извлечения — задача B).
+- Решение: импорт `StoredEvent` из `quack.events.log`. `checkpoint_render._turn_id` читал `payload.get("turn_id", event.turn_id)` — в конверте Фазы 4 `turn_id` нет, теперь только `payload.get("turn_id")` (оба тестовых журнала кладут `turn_id` в payload). Тесты строят событие по полям Фазы 4 (`id=seq`, `causation_seq=None`, `source_refs=[]`). В `test_extraction_v2` проверка `validate_payload("turn.extracted", …, 2)` заменена на `TurnExtractedV2.model_validate(payload.model_dump(mode="json"))`: каталога Фазы 3 нет, модель та же, строгость та же (`extra="forbid"`), `isinstance` избыточен.
+- Почему: Д-§7.3 п.1 ТЗ Ф4; красная линия 5 (утверждения не ослаблены).
+- Обратимость: полная.
+- Тесты: `tests/session/test_checkpoint_law10.py`, `test_extraction_v2.py`, `tests/graph/test_profile_fold.py` — зелёные.
+- Требует подтверждения владельцем: нет (ревью B: `_turn_id` и замена проверки `turn.extracted`)
+
+### D-A-236. WP1.3 шаг 5 ч.2: `pg_engine` не нужен — `get_current_learner_id` на сессии `Db` (D-A-230 закрыта)
+- Класс: A
+- WP / место: WP1.3; `tests/test_neo4j_outage.py`, `tests/test_learner_stream.py`, `tests/test_api_llm_provider.py`, `tests/domains/conftest.py`, `tests/session/*`
+- Контекст: D-A-230 оставила `pg_engine` в маршрутных тестах, пока `get_current_learner_id` читает пометку удаления Фазы 3. Сейчас он читает cookie-сессию `core.auth_sessions` через `Db` (`quack/api/auth.py`, WP18.3; удалённый ученик удаляется физически вместе с сессиями), пометки Фазы 3 нет.
+- Решение: из `build_app_resources(...)`, `build_job_context(...)` и фикстур убраны `pg_engine`, `db` (SessionFactory), `session_factory=`, `engine=`; `test_api_llm_provider` без `usefixtures("pg_engine")` (пул `Db` API открывается без ожидания). Построители `tests/support/resources.py` принимают ровно `(settings, neo4j, redis, *, db=…)`, шим «снятых аргументов» убран; AST-проверка всех вызовов в `tests/` — ни одного лишнего аргумента. `tests/support/auth.py` не реэкспортирует `ensure_user`.
+- Почему: WP1.3, T-DB3.
+- Обратимость: полная.
+- Тесты: `tests/session`, `tests/domains`, `tests/test_learner_stream.py`, `tests/test_neo4j_outage.py`, `tests/test_api_llm_provider.py`, `tests/test_app_assembly.py` — зелёные.
+- Требует подтверждения владельцем: нет
+
+### D-A-235. WP1.3 шаг 5 ч.2: фикстуры и помощники Фазы 3 в тестах сняты
+- Класс: A
+- WP / место: WP1.3, T-DB3; `tests/conftest.py`, `tests/support/phase3_pg.py`, `tests/support/phase3_events.py`, `tests/factories.py`, `tests/scenario.py`
+- Контекст: после переноса тестов (D-A-227…232, PR C #254) фикстуры `pg_engine`, `db` и построители событий Фазы 3 (`EventLog`, `new_event`, `sample_payloads`) никто не запрашивает.
+- Решение: `pytest_plugins = ["tests.db.fixtures"]`; `phase3_pg.py`, `phase3_events.py`, `factories.py` и `scenario.py` (история «из 36 типов» поверх `EventLog`, `build_scenario` нигде не вызывается) удалены. Имя базы `<test db>_p4` оставлено (его держат `tests/db/fixtures.py`, `tests/jobs/conftest.py`).
+- Почему: §8.15 п.1; их единственный потребитель — снятый код.
+- Обратимость: полная (git).
+- Тесты: ссылок на снятые имена нет (AST-скан `imports.py` пуст).
+- Требует подтверждения владельцем: нет
+
+### D-A-234. WP1.3 шаг 5 ч.2: снят код Фазы 3 и зависимости SQLAlchemy, asyncpg, Alembic
+- Класс: A
+- WP / место: WP1.3, T-DB3; `quack/{graph,jobs,events,db,runtime}`, `quack/config.py`, `migrations/`, `alembic.ini`, `pyproject.toml`, `uv.lock`, `TESTS.md`
+- Контекст: STATUS.md §5, поток A, п.1: после PR C с тестами (#254) потребителей Фазы 3 в коде не осталось, кроме перечисленных ниже.
+- Решение: удалены `graph/{worker,projector,phase_a}.py`, `jobs/{dispatcher,dispatcher_rules,queue}.py`, `events/{append,reader,catalog,projections,models}.py`, `db/{postgres,locks}.py`, `migrations/` (Alembic), `alembic.ini`. `jobs/runner.py`: `JobRunner` снят, остались `JobContext` (без `engine` и `session_factory`), `JobHandler`, `JOB_HANDLERS`, `register_job_handler`; `ClaimedJob` — из `quack.jobs.types`. `supervise` перенесён в `runtime/phase4.py`. `runtime/__init__.py`: `create_job_context` и `close_job_context` без engine. `graph/overlay.py`: оставлены `SessionOverlay`, `TaskEvaluationView`, `HintView` (поля `SessionOverlay` на них ссылаются), `events` — `StoredEvent` Фазы 4; `apply_overlay_events` и `build_session_overlay` сняты, наложение на `rules@3` — отдельная задача (WP2.3/WP3.4), не сделано. `graph/slice.py`: `SliceDeps(redis, applied_seq_reader, snapshot_read_retries=3, *, db=None)` без `session_factory`, хвост журнала — только по `db` (без `db` и без `min_seq` — `RuntimeError`). `events/__init__.py` экспортирует `NewEvent`, `StoredEvent`, `append_events` из `events/log.py`; `jobs/__init__.py` — `ClaimedJob`, `JobSpec`, `JobDeferred`, `JobFailedPermanently` из `jobs/types.py`. `config.py`: снято только свойство `sqlalchemy_dsn` (зона C). Из `pyproject.toml` сняты `sqlalchemy`, `asyncpg`, `alembic` (и `migrations` из `pyright.include`), `uv lock` снял ещё `mako`. `TESTS.md`: строки B1, B2 убраны, абзац после таблицы B и категория P переписаны.
+- Почему: STATUS.md §5 п.1; T-DB3; `Т-§0.4.4`.
+- Обратимость: полная (git).
+- Тесты: `uv run python imports.py` — пусто; `tests/{jobs,events,db,graph,session,domains,review,agents,practice,canvas,artifacts,materials,auth,storage,llm,e2e,embeddings}`, `tests/test_{contracts,route_registry,dispatcher,worker_and_ops,jobs_phase3,learner_stream,neo4j_outage,app_assembly,infra,session_overlay}.py` в контейнере K=7 — зелёные; два теста, которым нужен корень репозитория (`test_stand_dbmate`, `embeddings/test_modal_client`), в контейнере не проходят и до этого (см. `TESTS.md` §2), локально зелёные.
+- Правки тестов (§8.15): тестовых функций в этом шаге не удалено (их снятие — D-A-227…232). Удалены помощники без потребителей:
+  | Файл | Что удалено | Эквивалент Фазы 4 |
+  | :-- | :-- | :-- |
+  | `tests/support/phase3_pg.py` | `pg_engine`, `db`, `ensure_user`, `_migrate` (Alembic) | `pg_db`, `p4_db`, `create_learner` (`tests/db/fixtures.py`) |
+  | `tests/support/phase3_events.py`, `tests/factories.py` | `EventLog`, `new_event`, `sample_payloads`, `uid` | `tests/events/samples.py::sample_payload`, `NewEvent` из `quack.events.log` |
+  | `tests/scenario.py` | `build_scenario` (история на `EventLog`, не вызывалась) | `tests/graph/test_projection_batches.py` (скрипты событий `rules@3`) |
+  Изменены без снятия утверждений: `tests/jobs/test_job_context.py` (поля `JobContext` без `engine`, `session_factory`; порядок закрытия без `engine`), `tests/graph/test_projection_runner.py`, `tests/test_session_overlay.py` (`SliceDeps` без `session_factory`), `tests/session/test_turn_source.py` (поле `session_factory` макета ресурсов).
+- Требует подтверждения владельцем: нет
+
 ### D-A-233. WP3.4: ошибки бюджета обработчика в исполнителе Фазы 4 (шов S3)
 - Класс: A
 - WP / место: WP3.4, Т-§13.2; `quack/jobs/executor_p4.py`

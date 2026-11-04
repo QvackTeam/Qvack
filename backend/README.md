@@ -91,7 +91,7 @@ docker run -d --name quack-test-redis -p 56379:6379 redis:7
 
 Override with `QUACK_TEST_POSTGRES_DSN`, `QUACK_TEST_NEO4J_URI`, `QUACK_TEST_NEO4J_USER`,
 `QUACK_TEST_NEO4J_PASSWORD`, `QUACK_TEST_REDIS_URL`. The test session drops and re-creates
-the `auth`, `core`, `ops` schemas through the Alembic migration. One `pytest` per set of
+the `core`, `content`, `ops` schemas of the `_p4` database through the dbmate migrations. One `pytest` per set of
 containers at a time. `tests/e2e/` is the end-to-end stand (`T-E1`…`T-E10`): one application,
 projector, dispatcher, executors and scheduler in the test process.
 

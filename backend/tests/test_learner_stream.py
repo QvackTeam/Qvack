@@ -12,7 +12,6 @@ import orjson
 import pytest
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.config import Settings
@@ -87,7 +86,6 @@ async def _applied(pg_db: Db, learner: UUID, seq: int) -> None:
 
 async def test_learner_stream(
     stream_settings: Settings,
-    pg_engine: AsyncEngine,
     pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
@@ -100,7 +98,7 @@ async def test_learner_stream(
     await _p4_events(pg_db, learner, 3)
     await _applied(pg_db, learner, 2)  # last_seq 3, applied 2
 
-    resources = build_app_resources(stream_settings, pg_engine, neo4j, redis, db=pg_db)
+    resources = build_app_resources(stream_settings, neo4j, redis, db=pg_db)
     app = create_app(stream_settings, resources=resources)
     channel = projector_applied_channel(learner)
     topic = uuid4()
@@ -127,14 +125,13 @@ async def test_learner_stream(
 
 async def test_learner_stream_polls_without_redis(
     stream_settings: Settings,
-    pg_engine: AsyncEngine,
     pg_db: Db,
     neo4j: AsyncDriver,
 ) -> None:
     """T-H4 (broken Redis): the mark is polled in `ops.projector_offsets.seq`; an event only
     when `applied_seq` grows, without topics."""
     learner, headers = await _p4_learner(pg_db, stream_settings)
-    resources = build_app_resources(stream_settings, pg_engine, neo4j, BrokenRedis(), db=pg_db)
+    resources = build_app_resources(stream_settings, neo4j, BrokenRedis(), db=pg_db)
     app = create_app(stream_settings, resources=resources)
     async with (
         _client(app) as client,
@@ -154,7 +151,6 @@ async def test_learner_stream_polls_without_redis(
 
 async def test_learner_stream_keepalive(
     stream_settings: Settings,
-    pg_engine: AsyncEngine,
     pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
@@ -162,7 +158,7 @@ async def test_learner_stream_keepalive(
     """WP6.3 for this stream: a silent channel sends `: ping` comments every `sse_keepalive_s`."""
     cfg = stream_settings.model_copy(update={"sse_keepalive_s": 0.2})
     learner, headers = await _p4_learner(pg_db, cfg)
-    resources = build_app_resources(cfg, pg_engine, neo4j, redis, db=pg_db)
+    resources = build_app_resources(cfg, neo4j, redis, db=pg_db)
     async with (
         _client(create_app(cfg, resources=resources)) as client,
         client.stream("GET", "/v1/learner/stream", headers=headers) as r,
@@ -176,12 +172,11 @@ async def test_learner_stream_keepalive(
 
 async def test_learner_stream_requires_token(
     stream_settings: Settings,
-    pg_engine: AsyncEngine,
     pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
 ) -> None:
-    resources = build_app_resources(stream_settings, pg_engine, neo4j, redis, db=pg_db)
+    resources = build_app_resources(stream_settings, neo4j, redis, db=pg_db)
     async with _client(create_app(stream_settings, resources=resources)) as client:
         response = await client.get("/v1/learner/stream")
     assert response.status_code == 401
@@ -212,7 +207,6 @@ async def _p4_change(pg_db: Db, learner: UUID, redis: Redis | None, type_: str) 
 
 async def test_learner_stream_reports_artifacts_and_materials(
     stream_settings: Settings,
-    pg_engine: AsyncEngine,
     pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
@@ -223,7 +217,7 @@ async def test_learner_stream_reports_artifacts_and_materials(
     learner = await create_learner(pg_db)
     headers = session_cookie(await session_token(pg_db, learner, stream_settings))
     await _p4_change(pg_db, learner, None, "material.parsed")  # before the stream
-    resources = build_app_resources(stream_settings, pg_engine, neo4j, redis, db=pg_db)
+    resources = build_app_resources(stream_settings, neo4j, redis, db=pg_db)
     app = create_app(stream_settings, resources=resources)
     async with (
         _client(app) as client,
@@ -240,7 +234,6 @@ async def test_learner_stream_reports_artifacts_and_materials(
 
 async def test_learner_stream_forwards_jobs_changed(
     stream_settings: Settings,
-    pg_engine: AsyncEngine,
     pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
@@ -250,7 +243,7 @@ async def test_learner_stream_forwards_jobs_changed(
     and a plain signal after it still reads the log."""
     learner = await create_learner(pg_db)
     headers = session_cookie(await session_token(pg_db, learner, stream_settings))
-    resources = build_app_resources(stream_settings, pg_engine, neo4j, redis, db=pg_db)
+    resources = build_app_resources(stream_settings, neo4j, redis, db=pg_db)
     app = create_app(stream_settings, resources=resources)
     session_id = uuid4()
     async with (
@@ -271,14 +264,13 @@ async def test_learner_stream_forwards_jobs_changed(
 
 async def test_learner_stream_reports_changes_without_redis(
     stream_settings: Settings,
-    pg_engine: AsyncEngine,
     pg_db: Db,
     neo4j: AsyncDriver,
 ) -> None:
     """ТЗ Ф4 §4.8 (broken Redis): the change events arrive by polling."""
     learner = await create_learner(pg_db)
     headers = session_cookie(await session_token(pg_db, learner, stream_settings))
-    resources = build_app_resources(stream_settings, pg_engine, neo4j, BrokenRedis(), db=pg_db)
+    resources = build_app_resources(stream_settings, neo4j, BrokenRedis(), db=pg_db)
     app = create_app(stream_settings, resources=resources)
     async with (
         _client(app) as client,
@@ -292,7 +284,6 @@ async def test_learner_stream_reports_changes_without_redis(
 
 async def test_learner_stream_reports_revised_verdicts(
     stream_settings: Settings,
-    pg_engine: AsyncEngine,
     pg_db: Db,
     neo4j: AsyncDriver,
 ) -> None:
@@ -315,7 +306,7 @@ async def test_learner_stream_reports_revised_verdicts(
     await append_events(
         pg_db, learner, [event("verdict.recorded", {"answer_seq": judged.seq, **verdict})]
     )
-    resources = build_app_resources(stream_settings, pg_engine, neo4j, BrokenRedis(), db=pg_db)
+    resources = build_app_resources(stream_settings, neo4j, BrokenRedis(), db=pg_db)
     app = create_app(stream_settings, resources=resources)
     async with (
         _client(app) as client,

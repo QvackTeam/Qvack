@@ -1,9 +1,9 @@
 """Postgres of Phase 4 for tests (ТЗ Ф4 WP1.1–1.2; Phase 4 decision D-A-103).
 
-Until the old stack goes away (WP1.3), Phase 4 tables live in a separate database
-`<test db>_p4` on the same server, migrated by dbmate from `backend/db/migrations/`. The
-Alembic database of Phases 1–3 stays as it is for the old tests. The fixtures are registered
-once in `tests/conftest.py` (`pytest_plugins`), so every test directory can request them.
+Phase 4 tables live in a separate database `<test db>_p4` on the same server, migrated by
+dbmate from `backend/db/migrations/` (the Alembic database of Phases 1–3 went away in WP1.3,
+D-A-234; the name stays). The fixtures are registered once in `tests/conftest.py`
+(`pytest_plugins`), so every test directory can request them.
 `pg_db` gives a `Db` over a database with every Phase 4 table truncated;
 `create_learner(db)` inserts a `core.learners` row (append_events needs it, Т-§2.3).
 """

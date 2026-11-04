@@ -254,7 +254,6 @@ class Neo4jGraphReader(ExtraReads):
 
     def _deps(self) -> SliceDeps:
         return SliceDeps(
-            None,  # the journal of Phase 3 is not read here (D-A-210)
             self._redis,
             self._projected_seq,
             self._settings.snapshot_read_retries,

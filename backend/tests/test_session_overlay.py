@@ -24,7 +24,7 @@ def _deps(redis: Redis | None, applied: dict[str, int]) -> SliceDeps:
     async def reader(learner_id: UUID) -> int:
         return applied.get(str(learner_id), 0)
 
-    return SliceDeps(session_factory=None, redis=redis, applied_seq_reader=reader)
+    return SliceDeps(redis=redis, applied_seq_reader=reader)
 
 
 async def test_slice_returns_immediately_when_caught_up(redis: Redis) -> None:

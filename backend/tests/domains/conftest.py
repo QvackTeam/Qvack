@@ -11,13 +11,11 @@ import pytest
 from fastapi import FastAPI
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.resources import AppResources
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from tests.db.fixtures import create_learner
 from tests.support.auth import session_token
 from tests.support.resources import build_app_resources
@@ -32,14 +30,12 @@ def tracer() -> RecordingTracer:
 @pytest.fixture
 def resources(
     settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
     tracer: RecordingTracer,
 ) -> AppResources:
-    built = build_app_resources(settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db)
+    built = build_app_resources(settings, neo4j, redis, db=pg_db)
     built.llm.tracer = tracer
     return built
 

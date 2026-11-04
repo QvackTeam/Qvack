@@ -59,7 +59,7 @@ scripts/dev/ct.sh K
 
 Категории:
 - **A** — контрактные и интеграционные тесты Фазы 4 из §8 (`T-…`) и их основа: оставить.
-- **P** — свойство остаётся (§8.15 п.2): оставить; тест сейчас ещё засевает данные через SQLAlchemy (`db`, `pg_engine`, `SessionFactory`) и переносится на `Db` при WP1.3 с тем же утверждением.
+- **P** — свойство остаётся (§8.15 п.2): оставить; тест перенесён на `Db` (`pg_db`) с тем же утверждением (WP1.3).
 - **S** — стенды, подмены, `compose`, нагрузочный сценарий, операции: оставить.
 - **X** — `tests/e2e/**` и `tests/test_app_assembly.py`: этим разбором не трогаются (их правит другой агент).
 - **B** — код Фазы 3, который заменяет Фаза 4: **снимается вместе с кодом** (WP1.3 и удаление маршрутов), сейчас не удаляется.
@@ -94,7 +94,7 @@ scripts/dev/ct.sh K
 
 | Файлы | Что остаётся | Что снимается при переносе |
 | :-- | :-- | :-- |
-| `test_infra.py` | замки, схема Neo4j, клиент compute, формат ошибок, `/healthz`, SSE, CLI, журнал | `migration_creates_contract_indexes` (Alembic → `T-DB1`); `fts_index_query_finds_text_events` — **после** появления `T-DB6` (его ещё нет) |
+| `test_infra.py` | замки, схема Neo4j, клиент compute, формат ошибок, `/healthz`, SSE, CLI, журнал | `migration_creates_contract_indexes` (→ `T-DB1`); `fts_index_query_finds_text_events` — **после** появления `T-DB6` (его ещё нет) |
 | `test_jobs_phase3.py` | `T-Q7` (`all_job_kinds_have_handlers`, `worker_exits_with_code_1…`), давление (`pressure_flag…`), `product_code_uses_context_resources`, `purge_job_removes_learner_completely` (до WP25) | 8 тестов старой очереди: `claim_waits_for_projection`, `coalesce_keeps_max_required_seq`, `coalesced_cheatsheet_job…`, `job_deferred_*`, `budget_errors…`, `periodic_scheduler…`, `worker_graceful_shutdown…`, `requeue_on_shutdown…` → `jobs/test_queue_p4.py`, `test_executor_p4.py` |
 | `test_jobs_and_llm_gateway.py`, `test_llm_runtime.py` | шлюз, бюджеты, повторы, размыкатель, строгие схемы, реестр промптов | 15 тестов очереди `ops.jobs` на SQLAlchemy (`claim`, `coalesce`, `lock_key`, `retry/DLQ`, `reaper`) → `jobs/test_queue_p4.py`; `ops.llm_ledger` уходит с таблицей |
 | `test_learner_stream.py`, `test_ops_phase3.py`, `test_neo4j_outage.py`, `test_api_llm_provider.py`, `test_ratelimit.py`, `test_settings_meta_api.py` | `T-H4`, `T-O1`–`T-O6`, `T-H1`, лимитёр, секреты по ролям | только способ засева |
@@ -119,8 +119,6 @@ scripts/dev/ct.sh K
 
 | № | Код Фазы 3, который уходит | Тесты (файлы → тестов) | Чем заменено | Условие |
 | :-- | :-- | :-- | :-- | :-- |
-| B1 | `quack/events/{append,catalog,event_types,payloads,projections}.py` — журнал на SQLAlchemy, каталог из 36 типов | `test_events_and_append.py` → 143 | `events/test_catalog.py` (`T-EV1`–`T-EV5`), `db/test_append_events.py` (`T-DB5`, 8 тестов — прямые двойники: `append_assigns_monotonic_gapless_seq`, `append_stores_envelope_and_hash`, `idempotent_retry…`, `idempotency_conflict…`, `mixed_batch…`, `invalid_payload…`, `event_types_seen…`, `concurrent_appends…`) | WP1.3: пока Фаза 3 пишет события через `append_events` на SQLAlchemy |
-| B2 | проектор `rules@2`: `quack/graph/{projector,phase_a,worker,rebuild,overlay,memory,neo4j_store}.py` | `test_projector_determinism.py` 19, `test_projector_properties.py` 1, `test_worker_and_ops.py` 8, `test_session_overlay.py` 8 → 36 | `graph/test_projection_*` (`T-P1`–`T-P7`), `graph/test_read_neo4j_core.py` (watermark, оверлей), `jobs/test_executor_p4.py` (повтор задач) | WP3 включён в рантайм, `cli rebuild` на `rules@3`; `replay_failed_job` — вместе с `ops.dlq` |
 | B3 | свёртки Ф3 (`p_mastery`, пять `display_state`): `quack/graph/{folds,evidence_weights}.py` | `test_skill_and_topic_folds.py` → 50 | `graph/test_skill_fold.py` (`T-F*`, `T-MS1`, `T-TH*`), `graph/test_profile_fold.py` | `graph/read/skill_state.py` и `neo4j_reader.py` ещё импортируют `folds` — снимать после перевода чтения |
 | B4 | диспетчер Ф3: `quack/jobs/{dispatcher,dispatcher_rules,runner}.py` | `test_dispatcher.py` → 10 | `jobs/test_dispatcher_p4.py` (`T-D1`–`T-D4`), `jobs/test_rules_p4.py` | WP7 включён; `dispatcher_crash_does_not_stop_projector` проверить против `T-D8` при снятии |
 | B5 | диагностика и `graph.curate`: `quack/domains/{diagnostic,curation}.py` | `domains/test_diag_{idempotency,open_and_bank,state_from_events,wakeup}.py` 30, `test_curation_{keys_and_actor,slice_and_pool,thresholds}.py` 4 → 34 | §8.15 п.1 («диагностика»); гигиена графа — `agents/test_hygiene.py` (`T-AG4`) | маршруты `diagnostic/*` убраны из `T-A1` |
@@ -128,7 +126,7 @@ scripts/dev/ct.sh K
 | B7 | жизненный цикл сессий на SQLAlchemy (`core.sessions`), `GET /sessions/{id}/events` | `session/test_{session_lifecycle,session_finish_and_sweep,lifecycle_fixes,session_lock_order,session_events_stream}.py` → 18 | `session/test_sessions_db.py` (старт, пульс, конец, подметание), `test_learner_stream.py` (`T-H4`) | `finish` и `heartbeat` — проверить, что `test_sessions_db` закрывает присутствие и очередь итога |
 | B8 | заметки Markdown, шпаргалка темы, `tasks/next|hint|submit` Ф3: `quack/artifacts/{notes,cheatsheets,practice,store}.py` | `artifacts/test_{artifacts_search_export,artifact_isolation,practice_engine}.py` → 14 | `artifacts/test_documents_wp23.py` (изоляция: `other_learner_sees_nothing`), `test_cards_wp23.py`, `practice/test_*` (`T-CH*`, `T-TK*`); общая изоляция — `T-E3` | маршруты `notes`, `cheatsheet`, `tasks/*` убраны из `T-A1` |
 
-После снятия B и переноса P: в `tests/**`, `quack/**`, `loadtest/**` нет `sqlalchemy`, `asyncpg`, `alembic` (`T-DB3`, G4); `conftest.py` теряет `pg_engine`, `db`, `_migrate`.
+Строки B1 (журнал и каталог Фазы 3) и B2 (проектор `rules@2`) сняты вместе с кодом в WP1.3 шаг 5 ч.2 (D-A-234): в `tests/**`, `quack/**`, `loadtest/**` нет `sqlalchemy`, `asyncpg`, `alembic` (`T-DB3`), `conftest.py` не содержит `pg_engine`, `db`, `_migrate`.
 
 ## 5. Удалено сейчас (C)
 

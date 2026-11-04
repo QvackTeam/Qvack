@@ -226,7 +226,7 @@ async def test_internal_status_serves_the_report_of_ops_status(
 
     app: FastAPI = create_app(
         settings,
-        resources=build_app_resources(settings, None, neo4j, redis, db=pg_db),
+        resources=build_app_resources(settings, neo4j, redis, db=pg_db),
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:

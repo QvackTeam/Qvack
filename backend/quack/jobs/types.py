@@ -1,6 +1,6 @@
 """Types of a job shared by the queue, the executor and the handlers (WP1.3, D-A-216).
 
-They outlive the Phase 3 queue (`quack/jobs/queue.py`, removed in WP1.3 step 5): handlers of
+They outlived the Phase 3 queue (`quack/jobs/queue.py`, removed in WP1.3, D-A-234): handlers of
 every stream import them from here.
 """
 
