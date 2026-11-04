@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { topicState } from "@/lib/api/adapters";
+import { studyCardsFromApi } from "@/lib/api/cards";
 import { ApiError, get, idem, post, type S } from "@/lib/api/client";
 import { useData } from "@/lib/api/data";
 import { type Intent, startSession } from "@/lib/api/sessions";
@@ -11,12 +12,12 @@ import { useT } from "@/lib/i18n/provider";
 import { cn } from "@/lib/utils";
 import { useShell } from "../app-shell";
 import { ArtifactHost, ExpandableCard, type WindowSpec } from "../artifact-window";
+import { DeckCard, DeckViewer } from "../artifact-content";
 import { Crumbs, MemoryRing, PageFrame, PageSection, PILL, TEXT_BTN } from "../page-parts";
 import { useErrorText } from "./error-text";
 import { Markdown, plainText } from "./markdown";
 
 type Block = { block_id: string; kind: string; content: string };
-type Card = { card_id: string; kind: string; prompt: string };
 type Loaded = {
   topic: S["TopicView"];
   /** notes of the topic as blocks (`GET /v1/topics/{id}/notes`) */
@@ -129,18 +130,19 @@ export function TopicLive({ id }: { id: string }) {
   };
 
   // the documents of the page: notes (blocks), cards (prompts), the cheat sheet of the hub
-  type Doc = { key: string; title: string; kind: "note" | "cheatsheet" | "cards"; text: string };
+  type Doc = { key: string; title: string; kind: "note" | "cheatsheet"; text: string };
   const joined = (blocks: Block[]) => blocks.map((b) => b.content).join("\n\n");
   const docs: Doc[] = [];
   if (data.cheat && data.cheat.blocks.length) docs.push({ key: data.cheat.artifact_id, title: tx.stubs.library.kinds.cheatsheet, kind: "cheatsheet", text: joined(data.cheat.blocks as Block[]) });
   if (data.notes && data.notes.blocks.length) docs.push({ key: data.notes.artifact_id, title: tx.stubs.note.title, kind: "note", text: joined(data.notes.blocks as Block[]) });
-  if (data.cards && data.cards.cards.length) docs.push({ key: data.cards.artifact_id, title: t.cardsTitle, kind: "cards", text: (data.cards.cards as Card[]).map((c) => `- ${c.prompt}`).join("\n") });
+  // the cards are a deck: the stack on the page, the list and the review in its window (the same as on mocks)
+  const deck = data.cards ? studyCardsFromApi(data.cards) : [];
 
   const windows: Record<string, WindowSpec> = {};
   for (const d of docs) {
     windows[`a-${d.key}`] = {
       title: d.title,
-      meta: d.kind === "cheatsheet" ? tx.stubs.library.kinds.cheatsheet : d.kind === "note" ? tx.stubs.library.kinds.note : t.cardsTitle,
+      meta: d.kind === "cheatsheet" ? tx.stubs.library.kinds.cheatsheet : tx.stubs.library.kinds.note,
       actions:
         d.kind === "note" ? (
           <Link href={`/notes/${topic.topic_id}`} className={TEXT_BTN}>
@@ -149,6 +151,9 @@ export function TopicLive({ id }: { id: string }) {
         ) : undefined,
       body: <Markdown text={d.text} />,
     };
+  }
+  if (deck.length) {
+    windows.cards = { title: tx.topic.cards, meta: tx.topic.cardsMeta(deck.length, topic.name), body: <DeckViewer cards={deck} /> };
   }
 
   return (
@@ -210,7 +215,7 @@ export function TopicLive({ id }: { id: string }) {
         </PageSection>
 
         <PageSection id="topic-artifacts" title={tx.topic.artifacts}>
-          {docs.length === 0 ? (
+          {docs.length === 0 && deck.length === 0 ? (
             <p className="text-paper-dim">{tx.topic.noNotes}</p>
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
@@ -222,6 +227,7 @@ export function TopicLive({ id }: { id: string }) {
                   </span>
                 </ExpandableCard>
               ))}
+              {deck.length > 0 && <DeckCard cards={deck} />}
             </div>
           )}
           {data.hubId && (

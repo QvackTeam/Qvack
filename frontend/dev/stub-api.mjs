@@ -319,7 +319,19 @@ data: ${JSON.stringify({ applied_seq: S.seq })}
       return blocks ? json(res, 200, { artifact_id: id("a-notes-" + hit.t.key), kind: "notes", topic_id: g[1], hub_id: null, version: 1, blocks }) : err(res, "NOT_FOUND", 404, "no notes yet");
     }
     if (hit.t.state === "not_tested") return err(res, "NOT_FOUND", 404, "no cards yet");
-    return json(res, 200, { artifact_id: id("a-cards-" + hit.t.key), topic_id: g[1], version: 1, cards: (hit.t.skills ?? []).map((s, i) => ({ card_id: id(`c-${hit.t.key}-${i}`), kind: "recall", prompt: `Explain in your own words: ${s.toLowerCase()}.` })) });
+    // like the backend: {card_id, kind, prompt, owner}; the answer stays in the task behind the card and the API does not show it.
+    // STUB_CARD_ANSWERS=1 adds an `answer` to every card, to see how the deck looks when the back of a card is known
+    const KINDS = ["definition", "sign_to_method", "distinction", "against_misconception"];
+    const ask = {
+      definition: (n) => `Define: ${n}.`,
+      sign_to_method: (n) => `What in a problem tells you to reach for "${n}"?`,
+      distinction: (n) => `How is "${n}" different from what it is usually mistaken for?`,
+      against_misconception: (n) => `What is the usual mistake with "${n}", and why is it wrong?`,
+    };
+    const skills = hit.t.skills?.length ? hit.t.skills : [hit.t.name];
+    const withAnswers = process.env.STUB_CARD_ANSWERS === "1";
+    const cards = skills.flatMap((sk, i) => [KINDS[i % 4], KINDS[(i + 2) % 4]].map((kind, j) => ({ card_id: id(`c-${hit.t.key}-${i}-${j}`), kind, prompt: ask[kind](sk), owner: "system", ...(withAnswers ? { answer: hit.t.about || hit.t.simple || hit.t.line } : {}) })));
+    return json(res, 200, { artifact_id: id("a-cards-" + hit.t.key), topic_id: g[1], version: 1, cards });
   }
   if ((g = p.match(/^\/v1\/hubs\/([^/]+)\/cheatsheet$/))) {
     const hit = hubById(g[1]);
