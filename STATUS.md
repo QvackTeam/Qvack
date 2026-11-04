@@ -201,7 +201,7 @@
 6. **WP16.7, хвост** — регистрация команды оценки извлечения `agents/extraction_eval.py` (C, S15); выгрузка наборов LangSmith — оператор.
 7. **WP8.3 со стороны B** — `db=ctx.db` в читатель при первом отчёте «до и после» (issue #190); Q-A-4.
 8. **WP2.3 / WP3.4, наложение сессии** — подключено в `session/turn_source.py` (D-B-215, #260).
-9. **WP12.5 / WP20.2, задачи семинара** — функция B: принять `seminar_tasks` из разбора материала, разметить, записать `task.created {source: material}` (D-B-217, #271); обработчик `second_opinion.diagnosis` — C.
+9. **WP12.5 / WP20.2, задачи семинара** — функция B готова: `quack.practice.seminar_tasks.create_seminar_task` (D-B-218, #271); вызов из `material.parse` — C; обработчик `second_opinion.diagnosis` — C.
 
 ### Поток C
 
