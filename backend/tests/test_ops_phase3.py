@@ -23,12 +23,10 @@ from quack.db import Db
 from quack.db.postgres import SessionFactory
 from quack.db.redis import llm_circuit_key, llm_pressure_key
 from quack.events import append_events
-from quack.events.catalog import EVENT_TYPE_VERSIONS
 from quack.events.models import NewEvent
 from quack.graph.worker import ProjectorWorker
 from quack.jobs import kinds
 from quack.jobs.queue import enqueue_job
-from quack.ops.registry import can_rollback, event_registry, registry_gaps, write_event_registry
 from quack.ops.seed import SeedRefusedError, seed_learners, write_learners
 from quack.ops.status import collect_status
 from tests.support.auth import session_cookie
@@ -274,7 +272,9 @@ async def test_ops_status_report(
                 kinds.session_sweep_inactive(), run_after=datetime.now(UTC) - timedelta(seconds=120)
             ),
         )
-        await enqueue_job(session, kinds.graph_curate(lagging, uuid4(), {}, required_seq=last))
+        await enqueue_job(
+            session, kinds.artifact_refresh_cheatsheet(lagging, uuid4(), {}, required_seq=last)
+        )
     assert old is not None
     await _exec(
         db,
@@ -340,45 +340,3 @@ async def test_ops_status_without_postgres_exits_2(
     assert code == 2
     assert report["dependencies"]["postgres"] == "error"
     assert report["projector"]["learners_lagging"] is None
-
-
-# --- T-O2, T-O6: event registry, rollback check -----------------------------------------
-
-REGISTRY_FIXTURE = Path(__file__).parent / "fixtures" / "event_registry.json"
-
-
-def test_event_registry_and_can_rollback_of_phase3(tmp_path: Path) -> None:
-    """The library of Phase 3 (`quack.ops.registry`, until WP1.3 step 5). The commands moved to
-    the registry of Phase 4 (#232): `tests/test_ops_p4_registry.py`."""
-    out = tmp_path / "registry.json"
-    write_event_registry(out)
-    current = json.loads(out.read_text(encoding="utf-8"))
-    expected = json.loads(REGISTRY_FIXTURE.read_text(encoding="utf-8"))
-    assert current == expected == event_registry()
-    pairs = [(e["type"], e["schema_version"]) for e in current["events"]]
-    assert pairs == sorted(pairs) and len(pairs) == 37
-    assert ("turn.extracted", 2) in pairs and current["rules_version"] == "rules@2"
-
-    assert can_rollback(current, set()) == {
-        "can_rollback": True,
-        "new_pairs": [],
-        "new_pairs_seen": [],
-        "rules_changed": False,
-    }
-    previous = {**current, "events": [e for e in current["events"] if e["schema_version"] == 1]}
-    p = {"type": "turn.extracted", "schema_version": 2}
-    unseen = can_rollback(previous, set())
-    assert unseen["can_rollback"] is True and unseen["new_pairs"] == [p]
-    seen = can_rollback(previous, {("turn.extracted", 2)})
-    assert seen["can_rollback"] is False and seen["new_pairs_seen"] == [p]
-    other_rules = can_rollback({**current, "rules_version": "rules@1"}, set())
-    assert other_rules["rules_changed"] is True and other_rules["can_rollback"] is False
-
-
-def test_event_registry_has_handlers_and_rules(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert registry_gaps() == []
-    monkeypatch.setitem(EVENT_TYPE_VERSIONS, ("lesson.invented", 1), object())
-    assert registry_gaps() == [
-        "lesson.invented@1: no projector handler",
-        "lesson.invented@1: no dispatcher rule and no 'no rule' mark",
-    ]

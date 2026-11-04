@@ -31,8 +31,8 @@ class DispatcherRule:
     replaces: str  # the enqueue_job call that WP11.4 removes
 
 
-# Periodic jobs (`session.sweep_inactive`, `account.purge_deleted`) belong to the scheduler
-# (WP3.3), `POST /v1/topics/{id}/cheatsheet/refresh` enqueues directly (WP11.2 exception).
+# Periodic jobs (`session.sweep_inactive`) belong to the scheduler of Phase 4 (WP7.5),
+# `POST /v1/topics/{id}/cheatsheet/refresh` enqueues directly (WP11.2 exception).
 DISPATCHER_RULES: tuple[DispatcherRule, ...] = (
     DispatcherRule(
         event_type="turn.teacher_replied",
@@ -59,14 +59,6 @@ DISPATCHER_RULES: tuple[DispatcherRule, ...] = (
         replaces="session/lifecycle.py:459",
     ),
     DispatcherRule(
-        event_type="session.completed",
-        job_kind="graph.curate",
-        required_seq="event_seq",
-        condition="always",
-        needs="domain_id from the event payload",
-        replaces="session/lifecycle.py:470",
-    ),
-    DispatcherRule(
         event_type="session.digest_created",
         job_kind="artifact.refresh_cheatsheet",
         required_seq="event_seq",
@@ -78,7 +70,7 @@ DISPATCHER_RULES: tuple[DispatcherRule, ...] = (
 
 
 # WP11.5, Д-§5.2 п.6: event types that trigger no job — an explicit "no rule" mark. A new type
-# in the catalog must get a rule or a place here (`ops.registry.registry_gaps`, T-O6).
+# in the catalog must get a rule or a place here (`event_registry.registry_gaps`, T-O6).
 NO_DISPATCH_RULE: frozenset[str] = frozenset(
     {
         "learner.registered",
@@ -179,9 +171,6 @@ def _session_completed(event: StoredEvent, facts: EventFacts) -> list[JobSpec]:
                 "topic_id": None if facts.topic_id is None else str(facts.topic_id),
             },
             required_seq=event.seq,
-        ),
-        kinds.graph_curate(
-            event.learner_id, domain_id, {"domain_id": str(domain_id)}, required_seq=event.seq
         ),
     ]
 
