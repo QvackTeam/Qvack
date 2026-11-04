@@ -349,6 +349,8 @@ class Settings(BaseSettings):
     review_trigger_retention: float = 0.85
     forgetting_domain_idle_days: int = 30
     review_item_minutes: float = 1.5
+    # Slot 6 in the preparation mode (WP17.4, D-B-216): items shown per list.
+    prep_slot_max_items: int = 12
     today_max_items: int = 3
     # WP17.2: «подбирается на первых данных»; the class B record comes with WP17.
     today_min_score: float = 0.0
