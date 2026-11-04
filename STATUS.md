@@ -51,12 +51,12 @@
 | WP2.1 | Модели payload и реестр | влит | 65 типов, S3 заморожен (#80, #94, #119, #130) | — | D-A-121 (класс C) | T-EV1, T-EV2, T-EV3 |
 | WP2.2 | Ход и последствия вместе | влит | Пачка хода одним `append_events` (#109, `session/turn_commit.py`) | — | — | T-EV4 |
 | WP2.3 | Тексты для поиска | влит | Поля `text` типов каталога, сверка с индексом (`tests/events/test_catalog.py`) | — | — | — |
-| WP2.4 | Реестр в образе, полнота | частично | `test_registry_completeness` (#185); реестр Фазы 4, откат и пробелы — `quack/runtime/event_registry.py` (D-A-218, T-EV5) | регистрация в `cli.py` вместо `ops/registry.py` и шаг CI «реестр событий» — C (#232, WP9.3) | #232 | T-EV5 |
+| WP2.4 | Реестр в образе, полнота | частично | `test_registry_completeness` (#185); реестр Фазы 4, откат и пробелы — `quack/runtime/event_registry.py` (D-A-218, T-EV5) | `ops event-registry`, `can-rollback` в `cli.py` на реестре Фазы 4, шаг CI «реестр событий» в `fast` (C, #232, D-C-165, D-C-166); `ops/registry.py` удаляется в шаге 5 WP1.3 | — | T-EV5 |
 | WP3.1 | Схема графа | влит | Ограничения и индексы Neo4j Фазы 4 (#114) | — | — | T-P7 |
 | WP3.2 | Обработчики фазы А | влит | Обработчики 38 строк S5 (#135, #185) | — | — | T-P2, T-P3, T-P4, T-P5 |
 | WP3.3 | Фазы А–В, срез | влит | Фазы А–В, запись разницей, остановка потока (#185) | в процесс `projector` не подключён (WP1.3) | — | T-P6 |
 | WP3.4 | Режимы | влит | Пачки = пересборка (#185) | — | — | T-P1 |
-| WP3.5 | Пересборка | влит | Пересборка на rules@3, `--stale-rules` в `graph/projection` (#185) | `ops rebuild` в `cli.py` ещё на коде Фазы 3 (WP1.3) | — | T-P8 |
+| WP3.5 | Пересборка | влит | Пересборка на rules@3, `--stale-rules` в `graph/projection` (#185) | `ops rebuild` в `cli.py` при `phase4_processes` на `graph/projection` (C, #232, D-C-165); без флага — код Фазы 3 до шага 2 WP1.3 (#223) | — | T-P8 |
 | WP3.6 | Версия правил | влит | `RULES_VERSION = rules@3` в `projection/runner.py` | старая константа rules@2 в `graph/ids.py` уходит с WP1.3 | — | — |
 | WP4.1 | Свидетельство и ярус | влит | `projection/skill_fold.py` (#185, D-A-182) | — | — | T-F2 |
 | WP4.2 | Вычисляемые свойства | влит | Веса, окно «горит», новизна, delayed (#185) | — | — | T-F3, T-F9 |
@@ -135,7 +135,7 @@
 | WP16.4 | Определение домена | влит | `POST /v1/domains/classify` (#157) | — | — | T-AG5 |
 | WP16.5 | Строитель визуализаций | частично | `agent.viz`: генерация, рендер, одна попытка исправления (#168) | `GET /v1/viz/{id}` с CSP (объявление в `quack/artifacts/router.py`); `deploy/static/viz/` с закреплёнными D3/Plotly/KaTeX | — | T-AG6 |
 | WP16.6 | Поручения и доставка | влит | Обработчики `task.solution_space`, `agent.solution_space`, `agent.task_generation`, `check.known_claim`, `agent.illustration`, регистрация #173 (#208, D-B-191…193, D-B-196) | `agent.artifact` — C | — | T-AG7 |
-| WP16.7 | Проигрывание, судья, метрики (P2) | частично | Функции `session/replay.py::replay_session`, `agents/metrics.py::metrics`, `agents/judge.py` (#208, D-B-194, D-B-195); качество извлечения `agents/extraction_eval.py` (D-B-209) | регистрация `ops replay-session`/`ops metrics`/оценки извлечения (C, S15); выгрузка наборов LangSmith — оператор | — | — |
+| WP16.7 | Проигрывание, судья, метрики (P2) | частично | Функции `session/replay.py::replay_session`, `agents/metrics.py::metrics`, `agents/judge.py` (#208, D-B-194, D-B-195); качество извлечения `agents/extraction_eval.py` (D-B-209) | регистрация `ops replay-session`/`ops metrics` (C, S15); команда `ops extraction-eval` готова (C, D-C-167); выгрузка наборов LangSmith — оператор | — | — |
 | WP16.8 | Подготовка «Сегодня» | влит | `today.prepare` (#180) | — | — | T-RV2 |
 
 ### 4.3. Поток C: вход, каналы, материалы, артефакты, compute, эксплуатация, сквозная проверка
