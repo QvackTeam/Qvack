@@ -58,9 +58,10 @@ def build_app_resources(
     empty `ComputeScenario` (answers 503); storage, embeddings, email and the deletion journal
     are the working in-memory doubles. Without `db` (pass `pg_db`, seam S2) the `Db` is over a
     closed pool: a test that touches Postgres through it fails with `PoolClosed`."""
+    db = db or Db(AsyncConnectionPool(settings.postgres_dsn, open=False))
     return AppResources(
         settings=settings,
-        db=db or Db(AsyncConnectionPool(settings.postgres_dsn, open=False)),
+        db=db,
         neo4j=cast(AsyncDriver, neo4j),
         redis=cast(Redis | None, redis),
         llm=LLMGateway(provider or UnavailableLLMProvider(), settings, db=db),
