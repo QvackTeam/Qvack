@@ -97,7 +97,7 @@ export function EfficiencyScene({ scrollRef, win }: { scrollRef: RefObject<HTMLE
       const form = formOf();
       lastForm = form;
       if (win) {
-        const a = form > 0.85 ? true : form < 0.2 ? false : active;
+        const a = form > 0.8 ? true : form < 0.6 ? false : active; // текст уходит, как только сцена начала рассыпаться
         if (a !== active) {
           active = a;
           setPinIn(a);

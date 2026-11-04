@@ -183,7 +183,8 @@ export function createDuckRig(): DuckRig {
     }
     bodyGeo.setAttribute("color", new THREE.BufferAttribute(col, 3));
   }
-  body.add(mesh(bodyGeo, bodyMat));
+  const bodyMesh = mesh(bodyGeo, bodyMat);
+  body.add(bodyMesh);
 
   // хвост
   const tail = new THREE.Group();
@@ -232,7 +233,7 @@ export function createDuckRig(): DuckRig {
   const SPAN = 1.55;
   const flightWingMat = mat(0x0000e8, 0.8); // ярче сложенного крыла: раскрытое освещено сверху и спереди
   const makeSpread = (side: 1 | -1) => {
-    const g = blob(0.62, 0.045, SPAN, (v) => {
+    const g = blob(0.5, 0.04, SPAN, (v) => {
       const t = clamp01((v.z * side + SPAN) / (2 * SPAN)); // 0 — у корпуса, 1 — кончик
       v.x = v.x * (1 - 0.5 * t) - 0.34 * t * t; // хорда сужается, задняя кромка уходит назад
       v.y += 0.14 * t * t; // кончик чуть загнут вверх
@@ -375,6 +376,7 @@ export function createDuckRig(): DuckRig {
     const f = p.flight ?? 0;
     root.position.y = p.y ?? 0;
     const flying = f > 0.02;
+    bodyMesh.scale.set(1, 1 - 0.3 * f, 1 - 0.24 * f); // в полёте корпус стройнее: вытянутый, а не «шар»
     spreadNear.visible = flying;
     spreadFar.visible = flying;
     wingNear.visible = f < 0.5;

@@ -6,6 +6,7 @@ import { Hero } from "./hero";
 import { LandingNav } from "./nav";
 import { EfficiencyScene } from "./scenes/efficiency-scene";
 import { GraphScene } from "./scenes/graph-scene";
+import { useSnapScroll } from "./scenes/snap-scroll";
 import { STORY, usePinned } from "./scenes/story";
 
 /**
@@ -17,11 +18,12 @@ import { STORY, usePinned } from "./scenes/story";
 export function LandingPage() {
   const scrollRef = useRef<HTMLElement>(null);
   const pinned = usePinned();
+  useSnapScroll(scrollRef, pinned);
   return (
     <main
       ref={scrollRef}
       data-pinned={pinned}
-      className="relative isolate h-full overflow-x-hidden overflow-y-auto bg-[#080504] text-[#f1e4d6] motion-safe:scroll-smooth"
+      className={`relative isolate h-full overflow-x-hidden overflow-y-auto bg-[#080504] text-[#f1e4d6] ${pinned ? "" : "motion-safe:scroll-smooth"}`}
     >
       <LandingNav scrollRef={scrollRef} />
       {pinned ? (

@@ -7,18 +7,22 @@ import { smoothstep } from "./scene-utils";
  * следующая. Время измеряется в высотах окна (s = scrollTop / высота окна).
  *
  *   s 0.04–0.55   первый экран рассыпается (его собственная логика)
- *   s 0.40–0.95   сцена «эффективность и память» собирается, до 1.65 стоит, до 2.15 рассыпается
- *   s 2.00–2.55   сцена «как работает» собирается и стоит до конца рамки
+ *   s 0.30–0.95   сцена «эффективность и память» собирается, стоит до 1.32, рассыпается к 1.9
+ *   s 1.70–2.40   сцена «как работает» собирается и стоит до конца рамки
+ *
+ * Точки остановок — s = 0, 1.25, 2.55: сцена полностью собрана. Начал крутить — сцена тут же начинает рассыпаться, а если
+ * крутить дальше, страница сама доезжает до следующей точки (см. snap-scroll.ts).
  */
 export type Win = [number, number, number, number];
 
 export const STORY = {
-  efficiency: [0.4, 0.95, 1.65, 2.15] as Win,
-  how: [2.0, 2.55, 99, 100] as Win,
+  efficiency: [0.3, 0.95, 1.32, 1.9] as Win,
+  how: [1.7, 2.4, 99, 100] as Win,
   /** до какого s рамка остаётся на месте; дальше страница едет к подвалу */
-  end: 3.2,
-  /** куда прокручивать по якорным ссылкам (s) */
-  anchors: { efficiency: 1.25, how: 2.9 } as Record<string, number>,
+  end: 2.7,
+  /** точки остановок (s) и номера сцен по якорям */
+  points: [0, 1.25, 2.55],
+  anchors: { top: 0, efficiency: 1, how: 2 } as Record<string, number>,
 };
 
 /** Закреплённый режим включается на достаточно большом экране; на телефоне — обычная прокрутка со сценами друг под другом */
@@ -52,16 +56,15 @@ export function storyVisible(root: HTMLElement, w: Win, margin = 0.08): boolean 
   return s > w[0] - margin && s < w[3] + margin;
 }
 
-/** Якорная ссылка: в закреплённом режиме перематывает к нужному «времени», иначе обычный переход к секции */
+/** Якорная ссылка: в закреплённом режиме просит страницу доехать до нужной точки (её ведёт snap-scroll), иначе обычный переход к секции */
 export function goToScene(root: HTMLElement | null, id: string, e?: { preventDefault: () => void }) {
   if (!root) return;
-  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (root.dataset.pinned === "true" && id in STORY.anchors) {
     e?.preventDefault();
-    root.scrollTo({ top: STORY.anchors[id] * root.clientHeight, behavior: reduced ? "auto" : "smooth" });
+    root.dispatchEvent(new CustomEvent("story-go", { detail: STORY.anchors[id] }));
   } else if (id === "top") {
     e?.preventDefault();
-    root.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
+    root.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
   }
 }
 
