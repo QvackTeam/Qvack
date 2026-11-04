@@ -24,7 +24,6 @@ from quack.compute_client.client import ComputeClient, create_compute_client
 from quack.config import Settings
 from quack.db import Db, open_db
 from quack.db.neo4j import create_driver
-from quack.db.postgres import SessionFactory, create_engine, create_session_factory
 from quack.db.redis import create_redis
 from quack.embeddings.client import EmbeddingClient, create_embedding_client
 from quack.llm.gateway import LLMGateway
@@ -70,12 +69,6 @@ class AppResources:
         await self.db.close()
 
 
-def _outbox_session_factory(settings: Settings) -> SessionFactory:
-    """The argument `LLMGateway` still takes for its outbox (D-B-197): one lazy connection, no
-    other use in the API process. Goes with the argument (WP1.3, step 4 of stream B)."""
-    return create_session_factory(create_engine(settings, pool_size=1))
-
-
 async def create_app_resources(settings: Settings) -> AppResources:
     """Production resources of the API process, in the creation order of §4.2. The `Db` pool
     opens without waiting for Postgres (`wait=False`): the API starts and `/health/ready`
@@ -89,7 +82,7 @@ async def create_app_resources(settings: Settings) -> AppResources:
         db=db,
         neo4j=neo4j,
         redis=redis,
-        llm=LLMGateway(_outbox_session_factory(settings), provider, settings, db=db),
+        llm=LLMGateway(provider, settings, db=db),
         compute=create_compute_client(settings),
         storage=create_object_store(settings),
         embeddings=create_embedding_client(settings),

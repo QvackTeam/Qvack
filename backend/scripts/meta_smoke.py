@@ -3,8 +3,8 @@
 
 Covers:
 - every role of `Settings.llm_roles` — a text role is one structured call by its own output
-  schema through `LLMGateway.generate_structured` (strict schema, effort, output limit, ledger
-  and outbox); `segmenter`, `voice` and `illustrator` go through `LLMGateway.segment`,
+  schema through `LLMGateway.generate_structured` (strict schema, effort, output limit, usage
+  row); `segmenter`, `voice` and `illustrator` go through `LLMGateway.segment`,
   `transcribe` and `illustrate` on a tiny built-in input (D-B-187);
 - the prompts of Phase 3 that are not roles of the table (`evaluator`, `task_gen`, `structurer`,
   `curator`, `diagnostic`, `artifacts`);
@@ -17,8 +17,8 @@ A role whose prompt is not in the registry yet (`material_parser`, `viz_checker`
 `--out FILE` writes the same to a file. Exit code 1 if any role failed. Without `META_API_KEY`
 nothing is called: the report says «Не проверено» with the command, exit code 1.
 
-Run from `backend/` against a migrated Postgres (rows go to `ops.llm_ledger` and
-`core.llm_outbox` under a fresh learner id):
+Run from `backend/` against a migrated Postgres (rows go to `ops.llm_usage` under a
+fresh learner id):
 
     META_API_KEY=... META_API_BASE_URL=https://api.meta.ai/v1 POSTGRES_DSN=... \\
         uv run python scripts/meta_smoke.py --out /tmp/meta_smoke.txt
@@ -53,7 +53,7 @@ from quack.artifacts.writer import ArtifactWriterOutput
 from quack.canvas.diagnosis import CanvasDiagnoserOutput
 from quack.canvas.recognition import RecognizerOutput
 from quack.config import Settings, default_llm_roles
-from quack.db.postgres import SessionFactory, create_engine, create_session_factory
+from quack.db import Db, open_db
 from quack.domains.schemas import CuratorOutput, DiagnosticOutput, StructurerOutput
 from quack.llm.errors import LLMError, ProviderIncompleteError
 from quack.llm.gateway import LLMGateway
@@ -389,13 +389,11 @@ def _failure(exc: Exception) -> str:
     return f"{type(exc).__name__}:{getattr(exc, 'reason', '')}"
 
 
-async def run_smoke(
-    settings: Settings, session_factory: SessionFactory, provider: LLMProvider
-) -> list[dict[str, Any]]:
+async def run_smoke(settings: Settings, db: Db, provider: LLMProvider) -> list[dict[str, Any]]:
     """Run every smoke call once; one report row per role (the table order), then the Phase 3
     prompts and the stream probe."""
     recorder = _Recorder(provider)
-    gateway = LLMGateway(session_factory, recorder, settings)
+    gateway = LLMGateway(recorder, settings, db=db)
     registry = PromptRegistry()
     learner, run = uuid4(), uuid4().hex[:8]
     calls = {call.role: call for call in smoke_calls(settings)}
@@ -571,13 +569,13 @@ async def run(settings: Settings | None = None) -> tuple[int, str]:
     settings = settings or Settings()
     if not settings.meta_api_key.get_secret_value():
         return 1, unchecked_report()
-    engine = create_engine(settings, pool_size=2)
+    db = await open_db(settings)
     client = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
     try:
-        rows = await run_smoke(settings, create_session_factory(engine), client)
+        rows = await run_smoke(settings, db, client)
     finally:
         await client.aclose()
-        await engine.dispose()
+        await db.close()
     return exit_code(rows), render_report(rows)
 
 

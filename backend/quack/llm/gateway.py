@@ -1,9 +1,10 @@
 """LLMGateway.generate_structured (spec §8.3, Т-§11, Т-§12.4; ТЗ Фазы 3 WP5.1–5.6).
 
-Order: prompt + hash → outbox replay → token budgets → semaphore of the model → attempts
-(retries on failures, 429 with the pressure flag, 400 without retry, one retry of a cut
-answer, circuit breaker) → validation (one repair, Т-§11.1) → ledger + outbox + session
-tokens. Every attempt writes a ledger row; short-circuited calls do not.
+Order: prompt + hash → dollar budgets → semaphore of the model → attempts (retries on
+failures, 429 with the pressure flag, 400 without retry, one retry of a cut answer, circuit
+breaker) → validation (one repair, Т-§11.1) → a row of `ops.llm_usage` per attempt. The call is
+not deduplicated: a repeated job may pay again, event keys keep the facts single (law 5,
+D-B-212). Short-circuited calls write no row.
 """
 
 from __future__ import annotations
@@ -22,18 +23,12 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
-import orjson
 from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
-from sqlalchemy import text
 
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
-from quack.events.hashing import canonical_json
 from quack.llm.errors import (
-    LLMBudgetExceededError,
-    LLMError,
     LLMRateLimitedError,
     LLMSchemaError,
     LLMUnavailableError,
@@ -134,7 +129,7 @@ class _CallContext:
     session_id: UUID | None
     turn_id: UUID | None
     idempotency_key: str
-    # WP5.7: the effort of the call, written to the ledger.
+    # WP5.7: the effort of the call, written to the usage row.
     reasoning_effort: str | None = None
     # WP10.4: rows written so far for this call; a row after the first is a retry.
     rows: list[int] = field(default_factory=lambda: [0])
@@ -143,22 +138,19 @@ class _CallContext:
 class LLMGateway:
     def __init__(
         self,
-        session_factory: SessionFactory,
         provider: LLMProvider,
         settings: Settings,
         prompts: PromptRegistry | None = None,
         *,
+        db: Db,
         redis: Redis | None = None,
-        db: Db | None = None,
         tracer: Tracer | None = None,
     ) -> None:
         # WP10.6: a trace of each attempt; without a tracer — none (tests, `loadtest`).
         self.tracer: Tracer = tracer or NullTracer()
-        # WP10.4 (D-B-197): with `db` the call is accounted in `ops.llm_usage` with its cost
-        # and the budgets are in dollars; without it (the SQLAlchemy stack of Phases 1–3,
-        # until WP1.3) the row goes to `ops.llm_ledger` and the budgets are in tokens.
+        # WP10.4 (D-B-197): every attempt is a row of `ops.llm_usage` with its cost; the
+        # budgets are in dollars (WP1.3 step 4, D-B-212).
         self.db = db
-        self.session_factory = session_factory
         self.provider = provider
         self.settings = settings
         self.prompts = prompts or PromptRegistry()
@@ -202,11 +194,11 @@ class LLMGateway:
         hard: bool = False,
         images: Sequence[ImageInput] = (),
     ) -> LLMResult[T]:
-        """`prompt_role` takes the template of `prompt_role@prompt_version` while model,
-        limits, ledger and outbox stay with `role` (WP5.4); `reasoning_effort` overrides the
+        """`idempotency_key` is kept for callers: the gateway does not deduplicate, a repeat
+        pays again (D-B-212). `prompt_role` takes the template of `prompt_role@prompt_version`
+        while model, limits and usage stay with `role` (WP5.4); `reasoning_effort` overrides the
         role effort (WP6.5); `hard` takes the role's `hard_model` (Т-§11.1, D-B-166);
-        `images` go after the prompt text (Т-§11.1 «Spark с изображением», D-B-170) and are
-        part of the request hash.
+        `images` go after the prompt text (Т-§11.1 «Spark с изображением», D-B-170).
 
         `check` finds what the schema cannot (an unknown label, WP14.1): its error text goes
         back to the model once through the repair path; if the second answer is wrong again or
@@ -215,42 +207,13 @@ class LLMGateway:
         prompt = self.prompts.load(prompt_role or role, prompt_version)
         rendered = prompt.render(variables)
         model = self.settings.model_for_role(role, hard=hard)
-        schema = response_model.model_json_schema()
 
-        cached = await self._completed_outbox(learner_id, idempotency_key)
-        if cached is not None:
-            return LLMResult(
-                value=response_model.model_validate(cached[0]),
-                from_cache=True,
-                prompt_hash=prompt.sha256,
-                model=cached[1],
-                usage=None,
-            )
         exempt = role in self.settings.session_budget_exempt_roles
         await self._admit_budget(role, learner_id, None if exempt else session_id)
         effort = reasoning_effort or self.settings.effort_for_role(role)
         ctx = _CallContext(
             role, prompt, model, learner_id, session_id, turn_id, idempotency_key, effort
         )
-        request_hash = hashlib.sha256(
-            canonical_json(
-                {
-                    "role": role,
-                    "prompt_version": prompt_version,
-                    "prompt_hash": prompt.sha256,
-                    "prompt": rendered,
-                    "schema": schema,
-                    "model": model,
-                    "temperature": temperature,
-                    "reasoning_effort": effort,
-                    "images": [
-                        [image.mime, hashlib.sha256(image.data).hexdigest()] for image in images
-                    ],
-                }
-            )
-        ).hexdigest()
-        await self._mark_pending(ctx, request_hash)
-
         request = ProviderRequest(
             model=model,
             prompt=rendered,
@@ -266,38 +229,29 @@ class LLMGateway:
             images=tuple(images),
         )
         totals = [0, 0, 0, 0]  # input, output, cached, latency
-        try:
-            async with self._admitted(role, model):
-                response = await self._attempts(ctx, request, totals)
+        async with self._admitted(role, model):
+            response = await self._attempts(ctx, request, totals)
+            value, error = _parse(response_model, response.content)
+            problem = None
+            if value is None:
+                await self._record(ctx, response, totals[3], "schema_error", "schema")
+                repair = replace(request, repair_hint=error)
+                response = await self._attempts(ctx, repair, totals)
                 value, error = _parse(response_model, response.content)
-                problem = None
                 if value is None:
-                    await self._ledger(ctx, response, totals[3], "schema_error", "schema")
-                    repair = replace(request, repair_hint=error)
-                    response = await self._attempts(ctx, repair, totals)
-                    value, error = _parse(response_model, response.content)
-                    if value is None:
-                        await self._ledger(ctx, response, totals[3], "schema_error", "schema")
-                        raise LLMSchemaError(
-                            f"{prompt.ref}: response does not match schema: {error}"
-                        )
-                elif check is not None and (problem := check(value)):
-                    await self._ledger(ctx, response, totals[3], "schema_error", "label")
-                    first, first_response = value, response
-                    response = await self._attempts(
-                        ctx, replace(request, repair_hint=problem), totals
-                    )
-                    again, _ = _parse(response_model, response.content)
-                    if again is None:
-                        await self._ledger(ctx, response, totals[3], "schema_error", "schema")
-                        value, response = first, first_response
-                    else:
-                        value = again
-        except LLMError:
-            await self._finish_outbox(ctx, "failed", None, totals)
-            raise
-        await self._ledger(ctx, response, totals[3], "ok", None)
-        await self._finish_outbox(ctx, "completed", value.model_dump(mode="json"), totals)
+                    await self._record(ctx, response, totals[3], "schema_error", "schema")
+                    raise LLMSchemaError(f"{prompt.ref}: response does not match schema: {error}")
+            elif check is not None and (problem := check(value)):
+                await self._record(ctx, response, totals[3], "schema_error", "label")
+                first, first_response = value, response
+                response = await self._attempts(ctx, replace(request, repair_hint=problem), totals)
+                again, _ = _parse(response_model, response.content)
+                if again is None:
+                    await self._record(ctx, response, totals[3], "schema_error", "schema")
+                    value, response = first, first_response
+                else:
+                    value = again
+        await self._record(ctx, response, totals[3], "ok", None)
         usage = LLMUsage(totals[0], totals[1], totals[2], totals[3])
         return LLMResult(value, False, prompt.sha256, response.model, usage)
 
@@ -341,7 +295,7 @@ class LLMGateway:
     ) -> StreamingLLMProvider:
         """A provider of streamed steps for the turn graph: each step passes the breaker and
         the model slot (the teacher waits no longer than `teacher_admission_wait_ms`), gets a
-        ledger row and updates the breaker and the pressure flag (WP5 of Phase 3)."""
+        usage row and updates the breaker and the pressure flag (WP5 of Phase 3)."""
         if not hasattr(self.provider, "stream_structured"):
             raise TypeError(f"{type(self.provider).__name__} does not stream")
         model = self.settings.model_for_role(role)
@@ -453,8 +407,8 @@ class LLMGateway:
         invoke: Callable[[float], Awaitable[R]],
     ) -> tuple[R, LLMUsage]:
         """The path of a non-text call: budgets, slot of the model, attempts (retries, 429 with
-        the pressure flag, 400 without retry, breaker), one ledger row per attempt. There is no
-        prompt, no outbox and no schema repair: a repeated call is a repeated charge."""
+        the pressure flag, 400 without retry, breaker), one usage row per attempt. There is no
+        prompt and no schema repair: a repeated call is a repeated charge."""
         model = self.settings.model_for_role(role)
         timeout = self.settings.timeout_for_role(role)
         exempt = role in self.settings.session_budget_exempt_roles
@@ -474,7 +428,7 @@ class LLMGateway:
             response = await self._attempts_with(
                 ctx, request, totals, lambda _request: invoke(timeout)
             )
-        await self._ledger(ctx, response, totals[3], "ok", None)
+        await self._record(ctx, response, totals[3], "ok", None)
         return response, LLMUsage(totals[0], totals[1], totals[2], totals[3])
 
     # --- admission: semaphores per model (WP5.1) ---
@@ -550,14 +504,14 @@ class LLMGateway:
                 continue
             except ProviderBadRequestError as exc:
                 self._circuit_neutral(ctx.model)
-                await self._error_ledger(ctx, _latency(attempt_started), "error", "bad_request")
+                await self._record_error(ctx, _latency(attempt_started), "error", "bad_request")
                 log.warning("llm_bad_request", role=ctx.role, model=ctx.model, body=exc.body)
                 raise LLMUnavailableError(
                     f"{ctx.prompt.ref}: bad request", reason="bad_request"
                 ) from exc
             except ProviderIncompleteError as exc:
                 self._circuit_neutral(ctx.model)
-                await self._error_ledger(ctx, _latency(attempt_started), "incomplete", "incomplete")
+                await self._record_error(ctx, _latency(attempt_started), "incomplete", "incomplete")
                 limit = request.max_output_tokens
                 cap = settings.max_output_tokens_cap
                 if cut_retried or limit is None or limit >= cap:
@@ -571,7 +525,7 @@ class LLMGateway:
                 code: UnavailableReason = (
                     "timeout" if isinstance(exc, TimeoutError) else "unavailable"
                 )
-                await self._error_ledger(ctx, _latency(attempt_started), "error", code)
+                await self._record_error(ctx, _latency(attempt_started), "error", code)
                 await self._circuit_failure(ctx.model)
                 log.warning("llm_unavailable", role=ctx.role, code=code)
                 if failures >= settings.llm_retry_attempts:
@@ -603,7 +557,7 @@ class LLMGateway:
     ) -> float | None:
         """Ledger row, the whole 429 in the log (Т-§11.8), the pressure flag; returns the
         `retry-after` in seconds (number or HTTP date) or `None`."""
-        await self._error_ledger(ctx, latency_ms, "error", "rate_limited")
+        await self._record_error(ctx, latency_ms, "error", "rate_limited")
         raw = next((v for k, v in exc.headers.items() if k.lower() == "retry-after"), None)
         now = _now()
         ttl = parse_retry_after(raw, now) if raw is not None else exc.retry_after_sec
@@ -624,7 +578,7 @@ class LLMGateway:
 
     async def _admit_circuit(self, ctx: _CallContext) -> None:
         """Short-circuit while the breaker of the model is open; after `circuit_open_s` let
-        exactly one probe through (WP5.5). Short-circuited calls are logged, not ledgered."""
+        exactly one probe through (WP5.5). Short-circuited calls are logged, not recorded."""
         circuit = self._circuits.setdefault(ctx.model, _Circuit())
         now = time.monotonic()
         blocked = circuit.open_until > now or (circuit.open_until > 0 and circuit.probing)
@@ -655,86 +609,16 @@ class LLMGateway:
 
     # --- steps ---
 
-    async def _completed_outbox(
-        self, learner_id: UUID, key: str
-    ) -> tuple[dict[str, Any], str] | None:
-        async with self.session_factory() as session:
-            row = (
-                await session.execute(
-                    text(
-                        "SELECT status, response_json, model FROM core.llm_outbox "
-                        "WHERE learner_id = :l AND idempotency_key = :k"
-                    ),
-                    {"l": learner_id, "k": key},
-                )
-            ).first()
-        if row is None or row.status != "completed" or row.response_json is None:
-            return None
-        return dict(row.response_json), str(row.model)
-
     async def _admit_budget(self, role: str, learner_id: UUID, session_id: UUID | None) -> None:
-        if self.db is None:
-            await self._check_budgets(learner_id, session_id)
-        else:
-            await check_usd_budgets(self.db, self.settings, role, learner_id, session_id)
+        await check_usd_budgets(self.db, self.settings, role, learner_id, session_id)
 
-    async def _check_budgets(self, learner_id: UUID, session_id: UUID | None) -> None:
-        async with self.session_factory() as session:
-            daily = int(
-                (
-                    await session.execute(
-                        text(
-                            "SELECT COALESCE(SUM(input_tokens + output_tokens), 0) "
-                            "FROM ops.llm_ledger WHERE learner_id = :l AND created_at >= "
-                            "(date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')"
-                        ),
-                        {"l": learner_id},
-                    )
-                ).scalar_one()
-            )
-            limit = self.settings.daily_token_limit_per_learner
-            if daily >= limit:
-                raise LLMBudgetExceededError("daily", daily, limit)
-            if session_id is not None:
-                used = (
-                    await session.execute(
-                        text("SELECT tokens_used FROM core.sessions WHERE id = :s"),
-                        {"s": session_id},
-                    )
-                ).scalar_one_or_none()
-                limit = self.settings.session_token_limit
-                if used is not None and int(used) >= limit:
-                    raise LLMBudgetExceededError("session", int(used), limit)
-
-    async def _mark_pending(self, ctx: _CallContext, request_hash: str) -> None:
-        async with self.session_factory() as session, session.begin():
-            await session.execute(
-                text(
-                    "INSERT INTO core.llm_outbox (id, learner_id, idempotency_key, role, "
-                    "prompt_version, model, status, request_hash, created_at, updated_at) VALUES "
-                    "(:id, :l, :k, :role, :v, :model, 'pending', :h, now(), now()) "
-                    "ON CONFLICT (learner_id, idempotency_key) DO UPDATE SET status = 'pending', "
-                    "request_hash = EXCLUDED.request_hash, model = EXCLUDED.model, "
-                    "updated_at = now()"
-                ),
-                {
-                    "id": uuid4(),
-                    "l": ctx.learner_id,
-                    "k": ctx.idempotency_key,
-                    "role": ctx.role,
-                    "v": ctx.prompt.version,
-                    "model": ctx.model,
-                    "h": request_hash,
-                },
-            )
-
-    async def _error_ledger(
+    async def _record_error(
         self, ctx: _CallContext, latency_ms: int, status: str, code: str
     ) -> None:
         empty = ProviderResponse("", 0, 0, 0, ctx.model)
-        await self._ledger(ctx, empty, latency_ms, status, code)
+        await self._record(ctx, empty, latency_ms, status, code)
 
-    async def _ledger(
+    async def _record(
         self,
         ctx: _CallContext,
         response: ProviderResponse,
@@ -744,11 +628,7 @@ class LLMGateway:
     ) -> None:
         retried = ctx.rows[0] > 0
         ctx.rows[0] += 1
-        if self.db is not None:
-            await self._usage(ctx, response, latency_ms, status, retried)
-            await self._trace(ctx, response, latency_ms, status, error_code)
-            return
-        await self._write_ledger(ctx, response, latency_ms, status, error_code)
+        await self._usage(ctx, response, latency_ms, status, retried)
         await self._trace(ctx, response, latency_ms, status, error_code)
 
     async def _trace(
@@ -759,7 +639,7 @@ class LLMGateway:
         status: str,
         error_code: str | None,
     ) -> None:
-        """WP10.6: a trace of the attempt after its ledger row. A failure of the tracer — a log
+        """WP10.6: a trace of the attempt after its usage row. A failure of the tracer — a log
         line, never an error of the call."""
         try:
             await self.tracer.trace(
@@ -783,45 +663,6 @@ class LLMGateway:
         except Exception:
             log.warning("llm_trace_failed", role=ctx.role)
 
-    async def _write_ledger(
-        self,
-        ctx: _CallContext,
-        response: ProviderResponse,
-        latency_ms: int,
-        status: str,
-        error_code: str | None,
-    ) -> None:
-        async with self.session_factory() as session, session.begin():
-            await session.execute(
-                text(
-                    "INSERT INTO ops.llm_ledger (id, learner_id, session_id, turn_id, role, "
-                    "prompt_version, prompt_hash, model, input_tokens, output_tokens, "
-                    "cached_tokens, cached_input_tokens, reasoning_tokens, reasoning_effort, "
-                    "latency_ms, status, error_code, created_at) VALUES "
-                    "(:id, :l, :s, :t, :role, :v, :h, :model, :i, :o, :c, :ci, :r, :effort, "
-                    ":lat, :status, :err, now())"
-                ),
-                {
-                    "id": uuid4(),
-                    "l": ctx.learner_id,
-                    "s": ctx.session_id,
-                    "t": ctx.turn_id,
-                    "role": ctx.role,
-                    "v": ctx.prompt.version,
-                    "h": ctx.prompt.sha256,
-                    "model": response.model or ctx.model,
-                    "i": response.input_tokens,
-                    "o": response.output_tokens,
-                    "c": response.cached_tokens,
-                    "ci": response.cached_tokens,
-                    "r": response.reasoning_tokens,
-                    "effort": ctx.reasoning_effort,
-                    "lat": latency_ms,
-                    "status": status,
-                    "err": error_code,
-                },
-            )
-
     async def _usage(
         self,
         ctx: _CallContext,
@@ -832,7 +673,6 @@ class LLMGateway:
     ) -> None:
         """A row of `ops.llm_usage` with the cost (Т-§11.4, D-B-197). Voice has no tokens: the
         price is by the audio length; the illustrator: by the picture (D-B-198)."""
-        assert self.db is not None
         model = response.model or ctx.model
         audio_ms = int(getattr(response, "audio_duration_ms", 0))
         images = 1 if isinstance(response, ImageResponse) and status == "ok" else 0
@@ -863,39 +703,6 @@ class LLMGateway:
             status=status,
         )
         await insert_usage(self.db, row.learner_id, row)
-
-    async def _finish_outbox(
-        self,
-        ctx: _CallContext,
-        status: str,
-        response_json: dict[str, Any] | None,
-        totals: list[int],
-    ) -> None:
-        usage = {"input_tokens": totals[0], "output_tokens": totals[1], "cached_tokens": totals[2]}
-        async with self.session_factory() as session, session.begin():
-            await session.execute(
-                text(
-                    "UPDATE core.llm_outbox SET status = :status, "
-                    "response_json = CAST(:resp AS JSONB), usage_json = CAST(:usage AS JSONB), "
-                    "updated_at = now() WHERE learner_id = :l AND idempotency_key = :k"
-                ),
-                {
-                    "status": status,
-                    "resp": orjson.dumps(response_json).decode() if response_json else None,
-                    "usage": orjson.dumps(usage).decode(),
-                    "l": ctx.learner_id,
-                    "k": ctx.idempotency_key,
-                },
-            )
-            spent = totals[0] + totals[1]
-            if ctx.session_id is not None and spent:
-                await session.execute(
-                    text(
-                        "UPDATE core.sessions SET tokens_used = tokens_used + :t "
-                        "WHERE id = :s AND learner_id = :l"
-                    ),
-                    {"t": spent, "s": ctx.session_id, "l": ctx.learner_id},
-                )
 
 
 class _GatewayStream:
@@ -950,7 +757,7 @@ class _GatewayStream:
                 ) from exc
             except ProviderBadRequestError as exc:
                 gw._circuit_neutral(ctx.model)  # pyright: ignore[reportPrivateUsage]
-                await gw._error_ledger(ctx, _latency(started), "error", "bad_request")  # pyright: ignore[reportPrivateUsage]
+                await gw._record_error(ctx, _latency(started), "error", "bad_request")  # pyright: ignore[reportPrivateUsage]
                 log.warning("llm_bad_request", role=ctx.role, model=ctx.model, body=exc.body)
                 raise LLMUnavailableError(
                     f"{ctx.prompt.ref}: bad request", reason="bad_request"
@@ -959,7 +766,7 @@ class _GatewayStream:
                 code: UnavailableReason = (
                     "timeout" if isinstance(exc, TimeoutError) else "unavailable"
                 )
-                await gw._error_ledger(ctx, _latency(started), "error", code)  # pyright: ignore[reportPrivateUsage]
+                await gw._record_error(ctx, _latency(started), "error", code)  # pyright: ignore[reportPrivateUsage]
                 await gw._circuit_failure(ctx.model)  # pyright: ignore[reportPrivateUsage]
                 log.warning("llm_unavailable", role=ctx.role, code=code)
                 if yielded or failures >= settings.llm_retry_attempts:
@@ -984,10 +791,10 @@ class _GatewayStream:
         )
         if end.status == "incomplete":
             gw._circuit_neutral(ctx.model)  # pyright: ignore[reportPrivateUsage]
-            await gw._ledger(ctx, response, latency_ms, "incomplete", "incomplete")  # pyright: ignore[reportPrivateUsage]
+            await gw._record(ctx, response, latency_ms, "incomplete", "incomplete")  # pyright: ignore[reportPrivateUsage]
             return
         gw._circuit_success(ctx.model)  # pyright: ignore[reportPrivateUsage]
-        await gw._ledger(ctx, response, latency_ms, "ok", None)  # pyright: ignore[reportPrivateUsage]
+        await gw._record(ctx, response, latency_ms, "ok", None)  # pyright: ignore[reportPrivateUsage]
         if low_remaining(end.headers, gw.settings.pressure_remaining_share):
             await set_pressure_flag(
                 gw.redis, ctx.model, gw.settings.pressure_header_ttl_s, "headers", _now()
@@ -995,7 +802,7 @@ class _GatewayStream:
 
 
 def _media_hash(role: str) -> str:
-    """`prompt_hash` of the ledger row of a non-text role: there is no prompt (version 0)."""
+    """`prompt_hash` of the usage row of a non-text role: there is no prompt (version 0)."""
     return hashlib.sha256(f"{role}@media".encode()).hexdigest()
 
 

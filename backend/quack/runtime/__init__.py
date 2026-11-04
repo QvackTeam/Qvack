@@ -58,7 +58,7 @@ async def create_job_context(settings: Settings) -> JobContext:
         engine=engine,
         neo4j=neo4j,
         redis=redis,
-        llm=LLMGateway(session_factory, provider, settings, db=db),
+        llm=LLMGateway(provider, settings, db=db),
         compute=create_compute_client(settings),
         storage=create_object_store(settings),
         embeddings=create_embedding_client(settings),

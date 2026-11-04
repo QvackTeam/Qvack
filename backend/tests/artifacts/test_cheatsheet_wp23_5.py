@@ -185,6 +185,11 @@ async def test_a_sheet_that_fits_is_asked_once(stand: Stand, pg_db: Db) -> None:
     assert len(stand.writer.prompts) == 1
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="D-B-212: the outbox is gone, a repeat asks the model again and writes version 2; "
+    "stream C dedupes by the request key before the model call (issue #244)",
+)
 async def test_a_repeated_job_writes_no_new_version(stand: Stand, pg_db: Db) -> None:
     """Law 5: the same request key reads the same answers from the outbox."""
     learner = await create_learner(pg_db)

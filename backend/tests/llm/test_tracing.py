@@ -13,7 +13,7 @@ import httpx
 from pydantic import BaseModel, SecretStr
 
 from quack.config import Settings
-from quack.db.postgres import SessionFactory
+from quack.db import Db
 from quack.llm.gateway import LLMGateway
 from quack.llm.provider import ProviderRequest, ProviderResponse
 from quack.llm.tracing import (
@@ -41,13 +41,13 @@ class _Provider:
         return ProviderResponse('{"label": "ok"}', 100, 50, 40, request.model)
 
 
-def _gateway(db: SessionFactory, tracer: RecordingTracer) -> LLMGateway:
-    return LLMGateway(db, _Provider(), Settings(env="test"), _Registry(), tracer=tracer)
+def _gateway(db: Db, tracer: RecordingTracer) -> LLMGateway:
+    return LLMGateway(_Provider(), Settings(env="test"), _Registry(), db=db, tracer=tracer)
 
 
-async def test_tracing_pseudonym(db: SessionFactory) -> None:
+async def test_tracing_pseudonym(pg_db: Db) -> None:
     tracer, learner = RecordingTracer(), uuid4()
-    gw = _gateway(db, tracer)
+    gw = _gateway(pg_db, tracer)
 
     await gw.generate_structured("teacher", 3, Answer, {}, learner, None, None, f"k:{uuid4()}")
 
@@ -59,8 +59,8 @@ async def test_tracing_pseudonym(db: SessionFactory) -> None:
     assert str(learner) not in repr(record)
 
 
-async def test_tracer_failure_does_not_break_the_call(db: SessionFactory) -> None:
-    gw = _gateway(db, RecordingTracer(fail=True))
+async def test_tracer_failure_does_not_break_the_call(pg_db: Db) -> None:
+    gw = _gateway(pg_db, RecordingTracer(fail=True))
 
     result = await gw.generate_structured(
         "teacher", 1, Answer, {}, uuid4(), None, None, f"k:{uuid4()}"

@@ -26,7 +26,6 @@ from quack.agents.metrics import metrics
 from quack.config import Settings, get_settings
 from quack.db import open_db
 from quack.db.neo4j import create_driver, verify_schema
-from quack.db.postgres import create_engine, create_session_factory
 from quack.db.redis import create_redis
 from quack.graph.projection.rebuild import rebuild_learner
 from quack.graph.projection.runner import RULES_VERSION
@@ -171,18 +170,14 @@ def _run_api(settings: Settings) -> int:
 
 @asynccontextmanager
 async def _gateway(settings: Settings, db: quack.db.Db) -> AsyncIterator[LLMGateway]:
-    """The model gateway of `ops extraction-eval` and `ops replay-session`. It still takes the
-    session factory of Phases 1-3 (`LLMGateway.__init__`, stream B, WP1.3 step 4 removes it with
-    the outbox); this is the only place of the CLI that builds an engine, and it is not used on
-    the path of Phase 4 (`db=` is given)."""
-    engine = create_engine(settings)
+    """The model gateway of `ops extraction-eval` and `ops replay-session`: on `Db` only
+    (D-B-212), so the CLI builds no SQLAlchemy engine."""
     provider = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
-    llm = LLMGateway(create_session_factory(engine), provider, settings, db=db)
+    llm = LLMGateway(provider, settings, db=db)
     try:
         yield llm
     finally:
         await llm.aclose()
-        await engine.dispose()
 
 
 def _stop_event() -> asyncio.Event:

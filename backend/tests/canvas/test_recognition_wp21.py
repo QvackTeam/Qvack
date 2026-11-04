@@ -126,8 +126,10 @@ async def test_line_is_rendered_read_and_committed(
         "recognition_confidence": 0.9,
         "crossed_out": False,
     }
-    (call,) = [c for c in provider.calls if c.schema_name == "RecognizerOutput"]
-    assert call.images == (ImageInput("image/webp", WEBP),)
+    # D-B-212: the repeat calls the model again (no outbox); the event stays single by its key.
+    calls = [c for c in provider.calls if c.schema_name == "RecognizerOutput"]
+    assert len(calls) == 2
+    assert calls[0].images == (ImageInput("image/webp", WEBP),)
 
     down = book.line("l2", ["s1"], (0.0, 0.0, 5.0, 2.0), 3_000, 4_000)
     assert (

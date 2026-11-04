@@ -23,7 +23,7 @@ from quack.api.resources import AppResources
 from quack.compute_client.client import ComputeClient
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory, create_session_factory
+from quack.db.postgres import SessionFactory
 from quack.embeddings.client import EmbeddingClient
 from quack.jobs.runner import JobContext
 from quack.llm.gateway import LLMGateway
@@ -58,13 +58,12 @@ def build_app_resources(
     empty `ComputeScenario` (answers 503); storage, embeddings, email and the deletion journal
     are the working in-memory doubles. Without `db` (pass `pg_db`, seam S2) the `Db` is over a
     closed pool: a test that touches Postgres through it fails with `PoolClosed`."""
-    factory = session_factory or create_session_factory(cast(AsyncEngine, engine))
     return AppResources(
         settings=settings,
         db=db or Db(AsyncConnectionPool(settings.postgres_dsn, open=False)),
         neo4j=cast(AsyncDriver, neo4j),
         redis=cast(Redis | None, redis),
-        llm=LLMGateway(factory, provider or UnavailableLLMProvider(), settings, db=db),
+        llm=LLMGateway(provider or UnavailableLLMProvider(), settings, db=db),
         compute=compute or scripted_compute(ComputeScenario()),
         storage=storage or InMemoryObjectStore(),
         embeddings=embeddings or FakeEmbeddingClient(settings.embedding_dim),
@@ -93,15 +92,15 @@ def build_job_context(
     Compute defaults to an empty `ComputeScenario` (answers 503); storage, embeddings and the
     deletion journal are the in-memory doubles. Without `db` (pass `pg_db`, seam S2) the `Db`
     is over a closed pool, as in `build_app_resources`."""
+    db = db or Db(AsyncConnectionPool(settings.postgres_dsn, open=False))
     return JobContext(
         settings=settings,
-        db=db or Db(AsyncConnectionPool(settings.postgres_dsn, open=False)),
+        db=db,
         session_factory=session_factory,
         engine=cast(AsyncEngine, engine),
         neo4j=cast(AsyncDriver, neo4j),
         redis=cast(Redis | None, redis),
-        llm=llm
-        or LLMGateway(session_factory, provider or UnavailableLLMProvider(), settings, db=db),
+        llm=llm or LLMGateway(provider or UnavailableLLMProvider(), settings, db=db),
         compute=compute or scripted_compute(ComputeScenario()),
         storage=storage or InMemoryObjectStore(),
         embeddings=embeddings or FakeEmbeddingClient(settings.embedding_dim),
