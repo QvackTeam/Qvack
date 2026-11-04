@@ -20,7 +20,7 @@
 | **G0 «Скелет»** | WP0; базовая миграция dbmate; `Db` и `append_events`; поля ресурсов и подмены; имена параметров §6.7; черновик каталога; каркас compute; красные тесты Этапа I | **пройден** |
 | **G1 «Контракты заморожены»** | Каталог событий окончательный (S3, #119); строки проектора (S5, #135); таблица диспетчера (S6, #101, #117); сигнатуры `graph.read` (S4); `TeacherOutput`, `Element`, `AnswerSpec`, `TaskMarkup`, схемы ролей, `PROMPT_CONTRACTS.md`; черновик `openapi.json` | **пройден** |
 | **G2 «Память, проверка, ход»** | WP2–WP6.4, WP7.1–7.4, WP10.2–10.3, WP11, WP12.1–12.3, WP13, WP15, WP18, WP19, WP24; зелёные тесты группы G2; `T-E1` (текстовый путь) | **не пройден.** Осталось: WP1.3 (подключение проектора, очереди, исполнителя к процессам), WP26.1 (`T-E1`); маршрут `/jobs` WP7.4 сделан (B) |
-| **G3 «Учитель и каналы»** | WP6.5, WP7.5, WP8, WP12.4–12.7, WP14, WP16, WP17, WP20–WP23, WP25; зелёные `T-CX*`, `T-AG*`, `T-RV*`, `T-ED*`, `T-MT*`, `T-CV*`, `T-CP*`, `T-AR*`, `T-DL*`; `T-E2`–`T-E14` | **не пройден.** Осталось — A: WP6.5, WP7.5 (обработчики), WP8.2, WP8.3, WP17.2–17.6, WP25. B: WP16.3, WP16.5, WP16.6. C: WP20.2, WP21.6 (лассо), WP23.4–23.7. Тесты `T-E2`–`T-E14` (WP26) |
+| **G3 «Учитель и каналы»** | WP6.5, WP7.5, WP8, WP12.4–12.7, WP14, WP16, WP17, WP20–WP23, WP25; зелёные `T-CX*`, `T-AG*`, `T-RV*`, `T-ED*`, `T-MT*`, `T-CV*`, `T-CP*`, `T-AR*`, `T-DL*`; `T-E2`–`T-E14` | **не пройден.** Осталось — A: WP6.5, WP7.5 (обработчики), WP8.2, WP8.3, WP17.2–17.6, WP25. B: WP16.3, WP16.6. C: WP20.2, WP21.6 (лассо), WP23.4–23.7. Тесты `T-E2`–`T-E14` (WP26) |
 | **G4 «Выпуск»** | WP1.3, WP9, WP10.4–10.7, WP26; зелёные `T-DB3`, `T-OPS*`, `T-AI7`, `T-AI8`; DoD (§10) заполнен; решения класса C подтверждены; слияние в `main` решает владелец | **не пройден.** Осталось: WP1.3; WP9.1, WP9.3–9.7; WP10.1 (адаптеры), WP10.4, WP10.6, WP10.7; WP26. Таблица DoD пуста, подтверждения класса C — раздел 6 |
 
 ## 3. Прогресс
@@ -133,7 +133,7 @@
 | WP16.2 | Описание заблуждения | влит | `misconception.describe` (#165, #180) | — | — | T-AG2 |
 | WP16.3 | Сверка и гигиена графа | частично | `graph.hygiene` (#180); сверка `agents/reconcile.py::reconcile_domain` (D-B-205, D-B-206) | вызов из `material.parse` (WP20.2, C) | WP20.2 | T-AG3, T-AG4 |
 | WP16.4 | Определение домена | влит | `POST /v1/domains/classify` (#157) | — | — | T-AG5 |
-| WP16.5 | Строитель визуализаций | частично | `agent.viz`: генерация, рендер, одна попытка исправления (#168) | `GET /v1/viz/{id}` с CSP (объявление в `quack/artifacts/router.py`); `deploy/static/viz/` с закреплёнными D3/Plotly/KaTeX | — | T-AG6 |
+| WP16.5 | Строитель визуализаций | сделано (B) | `agent.viz`: генерация, рендер, одна попытка исправления (#168); `GET /v1/viz/{id}` с CSP по решению владельца (#201, D-B-178): тело `quack/practice/viz_page.py`, объявление `quack/artifacts/viz_routes.py` | `deploy/static/viz/` с закреплёнными D3/Plotly/KaTeX и `viz_libraries` (C, WP9.2) | — | T-AG6 |
 | WP16.6 | Поручения и доставка | влит | Обработчики `task.solution_space`, `agent.solution_space`, `agent.task_generation`, `check.known_claim`, `agent.illustration`, регистрация #173 (#208, D-B-191…193, D-B-196) | `agent.artifact` — C | — | T-AG7 |
 | WP16.7 | Проигрывание, судья, метрики (P2) | частично | Функции `session/replay.py::replay_session`, `agents/metrics.py::metrics`, `agents/judge.py` (#208, D-B-194, D-B-195); качество извлечения `agents/extraction_eval.py` (D-B-209); команды `ops metrics`, `ops replay-session` (C, D-C-151), `ops extraction-eval` (C, D-C-167) | выгрузка наборов LangSmith — оператор | — | — |
 | WP16.8 | Подготовка «Сегодня» | влит | `today.prepare` (#180) | — | — | T-RV2 |
@@ -193,7 +193,7 @@
 ### Поток B
 
 0. **WP1.3, шаг 4 B** — шлюз только на `Db` (D-B-212): PR фазы 4 B wave 6. Остаток C: `ops/status.py`, `ops/commands.py` читают `ops.llm_ledger`/`core.llm_outbox` — перевести на `ops.llm_usage`.
-1. **WP16.5** — `GET /v1/viz/{id}` с CSP после ответа владельца (issue #201); `deploy/static/viz/` — C.
+1. **WP16.5** — сделано (D-B-178); осталась статика `deploy/static/viz/` — C.
 2. **WP10.6, хвост** — подключение трассера в сборке процессов (C, #209), удаление трасс из WP25 (A).
 3. **WP10.7, хвост** — живой прогон владельцем: `META_API_KEY=… POSTGRES_DSN=… uv run python scripts/meta_smoke.py --out …` (DoD п.6a, D-B-187 [ПРОВЕРИТЬ]).
 4. **WP16.3, хвост** — вызов `reconcile_domain` из `material.parse` (C, WP20.2).

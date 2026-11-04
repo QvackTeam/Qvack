@@ -38,7 +38,13 @@ async def _started_session(system: System, learner: Learner, ids: Ids, payload: 
 STREAM = Stream(
     name="b",
     # `task_id` and `turn_id` are used by the routes of stream C (cards, canvas).
-    ids={"session_id": NO_ID, "session_domain_id": NO_ID, "task_id": NO_ID, "turn_id": NO_ID},
+    ids={
+        "session_id": NO_ID,
+        "session_domain_id": NO_ID,
+        "task_id": NO_ID,
+        "turn_id": NO_ID,
+        "viz_id": NO_ID,
+    },
     routes=(
         Route(
             "POST",
@@ -93,7 +99,8 @@ STREAM = Stream(
             ("GET", "/v1/sessions/{session_id}/events"),
             ("GET", "/v1/sessions/{session_id}/jobs"),
             ("GET", "/v1/llm/access"),
+            ("GET", "/v1/viz/{viz_id}"),
         }
     ),
-    routers=("quack.session.router:router",),
+    routers=("quack.session.router:router", "quack.artifacts.viz_routes:router"),
 )
