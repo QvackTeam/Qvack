@@ -46,7 +46,7 @@
 | :-- | :-- | :-: | :-- | :-- | :-- | :-- |
 | WP1.1 | dbmate и базовая схема | влит | `db/migrations/…baseline.sql` + 3 расширяющие миграции (#78, #142) | — | — | T-DB1 |
 | WP1.2 | `Db` и репозитории | влит | `quack.db.Db`, `append_events`, блокировки на psycopg (#78, #107) | — | — | T-DB2, T-DB4, T-DB5 |
-| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1 — процессы Фазы 4 (D-A-200, #224); шаг 2 — стенд на dbmate (C, #239); шаг 3 A — `graph/read`, `domains/**` на `Db` (D-A-207…212, #225, #226); шаг 3 B — #222; шаг 5 ч.1 — флаг `phase4_processes` снят, `graph.curate` и `account.purge_deleted` Фазы 3, `ops/registry.py`, `jobs/periodic.py`, `graph/rebuild.py` удалены (D-A-223…225) | шаг 3 C — `artifacts/*`, `api/*` на `Db` сделан (D-C-170, PR шага 3); ops и CLI сделаны: `ops status`, `restore-check`, `seed-learners`, `alerts`, `db-roles`, `cli.py` без движка, `replay-dlq` и `purge-deleted` сняты (C, D-C-180, D-C-181, ветка phase-4-c-step3-ops); шаг 4 B — шлюз без `session_factory`; шаг 5 ч.2 — `graph/worker.py`, `jobs/dispatcher*.py` (после тестов C), `jobs/queue.py`, `db/postgres.py`, зависимости `sqlalchemy`/`asyncpg`/`alembic` (T-DB3) | шаг 3 C, шаг 4 B | T-DB3 (G4) |
+| WP1.3 | Перенос кода, снятие SQLAlchemy | частично | Шаг 1 — процессы Фазы 4 (D-A-200, #224); шаг 2 — стенд на dbmate (C, #239); шаг 3 A — `graph/read`, `domains/**` на `Db` (D-A-207…212, #225, #226); шаг 3 B — #222; шаг 5 ч.1 — флаг `phase4_processes` снят, `graph.curate` и `account.purge_deleted` Фазы 3, `ops/registry.py`, `jobs/periodic.py`, `graph/rebuild.py` удалены (D-A-223…225) | шаг 3 C — `artifacts/*`, `api/*` на `Db` сделан (D-C-170, PR шага 3); ops и CLI сделаны: `ops status`, `restore-check`, `seed-learners`, `alerts`, `db-roles`, `cli.py` без движка, `replay-dlq` и `purge-deleted` сняты (C, D-C-180, D-C-181, ветка phase-4-c-step3-ops); шаг 3 C, тесты - `tests/**` зоны C без SQLAlchemy и Фазы 3, Фаза 3 для тестов A/B собрана в `tests/support/phase3_pg.py` и `phase3_events.py` (C, D-C-190); шаг 4 B — шлюз без `session_factory`; шаг 5 ч.2 — `graph/worker.py`, `jobs/dispatcher*.py` (после тестов C), `jobs/queue.py`, `db/postgres.py`, зависимости `sqlalchemy`/`asyncpg`/`alembic` (T-DB3) | шаг 3 C, шаг 4 B | T-DB3 (G4) |
 | WP1.4 | squawk | влит | `backend/.squawk.toml` (#185), job `squawk` в CI (#189) | — | — | T-DB7 |
 | WP2.1 | Модели payload и реестр | влит | 65 типов, S3 заморожен (#80, #94, #119, #130) | — | D-A-121 (класс C) | T-EV1, T-EV2, T-EV3 |
 | WP2.2 | Ход и последствия вместе | влит | Пачка хода одним `append_events` (#109, `session/turn_commit.py`) | — | — | T-EV4 |
@@ -145,18 +145,18 @@
 | WP0 | Вход и аудит (зоны A, B выполнены) | влит | `main` зелёный, чистый старт подтверждён владельцем 2026-11-02, п.3а–3е закрыты (#71, #72) | — | — | T-A9b |
 | WP9.1 | compose | частично | `compose.yaml`: Caddy, сети, лимиты, секреты ролей (#102, #174); `LLM_PRICES`, `LANGSMITH_API_KEY` у `api`/`workers`, пустая `LLM_PRICES` допустима вне prod (D-B-198, D-C-149, ветка phase-4-c-b209) | сервис `alerts` и таймер; сверить состав с `Д-§3` | — | T-OPS1, T-OPS6 |
 | WP9.2 | Caddy и образы | влит | `deploy/Caddyfile`, Dockerfile с `pg_dump 16`, `age`, CORS (#120, #177); `dbmate` и `db/migrations` в образе - D-C-160 | — | — | — |
-| WP9.3 | CI | частично | Jobs: backend, squawk, compute, images, publish в GHCR (#77, #171, #178, #189) | шаги: реестр событий (с A), типы фронтенда из OpenAPI, `modal/`, изоляция и один писатель отдельно; job выкатки | — | T-DB7 |
-| WP9.4 | Выкатка и откат | частично | `deploy/deploy.sh` (#120) | job выкатки в окружении `production`, `DEPLOY_FREEZE`; проверка порядка шагов | — | T-OPS8 |
-| WP9.5 | Бэкапы и тревоги | частично | `ops backup`, сервис и таймер `backup`, вебхук тревог (#122, #126) | `ops alerts` и `alerts`-контейнер, `GET /internal/status` | — | T-OPS5, T-OPS7 |
-| WP9.6 | Команды восстановления | частично | `ops db-roles` (#127), `ops rebuild`, `can-rollback` | `restore-check`, `orphan-objects`, `resume`, `replay-deletions`, `--concurrency`; ждут функций A (S15) | WP25 (A) | T-OPS2, T-OPS3, T-OPS4 |
-| WP9.7 | Сервер | частично | `deploy/setup-server.sh`, `deploy/README.md` (#120, #169) | таймер systemd `alerts`; раздел восстановления `Д-§8.3` | — | — |
+| WP9.3 | CI | в PR (ветка phase-4-c-wp9-3-ci) | Jobs: fast (+`modal/`: ruff, pyright), backend (+ шаги «изоляция», «один писатель»), squawk, compute, images, publish в GHCR, реестр событий (#237), `frontend-types` (только PR, ожидаемо красный до перевода фронтенда, не гейт публикации; R4-2); job выкатки с `production`, `concurrency: deploy`, `DEPLOY_FREEZE` (WP9.4); `$ref` 422 в `openapi.json` исправлены (D-C-210) | сделать `frontend-types` обязательным — владелец после перевода фронтенда | D-C-210 | T-DB7 |
+| WP9.4 | Выкатка и откат | в PR (ветка phase-4-c-wp9-3-ci) | `deploy/deploy.sh` (#120), job выкатки в окружении `production`, `DEPLOY_FREEZE` (#217), `tests/test_deploy_order.py` (порядок шагов Д-§6.1, нет автоотката при новых событиях) | живой прогон на сервере — владелец | D-C-210 | T-OPS8 |
+| WP9.5 | Бэкапы и тревоги | в PR (ветка phase-4-c-wp9-3-ci) | `ops backup`, сервис и таймер `backup`, вебхук тревог (#122, #126), `ops alerts`, сервис `alerts`, таймеры (#204, D-C-182), `GET /internal/status` (D-C-212) | — | D-C-212 | T-OPS5, T-OPS7 |
+| WP9.6 | Команды восстановления | в PR (ветка phase-4-c-wp9-3-ci) | `ops db-roles` (#127), `ops rebuild --concurrency`, `can-rollback`, `restore-check`, `resume`, `replay-deletions`, `orphan-objects` (функции A из S15 влиты; `orphan_objects` — в зоне C, D-C-211) | подтверждение владельцем определения «ссылка в Postgres» для `orphan-objects` | D-C-211 | T-OPS2, T-OPS3, T-OPS4 |
+| WP9.7 | Сервер | в PR (ветка phase-4-c-wp9-3-ci) | `deploy/setup-server.sh` с таймерами `quack-alerts` и `quack-host-state`, `deploy/README.md` с разделом восстановления Д-§8.3 (#120, #169, #204) | — | — | — |
 | WP18.1 | Вход по ссылке на почту | влит | `auth/links.py`, `ResendEmailSender`, лимиты (#97, #106) | — | D-C-133 | T-AU1, T-AU2 |
 | WP18.2 | Google OIDC | влит | `AuthlibGoogleOIDC` (#106) | клиент Google OIDC создаёт владелец | действие владельца | T-AU3 |
 | WP18.3 | Сессии и cookie | влит | Весь API на сессиях, JWT и пароль удалены (#123) | — | — | T-AU4, T-AU5 |
 | WP18.4 | Согласия | влит | `POST /v1/consents`, `require_terms` (#97, #106, #111) | — | — | T-AU6 |
 | WP19 | Объектное хранилище и загрузки | влит | `S3ObjectStore`, ключи с ULID, тип по содержимому (#90) | проверка региона Contabo и path-style на стенде (D-C-109) | — | T-ST1, T-ST2, T-ST3 |
 | WP20.1 | Загрузка | влит | `POST /v1/domains/{id}/materials`, `GET /v1/materials/{id}` (#98, #113) | — | — | T-MT1 (часть) |
-| WP20.2 | Разбор | не начат | Роль `material_parser` в `Settings`, события `material.*` | задача `material.parse`: страницы, куски, структура под блокировкой домена, слой 2 `material_parser@1` | WP1.3 (A), builder (B) | T-MT1 |
+| WP20.2 | Разбор | частично | Роль `material_parser` в `Settings`, события `material.*`; `material.parse` в два шага (страницы, куски, разметка; структура под `domain:{id}` через `reconcile_domain`, хаб «из материала»), слой 2 и черновик слоя 1 `material_parser@1` (D-C-200…D-C-203) | силлабус (дедлайны), задачи семинара, скан без текстового слоя (D-C-202 п.4) | задачи семинара — разметка WP12.5 (B) | T-MT1 |
 | WP20.3 | Эмбеддинги на Modal | влит | `modal/embeddings.py`, клиент (#115) | инструкция запроса и окно простоя — подтвердить владельцем | D-C-117 | T-MT2, T-MT4 |
 | WP20.4 | Векторный поиск, предвыборка | влит | `materials_prefetch`, `materials_search` (#140) | — | — | T-MT3 |
 | WP20.5 | Полнотекстовый поиск | влит | `GET /v1/search`, `materials/search.py` (#98, #113) | теста `T-DB6` (EXPLAIN GIN) в `tests/db` не нашёл | — | T-MT5, T-DB6 |
@@ -178,7 +178,7 @@
 | WP23.6 | Скиллы ученика (P2) | не начат | — | `content.learner_skills`, `/имя` в чате, `GET /v1/system-templates` | — | T-CX6 |
 | WP23.7 | Экспорт (P2) | не начат | экспорт Фазы 3 `GET /v1/domains/{id}/export` снят (D-C-170: `pMastery` и `core.domains` в Фазе 4 нет) | Obsidian, Anki (`genanki`), `POST /v1/learner/export` (`export.data`) | — | T-AR5 |
 | WP24 | Сервис compute | влит | Пул `pebble`, PDF, фото, рендер, Chromium по требованию (#82, #92) | почасовая чистка `/srv/quack/tmp` (D-C-110) | — | T-CM1, T-CM2, T-CM3 |
-| WP26 | Сквозные тесты и нагрузка | частично | `meta-mock` со стримингом и инструментами (#87), подмены `tests/support/` | стенд `tests/e2e/` всё ещё Фазы 3: перевод на новый путь (T-E1 нужен для G2), красные T-E2–E14, Locust на 100 учеников | WP1.3 (A) | T-E1–T-E14 |
+| WP26 | Сквозные тесты и нагрузка | частично | `meta-mock` со стримингом и инструментами (#87), подмены `tests/support/` | стенд `tests/e2e/` на процессах Фазы 4 (`projector_process`, `workers_process`, D-C-190); осталось: T-E1 (текстовый ход на новом стенде), красные T-E2–E14, Locust на 100 учеников | WP1.3 (A) | T-E1–T-E14 |
 
 ## 5. Следующие шаги
 
@@ -208,7 +208,7 @@
 3. **WP20.2** — задача `material.parse` и слой 2 `material_parser@1` (рантайм — после WP1.3).
 4. ~~WP21.4 → WP21.5~~ — сделано в ветке phase-4-c (D-C-158, D-C-159): каскад проверки шагов, пометки и вмешательства (T-CV4, T-CV5).
 5. **WP26.1–26.2** — перевести `tests/e2e/` на новый путь (`T-E1` для G2), красные `T-E2`–`T-E14`; после WP1.3 потока A.
-6. **WP9.5, WP9.6, WP9.3** — `ops alerts`, команды восстановления (после функций A), шаги CI (реестр событий, типы фронтенда, `modal/`), job выкатки (WP9.4).
+6. ~~WP9.5, WP9.6, WP9.3~~ — сделано в ветке phase-4-c-wp9-3-ci (D-C-210–D-C-212); остаётся живая проверка на сервере.
 7. **WP9.1/9.7** (`alerts`). WP21.6 (голос) и WP22.3 шаг 5 сделаны (D-C-153, D-C-152).
 8. **WP23.6–23.7** (P2), Locust на 100 учеников (WP26.3, P2); issues #193 (ответ C), #188.
 

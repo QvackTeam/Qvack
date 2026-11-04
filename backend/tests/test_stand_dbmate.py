@@ -1,5 +1,6 @@
 """WP1.3 step 2 / WP9 (D-C-160, issue #223): the stand, compose and the rollout job bring up the
-Phase 4 schema with dbmate before `api`, `projector` and `workers`, with `PHASE4_PROCESSES=true`."""
+Phase 4 schema with dbmate before `api`, `projector` and `workers`, which run the processes of
+Phase 4 unconditionally (the flag `PHASE4_PROCESSES` is removed, D-A-223)."""
 
 from __future__ import annotations
 
@@ -33,11 +34,12 @@ def compose() -> dict[str, Any]:
 # --- compose -----------------------------------------------------------------------------
 
 
-def test_the_processes_of_phase_4_are_on_at_the_stand(compose: dict[str, Any]) -> None:
-    """Settings reads `PHASE4_PROCESSES` without a prefix (`phase4_processes`, D-A-200)."""
-    for name in PROCESSES:
-        assert compose["services"][name]["environment"]["PHASE4_PROCESSES"] == "true", name
-    assert "PHASE4_PROCESSES" not in compose["services"]["compute"]["environment"]
+def test_the_processes_of_phase_4_need_no_flag(compose: dict[str, Any]) -> None:
+    """The processes of Phase 4 are the only ones (D-A-223): no service sets the retired
+    `PHASE4_PROCESSES`, and `Settings` has no field for it."""
+    for name, service in compose["services"].items():
+        assert "PHASE4_PROCESSES" not in service.get("environment", {}), name
+    assert "phase4_processes" not in Settings.model_fields
 
 
 def test_the_schema_is_migrated_before_the_processes_start(compose: dict[str, Any]) -> None:

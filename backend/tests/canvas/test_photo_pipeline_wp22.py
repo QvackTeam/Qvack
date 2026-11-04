@@ -7,14 +7,11 @@ import json
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy.ext.asyncio import AsyncEngine
-
 from quack.canvas.boards import get_canvas, open_canvas
 from quack.canvas.photo_pipeline import align_lines, normalized_levenshtein, run_photo_pipeline
 from quack.compute_client.contracts import AlignResponse, ImageResponse
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.event_types import PhotoUploaded
 from quack.events.log import NewEvent, append_events
 from quack.jobs.runner import JOB_HANDLERS
@@ -84,9 +81,7 @@ async def _log(db: Db, learner: UUID) -> list[tuple[str, str, Any]]:
     return [(r["type"], r["payload"]["line_id"], r["payload"]["text"]) for r in rows]
 
 
-async def test_photos_of_one_sheet_write_only_new_lines(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_photos_of_one_sheet_write_only_new_lines(pg_db: Db, settings: Settings) -> None:
     """WP22.3 п.1–4: the aligned photo is read in one call; the second photo of the sheet writes
     its new and changed lines and erases the newly crossed-out one; a repeated job writes
     nothing; a photo where little of the last one matches opens a new sheet."""
@@ -108,7 +103,7 @@ async def test_photos_of_one_sheet_write_only_new_lines(
     provider = ScriptedLLMProvider()
     provider.respond("RecognizerSheetOutput", lambda _request: dict(sheet))
     resources = build_app_resources(
-        settings, pg_engine, None, None, db=pg_db, session_factory=db, provider=provider,
+        settings, None, None, db=pg_db, provider=provider,
         compute=scripted_compute(scenario), storage=storage,
     )  # fmt: skip
 
@@ -189,7 +184,7 @@ def test_pipeline_job_is_registered() -> None:
 
 
 async def _canvas_with_pipeline(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
+    pg_db: Db, settings: Settings
 ) -> tuple[UUID, Any, InMemoryObjectStore, ComputeScenario, ScriptedLLMProvider, Any]:
     learner = await create_learner(pg_db)
     session_id = uuid4()
@@ -205,7 +200,7 @@ async def _canvas_with_pipeline(
     scenario = ComputeScenario()
     provider = ScriptedLLMProvider()
     resources = build_app_resources(
-        settings, pg_engine, None, None, db=pg_db, session_factory=db, provider=provider,
+        settings, None, None, db=pg_db, provider=provider,
         compute=scripted_compute(scenario), storage=storage,
     )  # fmt: skip
     return learner, canvas, storage, scenario, provider, resources
@@ -229,15 +224,13 @@ def _drawing(left: float, top: float, right: float, bottom: float) -> dict[str, 
     }  # fmt: skip
 
 
-async def test_sam_only_for_drawings(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_sam_only_for_drawings(pg_db: Db, settings: Settings) -> None:
     """T-CP3 (WP22.3 step 5): `segmenter` is called once per area the recognizer marked as a
     drawing, by the box of the area in pixels; the drawing is cleaned by compute with the mask
     of the model, stored, and laid into the learner layer of the board; a repeated job and a
     photo without drawings call nothing."""
     learner, canvas, storage, scenario, provider, resources = await _canvas_with_pipeline(
-        pg_db, pg_engine, db, settings
+        pg_db, settings
     )
     aligned = webp_vp8x(200, 100)
     answer = AlignResponse(aligned=True, image_webp_b64=base64.b64encode(aligned).decode())

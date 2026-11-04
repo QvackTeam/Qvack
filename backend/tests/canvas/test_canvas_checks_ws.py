@@ -11,8 +11,6 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncEngine
-
 from quack.api.app import create_app
 from quack.api.auth import SESSION_COOKIE
 from quack.auth.sessions import open_session
@@ -20,7 +18,6 @@ from quack.canvas.boards import get_canvas
 from quack.compute_client.contracts import ImageResponse
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.log import NewEvent, append_events
 from tests.canvas.steps_support import TRANSITION, events, follows, make_canvas
 from tests.db.fixtures import create_learner
@@ -53,7 +50,7 @@ class Rig:
         self.app, self.cookies, self.learner, self.canvas_id = app, cookies, learner, canvas_id
 
 
-async def _rig(pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings) -> Rig:
+async def _rig(pg_db: Db, settings: Settings) -> Rig:
     learner = await create_learner(pg_db)
     _, canvas = await make_canvas(pg_db, learner)
     scenario = ComputeScenario()
@@ -81,7 +78,7 @@ async def _rig(pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: 
         }
     )
     resources = build_app_resources(
-        cfg, pg_engine, None, None, db=pg_db, session_factory=db, provider=provider,
+        cfg, None, None, db=pg_db, provider=provider,
         compute=scripted_compute(scenario), storage=InMemoryObjectStore(),
     )  # fmt: skip
     token = await open_session(pg_db, cfg, learner_id=learner, now=datetime.now(UTC))
@@ -105,13 +102,11 @@ async def _write_line(ws: AsgiWebSocket, number: int, y: float) -> None:
     assert reading["type"] == "line_recognized" and reading["recognized"] is True
 
 
-async def test_error_mark_comes_after_the_grace(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_error_mark_comes_after_the_grace(pg_db: Db, settings: Settings) -> None:
     """T-CV4 + T-CV5 over the socket: the first line is read, the second contradicts it; the
     discrepancy is `observation.diagnosed {method: symbolic}` at once, the `mark` comes only
     after `error_grace_ms`, and the mark is in the teacher layer of the board."""
-    rig = await _rig(pg_db, pg_engine, db, settings)
+    rig = await _rig(pg_db, settings)
     async with AsgiWebSocket(
         rig.app, f"/v1/canvases/{rig.canvas_id}/ws", cookies=rig.cookies
     ) as ws:
@@ -128,12 +123,10 @@ async def test_error_mark_comes_after_the_grace(
     assert [(m.line_id, m.kind) for m in doc.teacher.marks] == [("l2", "error")]
 
 
-async def test_erased_line_gets_no_mark(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_erased_line_gets_no_mark(pg_db: Db, settings: Settings) -> None:
     """Т-§15.5: the learner erased the wrong line within the grace - no mark (self-correction);
     the evidence stays in the log as usual."""
-    rig = await _rig(pg_db, pg_engine, db, settings)
+    rig = await _rig(pg_db, settings)
     async with AsgiWebSocket(
         rig.app, f"/v1/canvases/{rig.canvas_id}/ws", cookies=rig.cookies
     ) as ws:
@@ -152,13 +145,11 @@ async def test_erased_line_gets_no_mark(
     assert len(await events(pg_db, rig.learner, "canvas.line_erased")) == 1
 
 
-async def test_quiet_mode_and_the_check_request(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_quiet_mode_and_the_check_request(pg_db: Db, settings: Settings) -> None:
     """Т-§15.5: in the quiet mode (`preference.set canvas_quiet`) no unprompted mark comes, the
     evidence is written; "проверь" shows the mark at once, taking the diagnosis already
     written (no second one)."""
-    rig = await _rig(pg_db, pg_engine, db, settings)
+    rig = await _rig(pg_db, settings)
     await append_events(
         pg_db,
         rig.learner,

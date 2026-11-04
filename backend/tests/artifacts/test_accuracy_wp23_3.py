@@ -9,7 +9,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.artifacts.documents import edit_block, get_artifact
 from quack.artifacts.hub_cheatsheet import generate_hub_cheatsheet, review_hub_cheatsheet
@@ -18,7 +17,6 @@ from quack.compute_client.contracts import RenderPdfResponse
 from quack.compute_client.math_contracts import MathCheckResponse
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from tests.artifacts.hubs import create_hub
 from tests.artifacts.test_cheatsheet_wp23_5 import HIT as HUB_HIT
 from tests.artifacts.test_cheatsheet_wp23_5 import HubReader
@@ -49,14 +47,14 @@ def verdict(outcome: str) -> MathCheckResponse:
 class Stand:
     """The writer answers `answers[i]` on the i-th call (the last one repeats)."""
 
-    def __init__(self, settings: Settings, engine: AsyncEngine, db: SessionFactory, pg: Db) -> None:
+    def __init__(self, settings: Settings, pg: Db) -> None:
         self.settings = settings
         self.provider = ScriptedLLMProvider()
         self.scenario = ComputeScenario()
         self.answers: list[list[dict[str, Any]]] = []
         self.provider.respond("ArtifactWriterOutput", self._answer)
         self.resources = build_app_resources(
-            settings, engine, None, None, db=pg, session_factory=db, provider=self.provider,
+            settings, None, None, db=pg, provider=self.provider,
             compute=scripted_compute(self.scenario),
         )  # fmt: skip
 
@@ -84,8 +82,8 @@ class Stand:
 
 
 @pytest.fixture
-def stand(settings: Settings, pg_engine: AsyncEngine, db: SessionFactory, pg_db: Db) -> Stand:
-    return Stand(settings, pg_engine, db, pg_db)
+def stand(settings: Settings, pg_db: Db) -> Stand:
+    return Stand(settings, pg_db)
 
 
 async def _notes(pg_db: Db, learner: UUID, topic_id: UUID) -> Any:
@@ -267,9 +265,7 @@ async def test_compute_down_marks_unverified_without_a_second_generation(
     assert b.unverified is True
 
 
-async def test_without_compute_the_formula_is_unverified(
-    stand: Stand, pg_db: Db, pg_engine: AsyncEngine
-) -> None:
+async def test_without_compute_the_formula_is_unverified(stand: Stand, pg_db: Db) -> None:
     learner = await create_learner(pg_db)
     topic_id = await _topic(pg_db, learner)
     stand.writes([block("Pythagoras", formulas=[IDENTITY])])

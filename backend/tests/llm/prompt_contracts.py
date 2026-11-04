@@ -23,6 +23,7 @@ from quack.canvas.recognition import RecognizerOutput, RecognizerSheetOutput
 from quack.domains.schemas import CuratorOutput, DiagnosticOutput, StructurerOutput
 from quack.llm.labels import LABEL_PREFIX
 from quack.llm.strict_schema import to_strict_json_schema
+from quack.materials.parse import MaterialParserOutput
 from quack.practice import role_outputs
 from quack.practice.schemas import EvaluatorOutput, TaskGenOutput
 from quack.prompts.registry import PromptRegistry
@@ -69,6 +70,7 @@ PHASE4_PROMPT_SCHEMAS: dict[str, tuple[type[BaseModel], ...]] = {
     "recognizer@1": (RecognizerOutput, RecognizerSheetOutput),
     "artifact_writer@1": (ArtifactWriterOutput,),
     "canvas_diagnoser@1": (CanvasDiagnoserOutput,),
+    "material_parser@1": (MaterialParserOutput,),
 }
 
 # Every prompt with its schemas: what `T-M5` and `PROMPT_CONTRACTS.md` cover.

@@ -23,6 +23,45 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-C-212. WP9.5: `GET /internal/status` в приложении `api`
+- Класс: C
+- WP / место: WP9.5, Д-§9.1; `quack/api/app.py` (`_internal_router`), `tests/e2e/routes/c.py`, `tests/test_ops_p4_status.py`
+- Контекст: ТЗ WP9.5 требует внутренний эндпоинт сводки с содержимым `ops status`; в коде его не было (Caddyfile уже отдаёт `/internal/*` кодом 404).
+- Решение: `GET /internal/status` вызывает `collect_status` на ресурсах процесса и отвечает отчётом: 200, либо 503, если Postgres не отвечает (код 2 команды). Маршрут вне схемы OpenAPI (`include_in_schema=False`), без входа ученика: защита — сеть Docker и Caddy, который его не проксирует. Вне реестра маршрутов `tests/e2e/routes` (реестр сверяется со схемой OpenAPI).
+- Почему: ТЗ Ф4 WP9.5, Д-§9.1.
+- Обратимость: код.
+- Тесты: `test_internal_status_serves_the_report_of_ops_status`.
+- Требует подтверждения владельцем: нет.
+
+### D-C-211. WP9.6: `orphan-objects`, `resume`, `replay-deletions`, `rebuild --concurrency`
+- Класс: C (определение «есть ссылка в Postgres» для `orphan-objects` в документах не дано)
+- WP / место: WP9.6, Д-§8.3, Д-§8.7; `quack/ops/orphan_objects.py`, `quack/cli.py`, `deploy/README.md`
+- Контекст: функции A из S15 влиты (`replay_deletions`, `reconcile_deletions` в `deletion/journal.py`, `resume` в `graph/projection/runner.py`); функции `orphan_objects` у A нет, она в зоне C (ops).
+- Решение: `ops resume --learner`, `ops replay-deletions --since` (печатает `{"replayed": N}`), `ops rebuild ... --concurrency N` (по умолчанию `rebuild_concurrency`; ученики пересобираются по N одновременно, код выхода 1, если хоть один не `rebuilt`). `ops orphan-objects --since [--dry-run]` смотрит объекты `learners/` новее метки: объект держат ссылки: ключ в `content.materials.object_key`, `material_pages.image_key`, `exports.object_key`; ключ в `payload` события или в `content` версии артефакта того же ученика; для кусков холста `learners/{l}/canvas/{s}/{c}/…` - строка `content.canvas_boards` (куски находятся по префиксу, ключа в базе нет). Остальное удаляется (при `--dry-run` только список). Печатает JSON `{checked, orphans, deleted, dry_run}`. Поиск ключа в событиях идёт по ученику ключа (`strpos(payload::text, key)`): дорого на большом журнале, но команда одноразовая, после восстановления, и объектов новее дампа немного.
+- Почему: ТЗ Ф4 WP9.6, Д-§8.3 шаги 5 и 8, Д-§8.7; T-OPS4.
+- Обратимость: код. Удаление необратимо, поэтому в README команде предшествует `--dry-run`. Если появятся новые места ссылок на ключи (таблица, колонка), их надо добавить в `orphan_objects.py`, иначе команда удалит живой файл.
+- Тесты: `tests/test_ops_p4_recovery.py`.
+- Требует подтверждения владельцем: да (риск удаления файлов ученика при неполном списке ссылок).
+
+### D-C-210. WP9.3: шаги CI (типы фронтенда, `modal/`, изоляция и один писатель), тесты порядка выкатки, ссылки OpenAPI
+- Класс: C (зона C: `.github`, `deploy`, `openapi.json`)
+- WP / место: WP9.3, WP9.4; `.github/workflows/ci.yml`, `quack/api/openapi.py`, `tests/test_ci_layers.py`, `tests/test_deploy_order.py` (T-OPS8), `tests/test_app_assembly.py`
+- Контекст: п.7 `Д-§5.2` («типы фронтенда из OpenAPI совпадают») требует Node, пакета нет в ТЗ §4.6; `modal/` не имел проверок; изоляция и один писатель шли только внутри полного прогона; `backend/openapi.json` не собирался генератором типов: у `/auth/*` и `/companion/pair` в ответе 422 остался `$ref` на удалённый `HTTPValidationError`.
+- Решение: (1) job `frontend-types` (только pull_request, не в `needs` у `publish`, ожидаемо красный до перевода фронтенда, R4-2): `npm ci --ignore-scripts` в `frontend/` по его lock-файлу (генератор `openapi-typescript` уже в `frontend/package.json`, новых зависимостей и actions нет, файлы фронтенда не меняются), генерация из `backend/openapi.json` теми же флагами, что в `api:types`, и `cmp` с `frontend/lib/api/schema.d.ts`. (2) `modal/` в job `fast`: `ruff check`, `ruff format --check` с настройками backend и `pyright ../modal` (пакет `modal` есть в backend, ТЗ §4.6). (3) Перед полным прогоном job `backend` отдельные шаги: изоляция (T-DB4, T-E3) и один писатель (T-A9a, T-A9b). (4) Выкатка (WP9.4): job `deploy` с окружением `production`, `concurrency: deploy` и пропуском при `DEPLOY_FREEZE` уже были; добавлены тесты (`test_ci_layers`) и `test_deploy_order.py` (T-OPS8): порядок шагов `Д-§6.1` и запрет автоотката при новых событиях, правилах, миграциях читаются по тексту `deploy.sh` (режима проверки в скрипте нет). (5) `quack/api/openapi.py`: ссылка 422 на удалённую модель заменена на `ErrorResponse` для всех маршрутов; тест `test_openapi_refs_all_resolve`; `openapi.json` пересобран.
+- Почему: `Д-§5.2` п.5, п.7, ТЗ Ф4 WP9.3, WP9.4, R4-2, §4.6, §8.13 (T-OPS8).
+- Обратимость: код и workflow.
+- Тесты: `tests/test_ci_layers.py`, `tests/test_deploy_order.py`, `tests/test_app_assembly.py::test_openapi_refs_all_resolve`.
+- Требует подтверждения владельцем: нет (обязательным `frontend-types` делает владелец после перевода фронтенда).
+### D-C-190. WP1.3 шаг 3 C, тесты: зона C без Фазы 3, стенд e2e на процессах Фазы 4, остаток Фазы 3 собран в `tests/support/phase3_*`
+- Класс: C (только тесты и подмены; код `quack/**` не менялся)
+- WP / место: WP1.3 шаг 3 (issue #215), WP26.1; `tests/support/{resources,dispatch,auth,phase3_pg,phase3_events}.py`, `tests/conftest.py`, `tests/factories.py`, `tests/e2e/{system,conftest,journey,test_isolation_and_idempotency}.py`, `tests/test_infra.py`, `tests/test_app_assembly.py`, `tests/{artifacts,canvas,auth,materials,storage}/*`, `tests/test_stand_dbmate.py`, `compose.yaml`, `deploy/README.md`, `.github/workflows/deploy.yml`
+- Контекст: тесты A/B (`session`, `domains`, `jobs`, `test_learner_stream`, `test_worker_and_ops`, `test_dispatcher`, `test_events_and_append`, `test_projector_determinism`, `test_session_overlay`, `test_neo4j_outage`, `test_jobs_phase3`) ещё просят фикстуры `pg_engine`, `db` (Alembic, SQLAlchemy), `ensure_user`, `EventLog`/`new_event`/`sample_payloads` и зовут `build_app_resources(settings, pg_engine, neo4j, redis, session_factory=db)` / `build_job_context(settings, db, None, None, engine=...)`. Править их нельзя, ломать - тоже. `JobContext` в `quack/jobs/runner.py` (зона A) пока имеет поля `session_factory` и `engine`.
+- Решение: (1) `build_app_resources` и `build_job_context` берут `settings, neo4j, redis, db=pg_db, ...`; старая форма (лишний пул перед `neo4j`, ключи `session_factory=`, `engine=`) принимается и отбрасывается, у `JobContext` оставшиеся поля Фазы 3 заполняются из неё или `None` (без их имён в файле). Зона C старую форму не использует. (2) Фикстуры `pg_engine`, `db`, `ensure_user` переехали из `tests/conftest.py` и `tests/support/auth.py` в `tests/support/phase3_pg.py` (подключён через `pytest_plugins`; `auth.py` реэкспортирует `ensure_user`); построители `EventLog`, `new_event`, `sample_payloads` - в `tests/support/phase3_events.py` (`tests/factories.py` реэкспортирует). A снимает оба файла и реэкспорты одним коммитом вместе с последним тестом Фазы 3 (шаг 5). (3) `tests/support/dispatch.py` - на `DispatcherP4` и `project_learner`; `mark_dispatched` пишет `ops.dispatcher_offsets` по `core.learners.seq`. (4) Стенд e2e: `projector_process` (проектор `rules@3` и диспетчер) и `workers_process` (исполнитель очереди Фазы 4 и такт периодических задач) задачами asyncio; процессы открывают свою `Db` по DSN базы Фазы 4 (`p4_database`), `consumer_poll_ms=100`; `settle()` смотрит `core.learners.seq`, `ops.projector_offsets.seq`, `ops.dispatcher_offsets`, `ops.jobs`; ученик - строка `core.learners` и сессия, `onboard` - `POST /v1/domains` и `topic.created`, `skill.created` в журнале Фазы 4. (5) `PHASE4_PROCESSES` снят из compose, README выкатки, workflow и теста стенда.
+- Почему: критерий WP1.3 (T-DB3) - нет `sqlalchemy`, `asyncpg`, `quack.db.postgres`, `quack.jobs.queue`, `quack.events.append|reader|catalog`, `quack.graph.worker`, `quack.jobs.dispatcher`, `session_factory` в тестах зоны C; красная линия 5 - утверждения не ослаблены.
+- Обратимость: переходник п.1 и два файла `phase3_*` исчезают одним коммитом A; стенд п.4 - основа `T-E1`.
+- Тесты и «Правки тестов» (§8.15): `test_infra.py::test_migration_creates_contract_indexes` читает базу Фазы 4; убраны проверки `uq_sessions_one_active` (единственная активная сессия снята, П-4.10) и `uq_artifacts_topic_cheatsheet` (в схеме dbmate нет такой таблицы), остальные индексы и `UNIQUE (learner_id, idempotency_key)` проверяются; `test_fts_index_query_finds_text_events`, `test_advisory_locks_*` перенесены на `append_events(db)` и `Db.advisory_lock` с теми же утверждениями; `test_app_assembly::sign_in` не пишет `auth.users` (никто не читает); `test_stand_dbmate::test_the_processes_of_phase_4_need_no_flag` вместо проверки флага проверяет его отсутствие. `T-E1` целиком не написан: остаток WP26.1 - текстовый ход на новом стенде (`/v1/sessions`, сообщение, ответ, `settle`, события и задачи по журналу), красные `T-E2`–`T-E14`.
+- Требует подтверждения владельцем: нет
+
 ### D-C-170. WP1.3 шаг 3 C: артефакты и сборка API без SQLAlchemy - маршруты Фазы 3 сняты, `AppResources` без `engine` и `session_factory`
 - Класс: C (зона C; формат событий и схемы БД не менялись); две правки в зоне A - п.5
 - WP / место: WP1.3 шаг 3 (issue #215, #235), WP23, WP25, §6.4 «Что заменено»; `quack/artifacts/{notes,cheatsheets,search,store,deps,router}.py` (удалены), `quack/artifacts/schemas.py`, `quack/api/{app,resources,auth}.py`, `tests/support/resources.py`, `tests/e2e/routes/c.py`
@@ -45,6 +84,44 @@
   - `tests/test_dispatcher.py::test_cheatsheet_refresh_endpoint_enqueues_directly` (T-D8 Фазы 3, `POST /v1/topics/{id}/cheatsheet/refresh`) - вместе с маршрутом; кнопка «собери сам» хаба и согласие - `test_cheatsheet_routes_wp23_5.py`;
   - `tests/test_jobs_phase3.py` (`T-Q7`: `test_all_job_kinds_have_handlers`, `test_worker_exits_with_code_1_on_handler_mismatch`): вид, чей пропуск проверяется, - `artifact.topic_refresh` вместо `artifact.refresh_cheatsheet` (его нет в `JOB_KINDS`); свойство то же;
   - `tests/test_app_assembly.py`: `test_search_limits_come_from_settings` переведён с `/v1/artifacts/search` на `/v1/search` (лимиты те же), проба `T-A3` `/v1/artifacts` → `/v1/me`.
+### D-C-203. WP20.2: фото конспекта, слой 1 `material_parser@1`, правка файлов B
+- Класс: B (форма данных и черновик промпта; доктрина — по D-C-132)
+- WP / место: WP20.2, S8; `quack/materials/parse.py` (`SheetReading`), `quack/prompts/material_parser/v1.md`, `tests/llm/prompt_contracts.py`, `scripts/meta_smoke.py`, `PROMPT_CONTRACTS.md`, `manifest.json`
+- Контекст: (1) фото конспекта читает `recognizer` в режиме листа (Т-§16.5), но `quack.materials` не может импортировать `quack.canvas` (§4.1). (2) Для `material_parser@1` нужен слой 2 (формат, контракт) и какой-то слой 1 (красная линия 13: доктрину пишет владелец).
+- Решение: (1) `SheetReading`, `SheetLine`, `SheetBox` в `materials/parse.py` — копия схемы `RecognizerSheetOutput`; тест сверяет `$defs` и `required` двух схем. Из ответа берутся строки не-рисунки и не зачёркнутые, склеенные через перевод строки, одна страница; выровненное изображение — картинка страницы. (2) Слой 2 `v1.md`: контракт `MaterialParserOutput {title, chunks[{n, topic, notation, teaches, uses}]}` и блок входа `chunks`. Слой 1 — черновик по тезисам Т-§4.3 (прецедент D-C-132, как у `recognizer@1` и `artifact_writer@1`): размечать, а не обучать; названия словами материала; что преподаёт и что использует; честная пустота; текст куска — данные (Т-§19.8); новых правил нет. Владелец может заменить своим пакетом. (3) Схема зарегистрирована в `tests/llm/prompt_contracts.py` и `scripts/meta_smoke.py` (`ROLE_SCHEMAS`, файл B; правка в несколько строк: иначе `test_smoke_runs_every_role...` и покрытие `ALL_PROMPT_SCHEMAS` красные).
+- Почему: §4.1, §7.6 п.1–2, §0.4.4 п.13, D-C-132, Т-§16.5, Т-§19.8.
+- Обратимость: код и файл промпта; версия `@2` для новой доктрины.
+- Тесты: `test_sheet_reading_is_the_schema_of_the_recognizer`, `test_image_material_is_read_by_the_recognizer`, `test_the_prompt_material_parser_v1_has_its_contract`, `tests/llm` (T-M5).
+- Требует подтверждения владельцем: нет (замена слоя 1 — на его усмотрение)
+
+### D-C-202. WP20.2: что разбор отдаёт структуре — имена, REQUIRES из `uses`, хаб «из материала»; что оставлено
+- Класс: B (WP20.2 п.3–4 не называет формат метки и состав записи)
+- WP / место: WP20.2 п.3–5, WP16.3 (`reconcile_domain`, B); `quack/materials/parse.py::structure_step`
+- Контекст: ТЗ: `material_parser` размечает «по кандидатам с метками», а `chunk.indexed` несёт `teaches`/`uses` как id навыков; кандидатов из графа на шаге 1 нет (он без блокировки и без графа).
+- Решение: (1) Парсер называет темы и навыки словами материала; метки кандидатов ставит сверка B (`builder`, Reconcile) на шаге 2 — она и есть «по кандидатам с метками». (2) Шаг 2: темы, затем навыки пачками по `candidate_k` (совет docstring `reconcile_domain`); `Subject.topic` нового навыка — тема куска, где его преподают (иначе название материала); `Subject.requires` — `uses` кусков, которые преподают навык (кроме самого навыка), `origin = material`. Одно имя в разных регистрах — один субъект (`casefold`, первое написание). (3) События одной транзакцией со статусом: `hub.created {kind: material, origin: material, control_type: no_goal, name = title или «Untitled material»}` (`hub_id` = `uuid5` от материала) и `hub.topics_changed` (темы из ответа сверки, `required_levels` = `control_type_levels["no_goal"]`), `chunk.indexed` на каждый кусок (в том числе без разметки), `material.parsed {pages_count}`; ключи `…:{chunk_id|material_id}`. (4) Оставлено: дедлайны и структура курса из силлабуса (`hub.deadline_set`) и задачи семинара (`task.created`, проверка Т-§5.6) — нужны разметка задач WP12.5 (B) и часовой пояс ученика, в T-MT1 их нет; PDF без текстового слоя (скан) даёт пустые страницы — распознавание картинок страниц не делается. Это хвост WP20.2, не закрытый этим решением.
+- Почему: Т-§4.3, Т-§4.4, Т-§4.6, Т-§4.8, WP16.3, WP20.2 п.3–5.
+- Обратимость: код; формат `chunk.indexed` не менялся.
+- Тесты: `test_material_parse_pipeline` (T-MT1), `test_parse_step_repeat_after_a_crash_reuses_pages`.
+- Требует подтверждения владельцем: нет
+
+### D-C-201. WP20.2: размер куска и параметры разбора, полезная нагрузка второго шага
+- Класс: C (числа из документа «около 1–2 КБ», остальное — параметры)
+- WP / место: WP20.2; `quack/config.py`, `quack/materials/parse.py`
+- Контекст: Т-§3.4.5 «около 1–2 КБ», Т-§4.3 «параллельно для больших материалов» — без чисел.
+- Решение: `material_chunk_chars = 1500` (цель), `material_chunk_max_chars = 2000` (потолок), `material_parser_batch = 8` кусков на вызов, `material_parser_concurrency = 4` вызова одновременно, `material_marks_per_chunk = 6`. Кусок лежит на одной странице; абзац цел, пока влезает; маленький кусок берёт следующий абзац до потолка; длинный текст режется по концу предложения, строки или пробелу. Номер куска в промпте — `[n]` с 1; номер вне диапазона и повтор отбрасываются, пропущенный кусок остаётся без разметки (`check=` не ставится: он стоил бы лишний вызов). Метки уходят в payload второго шага (`chunks[{chunk_id, topic, notation, teaches, uses}]`, около 0,2 КБ на кусок); тексты кусков там не лежат — шаг 2 режет страницы из `content.material_pages` тем же `split_chunks`, `chunk_id` = `uuid5` от материала, страницы и места на ней (закон 5). Изменение параметров между шагами сдвинет границы: метки несовпавших кусков теряются, кусок индексируется без них.
+- Почему: Т-§3.4.5, Т-§4.3, §0.4.3 (числа только в `Settings`).
+- Обратимость: параметры.
+- Тесты: `test_split_chunks_are_one_to_two_kb_inside_a_page`, `test_parser_gets_batches_and_loses_nothing_on_bad_numbers`.
+- Требует подтверждения владельцем: нет
+
+### D-C-200. WP20.2: `material.parse` — два шага одного вида, блокировка домена на втором, обработчик в слое сборки
+- Класс: B (ТЗ: «шаг записи структуры — `domain:{id}`», «тяжёлая часть — без блокировки»; как это сделать в очереди — не сказано)
+- WP / место: WP20.2, #173, S6; `quack/materials/parse.py`, `quack/ops/material_parse.py`, `quack/jobs/kinds.py`, `quack/runtime/__init__.py`
+- Контекст: правило диспетчера A ставит `material.parse` без `lock_key` (`rules_p4._material_uploaded`), а `reconcile_domain` (B) требует, чтобы вызвавшая задача держала `domain:{id}`. Блокировка на всю задачу заперла бы домен на время вызовов `material_parser`. Слои §4.1: `quack.materials` не импортирует `quack.agents`.
+- Решение: (1) Шаг 1 (`payload.step` нет) идёт без блокировки: страницы, куски, разметка; он ставит через `queue_p4.enqueue` второй шаг того же вида `material.parse` с `job_key = material.parse:{learner}:{material}:structure`, `lock_key = domain:{id}`, классом P1 (в сессии) / P2 (иначе), `required_seq = trigger_seq` (шаг 2 читает граф), `visible = true`, `payload.step = "structure"`. Повтор шага 1 находит тот же ключ — второго шага не будет (закон 5). Правки правила A не нужны. (2) Обработчик `material.parse` — клей в `quack/ops/material_parse.py` (слой сборки): передаёт в `structure_step` функцию над `reconcile_domain`; `quack.materials` знает только протокол `StructureResolver` и `SubjectSpec`. (3) Регистрация по #173: `JOB_KINDS`, `KIND_LLM_ROLES` (`material_parser`), `HANDLER_MODULES` (`quack.ops.material_parse`) — те же три строки, что у `artifact.topic_refresh`. (4) Статус строки `content.materials`: `uploaded` -> `parsed` вместе с событиями шага 2; `parsed` на входе любого шага — выход без работы.
+- Почему: Т-§4.3, Т-§13.4, WP20.2 п.4, WP16.3, D-A-110, #173, §4.1.
+- Обратимость: код. Если A захочет второй вид задачи (`material.structure`) — переименование `step`.
+- Тесты: `test_material_parse_pipeline`, `test_a_parsed_material_is_not_parsed_again`, `test_unknown_material_fails_permanently`, `test_the_kind_is_registered_by_the_procedure_of_issue_173`, `tests/test_jobs_phase3.py::test_all_job_kinds_have_handlers`.
 - Требует подтверждения владельцем: нет
 
 ### D-C-182. WP9.5: поддержка Telegram в алертинге и деплое (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)

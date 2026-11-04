@@ -164,7 +164,7 @@ jobs:
           SHORT: ${{ steps.commit.outputs.short }}
         run: |
           # deploy.sh: roles, dump, `dbmate up` (service `migrate`, D-C-160), and only then
-          # projector, workers and api (PHASE4_PROCESSES=true is set in compose.yaml).
+          # projector, workers and api (all of them run the Phase 4 processes, D-A-223).
           # shellcheck disable=SC2029  # SHORT is 7 hex characters, checked in the commit step
           ssh quack "cd /srv/quack && bash ./deploy/deploy.sh '${SHORT}'"
       - name: Journal of the rollout

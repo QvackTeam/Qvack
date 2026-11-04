@@ -7,8 +7,6 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy.ext.asyncio import AsyncEngine
-
 from quack.api.app import create_app
 from quack.api.auth import SESSION_COOKIE
 from quack.auth.sessions import open_session
@@ -24,7 +22,6 @@ from quack.canvas.strokes import Erasure, Point, Stroke, StrokeBatch
 from quack.compute_client.contracts import ImageResponse
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.event_types import CanvasLineCommitted
 from quack.events.log import NewEvent, append_events
 from quack.llm.provider import ImageInput
@@ -77,9 +74,7 @@ def test_render_request_crops_the_line() -> None:
     assert request.strokes[1].points == [(4.0, 10.0)]
 
 
-async def test_line_is_rendered_read_and_committed(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_line_is_rendered_read_and_committed(pg_db: Db, settings: Settings) -> None:
     """Т-§15.3: compute renders the line, `recognizer@1` reads the image, the log gets
     `canvas.line_committed {source: pen}`; a repeated `line_ready` writes nothing new; with
     compute down nothing is written."""
@@ -90,7 +85,7 @@ async def test_line_is_rendered_read_and_committed(
     provider = ScriptedLLMProvider()
     provider.respond("RecognizerOutput", lambda _request: READ)
     resources = build_app_resources(
-        settings, pg_engine, None, None, db=pg_db, session_factory=db, provider=provider,
+        settings, None, None, db=pg_db, provider=provider,
         compute=scripted_compute(scenario),
     )  # fmt: skip
     book = LineBook()
@@ -178,9 +173,7 @@ async def test_typed_formula_and_erased_line(pg_db: Db) -> None:
     ]
 
 
-async def test_socket_recognizes_a_line(
-    pg_db: Db, pg_engine: AsyncEngine, db: SessionFactory, settings: Settings
-) -> None:
+async def test_socket_recognizes_a_line(pg_db: Db, settings: Settings) -> None:
     """WP21.2–21.3 over the socket: strokes, then `line_ready` → `line_recognized` with the
     reading (П-9.7) while batches keep being acknowledged; a line of unknown strokes —
     `recognized: false`."""
@@ -192,7 +185,7 @@ async def test_socket_recognizes_a_line(
     provider.respond("RecognizerOutput", lambda _request: READ)
     cfg = settings.model_copy(update={"stroke_chunk_seconds": 0})
     resources = build_app_resources(
-        cfg, pg_engine, None, None, db=pg_db, session_factory=db, provider=provider,
+        cfg, None, None, db=pg_db, provider=provider,
         compute=scripted_compute(scenario), storage=InMemoryObjectStore(),
     )  # fmt: skip
     app = create_app(cfg, resources=resources)

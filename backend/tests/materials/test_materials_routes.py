@@ -11,7 +11,6 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.config import Settings
@@ -30,9 +29,7 @@ type ClientFor = Callable[..., Awaitable[httpx.AsyncClient]]
 
 
 @pytest.fixture
-async def client_for(
-    pg_db: Db, pg_engine: AsyncEngine, settings: Settings
-) -> AsyncIterator[ClientFor]:
+async def client_for(pg_db: Db, settings: Settings) -> AsyncIterator[ClientFor]:
     """A client of an app over `pg_db`, signed in as `learner_id` (or anonymous)."""
     async with AsyncExitStack() as stack:
 
@@ -40,7 +37,7 @@ async def client_for(
             learner_id: UUID | None, storage: ObjectStore | None = None
         ) -> httpx.AsyncClient:
             resources = build_app_resources(
-                settings, pg_engine, None, None, db=pg_db, storage=storage or InMemoryObjectStore()
+                settings, None, None, db=pg_db, storage=storage or InMemoryObjectStore()
             )
             app = create_app(settings, resources=resources)
             client = await stack.enter_async_context(

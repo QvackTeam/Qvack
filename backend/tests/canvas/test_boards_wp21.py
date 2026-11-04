@@ -13,7 +13,6 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.canvas.board import BoardDoc
@@ -28,13 +27,11 @@ type ClientFor = Callable[[UUID | None], Awaitable[httpx.AsyncClient]]
 
 
 @pytest.fixture
-async def client_for(
-    pg_db: Db, pg_engine: AsyncEngine, settings: Settings
-) -> AsyncIterator[ClientFor]:
+async def client_for(pg_db: Db, settings: Settings) -> AsyncIterator[ClientFor]:
     async with AsyncExitStack() as stack:
 
         async def make(learner_id: UUID | None) -> httpx.AsyncClient:
-            resources = build_app_resources(settings, pg_engine, None, None, db=pg_db)
+            resources = build_app_resources(settings, None, None, db=pg_db)
             app = create_app(settings, resources=resources)
             client = await stack.enter_async_context(
                 httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")

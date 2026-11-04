@@ -16,7 +16,6 @@ import orjson
 import pytest
 from fastapi import FastAPI
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.auth import SESSION_COOKIE
@@ -41,15 +40,13 @@ CLOSE_INVALID = 1007
 
 
 @pytest.fixture
-async def app_for(
-    pg_db: Db, pg_engine: AsyncEngine, redis: Redis, settings: Settings
-) -> AsyncIterator[AppFor]:
+async def app_for(pg_db: Db, redis: Redis, settings: Settings) -> AsyncIterator[AppFor]:
     def make(
         *, storage: ObjectStore | None = None, chunk_seconds: int = 0, with_redis: bool = True
     ) -> FastAPI:
         cfg = settings.model_copy(update={"stroke_chunk_seconds": chunk_seconds})
         resources = build_app_resources(
-            cfg, pg_engine, None, redis if with_redis else None, db=pg_db, storage=storage
+            cfg, None, redis if with_redis else None, db=pg_db, storage=storage
         )
         return create_app(cfg, resources=resources)
 

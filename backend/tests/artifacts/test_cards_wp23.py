@@ -8,7 +8,6 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.ratelimit import enforce_action_rate_limit
@@ -125,12 +124,10 @@ async def test_edit_is_a_new_task_and_delete_a_new_version(pg_db: Db, settings: 
 
 
 @pytest.fixture
-def cards_client(
-    settings: Settings, pg_engine: AsyncEngine, pg_db: Db
-) -> Callable[[UUID], Awaitable[httpx.AsyncClient]]:
+def cards_client(settings: Settings, pg_db: Db) -> Callable[[UUID], Awaitable[httpx.AsyncClient]]:
     async def make(learner_id: UUID) -> httpx.AsyncClient:
         app = create_app(settings)
-        app.state.resources = build_app_resources(settings, pg_engine, None, None, db=pg_db)
+        app.state.resources = build_app_resources(settings, None, None, db=pg_db)
         app.dependency_overrides[enforce_action_rate_limit] = lambda: None
         cookie = session_cookie(await session_token(pg_db, learner_id, settings))
         return httpx.AsyncClient(
