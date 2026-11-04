@@ -248,3 +248,17 @@ def test_session_started_marks_a_resumed_session() -> None:
     resumed = {**sample_payload("session.started"), "resumed": True}
     back = validate_payload("session.started", resumed)
     assert isinstance(back, SessionStarted) and back.resumed is True
+
+
+def test_agent_artifact_request_names_the_artifact_and_its_hub() -> None:
+    """D-A-196 (#191): `agent.requested {kind: artifact}` carries the artifact and the hub of a
+    cheat sheet as data; an unknown artifact is rejected."""
+    from uuid import uuid4
+
+    payload = sample_payload("agent.requested")
+    payload["kind"] = "artifact"
+    payload["params"] = {"artifact": "cheatsheet", "hub_id": str(uuid4())}
+    validate_payload("agent.requested", payload, 1)
+    payload["params"] = {"artifact": "poster"}
+    with pytest.raises(ValidationError):
+        validate_payload("agent.requested", payload, 1)

@@ -5,7 +5,7 @@ on the slice, and only the changed values reach Neo4j (the diff, `Т-§8.1` «о
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Protocol
+from typing import Literal, Protocol, cast
 
 from quack.config import Settings
 from quack.events.log import StoredEvent
@@ -212,6 +212,12 @@ class WholeSlice:
         return SubGraph(), topics
 
 
+def _outcome(value: str) -> Literal["correct", "incorrect", "partial", "unclear"]:
+    if value in ("correct", "incorrect", "partial"):
+        return cast(Literal["correct", "incorrect", "partial"], value)
+    return "unclear"
+
+
 def fold_profile(batch: BatchSlice, events: Sequence[StoredEvent], params: ProfileParams) -> None:
     """WP5.3 (`Т-§9.5`): `pref*`, the manner and `learned*` over the journal and the direct
     active evidence with the gate flag of the skill fold; «no data» removes a `learned*`."""
@@ -227,7 +233,7 @@ def fold_profile(batch: BatchSlice, events: Sequence[StoredEvent], params: Profi
     for skill, evidence in sorted(by_skill.items()):
         flags = gate_flags(evidence, novelty)
         samples += [
-            EvidenceSample(e.seq, skill, e.tier, e.outcome, e.assistance, flags[e.id])  # type: ignore[arg-type]
+            EvidenceSample(e.seq, skill, e.tier, _outcome(e.outcome), e.assistance, flags[e.id])
             for e in evidence
         ]
     folded, unset = profile_node_props(collect_profile_inputs(events, samples), params)

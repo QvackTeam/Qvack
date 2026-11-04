@@ -30,9 +30,11 @@ from quack.auth.router import router as auth_router
 from quack.auth.sessions import resolve_session
 from quack.canvas.router import router as canvas_router
 from quack.config import Settings, get_settings
+from quack.deletion.router import router as deletion_router
 from quack.domains.router import router as domains_router
 from quack.logging import configure_logging, get_logger, log_context
 from quack.materials.router import router as materials_router
+from quack.review.router import router as review_router
 from quack.session.router import router as session_router
 
 log = get_logger(__name__)
@@ -202,6 +204,8 @@ def create_app(
     # Domains and artifacts attach authentication and the `actions` limit in their routers
     # (public `register`/`login` carry the `auth` limit); the session router is wrapped here.
     app.include_router(domains_router)
+    app.include_router(review_router)
+    app.include_router(deletion_router)
     app.include_router(session_router, dependencies=[Depends(enforce_action_rate_limit)])
     app.include_router(artifacts_router)
     app.include_router(notes_router)

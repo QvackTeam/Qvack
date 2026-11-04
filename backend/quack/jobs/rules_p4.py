@@ -367,6 +367,15 @@ def _agent_requested(event: StoredEvent, _s: Settings, p: Any) -> list[JobPlan]:
             return []
         payload["topic_id"] = str(p.params.topic_id)
         return [_plan(event, kind, cls=cls, graph=True, payload=payload)]
+    if p.kind == "artifact" and p.params.artifact == "cheatsheet":
+        # Т-§17.7 «генерация — после согласия», D-A-199: the consent to the cheat sheet of a hub
+        # is the job of that hub, with the request to answer; without a hub nothing to build.
+        if p.params.hub_id is None:
+            return []
+        key = f"artifact:{p.params.hub_id}"
+        payload["hub_id"] = str(p.params.hub_id)
+        return [_plan(event, "artifact.cheatsheet", cls=cls, lock_key=key, coalesce_key=key,
+                      graph=True, payload=payload)]  # fmt: skip
     return [_plan(event, kind, cls=cls, payload=payload)]
 
 
@@ -554,8 +563,9 @@ RULES: tuple[RuleRow, ...] = (
     RuleRow("task.created", ("task.solution_space",), "source of the bank", _task_created),
     RuleRow(
         "agent.requested",
-        tuple(AGENT_JOB_KINDS.values()),
-        "P1 if needed_in_session; known_check -> check.known_claim",
+        (*AGENT_JOB_KINDS.values(), "artifact.cheatsheet"),
+        "P1 if needed_in_session; known_check -> check.known_claim; a cheat sheet -> "
+        "artifact.cheatsheet of its hub",
         _agent_requested,
     ),
     RuleRow("today.shown", ("today.prepare",), "always", _today_shown),

@@ -11,7 +11,7 @@ import base64
 import struct
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
@@ -1207,7 +1207,7 @@ def test_derived_evidence() -> None:
         if k[0] == "Evidence" and k[2] == "DERIVED_FROM"
     }
     found = sorted(
-        (str(p["derivedKind"]), int(p["level"]), k[4])  # type: ignore[arg-type]
+        (str(p["derivedKind"]), cast(int, p["level"]), k[4])
         for e, p in derived.items()
         for k in links
         if k[:3] == ("Evidence", e, "ON")
