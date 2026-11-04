@@ -23,6 +23,8 @@ type Colors = Record<"paper" | "dim" | "ribbon" | "cloth" | TopicState, string> 
 type Arrow = { id: string; dir: "up" | "down" | "left" | "right"; ind: IndicatorId; n: number; x: number; y: number; key: string };
 const IND_VAR: Record<IndicatorId, string> = { new: "var(--ind-new)", relevant: "var(--ind-relevant)", deadline: "var(--ind-deadline)", weak: "var(--ind-weak)", review: "var(--ind-review)" };
 
+/** The card of a topic opens this long after the pointer comes to it (ms): a pointer passing by does not flash cards */
+const CARD_DELAY = 220;
 const K_MIN = 0.04;
 const K_MAX = 2.4;
 const FIT_K_MAX = 1.2;
@@ -149,6 +151,11 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
   const loop = useRef<FrameRequestCallback>(() => {});
   const colors = useRef<Colors | null>(null);
   const hoverKey = useRef<string | null>(null);
+  const showTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** A card is on screen: moving to the next topic swaps it at once, only the first one waits */
+  const cardOn = useRef(false);
+  /** Where the pointer is over the canvas (null: not over it, or dragging). Topics near it show their names */
+  const pointer = useRef<Pt | null>(null);
   const drag = useRef<{ x: number; y: number; vx: number; vy: number; moved: boolean } | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const fitted = useRef(false);
@@ -528,7 +535,7 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     const unit = GAP_X * k;
     const fadeTopic = smooth(40, 78, unit);
     const fadeHub = smooth(8, 26, unit);
-    type Label = { key: string; text: string; x: number; y: number; above: boolean; prio: number; fade: number; deg: number; fill: string; font: string };
+    type Label = { key: string; text: string; x: number; y: number; above: boolean; prio: number; away?: number; fade: number; deg: number; fill: string; font: string };
     const labels: Label[] = [];
     const hubFont = `500 12px ${col.label}`;
     const topicFont = `400 11px ${col.body}`;
@@ -548,9 +555,15 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       const hot = n.key === hovered;
       // The label of a node an indicator lights is shown at any zoom
       const pin = marks.current.has(n.key);
-      labels.push({ key: n.key, text: t.name, x, y: y + rT + 4, above: false, prio: pin ? 3 : hot ? 2 : 1, fade: pin || hot ? 1 : fadeTopic, deg: links.degree.get(n.id) ?? 0, fill: hot ? col.paper : col.dim, font: topicFont });
+      // Near the pointer a name shows at any zoom. The reach follows the spacing of the nodes on screen (about two steps),
+      // so only a few names come at once, and the label pass below keeps every name off the others: nearest first, none on top of another
+      const ptr = pointer.current;
+      const away = ptr ? Math.hypot(x - ptr.x, y - ptr.y) : Infinity;
+      const reach = clamp(GAP_X * k * 2.2, 60, 130);
+      const closeBy = 1 - smooth(reach * 0.55, reach, away);
+      labels.push({ key: n.key, text: t.name, x, y: y + rT + 4, above: false, prio: pin ? 3 : hot ? 2 : closeBy > 0 ? 2 : 1, away, fade: pin || hot ? 1 : Math.max(fadeTopic, closeBy), deg: links.degree.get(n.id) ?? 0, fill: hot ? col.paper : col.dim, font: topicFont });
     }
-    labels.sort((a, b) => b.prio - a.prio || b.deg - a.deg || (a.key < b.key ? -1 : 1));
+    labels.sort((a, b) => b.prio - a.prio || (a.away ?? Infinity) - (b.away ?? Infinity) || b.deg - a.deg || (a.key < b.key ? -1 : 1));
     // Boxes already taken, in a coarse grid so a crowded graph stays cheap
     const CELL = 80;
     const grid = new Map<string, { x0: number; y0: number; x1: number; y1: number }[]>();
@@ -961,9 +974,23 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     hoverKey.current = key;
     schedule();
     clearTimeout(hideTimer.current);
-    if (key && !key.startsWith("h:")) setHover({ id: key, x: px, y: py });
-    else if (key) setHover(null);
-    else hideTimer.current = setTimeout(() => setHover(null), 220);
+    clearTimeout(showTimer.current);
+    if (key && !key.startsWith("h:")) {
+      const show = () => {
+        cardOn.current = true;
+        setHover({ id: key, x: px, y: py });
+      };
+      if (cardOn.current) show();
+      else showTimer.current = setTimeout(show, CARD_DELAY);
+    } else if (key) {
+      cardOn.current = false;
+      setHover(null);
+    } else {
+      hideTimer.current = setTimeout(() => {
+        cardOn.current = false;
+        setHover(null);
+      }, 220);
+    }
   };
 
   const local = (e: React.PointerEvent) => {
@@ -985,6 +1012,9 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
     if (d) {
       if (!d.moved && Math.hypot(p.x - d.x, p.y - d.y) > 4) {
         d.moved = true;
+        pointer.current = null;
+        clearTimeout(showTimer.current);
+        cardOn.current = false;
         setHoverKey(null);
         setHover(null);
       }
@@ -995,6 +1025,8 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
       return;
     }
     if (e.pointerType === "touch") return;
+    pointer.current = p;
+    schedule();
     const key = hitTest(p.x, p.y);
     setHoverKey(key, p.x, p.y);
     canvas.current!.style.cursor = key ? "pointer" : "grab";
@@ -1146,7 +1178,11 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          onPointerLeave={() => !drag.current && setHoverKey(null)}
+          onPointerLeave={() => {
+            pointer.current = null;
+            schedule();
+            if (!drag.current) setHoverKey(null);
+          }}
         />
 
         {arrows.length > 0 && (
@@ -1206,7 +1242,10 @@ export const LayeredGraph = forwardRef<GraphHandle, { model: GraphModel; domain:
             onPointerEnter={() => clearTimeout(hideTimer.current)}
             onPointerLeave={() => {
               hoverKey.current = null;
-              hideTimer.current = setTimeout(() => setHover(null), 220);
+              hideTimer.current = setTimeout(() => {
+                cardOn.current = false;
+                setHover(null);
+              }, 220);
             }}
             className="absolute z-10 rounded-[2px] border border-seam bg-cloth-raised p-4 shadow-[0_12px_32px_-12px_rgb(0_0_0/0.7)]"
             style={{

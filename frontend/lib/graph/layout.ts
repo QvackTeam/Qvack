@@ -15,8 +15,12 @@ const LONE_STEP = GAP_X * 1.6;
 const LAP_DROP = GAP_Y * 0.8;
 /** Where the flow turns round, the rail goes this far outside the last topic of the row */
 const RAIL_OUTER = GAP_X * 1.3;
-/** The snake of hub lanes turns round when a row would be wider than this, world units */
-const MAX_ROW_WIDTH = 2800;
+/**
+ * The snake of hub lanes turns round when a row would be wider than this, world units. It is the width of the row that holds
+ * all the hubs of Calculus today: the last of them is the last that goes right, the next hub already turns round. Going back
+ * the row stops at the same edge on the left (the mirror of the right one).
+ */
+const MAX_ROW_WIDTH = 2200;
 /** A hub stands this far above the highest of its topics */
 const HUB_RISE = GAP_Y * 0.9;
 /** Hubs are bigger than topics and need more room */
@@ -388,7 +392,7 @@ export function loadPositions(learner: string, domainId: string): StoredPosition
     const raw = localStorage.getItem(KEY(learner, domainId));
     if (!raw) return undefined;
     const v = JSON.parse(raw) as { v?: number; pos?: StoredPositions };
-    return v.v === 9 && v.pos && typeof v.pos === "object" ? v.pos : undefined;
+    return v.v === 10 && v.pos && typeof v.pos === "object" ? v.pos : undefined;
   } catch {
     return undefined;
   }
@@ -398,7 +402,7 @@ export function savePositions(learner: string, domainId: string, layout: Layout)
   const pos: StoredPositions = {};
   for (const n of layout.nodes.values()) pos[n.key] = [Math.round(n.x * 10) / 10, n.layer];
   try {
-    localStorage.setItem(KEY(learner, domainId), JSON.stringify({ v: 9, pos }));
+    localStorage.setItem(KEY(learner, domainId), JSON.stringify({ v: 10, pos }));
   } catch {
     /* no storage: the layout is recomputed next time */
   }
