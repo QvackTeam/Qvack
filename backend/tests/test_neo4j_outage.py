@@ -1,5 +1,6 @@
-"""Shared Neo4j error handler of the API (ТЗ Фазы 3 WP6.1, §4.5, seam S7): an endpoint that
-needs Neo4j for its answer returns `503 SERVICE_UNAVAILABLE`, never an unhandled 500."""
+"""Shared Neo4j error handler of the API (ТЗ Фазы 3 WP6.1, §4.5, seam S7; on the `Db` of Phase 4,
+D-A-230): an endpoint that needs Neo4j for its answer returns `503 SERVICE_UNAVAILABLE`, never an
+unhandled 500."""
 
 from __future__ import annotations
 
@@ -15,7 +16,6 @@ from quack.api.app import create_app
 from quack.api.errors import ErrorResponse
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from tests.db.fixtures import create_learner
 from tests.support.auth import learner_headers, login_hook
 from tests.support.broken import BrokenNeo4jDriver
@@ -24,11 +24,10 @@ from tests.support.resources import build_app_resources
 
 @pytest.fixture
 async def api(
-    settings: Settings, pg_engine: AsyncEngine, db: SessionFactory, pg_db: Db, redis: object
+    settings: Settings, pg_engine: AsyncEngine, pg_db: Db, redis: object
 ) -> AsyncIterator[httpx.AsyncClient]:
-    resources = build_app_resources(
-        settings, pg_engine, BrokenNeo4jDriver(), redis, db=pg_db, session_factory=db
-    )
+    # `pg_engine`: `get_current_learner_id` still reads the Phase 3 deletion mark (D-A-230).
+    resources = build_app_resources(settings, pg_engine, BrokenNeo4jDriver(), redis, db=pg_db)
     app = create_app(settings, resources=resources)
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     hooks = {"request": [login_hook(pg_db, settings)]}

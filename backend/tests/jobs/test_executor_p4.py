@@ -1,20 +1,24 @@
 """ТЗ Ф4 WP7.4: the executor on the queue of Phase 4 — the pulse and the cancel (T-D6), the end of
-a handler (success, retry, defer, permanent failure — T-D8), shutdown, a lost job, the worker loop.
-Needs Postgres only."""
+a handler (success, retry, defer, permanent failure — T-D8), shutdown, a lost job, the worker loop,
+the pressure flags of the models (T-Q10, WP5.3), the grace period of a stop (WP3.5). Postgres;
+Redis for the flags (D-A-231)."""
 
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
+from redis.asyncio import Redis
 
 from quack.config import Settings
 from quack.db import Db
+from quack.db.redis import llm_pressure_key
 from quack.jobs import queue_p4 as q
 from quack.jobs.executor_p4 import JobWorker, run_claimed
-from quack.jobs.queue import JobDeferred, JobFailedPermanently
-from quack.jobs.rules_p4 import JobPlan
+from quack.jobs.rules_p4 import KIND_LLM_ROLES, JobPlan
+from quack.jobs.types import JobDeferred, JobFailedPermanently
 from tests.db.fixtures import create_learner
 
 SETTINGS = Settings(job_heartbeat_interval_sec=1, job_max_attempts=2, consumer_poll_ms=50)
@@ -243,3 +247,124 @@ async def test_worker_loop_runs_jobs_and_stops_on_the_event(jobs_db: Db) -> None
     await asyncio.wait_for(loop, timeout=10)
     rows = await jobs_db.fetch_all("SELECT status FROM ops.jobs")
     assert [r["status"] for r in rows] == ["succeeded"] * 3
+
+
+async def test_a_deferred_job_yields_to_a_waiting_duplicate(jobs_db: Db) -> None:
+    """A job deferred while a newer one with its `coalesce_key` waits is superseded: it becomes
+    `cancelled`, the waiting one stays `queued` and is held back by the same delay."""
+    learner = await create_learner(jobs_db)
+    key = f"topic:{learner}"
+    job = await _put(jobs_db, learner, "a", coalesce_key=key, lock_key=key)  # running
+    waiting = JobPlan(
+        kind="agent.viz",
+        job_key="b",
+        priority_class="P2",
+        learner_id=learner,
+        lock_key=key,
+        coalesce_key=key,
+    )
+    assert await q.enqueue(jobs_db, waiting) == "inserted"  # the running one is out of the index
+
+    async def later() -> None:
+        raise JobDeferred(600, "learner_present")
+
+    assert await run_claimed(jobs_db, SETTINGS, job, later) == "deferred"
+    assert await _status(jobs_db, "a") == "cancelled"
+    row = await jobs_db.fetch_one("SELECT status, run_at FROM ops.jobs WHERE job_key = 'b'")
+    assert row is not None and row["status"] == "queued"
+    assert row["run_at"] >= datetime.now(UTC) + timedelta(seconds=595)
+
+
+async def test_pressure_flag_holds_back_the_kinds_of_that_model(jobs_db: Db, redis: Redis) -> None:
+    """WP5.3, T-Q10: while `llm:pressure:{model}` is set, kinds whose roles run on the model
+    wait; a kind without a model is still claimed. The flag expires — the kind is claimed."""
+    learner = await create_learner(jobs_db)
+    model = SETTINGS.model_for_role("extractor")
+    assert KIND_LLM_ROLES["extract.episode"] == ("extractor",)
+    assert KIND_LLM_ROLES["session.sweep_inactive"] == ()
+    for key, kind, cls in (("e", "extract.episode", "P2"), ("s", "session.sweep_inactive", "P3")):
+        plan = JobPlan(kind=kind, job_key=key, priority_class=cls, learner_id=learner)  # type: ignore[arg-type]
+        await q.enqueue(jobs_db, plan)
+    await redis.set(llm_pressure_key(model), "x", px=1000)
+    claimed: list[str] = []
+
+    async def handler(job: q.ClaimedJob) -> None:
+        claimed.append(job.job_key)
+
+    worker = JobWorker(
+        SETTINGS,
+        jobs_db,
+        {"extract.episode": handler, "session.sweep_inactive": handler},
+        redis=redis,
+    )
+    assert await worker.run_one()  # P2 would go first, but its model is under pressure
+    assert claimed == ["s"]
+    assert await worker.run_one() is False
+    assert await _status(jobs_db, "e") == "queued"
+
+    await asyncio.sleep(1.1)  # the flag expires by its TTL
+    assert await redis.exists(llm_pressure_key(model)) == 0
+    assert await worker.run_one()
+    assert claimed == ["s", "e"]
+
+
+async def test_without_redis_no_kind_is_held_back(jobs_db: Db) -> None:
+    """§4.2: a worker without Redis claims every kind and raises nothing."""
+    learner = await create_learner(jobs_db)
+    await q.enqueue(
+        jobs_db,
+        JobPlan(kind="extract.episode", job_key="e", priority_class="P2", learner_id=learner),
+    )
+    seen: list[str] = []
+
+    async def handler(job: q.ClaimedJob) -> None:
+        seen.append(job.job_key)
+
+    worker = JobWorker(SETTINGS, jobs_db, {"extract.episode": handler}, redis=None)
+    assert await worker.run_one()
+    assert seen == ["e"]
+
+
+async def test_a_stop_waits_for_the_grace_period_then_returns_the_rest_to_the_queue(
+    jobs_db: Db,
+) -> None:
+    """WP3.5: on stop the worker takes no new jobs, waits `worker_shutdown_grace_s` for the
+    running ones and puts the rest back to `queued`: attempt unchanged, no pulse."""
+    learner = await create_learner(jobs_db)
+    for key in ("fast", "forever"):
+        await q.enqueue(
+            jobs_db, JobPlan(kind="agent.viz", job_key=key, priority_class="P2", learner_id=learner)
+        )
+    fast_done = asyncio.Event()
+
+    async def handler(job: q.ClaimedJob) -> None:
+        if job.job_key == "fast":
+            await asyncio.sleep(0.05)
+            fast_done.set()
+        else:
+            await asyncio.Event().wait()
+
+    async def admission() -> list[str]:
+        return ["agent.viz"]
+
+    quick = SETTINGS.model_copy(
+        update={"worker_shutdown_grace_s": 0.3, "worker_concurrency": 2, "consumer_poll_ms": 20}
+    )
+    worker = JobWorker(quick, jobs_db, {"agent.viz": handler}, admission=admission)
+    stop = asyncio.Event()
+    loop = asyncio.create_task(worker.run_forever(stop))
+    for _ in range(100):
+        if fast_done.is_set() and await _status(jobs_db, "forever") == "running":
+            break
+        await asyncio.sleep(0.02)
+    clock = asyncio.get_running_loop()
+    started = clock.time()
+    stop.set()
+    await asyncio.wait_for(loop, timeout=2)
+    assert clock.time() - started < 2
+
+    assert await _status(jobs_db, "fast") == "succeeded"
+    row = await jobs_db.fetch_one(
+        "SELECT status, attempts, heartbeat_at FROM ops.jobs WHERE job_key = 'forever'"
+    )
+    assert row == {"status": "queued", "attempts": 0, "heartbeat_at": None}
