@@ -13,6 +13,8 @@ from quack.api.errors import ApiError
 from quack.api.resources import AppResources, get_resources
 from quack.config import Settings
 from quack.events.errors import IdempotencyConflictError
+from quack.graph.read import create_graph_reader
+from quack.graph.read.summary import SessionNotFoundError, SessionSummary, session_summary
 from quack.jobs.queue_p4 import visible_jobs
 from quack.session import lifecycle, sessions, stream
 from quack.session.action_turn import TurnContextSource, turn_frames
@@ -139,6 +141,21 @@ async def session_jobs(
             for j in jobs
         ]
     )
+
+
+@router.get("/sessions/{session_id}/summary", response_model=SessionSummary)
+async def session_summary_route(
+    session_id: UUID, learner_id: LearnerId, resources: Resources
+) -> SessionSummary:
+    """ТЗ Ф4 WP8.3 (`Т-§2.6`, `П-4.10`): «до и после» сессии в кодах. Declared by stream A in this
+    router (§7.3, crossing 3); the body is `quack.graph.read.summary` (D-A-213, D-A-217)."""
+    reader = create_graph_reader(
+        resources.neo4j, resources.settings, learner_id=learner_id, db=resources.db
+    )
+    try:
+        return await session_summary(resources.db, reader, learner_id, session_id)
+    except SessionNotFoundError as exc:
+        raise ApiError("NOT_FOUND", str(exc), status_code=404) from exc
 
 
 @router.post("/sessions/{session_id}/heartbeat")

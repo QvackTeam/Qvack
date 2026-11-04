@@ -2006,6 +2006,18 @@
         "title": "FreeAnswerElement",
         "type": "object"
       },
+      "GapType": {
+        "enum": [
+          "no_idea",
+          "when_to_apply",
+          "confusion",
+          "execution",
+          "slip",
+          "misconception",
+          "none"
+        ],
+        "type": "string"
+      },
       "Grade": {
         "additionalProperties": false,
         "properties": {
@@ -2549,6 +2561,50 @@
         "maximum": 6.0,
         "minimum": 1.0,
         "type": "integer"
+      },
+      "LevelBasis": {
+        "enum": [
+          "direct",
+          "transfer"
+        ],
+        "type": "string"
+      },
+      "LevelCode": {
+        "additionalProperties": false,
+        "properties": {
+          "basis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LevelBasis"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "status": {
+            "$ref": "#/components/schemas/LevelStatus"
+          }
+        },
+        "required": [
+          "level",
+          "status"
+        ],
+        "title": "LevelCode",
+        "type": "object"
+      },
+      "LevelStatus": {
+        "enum": [
+          "proven",
+          "implied",
+          "unstable",
+          "failed",
+          "not_tested"
+        ],
+        "type": "string"
       },
       "LevelView": {
         "properties": {
@@ -3161,6 +3217,15 @@
         },
         "title": "OpenCanvas",
         "type": "object"
+      },
+      "Outcome": {
+        "enum": [
+          "correct",
+          "incorrect",
+          "partial",
+          "unclear"
+        ],
+        "type": "string"
       },
       "PaceWarning": {
         "description": "`Т-§14.6`: the hub will not be ready by its date at the current pace.",
@@ -3906,6 +3971,93 @@
         "title": "SessionListResponse",
         "type": "object"
       },
+      "SessionSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "before_seq": {
+            "title": "Before Seq",
+            "type": "integer"
+          },
+          "domain_id": {
+            "format": "uuid",
+            "title": "Domain Id",
+            "type": "string"
+          },
+          "ended_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended Reason"
+          },
+          "hub_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hub Id"
+          },
+          "intent": {
+            "title": "Intent",
+            "type": "string"
+          },
+          "session_id": {
+            "format": "uuid",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/SkillChange"
+            },
+            "title": "Skills",
+            "type": "array"
+          },
+          "started_seq": {
+            "title": "Started Seq",
+            "type": "integer"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskDone"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "topic_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Id"
+          }
+        },
+        "required": [
+          "session_id",
+          "domain_id",
+          "intent",
+          "started_seq",
+          "before_seq",
+          "skills",
+          "tasks"
+        ],
+        "title": "SessionSummary",
+        "type": "object"
+      },
       "SessionView": {
         "properties": {
           "domain_id": {
@@ -4146,6 +4298,92 @@
         "title": "SignedOut",
         "type": "object"
       },
+      "SkillChange": {
+        "additionalProperties": false,
+        "description": "`before` is `None` for a skill that did not exist before the session; `after` is `None`\nwhen the skill is no longer read under this id (merged away).",
+        "properties": {
+          "after": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillCodes"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "before": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillCodes"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "skill_id": {
+            "format": "uuid",
+            "title": "Skill Id",
+            "type": "string"
+          },
+          "topic_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic Id"
+          }
+        },
+        "required": [
+          "skill_id",
+          "changed"
+        ],
+        "title": "SkillChange",
+        "type": "object"
+      },
+      "SkillCodes": {
+        "additionalProperties": false,
+        "description": "The state of a skill in codes — no names, no weights, no times.",
+        "properties": {
+          "consolidation_flag": {
+            "default": false,
+            "title": "Consolidation Flag",
+            "type": "boolean"
+          },
+          "gap_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GapType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/LevelCode"
+            },
+            "title": "Levels",
+            "type": "array"
+          }
+        },
+        "required": [
+          "levels"
+        ],
+        "title": "SkillCodes",
+        "type": "object"
+      },
       "SkillView": {
         "properties": {
           "levels": {
@@ -4283,6 +4521,60 @@
           "state"
         ],
         "title": "StatusFrame",
+        "type": "object"
+      },
+      "TaskClosing": {
+        "enum": [
+          "solved",
+          "skipped",
+          "solution_shown"
+        ],
+        "type": "string"
+      },
+      "TaskDone": {
+        "additionalProperties": false,
+        "description": "A task of the session: answers given, the deepest hint step shown, the outcome of the\nlast verdict and how it was closed (`None` — left open).",
+        "properties": {
+          "answers": {
+            "title": "Answers",
+            "type": "integer"
+          },
+          "closed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskClosing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hint_step": {
+            "title": "Hint Step",
+            "type": "integer"
+          },
+          "last_outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Outcome"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "task_id": {
+            "format": "uuid",
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "answers",
+          "hint_step"
+        ],
+        "title": "TaskDone",
         "type": "object"
       },
       "TaskElement": {
@@ -9763,6 +10055,77 @@
           }
         },
         "summary": "Session Jobs"
+      }
+    },
+    "/v1/sessions/{session_id}/summary": {
+      "get": {
+        "description": "ТЗ Ф4 WP8.3 (`Т-§2.6`, `П-4.10`): «до и после» сессии в кодах. Declared by stream A in this\nrouter (§7.3, crossing 3); the body is `quack.graph.read.summary` (D-A-213, D-A-217).",
+        "operationId": "session_summary_route_v1_sessions__session_id__summary_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "UNAUTHENTICATED: no session, or it expired or was revoked"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "NOT_FOUND: the resource does not exist or belongs to another learner"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "VALIDATION_ERROR"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "SERVICE_UNAVAILABLE or LLM_DEGRADED: a dependency of the answer is down"
+          }
+        },
+        "summary": "Session Summary Route"
       }
     },
     "/v1/topics/{topic_id}": {
