@@ -71,7 +71,7 @@ export function EfficiencyScene({ scrollRef, slot }: { scrollRef: RefObject<HTML
       dpr = Math.min(2, window.devicePixelRatio || 1);
       narrow = W < 900;
       cell = cellSize();
-      duckPx = narrow ? W * 0.4 : Math.min(W * 0.25, H * 0.5);
+      duckPx = narrow ? W * 0.32 : Math.min(W * 0.2, H * 0.4);
       cv.width = Math.round(W * dpr);
       cv.height = Math.round(H * dpr);
       const bw = Math.min(narrow ? W : W * 1.1, duckPx * 3.8);
@@ -84,7 +84,7 @@ export function EfficiencyScene({ scrollRef, slot }: { scrollRef: RefObject<HTML
       dots = Array.from({ length: NODES }, () => makeDots(nodeR, cell * 0.45));
       sprites = nodeSprites(cell * 0.45, dpr);
       lightning.layout(cell, dpr);
-      chain.setRest(duckPx * 0.3);
+      chain.setRest(duckPx * 0.24);
       return true;
     };
 

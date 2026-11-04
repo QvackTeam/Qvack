@@ -382,8 +382,11 @@ export function createDuckRig(): DuckRig {
     wingNear.visible = f < 0.5;
     wingFar.visible = f < 0.5;
     if (flying) {
-      const w = Math.sin(p.time * 15); // ~2,4 взмаха в секунду
-      const up = 0.3 + 0.85 * w; // от −0,55 (вниз) до 1,15 (вверх)
+      // взмахи сериями: несколько неспешных (~1,5 в секунду), потом парение с поднятыми и почти неподвижными крыльями
+      const m = (p.time % 4.4) / 4.4; // цикл 4,4 с: первая половина — взмахи, вторая — парение
+      const env = Math.sin(Math.PI * Math.min(1, m / 0.5)) * (m < 0.5 ? 1 : 0); // 0..1..0 в первой половине цикла
+      const w = Math.sin(p.time * 9.4) * env;
+      const up = 0.3 + 0.85 * w + 0.04 * Math.sin(p.time * 1.7); // в парении крылья чуть приподняты и еле заметно играют
       for (const [sp, sd] of [[spreadNear, 1], [spreadFar, -1]] as const) {
         sp.scale.setScalar(Math.max(0.001, f));
         sp.rotation.x = -sd * up * f;
