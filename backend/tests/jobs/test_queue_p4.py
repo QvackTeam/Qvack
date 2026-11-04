@@ -354,6 +354,35 @@ async def test_budget_is_per_session_and_inclusive_of_the_limit(jobs_db: Db) -> 
     assert job is not None  # exactly at the limit is not "beyond"
 
 
+async def test_budget_follows_the_pool_mode(jobs_db: Db) -> None:
+    """D-B-211 (#236, D-A-222): in `tight` the session limit is `tight_session_agent_budget_usd`;
+    the same spend under the normal limit is claimed."""
+    from quack.llm.access import reset_pool_cache
+
+    learner = await create_learner(jobs_db)
+    session = uuid4()
+    spend = (SETTINGS.tight_session_agent_budget_usd + SETTINGS.session_agent_budget_usd) / 2
+    await _spend(jobs_db, learner, session, "task_generator", spend)
+    row = await jobs_db.fetch_one("SELECT sum(cost_usd)::float8 AS s FROM ops.llm_usage")
+    assert row is not None
+    tight = SETTINGS.model_copy(
+        update={"llm_pool_budget_usd": row["s"] + SETTINGS.llm_pool_tight_remaining_usd / 2}
+    )
+
+    def plan(key: str) -> JobPlan:
+        return _plan(learner, key, kind="agent.task_generation", cls="P2", session_id=session)
+
+    await q.enqueue(jobs_db, plan("tight"))
+    reset_pool_cache()
+    assert await q.claim_next(jobs_db, tight) is None
+    assert await _status(jobs_db, "tight") == "skipped_budget"
+    await q.enqueue(jobs_db, plan("normal"))
+    reset_pool_cache()
+    job = await q.claim_next(jobs_db, SETTINGS)
+    assert job is not None and job.job_key == "normal"
+    reset_pool_cache()
+
+
 # --- cancel -------------------------------------------------------------------------------
 
 

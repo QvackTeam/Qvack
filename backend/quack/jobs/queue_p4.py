@@ -1,9 +1,9 @@
 """Job queue of Phase 4 on `Db` and `ops.jobs` (ТЗ Ф4 WP7.4; Т-§13.1, Т-§13.2, Т-§13.7–13.9).
 
-The fields and statuses are exactly `Т-§13.1`. Phase 3's `quack.jobs.queue` (SQLAlchemy, numeric
-priority, `ops.dlq`) stays until WP1.3 (D-A-103); this module is the queue `workers` of Phase 4
-use. Every function runs in the caller's transaction when there is one (`Db.transaction()`
-nests), so the dispatcher inserts jobs in the transaction of its offset.
+The fields and statuses are exactly `Т-§13.1`. This module is the queue `workers` of Phase 4
+use (the Phase 3 queue on SQLAlchemy was removed in WP1.3, D-A-234). Every function runs in the
+caller's transaction when there is one (`Db.transaction()` nests), so the dispatcher inserts jobs
+in the transaction of its offset.
 
 * **Insert** (`enqueue`): `job_key` is unique — a repeat is dropped; a job with a `coalesce_key`
   raises `required_seq` of the waiting job with the same key (`GREATEST`) and leaves its payload
@@ -41,6 +41,7 @@ from quack.db import Db
 from quack.db.redis import learner_signal_channel
 from quack.events.log import NewEvent, append_events
 from quack.jobs.rules_p4 import JobPlan
+from quack.llm.access import access_mode, budgets_for
 from quack.logging import get_logger
 
 log = get_logger(__name__)
@@ -274,7 +275,11 @@ async def _over_budget(db: Db, settings: Settings, job: ClaimedJob) -> bool:
     row = await db.fetch_one(
         _SESSION_SPEND, {"session_id": job.session_id, "roles": budget_roles(settings)}
     )
-    return row is not None and float(row["spent"]) > settings.session_agent_budget_usd
+    if row is None:
+        return False
+    # D-B-211 (#236, D-A-222): the session limit of the pool mode (`tight` — the lower one).
+    limit = budgets_for(settings, await access_mode(db, settings)).session_usd
+    return float(row["spent"]) > limit
 
 
 async def claim_next(

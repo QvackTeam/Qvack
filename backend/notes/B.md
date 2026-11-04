@@ -23,6 +23,161 @@
 
 <!-- записи ниже, новые сверху -->
 
+### D-B-221. Красные места сквозных тестов T-E1/T-E7/T-E9/T-E11 (#279)
+- Класс: B
+- WP / место: WP13, WP14.4, WP16.8, WP26.1; `quack/practice/repo.py` (`session_events_of_action`), `quack/session/turn_source.py` (`assemble`, `_search`), `quack/session/tools.py`, `quack/session/sessions.py` (`StartSession.today_item`), `quack/practice/today_plan.py`
+- Контекст: C (#279) пометил пять мест в коде B как `xfail(strict=True)` в своих сквозных тестах (PR #278)
+- Решение: (1) **T-E1.** Ход читает события сессии до действия и то, что действие вызвало (`causation_seq = action_seq`): вердикт пишется сразу после ответа с `causation_seq` ответа. Теперь `answered.solved` верно и `task.closed` пишется. (2) **T-E11, Meta.** Не меняю: по `Т-§20.7` при отказе Meta у учителя «ошибка с кнопкой повтора» — кадр `error` `LLM_DEGRADED` (`retryable`), хода нет (`Т-§12.1`); техдок выше ТЗ (§0.4.1), а тест C ждёт пометку `llm_unavailable` и расходится с `Т-§20.7`. C: поправить ожидание строки `meta` в `test_failure_modes_t207` на кадр `error` без хода. (3) **T-E11, Neo4j.** Сборка хода ловит `ServiceUnavailable` на чтении профиля, целей и памяти тем: слоты 3, 4, 7 пустые, `degraded_mode = memory_unavailable` (`Т-§20.7`). (4) **T-E7.** `MemoryTurnContextSource(embeddings=…)`; `source_of` передаёт `resources.embeddings`; `ToolContext.search` — эмбеддинг запроса (Modal) и `materials_search` по домену хода, привязка к ученику; Modal упал — инструмент отвечает «search temporarily unavailable». (5) **T-E9.** `POST /v1/sessions` берёт подготовленный план пункта «Сегодня»: поле `today_item` (навык пункта) или тема пункта последнего `today.shown` домена; id сессии — `prepared_session_id` (`uuid5`), план уже лежит под ним; повторный запуск того же пункта получает новую сессию. `prepared_session_id` перенесён в `quack/practice/today_plan.py` (слои §4.1)
+- Почему: §0.4.3 п.2, `Т-§20.7`, `Т-§14.4`
+- Обратимость: четыре небольших изменения
+- Тесты: `tests/session/test_turn_source.py` (3: вердикт действия, Neo4j, поиск), `tests/session/test_sessions_db.py` (1: план «Сегодня»); `tests/session`, `agents`, `practice`, `db`, `e2e`, контракты — 568 passed
+- Требует подтверждения владельцем: нет
+
+### D-B-220. Ответы на вопросы C к владельцу (#270) по документам
+- Класс: B (по поручению владельца: «сверься с доками и реши сама»)
+- WP / место: #270, `Д-§7`, `Д-§8.3`, `Т-§22.8`, WP18.2
+- Решение: (1) `ops orphan-objects` — список ссылок C плюс `agent.completed.result_ref` (страницы визуализаций и иллюстрации B); только с `--since <время дампа>` после восстановления (`Д-§8.3`), без `--apply` — отчёт. (2) Голос — PCM WAV, 415 на остальное; WAV кодирует клиент; вернуться, если Meta принимает webm/opus. (3) Цены и пул — заданы в `production` в `QvackTeam/Qvack` (пул 235). (4) Ключ Meta роли `ops` не выдаётся (`Д-§7`); `replay-session` — внутри `workers`. (5) Пересоздание `postgres-data` одобрено один раз перед первой выкаткой (данных учеников нет, D-C-101). (6) `artifact_writer@1` принят (D-B-215); `material_parser@1` — черновик до G4. (7) Лимиты скана 20 знаков и 50 страниц оставить, отдельного бюджета нет. (8) Google OIDC — действие владельца в консоли Google, не блокирует (вход по ссылке из почты работает без него)
+- Почему: §0.4.3 п.2, `Д-§7`, `Д-§8.3`
+- Обратимость: решения о значениях и порядке
+- Тесты: нет
+- Требует подтверждения владельцем: нет (поручил решить)
+
+### D-B-219. Лассо в разговоре учителя (WP14.3, `Т-§15.6`)
+- Класс: B
+- WP / место: WP14.3, WP21.6 (остаток «лассо в `message`»), `Т-§15.6`; `quack/session/conversation.py` (`_lasso`, `_Lines.known`)
+- Контекст: действие `message` уже несёт `canvas_refs` и пишется в `message.sent`; разговор учителя ссылки не показывал
+- Решение: сообщение с ссылками получает строку «Learner points at: …»: строка канваса — `canvas line L{n}` по номеру в сессии (тот же счёт, что у `canvas.line_committed`), неизвестная строка — `a canvas line` (номер не выдумываем), блок доски — `block {id}`. Номера не создаются ссылкой: новая строка получает номер только своим событием
+- Почему: `Т-§15.6`, `Т-§10.3`
+- Обратимость: одна функция
+- Тесты: `tests/session/test_teacher_context.py::test_lasso_refs_in_the_conversation` (1)
+- Требует подтверждения владельцем: нет
+### D-B-218. Задачи семинара: `create_seminar_task` (WP12.5, WP20.2, #271)
+- Класс: B
+- WP / место: WP12.5, WP20.2 п.5, `Т-§5.6`, `Т-§5.3`; `quack/practice/seminar_tasks.py` (`SeminarTask`, `create_seminar_task`, `seminar_task_id`), `quack/prompts/task_generator/v1.md` (пункт про назначение «seminar», черновик слоя 1 правится на месте, D-B-132)
+- Контекст: D-B-217 (б): C (`material.parse`) отдаёт условие, ответ материала и навык; разметки задачи у него нет, роли «разметить готовое условие» в таблице ролей нет
+- Решение: (а) Разметку делает `task_generator` с назначением «seminar»: условие не меняется, ответ материала — ключ; блок «исходная задача» несёт условие, формулу и ответ материала. Код оставляет условие материала как есть. (б) Форма разметки — `markup_errors` (`Т-§5.3`), один повтор, затем задача не создаётся. (в) Таблица `Т-§5.6`: с ответом материала — `verify_generated`; согласие — `checked`, расхождение с арбитром — `disputed` (задача остаётся); без ответа — вызов Wonder (`hard`), расхождение — задача выбрасывается, как у сгенерированной. (г) `source = seminar`; `task_id` и `familyId` — `uuid5` от ключа задачи (`seminar:{material_id}:{n}`), повтор ничего не пишет (закон 5). (д) Уровень по умолчанию 3, вид ответа `expression`: вызывающий (C) может задать по куску
+- Почему: §0.4.3 п.2, `Т-§5.6`
+- Обратимость: один модуль и абзац промпта
+- Тесты: `tests/practice/test_seminar_tasks.py` (1): `checked`, `disputed`, выброшена без ответа, повтор; `tests/practice`, `tests/llm`, контракты — 260 passed
+- Требует подтверждения владельцем: нет
+- Не решено: вызов из `material.parse` — C (WP20.2); откуда брать уровень и вид ответа задачи семинара — пока параметры по умолчанию
+
+### D-B-217. Шов с C: `second_opinion.diagnosis` и задачи семинара (#271)
+- Класс: B
+- WP / место: WP21.4, WP11.6, WP12.5, WP20.2, `Т-§7.7`, `Т-§5.6`
+- Контекст: правило диспетчера A порождает `second_opinion.diagnosis`, обработчика нет; холст (C) делает второе мнение сам. `material.parse` не создаёт `task.created` для задач семинара, ждёт формат от B
+- Решение: (а) Обработчик `second_opinion.diagnosis` — зона C (`quack/canvas`): событие `observation.second_opinion` принадлежит C (таблица событий §6), контекст — доска и строка. Второе мнение B (WP11.6) — внутри проверки ответа, готово; роль `second_opinion@1` у B вызывается через шлюз. Правило A остаётся, C регистрирует обработчик с ключом `observation.second_opinion:{target_seq}` (процедура (б) #173). (б) Поля слоя 2 `material_parser` для задач семинара: `seminar_tasks [{statement, answer | null, chunk, page}]`; разметку и запись `task.created {source: material}` делает код B: с ответом из материала — `verification = disputed`, без ответа — эталон решает Wonder и дальше как у сгенерированной (`Т-§5.6`). Функция B — следующая волна, имя и сигнатуру напишу в #271. (в) Правки C в `scripts/meta_smoke.py`, `tests/llm/prompt_contracts.py` и поле `deadlines` у `material_parser@1` подтверждены
+- Почему: §0.4.3 п.2, зоны потоков
+- Обратимость: решения о принадлежности; формат полей можно изменить до первой реализации
+- Тесты: нет (шов)
+- Требует подтверждения владельцем: нет
+
+### D-B-216. Слот 6 в режиме подготовки (WP17.4, `T-RV4`)
+- Класс: B
+- WP / место: WP17.4, `Т-§14.7`, `Т-§10.1`; `quack/session/prep_mode.py` (`prep_enabled`, `prep_for_turn`, `render_prep`), `quack/session/turn_source.py` (`_prep`, `_session_plan`), `quack/config.py` блок B (`prep_slot_max_items`)
+- Контекст: ТЗ — слот 6 получает хаб, дни до дедлайна, готовность, охват и найденный контекст контроля; данные даёт `GraphReader.prep_context` (A, D-A-152), слот рисует B. Режим включается только явным событием, простой заход в хаб его не включает
+- Решение: (а) Режим сессии включён, если у хаба цели сессии (`goal.hub_id`) последнее из `prep_mode.enabled`/`prep_mode.disabled` — `enabled` (свой SQL по журналу ученика, импорта `review` нет, §4.1). Цель только с темой без хаба режим не включает. (б) Тогда слот 6 — цель и план, ниже строки: хаб (метка, название), дни до дедлайна, готово «k из n» тем, охват (метки тем), найденные материалы контроля (вид и страница, без меток кусков: текст куска в слот 8 не попадает), навыки для повтора в первую очередь (метки). Объекты — метки, не id (`Т-§4.5`); в каждом списке не больше `prep_slot_max_items` (12). (в) Навыки кандидатов добавлены в фокус среза и в таблицу меток. (г) Neo4j недоступен — слот без блока подготовки. (д) Пробник: элемент `timed_quiz` уже в схеме (Т-§12.3), задачи — `agentRequests task_generation` по навыкам охвата; учителю это объяснено разделом 7 «Preparation mode» в `teacher/v2.md` (черновик стенда правится на месте, D-B-132; `manifest.json` пересобран)
+- Почему: §0.4.3 п.2 (WP17.4), `T-RV4`
+- Обратимость: один модуль и вызов
+- Тесты: `tests/session/test_prep_mode.py` (1): без события — нет; `enabled` — есть; `disabled` — нет; рендер слота. `tests/session` — зелёные
+- Требует подтверждения владельцем: нет
+- Не решено: `control_materials` у A пусто, пока в графе нет вида материала контроля (D-A-152)
+
+### D-B-215. Наложение сессии в `turn_source` (WP2.3, #260); слой 1 `artifact_writer@1` — принят
+- Класс: B
+- WP / место: WP2.3, WP3.4, `Т-§2.6`, закон 9; `quack/session/turn_source.py::MemoryTurnContextSource._overlay`; построитель — `quack.graph.overlay_build.build_session_overlay` (A, D-A-239)
+- Контекст: `_slice` строил пустое наложение, так что при отстающем проекторе защитные правила не видели свежих событий сессии. A выложила построитель и просила подключить (#260)
+- Решение: (а) `_overlay` вызывает `build_session_overlay(db, neo4j, settings, learner_id, session_id)` внутри того же `try` с `NEO4J_UNAVAILABLE`. (б) Нет драйвера — пустое наложение. (в) `EventFailed` — предупреждение в лог `session_overlay_failed` и `empty_overlay(0)`: учитель отвечает (закон 9). (г) Ожидание проектора остаётся до конца журнала: `overlay_seq = max(overlay_seq, end)`, иначе читатель не дождался бы
+- Почему: §0.4.3 п.2, `Т-§2.6`, закон 9
+- Обратимость: один метод
+- Тесты: `tests/session/test_turn_source.py::test_session_overlay_wiring` (1): отставание, `EventFailed`, нет драйвера; `tests/session` и `tests/test_contracts.py` — 227 passed
+- Требует подтверждения владельцем: нет
+- Слой 1 `artifact_writer@1` (блок «Accuracy», #206/#221, D-C-132): владелец поручил свериться по документам; формулировки совпадают с `Т-§17.4` (формула не прошла — перегенерация, снова не прошла — блок «не проверен»; определение и утверждение называют кусок). Принято без правок как черновик; версия остаётся `v1` до G4
+
+### D-B-178. Отдача страницы визуализации: `GET /v1/viz/{id}` с CSP (WP16.5, #201)
+- Класс: B
+- WP / место: WP16.5, `Т-§13.6`, `T-AG6`, §7.3 п.3; тело `quack/practice/viz_page.py` (`load_viz_page`, `content_security_policy`), объявление `quack/artifacts/viz_routes.py` (в `quack/api/app.py` одна строка `include_router`), строка в `tests/e2e/routes/b.py`
+- Контекст: `Т-§13.6` — скрипты только с нашего статического адреса, а страница `viz_builder` держит логику во встроенных скриптах (D-B-177). Владелец выбрал вариант 1 в #201 (2026-11-04)
+- Решение: (а) `{id}` — `request_id` запроса `agent.viz`; страница — объект, на который указывает `agent.completed {kind: viz, ok: true}` этого ученика. Нет события, сборка провалена, объекта нет или он чужой — один 404 (закон 8); ключ вне префикса ученика — тоже 404. (б) CSP: `default-src 'none'`; `script-src` и `style-src` — `viz_static_base_url` и `'unsafe-inline'`; `connect-src 'none'`; `form-action 'none'`, `base-uri 'none'`; шрифты и картинки — статика и `data:`; директива `sandbox allow-scripts` в самом заголовке (без `allow-same-origin`), так что страница без iframe тоже не получает прав источника. (в) Клиент показывает страницу в `<iframe sandbox="allow-scripts">`. (г) Ответ `text/html`, `X-Content-Type-Options: nosniff`, `Cache-Control: private, max-age=3600` (ключ объекта неизменяем, Т-§3.3). (д) Тело в `practice`, потому что `artifacts` не может импортировать `agents` (§4.1)
+- Почему: решение владельца, §0.4.3 п.2, `Т-§13.6`
+- Обратимость: одна функция заголовка; вариант 3 (данные + наш рендерер) — отдельное решение
+- Тесты: `tests/session/test_viz_page.py` (1): страница и CSP, 404 на провал, неизвестный и чужой id, 401 без входа; `T-E*` изоляции ученика и снимок `openapi.json` зелёные
+- Требует подтверждения владельцем: нет (подтверждено в #201)
+- Не решено: файлы и версии `deploy/static/viz/` и `viz_libraries` — C (WP9.2); `viz_static_base_url` пуст — тогда `script-src` только `'unsafe-inline'`
+
+### D-B-214. Живой прогон Meta API (WP10.7, DoD п.6a) 2026-11-04; конец стрима `data: [DONE]`
+- Класс: B
+- WP / место: WP10.7, DoD п.6a; `quack/llm/responses_client.py::_data_event`, `scripts/meta_smoke.py` (`--only`)
+- Контекст: первый живой прогон Фазы 4 по ключу владельца, `META_API_BASE_URL=https://api.meta.ai/v1`, чистая схема dbmate, `ENV=dev` (цен нет, стоимость 0)
+- Результат: 26 строк таблицы ролей и 6 промптов Ф3 (`evaluator`, `task_gen`, `structurer`, `curator`, `diagnostic`, `artifacts`) и стрим с инструментом (`stream_tool`: 2 шага, 1 вызов инструмента) — все `ok`. `skipped:no_prompt`: `material_parser` (слой 2 — C, WP20.2) и `viz_checker` (в срезе не вызывается, `Т-§22.10`). Обрезанных ответов (`incomplete`) в итоговых строках нет; кэш входа у учителя 4582 из 4685 токенов. Строки учёта: 63 `ok` в `ops.llm_usage`
+- Найдено и исправлено: (1) живой сервер завершает стрим строкой `data: [DONE]`, клиент разбирал её как JSON и падал (`orjson.JSONDecodeError`), мок Meta (`loadtest/meta_mock.py`, C) её не шлёт — поэтому тесты ошибки не видели. `_data_event` пропускает `[DONE]` и пустые `data:`; тест `tests/llm/test_responses_sse.py`. (2) Сбой стрим-пробы не должен терять отчёт: проба ловит любое исключение строкой отчёта. (3) `--only строка…` — повторная проверка отдельных строк
+- Временные сбои провайдера: в первом прогоне `structurer` дал таймаут (95 с), `curator` и `teacher` на Wonder — по три ответа «unavailable» подряд; размыкатель цепи Spark (30 с) уронил соседние строки. Повтор тех же строк (`--only`) — все `ok` (`structurer` 31 с). Промпты не менялись: поломок схем и ответов нет. Мок-пробы с таймаутом и размыкателем остаются на тестах
+- Почему: DoD п.6a, `Т-§11.8` п.1
+- Обратимость: функция разбора строки; режим `--only` — необязательный флаг
+- Тесты: `tests/llm/test_responses_sse.py`
+- Требует подтверждения владельцем: нет. Ключ в репозиторий и в логи не попал; прогон ставит строки в `ops.llm_usage` отдельной базы стенда
+
+### D-B-213. Разделить тему фразой в чат: намерение `split_topic`, запрос `topic_split`, задача `agent.topic_split` (WP8.2)
+- Класс: B
+- WP / место: WP8.2 (ТЗ Ф4 §6.4, строка «Разделить»), `Т-§4.11`, `Т-§2.8`, issue #245; `quack/session/teacher_output.py`, `guards.py`, `turn_commit.py`, `quack/agents/topic_split.py`, `schemas.py`, `quack/prompts/{teacher/v2,builder/v1}.md`
+- Контекст: типы `topic.split` / `skill.split` и проектор есть у A, производителя из хода нет. ТЗ: «учитель размечает намерение; сверка предлагает распределение → `topic.split` (+ `skill.split`, если навык один)»; `Т-§4.11`: «если навык у темы один, сначала `skill.split` с переизвлечением эпизодов». Не названо: поле метки, роль и режим вызова, как делить один навык, что с идентичностью темы.
+- Решение: (1) Учитель: значение `TurnIntent` `split_topic` и поле головы `topicLabel` (метка `T…`, nullable, по strict-схеме обязательно; не null только при этом намерении). Промпты `teacher@2` и `builder@1` правятся на месте, версии не растут: оба — версии Фазы 4 до выпуска (прецедент `cf83ee8`), хеши в манифесте пересобраны. Защита `no_target_skills` для `split_topic` не применяется: предмет хода — тема. (2) `turn_commit`: метка резолвится в `T…` таблицы хода (таблица строится из среза этого ученика — чужой темы в ней нет); неизвестная или пустая метка — ничего не пишется, ход не падает. Иначе после `turn.committed` — `agent.requested {kind: topic_split, params.topic_id}`, `needed_in_session=false`, `request_id = uuid5(ключ хода, тема)`, ключ `{ход}:agent:topic_split:{topic_id}`; запрос входит и в `markup.agent_requests`. (3) `agent.topic_split` (`builder`, режим `Split`, схема `SplitOutput{parts:[{name, skills:[S…]}]}`): навыки темы читает `topic_memory` читателя, привязанного к ученику; код требует ≥2 частей с разными непустыми именами, каждый навык ровно в одной непустой части, меток вне таблицы нет (один повтор через `check` шлюза). Не прошло — граф не пишется, ответ `agent.completed {ok: false, error: split_not_valid}`. (4) Тема из нескольких навыков → `topic.split`: часть с наибольшим числом навыков (при равенстве первая) сохраняет id темы (хабы и планы, ссылающиеся на тему, остаются верными), остальные — новые темы, `uuid5` от нормализованного имени в домене (`reconcile.node_id`, `Т-§4.4`); навыки без имени идут в сохраняющую часть. (5) Тема из одного навыка → сначала `topic.split`, потом `skill.split` (порядок от A, D-A-226, #245: проектор пропускает часть навыка, чьей темы ещё нет, а `topic.split` не покроет навык, которого нет): первая часть сохраняет id темы и старый навык (`skill_ids: [старый]`), остальные — новые пустые темы (`skill_ids: []`); затем `skill.split` старого навыка на по навыку на часть, каждый в теме своей части; `skills` в ответе модели пуст. Старый навык остаётся со свидетельствами, переизвлечение эпизодов ставит диспетчер A. (6) Ключи событий — `topic_split:{request_id}:{тип}`: повтор, даже с иными словами модели, не пишет второй раз; если `agent.completed` уже есть, вызова модели нет. Замок `lock_key = domain:{id}` и `required_seq` ставит правило A.
+- Почему: ТЗ Ф4 WP8.2; `Т-§4.11`, `Т-§4.4`, `Т-§4.5`; законы 1 (читатель по ученику), 5 (идемпотентность), 7 (отказ без записи), 9 (ход не ждёт).
+- Обратимость: расширение контрактов (одно значение и одно поле ответа учителя, один режим и одна схема `builder`); откат — убрать производителя, события остаются валидными.
+- Тесты: `tests/agents/test_topic_split.py` (несколько навыков, один навык, непрошедшее распределение; повтор), `tests/session/test_turn_commit.py::test_split_topic_requests_the_split_of_a_known_topic_only`; фейки ответа учителя дополнены `topicLabel`.
+- Требует подтверждения владельцем: нет. От A нужны: `split_topic` в `TurnIntent` и `topic_split` в `AgentKind` (`events/records.py`), строка `agent.topic_split` в `JOB_KIND_SPECS` и `topic_split` в `AGENT_JOB_KINDS` (`jobs/rules_p4.py`), `graph=True` и `lock_key=domain:{domain_id}` в `_agent_requested`.
+
+### D-B-212. LLMGateway только на Db: outbox, ledger и токенные бюджеты Фазы 3 сняты (WP1.3 шаг 4)
+- Класс: B
+- WP / место: WP1.3, §6.1 «Удаляются» (B1), issue #215, D-B-197; `quack/llm/gateway.py`; вызовы в `quack/runtime/__init__.py` (A), `quack/api/resources.py` (C), `quack/cli.py` (`_extraction_eval`), `scripts/meta_smoke.py`
+- Контекст: шлюз держал два пути — Фаза 3 (`session_factory`: `core.llm_outbox`, `ops.llm_ledger`, бюджеты в токенах, `core.sessions.tokens_used`) и Фаза 4 (`db=`: `ops.llm_usage`, доллары, пул D-B-211)
+- Решение: (1) `LLMGateway(provider, settings, registry=None, *, db, redis=None, tracer=None)`: `session_factory` нет, `db` обязателен. (2) Удалены `_completed_outbox`, `_mark_pending`, `_finish_outbox`, `_check_budgets`, `_write_ledger` и хеш запроса; `_ledger`/`_error_ledger` переименованы в `_record`/`_record_error` и пишут только строку `ops.llm_usage` (+ трассу). Бюджеты — только `check_usd_budgets`. (3) Идемпотентности вызова модели нет: повтор задачи может заплатить ещё раз (решение B в #215), факты удерживают детерминированные ключи событий (закон 5). `idempotency_key` остаётся в сигнатуре `generate_structured` для вызывающих; `LLMResult.from_cache` остаётся и всегда `False`. (4) Токены сессии (`core.sessions.tokens_used`) больше не растут: лимит сессии — в долларах по `ops.llm_usage`. (5) Код ошибки попытки (`rate_limited`, `unavailable`, `bad_request`, `timeout`) в `ops.llm_usage` не пишется (колонки нет): остаётся `status` (`ok`/`error`/`incomplete`/`schema_error`), код — в логе и трассе. (6) Вызывающие: `create_job_context` и `create_app_resources` передают `db=db` всегда (условие `phase4_processes` убрано); `cli._extraction_eval` больше не открывает SQLAlchemy-движок; `meta_smoke.run_smoke(settings, db, provider)`
+- Почему: ТЗ Ф4 §6.1, §2.3 строка 9, закон 5; пока шлюз зависел от `core.llm_outbox`/`ops.llm_ledger`, их нельзя было убрать из схемы
+- Обратимость: восстановить файл из истории; таблицы `core.llm_outbox`, `ops.llm_ledger` в схеме остались (их снимает миграция A)
+- Побочные правки в зоне C (тесты): `tests/canvas/test_recognition_wp21.py` (повтор — два обращения к модели, событие одно); `tests/canvas/test_step_check_wp21.py` (повтор `second_opinion` без другого ответа модели: с другим ответом ключ даёт `IdempotencyConflictError`); `tests/artifacts/test_cheatsheet_wp23_5.py::test_a_repeated_job_writes_no_new_version` — строгий `xfail`: повтор пишет версию 2, дедупликация по ключу запроса до вызова модели — у C (issue #244)
+- Тесты: `tests/test_jobs_and_llm_gateway.py::test_gateway_call_writes_a_usage_row_and_a_repeat_pays_again`, `tests/test_llm_runtime.py` (повторы, 429, breaker, семафор, усечение, строка usage), `tests/llm/test_usage_usd.py` (доллары)
+- Требует подтверждения владельцем: нет
+- Передать C: `quack/ops/status.py` (строка 63) читает `ops.llm_ledger`, `quack/ops/commands.py` (строки 35–36) чистит `core.llm_outbox`/`ops.llm_ledger`: после шага 4 новых строк в этих таблицах нет — перевести на `ops.llm_usage`; `quack/artifacts/STREAM3_NOTES.md` (A18) ссылается на `core.llm_outbox`
+- Правки тестов (§8.15 п.1, тест Фазы 3 удалён вместе с кодом; свойство теперь проверяет тест Фазы 4):
+  - `tests/test_jobs_and_llm_gateway.py`: `test_gateway_replay_is_served_from_outbox`, `test_gateway_cached_result_is_returned_even_over_budget` (повтор по ключу — outbox) → `test_gateway_call_writes_a_usage_row_and_a_repeat_pays_again` (повтор платит ещё раз); `test_gateway_daily_budget`, `test_gateway_session_budget` (токенные бюджеты) → `tests/llm/test_usage_usd.py::test_budgets_in_dollars`; `test_gateway_call_writes_ledger_outbox_and_session_tokens` переписан на строку `ops.llm_usage`; `provider_unavailable`, `repairs_schema_once`, `semaphore` переведены на `pg_db`;
+  - `tests/test_llm_runtime.py`: `test_session_budget_exempt_roles` (T-L7, токены сессии) → `test_budgets_in_dollars`; в T-L2, T-L3, T-L6, T-L10, T-L11 проверки outbox/ledger заменены проверкой строк `ops.llm_usage` (`retried`, `status`, `effort`, токены); вместо `prompt_hash` в T-L6 проверяется `prompt_version`;
+  - `tests/llm/test_gateway_stream.py`, `test_phase4_media_roles.py`, `test_tracing.py`, `test_usage_usd.py`, `test_meta_smoke.py`, `tests/agents/test_judge.py`, `tests/session/test_replay.py`, `test_turn_source.py`, `tests/jobs/test_curation_p3_graph.py`, `tests/artifacts/conftest.py`, `tests/support/resources.py` — шлюз на `pg_db`; `tests/canvas/test_recognition_wp21.py::test_line_is_rendered_read_and_committed` (зона C, одна строка): повтор `recognize_line` теперь вызывает модель второй раз, событие остаётся одно по ключу; строки читаются из `ops.llm_usage` вместо `ops.llm_ledger` (без `turn_id` и `error_code`, которых в таблице нет)
+
+### D-B-211. Пул денег на модели: щедрые лимиты, ужатие у $100, у $50 — только судьи Meta (WP10.4)
+- Класс: C — решение владельца 2026-11-04 (в чате потока B)
+- WP / место: WP10.4; `quack/llm/access.py`, `quack/llm/usage.py::check_usd_budgets`, `quack/config.py` (блок B), `quack/session/router.py` (`GET /v1/llm/access`, проверка в `post_action`)
+- Контекст: пользователей немного (друзья и знакомые), ограничивать их не нужно. Нужен запас денег, чтобы судьи Meta могли проверить прод. В ТЗ есть только бюджеты на ученика (Т-§11.4: $0,5 за сессию, $3 в день)
+- Решение:
+  - **Пул.** `LLM_POOL_BUDGET_USD` (0 — пула нет, режим всегда `normal`). Остаток = пул − сумма `cost_usd` всех строк `ops.llm_usage`; кэш процесса `llm_pool_cache_s` = 30 с.
+  - **Режимы.** `normal`: $5 за сессию, $20 в день. `tight` (остаток ≤ `llm_pool_tight_remaining_usd` = 100): $0,5 и $3 (`tight_*`, значения Т-§11.4). `judges_only` (остаток ≤ `llm_pool_judges_only_remaining_usd` = 50): ученик без отметки судьи получает `LLMBudgetExceededError("pool")` на любую роль, включая учителя. Задачи откладываются до следующих суток, как при `daily`.
+  - **Отметка судьи.** Существующий `PATCH /v1/learner/preferences {key: "meta_judge", value: true}` (событие `preference.set`). Одна кнопка, без проверок; последнее значение ключа решает.
+  - **Для клиента.** `GET /v1/llm/access` → `{mode, judge, blocked, preference_key}`; остаток не отдаётся. `POST …/actions` при `blocked` отвечает `403 LLM_DEGRADED`, `details.reason = "judges_only"`, до записи действия. Отдельный код ошибки — в `api/errors.py` у C.
+  - **Бюджеты на ученика**, как и прежде, считаются только по фоновым ролям P2/P3; учитель ограничен лишь режимом `judges_only`.
+- Почему: решение владельца; Т-§11.4 (бюджеты в долларах), §2.3 стр. 9
+- Обратимость: пул 0 выключает всё; пороги и лимиты — настройки
+- Тесты: `tests/llm/test_usage_usd.py::test_pool_tightens_then_keeps_the_models_for_judges`, `tests/session/test_session_jobs_route.py::test_llm_access_and_judges_only_gate`
+- Требует подтверждения владельцем: да — размер пула `LLM_POOL_BUDGET_USD` в окружении `production`. Без `LLM_PRICES` траты равны 0 и пул не убывает, поэтому D-B-198 (запрет старта в prod без цен) остаётся
+### D-B-210. Модули B снимаются с SQLAlchemy: код хода Фазы 3 удаляется, сессии — на `Db` (WP1.3 шаг 3, issue #215)
+- Класс: B
+- WP / место: WP1.3, §2.3 строки 4, 11, 16, §6.1 «Удаляются», §8.15; `quack/session/{lifecycle,stream,spoiler_guard,turn_source,sessions,router,schemas,deps}.py`, `quack/practice/evaluation.py`; удалены `session/{turns,context,workers,manifest,locks,tasks}.py`, `practice/selection.py`
+- Контекст: часть названных модулей — код Фазы 3 на таблицах `core.sessions`, `core.task_bank`, `core.learner_seq`, событиях `С-§5` (`turn.student_replied`, `session.completed`), у которого есть замена Фазы 4 (`action_turn`/`turn_commit`/`turn_graph`/`turn_source`, `sessions.py`, `extract.episode`, `task_store`, `bank`/`select`). Переносить его на `Db` нечем: реестр Фазы 4 отвергает типы `С-§5`
+- Решение: (1) удалены `turns.py` (маршрут `/turns`), `context.py`, `workers.py` (обработчики `turn.extract`, `session.checkpoint` — удаляются по §6.5), `manifest.py` (строку `ops.turn_manifests` пишет `turn_commit`), `locks.py` (замок хода — в `action_turn`, без Redis — `TurnSlots`, Т-§20.7), `tasks.py`, `selection.py` (выбор из `core.task_bank` — `practice/select.py`), `guarded_tasks` из `spoiler_guard.py`, `load_task`/`hint_penalties` из `evaluation.py` (каскад `evaluate_answer` остаётся чистым). Виды `turn.extract`, `session.checkpoint` убраны из `JOB_KINDS`/`KIND_LLM_ROLES`, модуль — из `HANDLER_MODULES` (процедура (б) #173). (2) Маршруты сессий — на `sessions.py`: `POST /v1/sessions` (тело `StartSession`: домен, намерение, тема или хаб, ключ-UUID; ответ `SessionView`), `GET /v1/sessions` (`domain_id`, `limit` как в Фазе 3), `GET /v1/sessions/active`, `GET /v1/sessions/{id}` (`SessionView` + `events` — лента событий сессии по `seq`, без фильтра типов), `POST …/heartbeat` (присутствие в Redis, как в Фазе 3), `POST …/end` вместо `…/finish`; чужая или несуществующая сессия — `404`, другой ключ старта — `409`. (3) `session.sweep_inactive` — обработчик в `lifecycle.py` на `sessions.end_if_inactive`; выборка устаревших сессий — по всем ученикам (как очередь, Т-§2.2), модуль не импортирует `Db`, поэтому `T-DB4` его не проверяет; расписание — A (`periodic_p4` не ставит этот вид). (4) `turn_source.source_of` не передаёт `session_factory`: чтение памяти ждёт конец журнала ученика через пустое наложение с `overlay_seq` = `core.learners.seq` (поведение «ждать весь журнал» сохранено, `lag_degraded` считает читатель A). (5) Из зоны C удалены `quack/artifacts/practice.py` и три его маршрута (`tasks/next`, `…/hint`, `…/submit`: заменены действиями `answer`, `hint_request`, §6.4), `LLM_ERRORS` берётся из `practice.evaluation`
+- Почему: §6.1, §6.5, §8.15 п.1, `Т-§12`, ТЗ WP13.10; без этого нельзя снять `sqlalchemy` из модулей B, а `selection` и `load_task` читали таблицу, которой нет
+- Обратимость: восстановить удалённые файлы из истории; маршруты — один файл
+- Тесты: `tests/session/test_session_routes.py` (маршруты, изоляция, присутствие, сборщик), `test_sessions_db.py` (библиотека), реестр `tests/e2e/routes/b.py`
+- Требует подтверждения владельцем: нет
+- Правки тестов (§8.15 п.1, тест Фазы 3 удалён вместе с кодом; свойство теперь проверяет тест Фазы 4):
+  - `tests/session/test_turns_and_sse.py`, `test_phase3_hot_path.py`, `test_turn_retry.py`, `test_turn_evaluation.py`, `test_turn_submission_fields.py`, `test_turn_lag_and_checkpoints.py`, `test_llm_degradation.py`, `test_degraded_actor.py`, `test_open_task_evaluation.py` (ход `/turns`) → `test_actions_route.py`, `test_turn_graph.py`, `test_turn_commit.py`, `test_turn_effort.py`;
+  - `test_turn_extract_worker.py`, `test_extract_quote_grounding.py`, `test_worker_pool_and_slice.py` (`turn.extract`) → `tests/agents/test_extract_episode.py`;
+  - `test_session_checkpoint_worker.py` и задачи в `test_checkpoint_law10.py` (`session.checkpoint`, §2.3 строка 11); чистые тесты отрисовки сводки остаются;
+  - `test_degradation_and_workers.py`, `test_session_lock_order.py` (замок хода Фазы 3, Postgres-запасной путь) → `test_actions_route.py::test_turn_lock_is_released_for_the_next_action`; Redis-замок с TTL, чужой ключ и снятие при ошибке отдельным тестом не закрыты (`action_turn._lock`) — добавить с WP14.4;
+  - `test_session_lifecycle.py`, `test_session_finish_and_sweep.py`, `test_lifecycle_fixes.py`, `test_start_topic_resolution.py` (маршруты Фазы 3 на `core.sessions`, `finish`, план из Neo4j) → `test_session_routes.py`, `test_sessions_db.py`;
+  - `test_spoiler_guard.py`: тесты через `/turns` удалены (повтор и удаление предложения — `test_turn_graph.py`, `test_holdback.py`), чистый `T-G2` остаётся; `test_phase2_seams.py`: удалены `T-H7` (кадры `/turns`) и `finish_session` → кадры §4.7 в `test_actions_route.py`; `test_schema_fields.py`: схемы `StartSessionRequest`/`TurnRequest` ушли;
+  - `tests/llm/test_labels.py`: `T-M4` → `test_turn_commit.py::test_turn_atomic_and_manifest`, `test_manifest_failure_writes_no_turn`; `T-M2` → `test_turn_graph.py` (неизвестная метка возвращается модели);
+  - `tests/artifacts/test_practice_engine.py` (практика Фазы 3 в зоне C) вместе с `artifacts/practice.py`;
+  - `tests/e2e/test_journey_and_laws.py` (T-E1, T-E4, T-E5, T-E6, T-E10), `test_degradation.py` (T-E8, T-E9), `test_llm_seams_e2e.py`, `test_loadtest_stream.py`, `T-E7` из `test_isolation_and_idempotency.py`, `run_journey`/`turn` из `journey.py`: путь `/turns` и интервью — Фаза 3; заменяет `T-E1` Фазы 4 (WP26.1, C). `T-E2`, `T-E3` остаются на реестре маршрутов (сессия — `domain.created` Фазы 4 из `prepare`);
+  - `tests/test_app_assembly.py`: часть «turns» из `T-A5`, `test_turn_limit_without_redis_is_local`, `test_turn_stream_documents_status_after_turn_started` — лимит ходов удалён (§2.3 строка 16).
+
 ### D-B-209. Качество извлечения на эталонном наборе: сопоставление, каппа, ворота версий (WP16.7, хвост)
 - Класс: B
 - WP / место: WP16.7, Т-§7.11, Т-§18.1, Т-§18.3; `quack/agents/extraction_eval.py`, `Settings.extraction_eval_runs` = 5

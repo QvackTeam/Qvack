@@ -6,11 +6,20 @@ code lives here under a name.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class FoldParams(BaseModel):
@@ -191,13 +200,17 @@ def default_llm_roles() -> dict[str, RoleConfig]:
 class ModelPrice(BaseModel):
     """Т-§11.4: dollars per 1M tokens of one model (ТЗ Ф4 WP10.4). `per_minute` — dollars per
     minute of audio and `per_image` — dollars per picture, for the calls that report no tokens
-    (`voice`, `illustrator`; D-B-198). Every field is 0 unless the owner sets it."""
+    (`voice`, `illustrator`; D-B-198) and are 0 unless the owner sets them. The three token prices
+    are required, a price is not negative and an unknown key is an error: a typo or a gap would
+    otherwise cost the model at 0 and silently void the dollar budgets (D-B-199; D-C-150)."""
 
-    input: float = 0.0
-    cached_input: float = 0.0
-    output: float = 0.0
-    per_minute: float = 0.0
-    per_image: float = 0.0
+    model_config = ConfigDict(extra="forbid")
+
+    input: float = Field(ge=0)
+    cached_input: float = Field(ge=0)
+    output: float = Field(ge=0)
+    per_minute: float = Field(default=0.0, ge=0)
+    per_image: float = Field(default=0.0, ge=0)
 
 
 class Settings(BaseSettings):
@@ -269,7 +282,6 @@ class Settings(BaseSettings):
     # WP3.3: periodic jobs. Phase 3 decisions (ТЗ §6.2).
     scheduler_tick_s: float = 15.0
     session_sweep_interval_s: int = 60
-    purge_deleted_interval_s: int = 600
     # WP3.4: a job deferred to the next UTC midnight gets up to this much random jitter.
     daily_budget_defer_jitter_s: int = 900
     # WP11.1 (Т-§22.4): dispatcher inside `projector`; batch size as projector_batch_max_events.
@@ -284,10 +296,6 @@ class Settings(BaseSettings):
     # WP1.2: pool of `Db` per process; the docs give no sizes (Phase 4 decision D-A-101).
     pg_pool_min_size: int = 1
     pg_pool_max_size: int = 10
-    # WP1.3 (Phase 4 decision D-A-200): `projector` and `workers` run the code of Phase 4
-    # (rules@3, the queue and the executor on Db). Off until the deployment switches its
-    # schema to dbmate (WP9); then on, and the code of Phase 3 goes with WP1.3.
-    phase4_processes: bool = False
     # Т-§2.7, Т-§2.4.
     rebuild_concurrency: int = 2
     projector_lag_p95_ms: int = 500
@@ -321,6 +329,8 @@ class Settings(BaseSettings):
         }
     )
     why_recent_n: int = 3
+    # D-A-141, D-A-242: last exposures per skill in the slice of the teacher (no number in Т-§10.2).
+    slice_recent_exposures: int = 3
     # Т-§9.2, Т-§9.5: misconceptions and profile.
     fix_min_resists: int = 2
     watch_days: int = 3
@@ -341,6 +351,8 @@ class Settings(BaseSettings):
     review_trigger_retention: float = 0.85
     forgetting_domain_idle_days: int = 30
     review_item_minutes: float = 1.5
+    # Slot 6 in the preparation mode (WP17.4, D-B-216): items shown per list.
+    prep_slot_max_items: int = 12
     today_max_items: int = 3
     # WP17.2: «подбирается на первых данных»; the class B record comes with WP17.
     today_min_score: float = 0.0
@@ -455,14 +467,26 @@ class Settings(BaseSettings):
     # WP10.1: the role table Т-§11.1, one row per role.
     llm_roles: dict[str, RoleConfig] = Field(default_factory=default_llm_roles)
     # WP10.4 (Т-§11.4, ТЗ Ф4 §2.3 строка 9): prices come from the owner; empty until then.
-    llm_prices: dict[str, ModelPrice] = Field(default_factory=dict)
+    # JSON in `LLM_PRICES`; an empty string is the empty table (D-C-149).
+    llm_prices: Annotated[dict[str, ModelPrice], NoDecode] = Field(default_factory=dict)
     # WP10.3 (Т-§11.5).
     tool_timeout_ms: int = 2000
     # WP10.3: model steps of one tool loop before it is cut. Phase 4 decision D-B-117.
     tool_loop_max_steps: int = 4
-    # WP10.4 (Т-§11.4).
-    session_agent_budget_usd: float = 0.5
-    learner_daily_budget_usd: float = 3.0
+    # WP10.4 (Т-§11.4); owner decision D-B-211: generous per-learner budgets while the pool
+    # is full, the values of Т-§11.4 once it runs low (`tight_*`).
+    session_agent_budget_usd: float = 5.0
+    learner_daily_budget_usd: float = 20.0
+    tight_session_agent_budget_usd: float = 0.5
+    tight_learner_daily_budget_usd: float = 3.0
+    # D-B-211: the money for models, in dollars (`LLM_POOL_BUDGET_USD`); 0 — no pool, the mode
+    # is always `normal`. The remainder is the pool minus every cost in `ops.llm_usage`.
+    llm_pool_budget_usd: float = 0.0
+    llm_pool_tight_remaining_usd: float = 100.0
+    llm_pool_judges_only_remaining_usd: float = 50.0
+    llm_pool_cache_s: float = 30.0
+    # D-B-211: the preference (`preference.set`) by which a learner says «I am a Meta judge».
+    meta_judge_preference_key: str = "meta_judge"
     # WP13.4 (Т-§12.2).
     spoiler_holdback_chars: int = 120
     # WP14.5 (Т-§10.1).
@@ -530,7 +554,7 @@ class Settings(BaseSettings):
     viz_libraries: dict[str, str] = Field(default_factory=dict)
     # WP8.2 (WP16.6): the short check of «я это уже знаю» — at most this many tasks, one per
     # skill of the topic (the document says «1–3»). D-B-193.
-    known_check_max_tasks: int = 3
+    known_check_max_tasks: int = Field(default=3, ge=1)
     # WP10.6 (ТЗ Ф4 §2.3 строка 20): UUIDv5 namespace of the learner pseudonym in traces.
     # Phase 4 decision D-B-105: a fixed namespace, never changed after the first trace.
     langsmith_pseudonym_ns: str = "6f1c2a9e-4b7d-5e3a-9c21-0d8e7f6a5b43"
@@ -551,7 +575,7 @@ class Settings(BaseSettings):
     teacher_two_step: bool = False
     # WP16.7 (Т-§18.2): attempts of Т1 (the latest) the Brier score of `ops metrics` replays the
     # memory for; each one replays the learner's log. Phase 4 decision D-B-195.
-    metrics_brier_max_attempts: int = 200
+    metrics_brier_max_attempts: int = Field(default=200, ge=1)
 
     # --- stream C ---
     # WP8.3: probe timeout of /health/ready and /healthz (was HEALTH_CHECK_TIMEOUT_SEC).
@@ -594,6 +618,9 @@ class Settings(BaseSettings):
     email_api_key: SecretStr = SecretStr("")
     google_oidc_client_id: SecretStr = SecretStr("")
     google_oidc_client_secret: SecretStr = SecretStr("")
+    # Timeout of one HTTP call of sign-in (Resend, Google token and certificates). The documents
+    # name no value: the one of `compute_timeout_sec` (Phase 4 decision of stream C, to confirm).
+    auth_http_timeout_s: float = 5.0
     # WP19 (Т-§19.8, Д-§8.4)
     upload_max_mb: int = 50
     object_url_ttl_s: int = 300
@@ -609,6 +636,20 @@ class Settings(BaseSettings):
     deletions_s3_secret_key: SecretStr = SecretStr("")
     # WP20 (Т-§10.5, ТЗ §2.3 п.17)
     materials_k: int = 5
+    # WP20.2 (Т-§3.4.5 «около 1–2 КБ», Т-§4.3 «параллельно для больших материалов»;
+    # Phase 4 decision D-C-201): chunk size in characters, chunks per `material_parser` call,
+    # calls in flight, marks kept per chunk.
+    material_chunk_chars: int = Field(default=1500, ge=200)
+    material_chunk_max_chars: int = Field(default=2000, ge=200)
+    material_parser_batch: int = Field(default=8, ge=1)
+    material_parser_concurrency: int = Field(default=4, ge=1)
+    material_marks_per_chunk: int = Field(default=6, ge=1)
+    # WP20.2 tail (D-C-213, D-C-214): deadlines of a syllabus kept per material; a PDF page with
+    # fewer characters of text than `material_scan_min_chars` is read from its image, at most
+    # `material_scan_max_pages` pages of one file.
+    material_deadlines_max: int = Field(default=20, ge=1)
+    material_scan_min_chars: int = Field(default=20, ge=0)
+    material_scan_max_pages: int = Field(default=50, ge=1)
     # Т-§3.4.6, Т-§10.5: the reserve taken inside SEARCH before post-filters and the final k.
     vector_search_reserve: int = 30
     embedding_dim: int = 768
@@ -624,6 +665,7 @@ class Settings(BaseSettings):
     mark_min_confidence: float = 0.8
     error_grace_ms: int = 8000
     stuck_idle_s: int = 60
+    stuck_erase_times: int = 3
     max_unprompted_marks_per_task: int = 2
     min_intervention_gap_s: int = 45
     # Client parameters served in GET /v1/me (ТЗ §6.7); Т-§21.3 (§15.2, §15.3, §16.2).
@@ -637,6 +679,12 @@ class Settings(BaseSettings):
     # WP23 (Т-§17)
     cards_per_topic_max: int = 15
     cheatsheet_fit_rounds: int = 2
+    # Т-§17.8 (WP23.6): longest instruction of a learner skill, in characters (D-C-216)
+    learner_skill_max_chars: int = 2000
+    # Т-§17.4 (WP23.3): formulas of one block that code sends to compute; the rest stay unchecked
+    artifact_formulas_per_block_max: int = 5
+    # Т-§17.4 (WP23.3): longest side of a formula sent to compute (the `MathInput` limit)
+    artifact_formula_chars_max: int = 2000
     # WP9 (Д-§2.1, Д-§4.2, Д-§8.1, Д-§9.3)
     disk_warn_pct: int = 75
     disk_crit_pct: int = 90
@@ -660,6 +708,8 @@ class Settings(BaseSettings):
     # Д-§14.3: the chat is not chosen yet, the body shape follows the setting (ops/notify.py).
     alert_webhook_format: Literal["slack", "discord", "telegram"] = "slack"
     alert_webhook_chat_id: str = ""
+    telegram_bot_token: SecretStr = SecretStr("")
+    telegram_chat_id: str = ""
     # `ops alerts` (Д-§9.3): starting values of the table; every run is a fresh container, the
     # hold times are measured in Redis.
     heartbeat_alerts_url: SecretStr = SecretStr("")
@@ -696,6 +746,16 @@ class Settings(BaseSettings):
         )
         return self
 
+    @field_validator("llm_prices", mode="before")
+    @classmethod
+    def _read_llm_prices(cls, value: Any) -> Any:
+        """`LLM_PRICES` is JSON; an empty or blank string (compose passes `${LLM_PRICES:-}`) is
+        the empty table, so dev starts and prod refuses with the message of D-B-198 (D-C-149)."""
+        if isinstance(value, str | bytes):
+            text = value.decode() if isinstance(value, bytes) else value
+            return json.loads(text) if text.strip() else {}
+        return value
+
     @model_validator(mode="after")
     def _require_secrets_in_prod(self) -> Settings:
         """Д-§7, ТЗ WP9.2: each process gets only its own secrets, prod requires exactly those of
@@ -721,15 +781,6 @@ class Settings(BaseSettings):
         if self.env == "prod" and self.process_role in ("api", "workers") and not self.llm_prices:
             raise ValueError("LLM_PRICES is required for ENV=prod (price table of Т-§11.4)")
         return self
-
-    @property
-    def sqlalchemy_dsn(self) -> str:
-        """POSTGRES_DSN rewritten for the SQLAlchemy asyncpg dialect."""
-        dsn = self.postgres_dsn
-        for prefix in ("postgresql+asyncpg://", "postgresql://", "postgres://"):
-            if dsn.startswith(prefix):
-                return "postgresql+asyncpg://" + dsn[len(prefix) :]
-        raise ValueError("POSTGRES_DSN must start with postgresql://")
 
     @property
     def llm_api_key(self) -> SecretStr:
@@ -795,6 +846,7 @@ class Settings(BaseSettings):
                     self.backup_s3_secret_key,
                     self.heartbeat_backup_url,
                     self.alert_webhook_url,
+                    self.telegram_bot_token,
                     self.heartbeat_alerts_url,
                     self.app_db_password,
                     self.reader_db_password,

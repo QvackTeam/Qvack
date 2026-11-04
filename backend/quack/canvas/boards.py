@@ -10,6 +10,7 @@ domain of its session.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -18,7 +19,7 @@ from uuid import UUID, uuid4, uuid5
 from psycopg.types.json import Jsonb
 from redis.asyncio import Redis
 
-from quack.canvas.board import BoardDoc
+from quack.canvas.board import BoardDoc, Hint, LearnerDrawing, Mark
 from quack.db import Db
 from quack.events.event_types import AgentRequested
 from quack.events.log import NewEvent, append_events
@@ -40,6 +41,24 @@ _DOMAIN_OF_LEARNER = (
 _TASK = (
     "SELECT source, solution_space IS NOT NULL AS has_space FROM content.tasks "
     "WHERE learner_id = %(learner_id)s AND task_id = %(task_id)s"
+)
+# A drawing is added once: its id is the key (a repeated photo job adds nothing).
+_ADD_DRAWING = (
+    "UPDATE content.canvas_boards SET "
+    "doc = jsonb_set(doc, '{learner,drawings}', "
+    "COALESCE(doc #> '{learner,drawings}', '[]'::jsonb) || %(drawing)s, true), "
+    "version = version + 1, updated_at = now() "
+    "WHERE learner_id = %(learner_id)s AND canvas_id = %(canvas_id)s AND NOT EXISTS ("
+    "SELECT 1 FROM jsonb_array_elements(COALESCE(doc #> '{learner,drawings}', '[]'::jsonb)) d "
+    "WHERE d ->> 'drawing_id' = %(drawing_id)s) RETURNING version"
+)
+_LOCK_DOC = (
+    "SELECT doc FROM content.canvas_boards WHERE learner_id = %(learner_id)s "
+    "AND canvas_id = %(canvas_id)s FOR UPDATE"
+)
+_STORE_DOC = (
+    "UPDATE content.canvas_boards SET doc = %(doc)s, version = version + 1, updated_at = now() "
+    "WHERE learner_id = %(learner_id)s AND canvas_id = %(canvas_id)s"
 )
 _COLUMNS = "canvas_id, session_id, task_id, doc, version, updated_at"
 _INSERT = (
@@ -133,6 +152,91 @@ async def get_canvas(db: Db, *, learner_id: UUID, canvas_id: UUID) -> Canvas:
     if row is None:
         raise CanvasNotFound(f"canvas {canvas_id} not found")
     return _canvas(row)
+
+
+async def add_drawing(
+    db: Db, *, learner_id: UUID, canvas_id: UUID, drawing: LearnerDrawing
+) -> bool:
+    """Lay a drawing into the learner layer (WP22.3 step 5); `False` — it is there already."""
+    row = await db.fetch_one(
+        _ADD_DRAWING,
+        {
+            "learner_id": learner_id,
+            "canvas_id": canvas_id,
+            "drawing_id": drawing.drawing_id,
+            "drawing": Jsonb([drawing.model_dump(mode="json")]),
+        },
+    )
+    return row is not None
+
+
+async def _change_teacher_layer(
+    db: Db, *, learner_id: UUID, canvas_id: UUID, change: Callable[[BoardDoc], bool]
+) -> bool:
+    """Change the teacher layer under a row lock; the learner layer is never touched (П-9.4).
+    `change` returns whether it changed the document."""
+    async with db.transaction():
+        row = await db.fetch_one(_LOCK_DOC, {"learner_id": learner_id, "canvas_id": canvas_id})
+        if row is None:
+            raise CanvasNotFound(f"canvas {canvas_id} not found")
+        doc = BoardDoc.model_validate(row["doc"])
+        if not change(doc):
+            return False
+        await db.execute(
+            _STORE_DOC,
+            {
+                "learner_id": learner_id,
+                "canvas_id": canvas_id,
+                "doc": Jsonb(doc.model_dump(mode="json")),
+            },
+        )
+        return True
+
+
+async def put_mark(db: Db, *, learner_id: UUID, canvas_id: UUID, mark: Mark) -> bool:
+    """Put a mark of the teacher layer; a mark of the same `mark_id` is replaced (an unsure
+    `question` becomes `error`). `False` — the document is as it was (WP21.5)."""
+
+    def change(doc: BoardDoc) -> bool:
+        marks = doc.teacher.marks
+        same = [m for m in marks if m.mark_id == mark.mark_id]
+        if same == [mark]:
+            return False
+        doc.teacher.marks = [m for m in marks if m.mark_id != mark.mark_id] + [mark]
+        return True
+
+    return await _change_teacher_layer(
+        db, learner_id=learner_id, canvas_id=canvas_id, change=change
+    )
+
+
+async def remove_mark(db: Db, *, learner_id: UUID, canvas_id: UUID, mark_id: str) -> bool:
+    """Take a mark off the board quietly (a second opinion did not confirm it, or the learner
+    erased the line); `False` — there was none."""
+
+    def change(doc: BoardDoc) -> bool:
+        kept = [m for m in doc.teacher.marks if m.mark_id != mark_id]
+        changed = len(kept) != len(doc.teacher.marks)
+        doc.teacher.marks = kept
+        return changed
+
+    return await _change_teacher_layer(
+        db, learner_id=learner_id, canvas_id=canvas_id, change=change
+    )
+
+
+async def put_hint(db: Db, *, learner_id: UUID, canvas_id: UUID, hint: Hint) -> bool:
+    """Lay a quiet hint into the teacher layer once per `hint_id`."""
+
+    def change(doc: BoardDoc) -> bool:
+        if any(h.hint_id == hint.hint_id for h in doc.teacher.hints):
+            return False
+        doc.teacher.hints.append(hint)
+        return True
+
+    return await _change_teacher_layer(
+        db, learner_id=learner_id, canvas_id=canvas_id, change=change
+    )
 
 
 async def domain_canvases(db: Db, *, learner_id: UUID, domain_id: UUID) -> list[Canvas]:

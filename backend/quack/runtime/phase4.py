@@ -21,7 +21,6 @@ from quack.db.neo4j import create_driver, verify_schema
 from quack.db.redis import create_redis
 from quack.graph.projection.process import ProjectorP4
 from quack.jobs import queue_p4
-from quack.jobs.dispatcher import supervise
 from quack.jobs.dispatcher_p4 import DispatcherP4
 from quack.jobs.executor_p4 import JobWorker
 from quack.jobs.periodic_p4 import schedule_periodic
@@ -35,6 +34,28 @@ type Bound = Callable[[queue_p4.ClaimedJob], Awaitable[None]]
 
 # Т-§13.1 classes as the numeric priority the handlers of Phase 3 may read (P0 first).
 _PRIORITY = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+
+
+async def supervise(
+    name: str,
+    task: Callable[[asyncio.Event], Awaitable[None]],
+    stop: asyncio.Event,
+    *,
+    restart_pause_s: float,
+) -> None:
+    """WP11.1: run `task(stop)` until `stop`; an exception is logged and the task restarts after
+    `restart_pause_s`, so a crash of the dispatcher does not stop the projector and back."""
+    while not stop.is_set():
+        try:
+            await task(stop)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.error("supervised_task_crashed", task=name, error=repr(exc))
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=restart_pause_s)
+        else:
+            return
 
 
 def as_phase3_job(job: queue_p4.ClaimedJob, settings: Settings) -> Phase3Job:

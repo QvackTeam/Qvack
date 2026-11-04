@@ -14,32 +14,23 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import httpx
-from sqlalchemy import text
 
 from quack.api.auth import SESSION_COOKIE
 from quack.auth.sessions import open_session
 from quack.config import Settings
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 
 type RequestHook = Callable[[httpx.Request], Awaitable[None]]
 
 TEST_LEARNER_HEADER = "X-Test-Learner"
 
-
-_INSERT_USER = text(
-    "INSERT INTO auth.users (id, email, password_hash, display_name) "
-    "VALUES (:id, :email, 'test-only', 'Test learner') ON CONFLICT (id) DO NOTHING"
-)
-
-
-async def ensure_user(db: SessionFactory, learner_id: UUID) -> None:
-    """The Phase 3 account row of `learner_id` (no-op when it exists): `DELETE /v1/learner` and
-    `PATCH /v1/learner/preferences` still work on `auth.users` until WP1.3/WP25."""
-    async with db() as session, session.begin():
-        await session.execute(
-            _INSERT_USER, {"id": learner_id, "email": f"{learner_id}@test.invalid"}
-        )
+__all__ = [
+    "learner_headers",
+    "login",
+    "login_hook",
+    "session_cookie",
+    "session_token",
+]
 
 
 async def login(client: httpx.AsyncClient, db: Db, learner_id: UUID, settings: Settings) -> str:

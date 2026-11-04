@@ -12,14 +12,12 @@ import pytest
 from fastapi import FastAPI
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.auth import SESSION_COOKIE
 from quack.auth.sessions import open_session
 from quack.config import Settings
 from quack.db.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.log import NewEvent, append_events
 from quack.jobs.queue_p4 import enqueue
 from quack.jobs.rules_p4 import JobPlan
@@ -31,15 +29,13 @@ pytest_plugins = ["tests.session.fixtures"]
 @pytest.fixture
 async def app(
     settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     neo4j: AsyncDriver,
     redis: Redis,
     pg_db: Db,
 ) -> FastAPI:
     from tests.support.resources import build_app_resources
 
-    resources = build_app_resources(settings, pg_engine, neo4j, redis, db=pg_db, session_factory=db)
+    resources = build_app_resources(settings, neo4j, redis, db=pg_db)
     return create_app(settings, resources=resources)
 
 
@@ -103,3 +99,54 @@ async def test_plaque_shows_visible_jobs_of_own_session(
     assert missing.status_code == 404
     other = await client.get(f"/v1/sessions/{other_session}/jobs", cookies=cookies)
     assert other.status_code == 404
+
+
+async def test_llm_access_and_judges_only_gate(
+    client: httpx.AsyncClient, pg_db: Db, settings: Settings, app: FastAPI
+) -> None:
+    """D-B-211: `GET /v1/llm/access` tells the client the pool mode; in `judges_only` a learner
+    without `meta_judge` gets 403 on an action, the preference lets them through."""
+    from quack.llm.access import reset_pool_cache
+
+    learner, session, cookies = await _learner(pg_db, settings)
+    normal = await client.get("/v1/llm/access", cookies=cookies)
+    assert normal.status_code == 200, normal.text
+    assert normal.json()["blocked"] is False
+
+    saved = getattr(app.state, "settings", None)
+    app.state.settings = settings.model_copy(
+        update={"llm_pool_budget_usd": 10.0, "llm_pool_cache_s": 0.0}
+    )
+    reset_pool_cache()
+    try:
+        tight = await client.get("/v1/llm/access", cookies=cookies)
+        assert tight.json() == {
+            "mode": "judges_only",
+            "judge": False,
+            "blocked": True,
+            "preference_key": "meta_judge",
+        }
+        refused = await client.post(
+            f"/v1/sessions/{session}/actions",
+            json={"kind": "message", "text": "hi", "idempotency_key": str(uuid4())},
+            cookies=cookies,
+        )
+        assert refused.status_code == 403, refused.text
+        assert refused.json()["error"]["details"]["reason"] == "judges_only"
+        await append_events(
+            pg_db,
+            learner,
+            [
+                NewEvent(
+                    type="preference.set",
+                    payload={"key": "meta_judge", "value": True},
+                    actor="learner",
+                    idempotency_key=f"preference:{uuid4()}",
+                )
+            ],
+        )
+        judge = await client.get("/v1/llm/access", cookies=cookies)
+        assert judge.json()["blocked"] is False
+    finally:
+        app.state.settings = saved
+        reset_pool_cache()

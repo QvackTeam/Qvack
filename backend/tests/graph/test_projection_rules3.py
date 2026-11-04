@@ -637,6 +637,33 @@ def test_skill_split_creates_the_parts_and_keeps_the_old_skill() -> None:
     assert ("Evidence", EVIDENCE, "ON", "Skill", SKILL) in rels
 
 
+def test_split_of_a_one_skill_topic_in_one_batch_needs_the_topics_first() -> None:
+    """WP8.2 (D-A-226, question of B in #245): a topic with one skill is split by `topic.split`
+    (the parts exist) and then `skill.split` (its parts land in them). The other order loses a
+    part: `skill.split` skips a part whose topic is not there yet, and `topic.split` cannot
+    cover a skill that does not exist."""
+    topic_split = {"topic_id": TOPIC, "into": [
+        {"topic_id": TOPIC, "name": "Same denominators", "skill_ids": [SKILL]},
+        {"topic_id": TOPIC_NEW, "name": "Unlike denominators", "skill_ids": []},
+    ]}  # fmt: skip
+    skill_split = {"skill_id": SKILL, "into": [
+        {"skill_id": SKILL_P1, "name": "same", "topic_id": TOPIC},
+        {"skill_id": SKILL_P2, "name": "unlike", "topic_id": TOPIC_NEW},
+    ]}  # fmt: skip
+    start = ([_DOMAIN, _TOPIC, _SKILL], [_rel(("Topic", TOPIC), "COVERS", ("Skill", SKILL))])
+    nodes, rels = _run(
+        [_event(60, "topic.split", topic_split), _event(61, "skill.split", skill_split)], *start
+    )
+    assert ("Topic", TOPIC_NEW) in nodes and nodes[("Topic", TOPIC)]["status"] == "active"
+    assert ("Topic", TOPIC, "COVERS", "Skill", SKILL_P1) in rels
+    assert ("Topic", TOPIC_NEW, "COVERS", "Skill", SKILL_P2) in rels
+    wrong, wrong_rels = _run(
+        [_event(60, "skill.split", skill_split), _event(61, "topic.split", topic_split)], *start
+    )
+    assert ("Skill", SKILL_P2) not in wrong
+    assert ("Topic", TOPIC_NEW, "COVERS", "Skill", SKILL_P2) not in wrong_rels
+
+
 # --- tasks (T-P4, group 4; Т-§4.4, Т-§5.1, Т-§5.2, Т-§5.6) -----------------------------------
 
 TASK = str(UUID(int=0x7A))

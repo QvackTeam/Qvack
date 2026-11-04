@@ -14,9 +14,12 @@
 4. fewer than `new_sheet_match_share` of the lines of the last photo matched — a new sheet of
    the same solution: every line is new.
 
+5. every area the recognizer marked as a drawing — and only those (T-CP3) — goes to `segmenter`
+   (`sam-3.1`) by its box in pixels; compute `/v1/image/clean-drawing` removes the paper under
+   the mask, the image is stored and laid into the learner layer of the board (D-C-153).
+
 The line source is the whole photo with the approximate box of the line (`Т-§22.6`), so no crop
-is stored. Drawings (step 5, `segmenter`) wait for the gateway adapter of `sam-3.1`
-(BLOCKED-C-204); until then they are counted and skipped.
+is stored.
 
 The sheet the photo is compared with is read from the log: a photo line id is
 `{sheet}:{photo}:{n}`, where `sheet` is the photo that opened the sheet (D-C-134). A repeated job
@@ -34,7 +37,9 @@ from uuid import UUID
 
 from redis.asyncio import Redis
 
-from quack.canvas.boards import get_canvas
+from quack.canvas.board import LearnerDrawing
+from quack.canvas.boards import Canvas, add_drawing, get_canvas
+from quack.canvas.drawings import drawing_mask, pixel_box, webp_size
 from quack.canvas.recognition import (
     RECOGNIZER_ROLE,
     RECOGNIZER_VERSION,
@@ -43,16 +48,17 @@ from quack.canvas.recognition import (
     SheetLine,
 )
 from quack.compute_client.client import ComputeClient
-from quack.compute_client.contracts import ImageRequest
+from quack.compute_client.contracts import CleanDrawingRequest, ImageRequest
 from quack.config import Settings
 from quack.db import Db
 from quack.events.event_types import CanvasLineCommitted, CanvasLineErased, PhotoUploaded
 from quack.events.log import NewEvent, append_events
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.llm.gateway import LLMGateway
 from quack.llm.provider import ImageInput
 from quack.logging import get_logger
+from quack.storage.keys import photo_drawing_key
 from quack.storage.objects import ObjectStore
 
 log = get_logger(__name__)
@@ -167,12 +173,13 @@ async def current_sheet(db: Db, *, learner_id: UUID, canvas_id: UUID) -> Sheet:
 @dataclass(frozen=True)
 class PhotoResult:
     """What the job wrote: the ids of committed and erased lines, whether the photo opened a
-    new sheet and how many drawings wait for `segmenter`."""
+    new sheet, how many drawings the sheet has and the ids of those laid on the board now."""
 
     committed: list[str]
     erased: list[str]
     new_sheet: bool
     drawings: int
+    drawings_placed: list[str]
 
 
 async def run_photo_pipeline(
@@ -186,7 +193,7 @@ async def run_photo_pipeline(
     photo_id: UUID,
     redis: Redis | None = None,
 ) -> PhotoResult | None:
-    """Steps 1–4 of WP22.3 for one photo; `None` — the photo has no canvas (WP22.4). Errors of
+    """Steps 1–5 of WP22.3 for one photo; `None` — the photo has no canvas (WP22.4). Errors of
     compute and of the model propagate: the job is retried (§4.2)."""
     row = await db.fetch_one(_PHOTO, {"learner_id": learner_id, "photo_id": str(photo_id)})
     if row is None:
@@ -198,6 +205,7 @@ async def run_photo_pipeline(
     canvas = await get_canvas(db, learner_id=learner_id, canvas_id=photo.canvas_id)
     original = await storage.get(photo.object_key)
     aligned = await compute.image_align(ImageRequest(image_b64=base64.b64encode(original).decode()))
+    sheet_image = base64.b64decode(aligned.image_webp_b64)
     reading = await gateway.generate_structured(
         RECOGNIZER_ROLE,
         RECOGNIZER_VERSION,
@@ -207,12 +215,10 @@ async def run_photo_pipeline(
         canvas.session_id,
         None,
         f"recognizer:photo:{photo_id}",
-        images=[ImageInput(SHEET_MIME, base64.b64decode(aligned.image_webp_b64))],
+        images=[ImageInput(SHEET_MIME, sheet_image)],
     )
     lines = [line for line in reading.value.lines if line.kind != "drawing"]
-    drawings = len(reading.value.lines) - len(lines)
-    if drawings:
-        log.info("photo_drawings_skipped", photo_id=str(photo_id), drawings=drawings)
+    areas = [line for line in reading.value.lines if line.kind == "drawing"]
 
     sheet = await current_sheet(db, learner_id=learner_id, canvas_id=photo.canvas_id)
     pairs = align_lines(
@@ -253,7 +259,79 @@ async def run_photo_pipeline(
             )
     if events:
         await append_events(db, learner_id, events, redis=redis)
-    return PhotoResult(committed=committed, erased=erased, new_sheet=new_sheet, drawings=drawings)
+    placed = await _place_drawings(
+        db, gateway, compute, storage,
+        learner_id=learner_id, canvas=canvas, photo_id=photo_id, image=sheet_image, areas=areas,
+    )  # fmt: skip
+    return PhotoResult(
+        committed=committed,
+        erased=erased,
+        new_sheet=new_sheet,
+        drawings=len(areas),
+        drawings_placed=placed,
+    )
+
+
+async def _place_drawings(
+    db: Db,
+    gateway: LLMGateway,
+    compute: ComputeClient,
+    storage: ObjectStore,
+    *,
+    learner_id: UUID,
+    canvas: Canvas,
+    photo_id: UUID,
+    image: bytes,
+    areas: Sequence[SheetLine],
+) -> list[str]:
+    """Step 5: one `segmenter` call per drawing area, `clean-drawing` under the mask, the image
+    to the store, a record in the learner layer. A drawing already on the board is not touched
+    (a repeated job calls nothing). The photo whose size the WebP header does not give has no
+    box in pixels: its drawings are skipped and logged (D-C-153). Errors propagate: the job is
+    retried (§4.2)."""
+    if not areas:
+        return []
+    size = webp_size(image)
+    if size is None:
+        log.info("photo_drawings_skipped", photo_id=str(photo_id), drawings=len(areas))
+        return []
+    known = {d.drawing_id for d in canvas.doc.learner.drawings}
+    placed: list[str] = []
+    for n, area in enumerate(areas):
+        drawing_id = f"{photo_id}:{n}"
+        box = pixel_box(area.bbox, size)
+        if drawing_id in known:
+            continue
+        if box.x2 <= box.x1 or box.y2 <= box.y1:
+            log.info("photo_drawing_empty_box", photo_id=str(photo_id), drawing=n)
+            continue
+        found = await gateway.segment(
+            ImageInput(SHEET_MIME, image),
+            learner_id=learner_id,
+            session_id=canvas.session_id,
+            box=box,
+        )
+        objects = found.value.objects
+        chosen = next((o for o in objects if o.mask is not None), objects[0] if objects else None)
+        cleaned = await compute.image_clean_drawing(
+            CleanDrawingRequest(
+                image_b64=base64.b64encode(image).decode(),
+                mask_b64=drawing_mask(chosen, box, size),
+            )
+        )
+        key = photo_drawing_key(learner_id, photo_id, n)
+        await storage.put(key, base64.b64decode(cleaned.image_webp_b64), SHEET_MIME)
+        drawing = LearnerDrawing(
+            drawing_id=drawing_id,
+            photo_id=photo_id,
+            object_key=key,
+            bbox=(area.bbox.left, area.bbox.top, area.bbox.right, area.bbox.bottom),
+        )
+        if await add_drawing(
+            db, learner_id=learner_id, canvas_id=canvas.canvas_id, drawing=drawing
+        ):
+            placed.append(drawing_id)
+    return placed
 
 
 def _committed(

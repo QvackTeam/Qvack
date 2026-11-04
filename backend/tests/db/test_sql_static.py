@@ -7,7 +7,7 @@ f-string, `+` concatenation, `%` formatting or `str.format` — dynamic SQL goes
 T-DB4: every repository function over a table with `learner_id` takes `learner_id` and every
 statement over such a table uses `%(learner_id)s` (in `WHERE` for reads, updates and deletes).
 A repository module is a module of `quack/` that works through `Db` (imports `quack.db`'s `Db`);
-the SQLAlchemy modules of Phases 1–3 leave with WP1.3 (T-DB3).
+the SQLAlchemy modules of Phases 1–3 were removed in WP1.3 (T-DB3, D-A-234).
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ _WHERE_LEARNER = re.compile(r"\bWHERE\b[\s\S]*\blearner_id\s*=\s*%\(learner_id\)
 
 # Statements over learner tables that are cross-learner by design. Each entry needs a reason.
 CROSS_LEARNER_ALLOWED: dict[str, str] = {
+    # D-B-211: the money pool is one operational sum over every learner's calls.
+    "quack/llm/access.py:_POOL_SPENT": "the pool of money for models is shared by all learners",
     # D-C-111 (#97): before login the learner is unknown, the row is found by its address.
     "quack/auth/links.py:_LEARNER_BY_EMAIL": "learner of a mail address, unknown before login",
     # D-C-111 (#97): the learner of a request is found by the token of its session.
@@ -90,6 +92,25 @@ CROSS_LEARNER_ALLOWED |= {
     )
 } | {
     "quack/session/replay.py:_SESSION_LEARNER": "learner of a session named by the operator",
+}
+
+# D-C-181 (WP1.3 step 3): `ops status`, `ops restore-check` and `ops seed-learners` look at the
+# whole system, not at one learner (Д-§9.1, Д-§8.3, Д-§11).
+CROSS_LEARNER_ALLOWED |= {
+    f"quack/ops/status.py:{name}": "the report of the whole system (Д-§9.1)"
+    for name in (
+        "_PROJECTOR",
+        "_DISPATCHER",
+        "_STOPPED",
+        "_BY_STATUS",
+        "_OLDEST_QUEUED",
+        "_WAITING",
+        "_FINISHED_HOUR",
+        "_LLM",
+    )
+} | {
+    "quack/ops/restore_check.py:_LOG_SEQS": "the log position of every learner (Д-§8.3)",
+    "quack/ops/seed.py:_COUNT_REAL": "learners that are not seeded, over all of them (Д-§11)",
 }
 
 

@@ -1,7 +1,8 @@
 """Routes of stream C (ТЗ Ф4 §7.3): auth, consents, learner settings, materials, canvases,
 artifacts (notes, blocks, cards, cheatsheets), the learner stream and health.
 
-Stages 20-30 are the consents, 190-270 the artifacts, blocks, cards and the canvas line.
+Stages 20-30 are the consents, 190-270 the artifacts, blocks, cards and the canvas line, 310-320
+the cheat sheet of a hub.
 """
 
 from __future__ import annotations
@@ -25,11 +26,7 @@ if TYPE_CHECKING:
     from tests.e2e.system import Learner, System
 
 
-async def _note_created(system: System, learner: Learner, ids: Ids, payload: Any) -> Ids:
-    return ids.replace(artifact_id=UUID(payload["artifact_id"]))
-
-
-async def _note_deleted(system: System, learner: Learner, ids: Ids, payload: Any) -> Ids:
+async def _topic_with_notes(system: System, learner: Learner, ids: Ids) -> Ids:
     """WP23.1 reads topics from the Phase 4 log (`topic.created`), which the Phase 3 structure
     of the walk does not write (D-C-112): one topic is recorded there for the notes routes."""
     topic_id, domain_id = uuid4(), uuid4()
@@ -106,6 +103,27 @@ async def _canvas_with_a_line(system: System, learner: Learner, ids: Ids) -> Ids
     return ids.replace(canvas_id=canvas.canvas_id, line_id="t1")
 
 
+async def _hub_of_the_walk(system: System, learner: Learner, ids: Ids) -> Ids:
+    """WP23.5: one hub in the Phase 4 log (`hub.created`) for the cheat sheet routes."""
+    hub_id, domain_id = uuid4(), uuid4()
+    created = NewEvent(
+        type="hub.created",
+        payload={
+            "hub_id": hub_id,
+            "domain_id": domain_id,
+            "name": "Calculus exam",
+            "kind": "request",
+            "origin": "learner",
+            "control_type": "tasks",
+        },
+        actor="code",
+        idempotency_key=f"te2:hub:{hub_id}",
+        domain_id=domain_id,
+    )
+    await append_events(system.resources.db, learner.learner_id, [created])
+    return ids.replace(cheatsheet_hub_id=hub_id)
+
+
 async def _card_of_topic(system: System, learner: Learner, ids: Ids) -> UUID:
     """WP23.4: a card of the walk's Phase 4 topic, as the writer leaves it — its task already in
     the bank (D-C-140)."""
@@ -151,6 +169,10 @@ STREAM = Stream(
         "block_id": NO_ID,
         # WP23.4: a card of the topic (the task behind it).
         "card_id": NO_ID,
+        # WP23.5: a hub of the walk (the cheat sheet routes); stream A's `hub_id` is a graph hub.
+        "cheatsheet_hub_id": NO_ID,
+        # WP23.6: a skill of the learner (the routes that change or delete it).
+        "skill_id": NO_ID,
         # WP21.3: a recognized line of the canvas the walk opens for the correction route.
         "line_id": "none",
     },
@@ -168,36 +190,10 @@ STREAM = Stream(
             body=lambda ids, v: {"version": ["2026-11", "2026-12"][v]},
         ),
         Route(
-            "POST",
-            "/v1/artifacts/notes",
-            stage=190,
-            body=lambda ids, v: {
-                "domain_id": str(ids.domain_id),
-                "title": ["Note", "Other note"][v],
-                "text": "My own words",
-            },
-            advance=_note_created,
-        ),
-        Route(
-            "PATCH",
-            "/v1/artifacts/notes/{artifact_id}",
-            stage=200,
-            requires=("artifact_id",),
-            body=lambda ids, v: {"title": "Note", "text": ["Edited", "Edited again"][v]},
-        ),
-        Route(
-            "DELETE",
-            "/v1/artifacts/notes/{artifact_id}",
-            stage=210,
-            requires=("artifact_id",),
-            body=lambda ids, v: {},
-            no_other_body="the body has no field besides the key",
-            advance=_note_deleted,
-        ),
-        Route(
             "PUT",
             "/v1/artifacts/{artifact_id}/blocks/{block_id}",
             stage=220,
+            prepare=_topic_with_notes,
             requires=("artifact_id", "block_id"),
             body=lambda ids, v: {"content": ["My words", "Other words"][v]},
             advance=_block_written,
@@ -243,6 +239,39 @@ STREAM = Stream(
             requires=("canvas_id", "line_id"),
             body=lambda ids, v: {"text": ["x=2", "x=3"][v], "sympy": None},
         ),
+        # ТЗ Ф4 §6.4, WP23.6: the id of the skill comes from the key, so a repeat is the same skill.
+        Route(
+            "POST",
+            "/v1/learner-skills",
+            stage=275,
+            body=lambda ids, v: {
+                "name": "brief",
+                "instruction": ["Answer in two sentences.", "Answer in one."][v],
+                "bindings": {"artifact_types": ["notes"]},
+            },
+        ),
+        # ТЗ Ф4 §6.4, WP23.5: the review of the learner's cheat sheet and the consent to a
+        # generated one. Last in the walk: the consent writes `agent.requested` with `artifact` and
+        # `hub_id`, which the schema takes with D-A-196 (issue #191);.
+        Route(
+            "POST",
+            "/v1/hubs/{hub_id}/cheatsheet/review",
+            stage=310,
+            requires=("cheatsheet_hub_id",),
+            path_ids={"hub_id": "cheatsheet_hub_id"},
+            prepare=_hub_of_the_walk,
+            body=lambda ids, v: {},
+            no_other_body="the body has no field besides the key",
+        ),
+        Route(
+            "POST",
+            "/v1/hubs/{hub_id}/cheatsheet",
+            stage=320,
+            requires=("cheatsheet_hub_id",),
+            path_ids={"hub_id": "cheatsheet_hub_id"},
+            body=lambda ids, v: {},
+            no_other_body="the body has no field besides the key",
+        ),
         # --- routes without `idempotency_key`; each reason is a ТЗ rule ---
         # ТЗ Ф4 §6.4: the body is `{timezone}` only; no event, a repeat sets the same value.
         Route(
@@ -265,6 +294,22 @@ STREAM = Stream(
             no_key="each call opens a new canvas",
             body=lambda ids, v: {},
         ),
+        # ТЗ Ф4 WP23.6 (D-C-216): `content.learner_skills` has no key column and no event; the
+        # request sets absolute values, so a repeat changes nothing (no new version).
+        Route(
+            "PATCH",
+            "/v1/learner-skills/{skill_id}",
+            no_key="no event; sets absolute values, a repeat writes no new version (D-C-216)",
+            body_key="none",
+            body=lambda ids, v: {"instruction": ["Be brief.", "Be long."][v]},
+        ),
+        Route(
+            "DELETE",
+            "/v1/learner-skills/{skill_id}",
+            no_key="no event; deletes the skill with its versions, a repeat finds none (D-C-216)",
+            body_key="none",
+            body=lambda ids, v: {},
+        ),
         # ТЗ Ф4 WP22.1: every call issues a new one-time token (Т-§16.1); no event to replay.
         Route(
             "POST",
@@ -280,12 +325,14 @@ STREAM = Stream(
             no_key="multipart; each photo is a new snapshot",
             files={"file": ("sheet.webp", b"RIFF\x00\x00\x00\x00WEBPVP8 ", "image/webp")},
         ),
-        # D-C-009: ТЗ-П3 §3 gives this endpoint no key; it writes no event and its job coalesces.
+        # ТЗ Ф4 WP21.6: the key of the event is the session and the time of the segment (D-C-152),
+        # so a retry costs nothing; the segment is audio, a multipart request has no body key.
         Route(
             "POST",
-            "/v1/topics/{topic_id}/cheatsheet/refresh",
-            no_key="no event; the job coalesces",
-            body=lambda ids, v: {"domain_id": str(ids.domain_id)},
+            "/v1/sessions/{session_id}/voice",
+            no_key="multipart; the key is the session and the time of the segment (D-C-152)",
+            files={"audio": ("segment.wav", b"RIFF", "audio/wav")},
+            form={"started_at_ms": "1000", "ended_at_ms": "2000"},
         ),
     ),
     other_routes=frozenset(
@@ -309,21 +356,24 @@ STREAM = Stream(
             ("GET", "/v1/canvases/{canvas_id}"),
             ("GET", "/v1/canvases/{canvas_id}/replay"),
             ("GET", "/v1/domains/{domain_id}/canvases"),
-            # ТЗ-П3 §3: artifacts, search, cheatsheets, export
-            ("GET", "/v1/artifacts"),
-            ("GET", "/v1/artifacts/search"),
-            ("GET", "/v1/topics/{topic_id}/cheatsheet"),
-            ("GET", "/v1/domains/{domain_id}/export"),
             # ТЗ Ф4 §6.4 «Артефакты», WP23.1, WP23.4
             ("GET", "/v1/topics/{topic_id}/notes"),
             ("GET", "/v1/topics/{topic_id}/cards"),
+            # ТЗ Ф4 §6.4, WP23.5
+            ("GET", "/v1/hubs/{hub_id}/cheatsheet"),
+            # ТЗ Ф4 §6.4, WP23.6
+            ("GET", "/v1/learner-skills"),
+            ("GET", "/v1/system-templates"),
             # §6.4: new endpoints of Phase 3
             ("GET", "/v1/learner/stream"),
         }
     ),
+    # T-E3: the notes of the learner whose ids the other learner tries (blocks, cards routes).
+    isolation=(_topic_with_notes,),
     routers=(
-        "quack.artifacts.router:router",
         "quack.artifacts.notes_routes:router",
         "quack.artifacts.cards_routes:router",
+        "quack.artifacts.hub_cheatsheet_routes:router",
+        "quack.artifacts.skills_routes:router",
     ),
 )

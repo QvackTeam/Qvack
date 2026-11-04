@@ -6,7 +6,7 @@ mark `ops.dispatcher_offsets`. One transaction per batch: read the events → cl
 and its `counters`. A crash leaves nothing; a replay of the same events finds the same jobs by
 their deterministic `job_key` and the same `episode.closed` by its key (law 5). The dispatcher
 reads relational tables only (`Т-§13.3`: the journal, not the projection), calls no model and
-never writes to Neo4j (law 3). Phase 3's `dispatcher.py` stays until WP1.3 (D-A-103).
+never writes to Neo4j (law 3).
 
 `counters` (D-A-160): `{"episodes": {<session_id>: open episode}, "new_topics": {<domain_id>: n}}`.
 """

@@ -6,7 +6,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.canvas.boards import open_canvas
@@ -45,9 +44,7 @@ async def _corrections(db: Db, learner: UUID) -> list[Any]:
     return [r["payload"] for r in rows]
 
 
-async def test_correction_writes_handwriting_corrected(
-    pg_db: Db, pg_engine: AsyncEngine, settings: Settings
-) -> None:
+async def test_correction_writes_handwriting_corrected(pg_db: Db, settings: Settings) -> None:
     """Т-§2.8: the learner's reading goes to the log as `handwriting.corrected`; a repeat with
     the key writes nothing, another text with it is 409; an unknown line or another learner's
     canvas is 404."""
@@ -55,7 +52,7 @@ async def test_correction_writes_handwriting_corrected(
     canvas_id = await _canvas_with_line(pg_db, learner)
     url = f"/v1/canvases/{canvas_id}/lines/l1/correct"
     body = {"idempotency_key": "fix-1", "text": "x^3", "sympy": "x**3"}
-    resources = build_app_resources(settings, pg_engine, None, None, db=pg_db)
+    resources = build_app_resources(settings, None, None, db=pg_db)
     app = create_app(settings, resources=resources)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"

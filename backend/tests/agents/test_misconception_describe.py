@@ -24,8 +24,8 @@ from quack.db import Db
 from quack.events.records import TaskMarkupRecord, TestedLevelRecord
 from quack.events.values import AnswerSpec, MathValue
 from quack.graph.read import ManifestationFact, MisconceptionDetail
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext
+from quack.jobs.types import ClaimedJob
 from quack.llm.gateway import LLMGateway, LLMResult
 from quack.practice.role_outputs import TaskCondition
 from quack.practice.task_store import create_task

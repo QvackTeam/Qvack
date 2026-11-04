@@ -12,16 +12,13 @@ import httpx
 import pytest
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.config import Settings
 from quack.db.db import Db
-from quack.db.postgres import SessionFactory
 from quack.events.event_types import ConsentGiven
 from quack.events.log import NewEvent, append_events
-from tests.session.fixtures import SeededDomain
-from tests.support.auth import session_cookie, session_token
+from tests.session.helpers import Learner, make_learner
 from tests.support.resources import build_app_resources
 
 pytest_plugins = ["tests.session.fixtures"]
@@ -37,28 +34,16 @@ def terms_settings(settings: Settings) -> Settings:
 @pytest.fixture
 async def gated(
     terms_settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     neo4j: AsyncDriver,
     redis: Redis,
     pg_db: Db,
 ) -> AsyncIterator[httpx.AsyncClient]:
     """The app with the consent gate in place (no override of `require_terms`)."""
-    resources = build_app_resources(
-        terms_settings, pg_engine, neo4j, redis, session_factory=db, db=pg_db
-    )
+    resources = build_app_resources(terms_settings, neo4j, redis, db=pg_db)
     app = create_app(terms_settings, resources=resources)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as http:
         yield http
-
-
-async def _headers(pg_db: Db, settings: Settings, learner_id: UUID) -> dict[str, str]:
-    await pg_db.execute(
-        "INSERT INTO core.learners (learner_id, email) VALUES (%(l)s, %(e)s)",
-        {"l": learner_id, "e": f"{learner_id}@test.invalid"},
-    )
-    return session_cookie(await session_token(pg_db, learner_id, settings))
 
 
 async def _consent(pg_db: Db, learner_id: UUID, version: str) -> None:
@@ -76,35 +61,32 @@ async def _consent(pg_db: Db, learner_id: UUID, version: str) -> None:
     )
 
 
-def _start_body(seed: SeededDomain) -> dict[str, str]:
-    return {"domain_id": str(seed.domain_id), "idempotency_key": str(uuid4())}
+def _start_body(who: Learner) -> dict[str, str]:
+    return {"domain_id": str(who.domain_id), "intent": "learn", "idempotency_key": str(uuid4())}
 
 
 async def test_session_start_needs_current_terms(
-    gated: httpx.AsyncClient,
-    pg_db: Db,
-    terms_settings: Settings,
-    seeded_domain: SeededDomain,
+    gated: httpx.AsyncClient, pg_db: Db, terms_settings: Settings
 ) -> None:
-    learner_id = seeded_domain.learner_id
-    headers = await _headers(pg_db, terms_settings, learner_id)
+    who = await make_learner(pg_db, terms_settings)
 
-    refused = await gated.post("/v1/sessions", json=_start_body(seeded_domain), headers=headers)
+    refused = await gated.post("/v1/sessions", json=_start_body(who), cookies=who.cookies)
     assert refused.status_code == 403
     assert refused.json()["error"]["code"] == "CONSENT_REQUIRED"
 
-    await _consent(pg_db, learner_id, "2025-01")  # an old version is not the current one
-    stale = await gated.post("/v1/sessions", json=_start_body(seeded_domain), headers=headers)
+    await _consent(pg_db, who.learner_id, "2025-01")  # an old version is not the current one
+    stale = await gated.post("/v1/sessions", json=_start_body(who), cookies=who.cookies)
     assert stale.status_code == 403
 
-    await _consent(pg_db, learner_id, TERMS)
-    started = await gated.post("/v1/sessions", json=_start_body(seeded_domain), headers=headers)
+    await _consent(pg_db, who.learner_id, TERMS)
+    started = await gated.post("/v1/sessions", json=_start_body(who), cookies=who.cookies)
     assert started.status_code == 201, started.text
 
 
 async def test_session_start_without_cookie_is_unauthenticated(
-    gated: httpx.AsyncClient, seeded_domain: SeededDomain
+    gated: httpx.AsyncClient, pg_db: Db, terms_settings: Settings
 ) -> None:
-    response = await gated.post("/v1/sessions", json=_start_body(seeded_domain))
+    who = await make_learner(pg_db, terms_settings)
+    response = await gated.post("/v1/sessions", json=_start_body(who))
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "UNAUTHENTICATED"

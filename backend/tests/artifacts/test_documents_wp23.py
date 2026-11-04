@@ -9,7 +9,6 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app
 from quack.api.ratelimit import enforce_action_rate_limit
@@ -315,15 +314,13 @@ async def test_other_learner_sees_nothing(pg_db: Db) -> None:
 
 
 @pytest.fixture
-def notes_client(
-    settings: Settings, pg_engine: AsyncEngine, pg_db: Db
-) -> Callable[[UUID], Awaitable[httpx.AsyncClient]]:
+def notes_client(settings: Settings, pg_db: Db) -> Callable[[UUID], Awaitable[httpx.AsyncClient]]:
     """The API over `pg_db`, signed in with a real Phase 4 session of the learner (D-C-119);
     without Redis the `actions` limit is off."""
 
     async def make(learner_id: UUID) -> httpx.AsyncClient:
         app = create_app(settings)
-        app.state.resources = build_app_resources(settings, pg_engine, None, None, db=pg_db)
+        app.state.resources = build_app_resources(settings, None, None, db=pg_db)
         app.dependency_overrides[enforce_action_rate_limit] = lambda: None
         cookie = session_cookie(await session_token(pg_db, learner_id, settings))
         return httpx.AsyncClient(
@@ -358,6 +355,8 @@ async def test_notes_routes(
                 "skills": [],
                 "generatedBy": None,
                 "supplementTo": None,
+                "basis": None,
+                "unverified": False,
             }
         ]
         # §6.4, T-E2: the repeat answers the same and writes nothing; another body — 409.

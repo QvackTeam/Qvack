@@ -1,6 +1,6 @@
 """ТЗ Ф4 WP10.2, WP10.3 inside the gateway (WP5 of Phase 3 stays, WP10 «adds what is missing»):
 a streamed step of the teacher turn goes through the same admission, circuit breaker, pressure
-flag and ledger as `generate_structured` (D-B-152). The turn graph takes the gateway stream as
+flag and usage row as `generate_structured` (D-B-152). The turn graph takes the gateway stream as
 its provider (seam S13 underneath)."""
 
 from __future__ import annotations
@@ -14,10 +14,9 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import BaseModel
 from redis.asyncio import Redis
-from sqlalchemy import text
 
 from quack.config import Settings
-from quack.db.postgres import SessionFactory
+from quack.db import Db
 from quack.db.redis import llm_pressure_key
 from quack.llm.errors import LLMRateLimitedError, LLMUnavailableError, ProviderUnavailableError
 from quack.llm.gateway import LLMGateway
@@ -62,13 +61,13 @@ def _provider() -> ScriptedLLMProvider:
 
 
 def _gateway(
-    db: SessionFactory,
+    pg_db: Db,
     provider: Any,
     prompts: PromptRegistry,
     redis: Redis | None = None,
     **over: Any,
 ) -> LLMGateway:
-    return LLMGateway(db, provider, _settings(**over), prompts, redis=redis)
+    return LLMGateway(provider, _settings(**over), prompts, db=pg_db, redis=redis)
 
 
 def _stream(gw: LLMGateway, learner_id: UUID, turn_id: UUID) -> tuple[Any, StreamingLLMProvider]:
@@ -89,24 +88,17 @@ async def _collect(events: AsyncIterator[StreamEvent]) -> list[StreamEvent]:
     return [event async for event in events]
 
 
-async def _ledger(db: SessionFactory, learner_id: UUID) -> list[Any]:
-    async with db() as session:
-        rows = await session.execute(
-            text(
-                "SELECT role, model, prompt_version, turn_id, status, error_code, input_tokens, "
-                "output_tokens, reasoning_effort FROM ops.llm_ledger WHERE learner_id = :l "
-                "ORDER BY created_at, id"
-            ),
-            {"l": learner_id},
-        )
-        return list(rows.all())
+async def _usage(db: Db, learner_id: UUID) -> list[dict[str, Any]]:
+    return await db.fetch_all(
+        "SELECT role, model, prompt_version, status, input_tokens, output_tokens, effort "
+        "FROM ops.llm_usage WHERE learner_id = %(l)s ORDER BY id",
+        {"l": learner_id},
+    )
 
 
-async def test_stream_step_goes_through_the_gateway(
-    db: SessionFactory, prompts: PromptRegistry
-) -> None:
+async def test_stream_step_goes_through_the_gateway(pg_db: Db, prompts: PromptRegistry) -> None:
     provider = _provider()
-    gw = _gateway(db, provider, prompts)
+    gw = _gateway(pg_db, provider, prompts)
     learner_id, turn_id = uuid4(), uuid4()
     request, stream = _stream(gw, learner_id, turn_id)
 
@@ -120,36 +112,31 @@ async def test_stream_step_goes_through_the_gateway(
     assert sent.base.reasoning_effort == "high" and sent.base.prompt_cache_key == "teacher@2"
     assert sent.base.json_schema["additionalProperties"] is False
     assert sent.tools == (TOOL,)
-    [row] = await _ledger(db, learner_id)
-    assert (row.role, row.model, row.prompt_version, row.turn_id) == ("teacher", WONDER, 2, turn_id)
-    assert (row.status, row.error_code, row.reasoning_effort) == ("ok", None, "high")
-    assert row.input_tokens > 0 and row.output_tokens > 0
+    [row] = await _usage(pg_db, learner_id)
+    assert (row["role"], row["model"], row["prompt_version"]) == ("teacher", WONDER, "teacher@2")
+    assert (row["status"], row["effort"]) == ("ok", "high")
+    assert row["input_tokens"] > 0 and row["output_tokens"] > 0
 
 
 async def test_unavailable_before_the_first_event_is_retried(
-    db: SessionFactory, prompts: PromptRegistry
+    pg_db: Db, prompts: PromptRegistry
 ) -> None:
     provider = _provider()
     provider.fail(ScriptedFailure("unavailable", schema_name="StreamAnswer", times=1))
-    gw = _gateway(db, provider, prompts)
+    gw = _gateway(pg_db, provider, prompts)
     learner_id = uuid4()
     request, stream = _stream(gw, learner_id, uuid4())
 
     events = await _collect(stream.stream_structured(request))
 
     assert isinstance(events[-1], StreamCompleted)
-    assert [(r.status, r.error_code) for r in await _ledger(db, learner_id)] == [
-        ("error", "unavailable"),
-        ("ok", None),
-    ]
+    assert [r["status"] for r in await _usage(pg_db, learner_id)] == ["error", "ok"]
 
 
-async def test_unavailable_after_retries_is_an_error(
-    db: SessionFactory, prompts: PromptRegistry
-) -> None:
+async def test_unavailable_after_retries_is_an_error(pg_db: Db, prompts: PromptRegistry) -> None:
     provider = _provider()
     provider.fail(ScriptedFailure("unavailable", schema_name="StreamAnswer", times=5))
-    gw = _gateway(db, provider, prompts)
+    gw = _gateway(pg_db, provider, prompts)
     request, stream = _stream(gw, uuid4(), uuid4())
 
     with pytest.raises(LLMUnavailableError):
@@ -158,11 +145,11 @@ async def test_unavailable_after_retries_is_an_error(
 
 
 async def test_rate_limited_turn_is_not_retried_and_sets_pressure(
-    db: SessionFactory, prompts: PromptRegistry, redis: Redis
+    pg_db: Db, prompts: PromptRegistry, redis: Redis
 ) -> None:
     provider = _provider()
     provider.fail(ScriptedFailure("rate_limited", schema_name="StreamAnswer", retry_after="7"))
-    gw = _gateway(db, provider, prompts, redis)
+    gw = _gateway(pg_db, provider, prompts, redis)
     learner_id = uuid4()
     request, stream = _stream(gw, learner_id, uuid4())
 
@@ -171,15 +158,13 @@ async def test_rate_limited_turn_is_not_retried_and_sets_pressure(
 
     assert len(provider.stream_calls) == 1
     assert await redis.exists(llm_pressure_key(WONDER))
-    assert [(r.status, r.error_code) for r in await _ledger(db, learner_id)] == [
-        ("error", "rate_limited")
-    ]
+    assert [r["status"] for r in await _usage(pg_db, learner_id)] == ["error"]
 
 
-async def test_bad_request_is_an_error(db: SessionFactory, prompts: PromptRegistry) -> None:
+async def test_bad_request_is_an_error(pg_db: Db, prompts: PromptRegistry) -> None:
     provider = _provider()
     provider.fail(ScriptedFailure("bad_request", schema_name="StreamAnswer"))
-    gw = _gateway(db, provider, prompts)
+    gw = _gateway(pg_db, provider, prompts)
     request, stream = _stream(gw, uuid4(), uuid4())
 
     with pytest.raises(LLMUnavailableError) as raised:
@@ -187,14 +172,12 @@ async def test_bad_request_is_an_error(db: SessionFactory, prompts: PromptRegist
     assert raised.value.reason == "bad_request" and len(provider.stream_calls) == 1
 
 
-async def test_cut_step_is_passed_on_and_ledgered(
-    db: SessionFactory, prompts: PromptRegistry
-) -> None:
+async def test_cut_step_is_passed_on_and_recorded(pg_db: Db, prompts: PromptRegistry) -> None:
     """The graph retries a cut step with the doubled limit (Т-§11.1); the gateway only
     passes it on and writes `incomplete`."""
     provider = _provider()
     provider.fail(ScriptedFailure("incomplete", schema_name="StreamAnswer"))
-    gw = _gateway(db, provider, prompts)
+    gw = _gateway(pg_db, provider, prompts)
     learner_id = uuid4()
     request, stream = _stream(gw, learner_id, uuid4())
 
@@ -202,15 +185,13 @@ async def test_cut_step_is_passed_on_and_ledgered(
 
     last = events[-1]
     assert isinstance(last, StreamCompleted) and last.status == "incomplete"
-    assert [(r.status, r.error_code) for r in await _ledger(db, learner_id)] == [
-        ("incomplete", "incomplete")
-    ]
+    assert [r["status"] for r in await _usage(pg_db, learner_id)] == ["incomplete"]
 
 
-async def test_open_circuit_short_circuits(db: SessionFactory, prompts: PromptRegistry) -> None:
+async def test_open_circuit_short_circuits(pg_db: Db, prompts: PromptRegistry) -> None:
     provider = _provider()
     provider.fail(ScriptedFailure("unavailable", schema_name="StreamAnswer", times=10))
-    gw = _gateway(db, provider, prompts, circuit_failures=2, llm_retry_attempts=1)
+    gw = _gateway(pg_db, provider, prompts, circuit_failures=2, llm_retry_attempts=1)
     request, stream = _stream(gw, uuid4(), uuid4())
     with pytest.raises(LLMUnavailableError):
         await _collect(stream.stream_structured(request))  # two failures open the breaker
@@ -222,12 +203,10 @@ async def test_open_circuit_short_circuits(db: SessionFactory, prompts: PromptRe
     assert raised.value.reason == "circuit_open" and len(provider.stream_calls) == calls
 
 
-async def test_consumer_stop_releases_the_model_slot(
-    db: SessionFactory, prompts: PromptRegistry
-) -> None:
+async def test_consumer_stop_releases_the_model_slot(pg_db: Db, prompts: PromptRegistry) -> None:
     """The graph stops a stream on a rejected head or a spoiler: the slot is free at once."""
     provider = _provider()
-    gw = _gateway(db, provider, prompts, llm_concurrency={"api": {WONDER: 1}})
+    gw = _gateway(pg_db, provider, prompts, llm_concurrency={"api": {WONDER: 1}})
     request, stream = _stream(gw, uuid4(), uuid4())
 
     events = stream.stream_structured(request)
@@ -241,12 +220,12 @@ async def test_consumer_stop_releases_the_model_slot(
 
 
 async def test_teacher_waits_for_a_slot_no_longer_than_admission_wait(
-    db: SessionFactory, prompts: PromptRegistry
+    pg_db: Db, prompts: PromptRegistry
 ) -> None:
     provider = _provider()
     gate = provider.hold("StreamAnswer")
     gw = _gateway(
-        db, provider, prompts, llm_concurrency={"api": {WONDER: 1}}, teacher_admission_wait_ms=50
+        pg_db, provider, prompts, llm_concurrency={"api": {WONDER: 1}}, teacher_admission_wait_ms=50
     )
     request, stream = _stream(gw, uuid4(), uuid4())
     first = asyncio.create_task(_collect(stream.stream_structured(request)))
@@ -275,11 +254,11 @@ class _BreaksMidStream:
 
 
 async def test_failure_after_the_first_event_is_not_retried(
-    db: SessionFactory, prompts: PromptRegistry
+    pg_db: Db, prompts: PromptRegistry
 ) -> None:
     """The learner may have seen the first text: the turn fails, no second stream."""
     provider = _BreaksMidStream()
-    gw = _gateway(db, provider, prompts, llm_retry_attempts=3)
+    gw = _gateway(pg_db, provider, prompts, llm_retry_attempts=3)
     request, stream = _stream(gw, uuid4(), uuid4())
 
     with pytest.raises(LLMUnavailableError):
@@ -288,11 +267,11 @@ async def test_failure_after_the_first_event_is_not_retried(
 
 
 async def test_graph_step_stopped_by_the_consumer_frees_the_slot(
-    db: SessionFactory, prompts: PromptRegistry
+    pg_db: Db, prompts: PromptRegistry
 ) -> None:
     """`stream_step` closes the stream when its text callback raises (a rejected head)."""
     provider = _provider()
-    gw = _gateway(db, provider, prompts, llm_concurrency={"api": {WONDER: 1}})
+    gw = _gateway(pg_db, provider, prompts, llm_concurrency={"api": {WONDER: 1}})
     request, stream = _stream(gw, uuid4(), uuid4())
 
     async def reject(_text: str) -> None:

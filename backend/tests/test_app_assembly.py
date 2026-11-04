@@ -20,15 +20,12 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from neo4j import AsyncDriver
 from redis.asyncio import Redis
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.app import create_app, write_openapi
 from quack.api.errors import ErrorResponse
 from quack.api.openapi import render_openapi
 from quack.config import Settings
-from quack.db import Db
-from quack.db.postgres import SessionFactory, create_engine
+from quack.db import Db, open_db
 from quack.db.redis import ratelimit_key
 from tests.e2e.routes import declared_routers, expected_routes
 from tests.support.auth import session_cookie, session_token
@@ -47,7 +44,7 @@ PUBLIC_ROUTES = {
 REDIRECT_ONLY_ROUTES = {("GET", "/auth/google/start")}
 PATH_PARAM = re.compile(r"\{[^}]+\}")
 # One GET route of each product package (T-A3).
-PACKAGE_PROBES = ("/v1/domains", "/v1/sessions/active", "/v1/artifacts")
+PACKAGE_PROBES = ("/v1/domains", "/v1/sessions/active", "/v1/me")
 
 
 type AppFactory = Callable[..., FastAPI]
@@ -56,8 +53,6 @@ type AppFactory = Callable[..., FastAPI]
 @pytest.fixture
 def make_app(
     settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     pg_db: Db,
     neo4j: AsyncDriver,
     redis: Redis,
@@ -67,9 +62,7 @@ def make_app(
 
     def make(*, redis_client: Any = redis, **overrides: Any) -> FastAPI:
         cfg = settings.model_copy(update=overrides)
-        resources = build_app_resources(
-            cfg, pg_engine, neo4j, redis_client, db=pg_db, session_factory=db
-        )
+        resources = build_app_resources(cfg, neo4j, redis_client, db=pg_db)
         return create_app(cfg, resources=resources)
 
     return make
@@ -79,18 +72,13 @@ type SignIn = Callable[[], Awaitable[tuple[str, dict[str, str]]]]
 
 
 @pytest.fixture
-def sign_in(db: SessionFactory, pg_db: Db, settings: Settings) -> SignIn:
+def sign_in(pg_db: Db, settings: Settings) -> SignIn:
     """A new learner with a Phase 4 session (ТЗ Ф4 WP18.3): `(learner_id, headers)`.
-    `/v1/auth/register` is removed (D-A-113); the `core.learners` row is what the log of Phase 4
-    needs (domains, preferences, D-A-207), the `auth.users` row is the Phase 3 account."""
+    `/v1/auth/register` is removed (D-A-113); the `core.learners` row is the account (domains,
+    preferences, D-A-207; `auth.users` of Phase 3 is not read any more)."""
 
     async def make() -> tuple[str, dict[str, str]]:
         learner_id = uuid4()
-        async with db() as session, session.begin():
-            await session.execute(
-                text("INSERT INTO auth.users (id, email, password_hash) VALUES (:id, :e, '!')"),
-                {"id": learner_id, "e": f"{learner_id}@test.invalid"},
-            )
         await pg_db.execute(
             "INSERT INTO core.learners (learner_id, email) VALUES (%(id)s, %(email)s)",
             {"id": learner_id, "email": f"{learner_id}@test.invalid"},
@@ -148,7 +136,7 @@ async def test_every_protected_route_requires_auth_before_validation(
 async def test_single_session_contract_across_packages(
     api: httpx.AsyncClient, sign_in: SignIn
 ) -> None:
-    """T-A3: one session works in domains, session and artifacts; after `DELETE /v1/learner`
+    """T-A3: one session works in domains, session and the account; after `DELETE /v1/learner`
     and with an unknown cookie it gets 401 in all three (ТЗ Ф4 WP18.3)."""
     _, headers = await sign_in()
 
@@ -266,9 +254,9 @@ async def test_rate_limit_local_fallback_without_redis(
 async def test_actions_and_turns_rate_limits(
     make_app: AppFactory, redis: Redis, sign_in: SignIn
 ) -> None:
-    """T-A5: `learner_actions_per_min` for POST/PATCH/DELETE, `turns_per_min` for turns,
-    GET unlimited, heartbeat outside `actions`, Redis keys carry a TTL."""
-    app = make_app(learner_actions_per_min=3, turns_per_min=1)
+    """T-A5: `learner_actions_per_min` for POST/PATCH/DELETE (one limit for every action, ТЗ Ф4
+    §2.3 строка 16), GET unlimited, heartbeat outside `actions`, Redis keys carry a TTL."""
+    app = make_app(learner_actions_per_min=3)
     async with _client(app) as client:
         learner_id, headers = await sign_in()
         for i in range(3):
@@ -302,36 +290,6 @@ async def test_actions_and_turns_rate_limits(
             assert created.status_code == 201, created.text
         assert await redis.get(ratelimit_key("actions", other_id)) == "3"
 
-        # turns: the second turn of the window is refused (the session does not matter)
-        third_id, third = await sign_in()
-        first_turn = await client.post(
-            f"/v1/sessions/{uuid4()}/turns",
-            json={"text": "hi", "idempotency_key": str(uuid4())},
-            headers=third,
-        )
-        assert first_turn.status_code != 429, first_turn.text
-        second_turn = await client.post(
-            f"/v1/sessions/{uuid4()}/turns",
-            json={"text": "hi again", "idempotency_key": str(uuid4())},
-            headers=third,
-        )
-        assert second_turn.status_code == 429, second_turn.text
-        assert await redis.ttl(ratelimit_key("turns", third_id)) > 0
-
-
-async def test_turn_limit_without_redis_is_local(make_app: AppFactory, sign_in: SignIn) -> None:
-    """T-E8 in small: the turn limit does not fail open when Redis is down."""
-    app = make_app(redis_client=BrokenRedis(), turns_per_min=1)
-    async with _client(app) as client:
-        _, headers = await sign_in()
-        for expected_blocked in (False, True):
-            response = await client.post(
-                f"/v1/sessions/{uuid4()}/turns",
-                json={"text": "hi", "idempotency_key": str(uuid4())},
-                headers=headers,
-            )
-            assert (response.status_code == 429) is expected_blocked, response.text
-
 
 # --- WP1.6: thresholds read from Settings at request time ------------------------------------
 
@@ -340,18 +298,16 @@ async def test_search_limits_come_from_settings(make_app: AppFactory, sign_in: S
     app = make_app(search_min_query_len=4, search_default_limit=7, search_max_limit=9)
     async with _client(app) as client:
         _, headers = await sign_in()
-        too_short = await client.get("/v1/artifacts/search", params={"q": "abc"}, headers=headers)
+        too_short = await client.get("/v1/search", params={"q": "abc"}, headers=headers)
         assert too_short.status_code == 422, too_short.text
         assert too_short.json()["error"]["code"] == "VALIDATION_ERROR"
         too_many = await client.get(
-            "/v1/artifacts/search", params={"q": "abcd", "limit": 10}, headers=headers
+            "/v1/search", params={"q": "abcd", "limit": 10}, headers=headers
         )
         assert too_many.status_code == 422, too_many.text
-        ok = await client.get(
-            "/v1/artifacts/search", params={"q": "abcd", "limit": 9}, headers=headers
-        )
+        ok = await client.get("/v1/search", params={"q": "abcd", "limit": 9}, headers=headers)
         assert ok.status_code == 200, ok.text
-        default = await client.get("/v1/artifacts/search", params={"q": "abcd"}, headers=headers)
+        default = await client.get("/v1/search", params={"q": "abcd"}, headers=headers)
         assert default.status_code == 200, default.text
 
 
@@ -368,14 +324,12 @@ class _SlowNeo4j:
 @pytest.mark.parametrize(("timeout_s", "neo4j_state"), [(0.05, "error"), (2.0, "ok")])
 async def test_health_probe_timeout_comes_from_settings(
     settings: Settings,
-    pg_engine: AsyncEngine,
-    db: SessionFactory,
     redis: Redis,
     timeout_s: float,
     neo4j_state: str,
 ) -> None:
     cfg = settings.model_copy(update={"health_check_timeout_s": timeout_s})
-    resources = build_app_resources(cfg, pg_engine, _SlowNeo4j(), redis, session_factory=db)
+    resources = build_app_resources(cfg, _SlowNeo4j(), redis)
     async with _client(create_app(cfg, resources=resources)) as client:
         response = await client.get("/health/ready")
     assert response.json()["checks"]["neo4j"] == neo4j_state, response.text
@@ -384,25 +338,31 @@ async def test_health_probe_timeout_comes_from_settings(
 # --- WP8.3: /healthz -----------------------------------------------------------------------
 
 
-async def test_healthz_depends_only_on_postgres(
-    settings: Settings, pg_engine: AsyncEngine, db: SessionFactory
-) -> None:
-    """T-A8: Neo4j and Redis broken → `/healthz` 200; Postgres unreachable → 503. No auth."""
-    resources = build_app_resources(
-        settings, pg_engine, BrokenNeo4jDriver(), BrokenRedis(), session_factory=db
-    )
+async def test_healthz_depends_only_on_postgres(settings: Settings, pg_db: Db) -> None:
+    """T-A8: Neo4j and Redis broken → `/healthz` 200; Postgres unreachable → 503. No auth.
+    Postgres is asked through the `Db` of the resources (WP1.3)."""
+    resources = build_app_resources(settings, BrokenNeo4jDriver(), BrokenRedis(), db=pg_db)
     async with _client(create_app(settings, resources=resources)) as client:
         ok = await client.get("/healthz")
     assert (ok.status_code, ok.json()) == (200, {"status": "ok"}), ok.text
 
-    dead = create_engine(settings.model_copy(update={"postgres_dsn": DEAD_POSTGRES_DSN}))
+    dead_db = await open_db(
+        settings.model_copy(update={"postgres_dsn": DEAD_POSTGRES_DSN}), wait=False
+    )
     try:
-        broken = build_app_resources(settings, dead, BrokenNeo4jDriver(), BrokenRedis())
+        broken = build_app_resources(
+            settings,
+            BrokenNeo4jDriver(),
+            BrokenRedis(),
+            db=dead_db,
+        )
         async with _client(create_app(settings, resources=broken)) as client:
             down = await client.get("/healthz")
+            ready = await client.get("/health/ready")
     finally:
-        await dead.dispose()
+        await dead_db.close()
     assert (down.status_code, down.json()) == (503, {"status": "error"}), down.text
+    assert ready.status_code == 503 and ready.json()["checks"]["postgres"] == "error", ready.text
 
 
 DEAD_POSTGRES_DSN = "postgresql://quack:quack@127.0.0.1:1/quack_test"
@@ -495,37 +455,25 @@ def test_openapi_documents_every_response() -> None:
             assert all(ref == ERROR_REF for ref in errors.values()), what
 
 
+def test_openapi_refs_all_resolve() -> None:
+    """Д-§5.2 п.7 (D-C-210): the schema feeds the type generator of the frontend, which fails on
+    a `$ref` to a component that is not there (the stripped `HTTPValidationError` was left on
+    `/auth/*` and `/companion/pair`)."""
+    schema = _snapshot_app().openapi()
+    components = set(schema["components"]["schemas"])
+    refs = set(re.findall(r'"#/components/schemas/([^"]+)"', json.dumps(schema)))
+    assert refs - components == set()
+
+
 def test_sse_endpoints_document_event_stream() -> None:
     """WP8.7: SSE endpoints (`С-§8.5`) describe a `text/event-stream` body."""
     paths = _snapshot_app().openapi()["paths"]
     for path in (
-        "/v1/sessions/{session_id}/turns",
         "/v1/sessions/{session_id}/events",
         "/v1/sessions/{session_id}/actions",
     ):
         (operation,) = paths[path].values()
         assert list(operation["responses"]["200"]["content"]) == ["text/event-stream"], path
-
-
-def test_turn_stream_documents_status_after_turn_started() -> None:
-    """WP6.3: the turn stream description lists its events in order; `status` with
-    `{"state": "thinking"}` comes right after `turn_started` (for the frontend at G1)."""
-    paths = _snapshot_app().openapi()["paths"]
-    (operation,) = paths["/v1/sessions/{session_id}/turns"].values()
-    schema = operation["responses"]["200"]["content"]["text/event-stream"]["schema"]
-    order = [
-        "turn_started",
-        "status",
-        "token",
-        "task_evaluated",
-        "task_assigned",
-        "turn_completed",
-        "done",
-    ]
-    positions = [schema["description"].find(f"`{name}`") for name in order]
-    assert all(p >= 0 for p in positions), schema["description"]
-    assert positions == sorted(positions), schema["description"]
-    assert '{"state": "thinking"}' in schema["description"]
 
 
 def test_create_app_binds_process_and_version(settings: Settings) -> None:

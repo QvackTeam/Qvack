@@ -55,7 +55,8 @@ def _answer(kind: str, **extra: Any) -> StoredEvent:
 
 
 def test_every_kind_of_the_spec_is_listed_once_and_removed_ones_are_gone() -> None:
-    assert len(set(r.JOB_KINDS + r.PERIODIC_JOB_KINDS)) == 24 + 5
+    # 24 kinds of the list of ТЗ §6.5 + `agent.topic_split` (WP8.2, D-A-226) + 5 periodic
+    assert len(set(r.JOB_KINDS + r.PERIODIC_JOB_KINDS)) == 25 + 5
     assert not set(r.REMOVED_JOB_KINDS) & set(r.JOB_KINDS + r.PERIODIC_JOB_KINDS)
 
 
@@ -222,6 +223,29 @@ def test_known_check_request_without_topic_puts_no_job() -> None:
         payload={"kind": "known_check", "params": {}, "needed_in_session": True},
     )
     assert _kinds(event) == []
+
+
+def test_topic_split_request_is_a_graph_job_of_the_domain() -> None:
+    """WP8.2 (D-A-226): `agent.requested {kind: topic_split}` -> `agent.topic_split`, a graph
+    writer under the lock of the domain, the topic in the payload; without a topic no job."""
+    topic = uid("topic")
+    event = _event(
+        "agent.requested",
+        payload={
+            "kind": "topic_split",
+            "params": {"topic_id": topic},
+            "needed_in_session": False,
+        },
+    )
+    plan = _one(event)
+    assert plan.kind == "agent.topic_split" and plan.priority_class == "P2"
+    assert plan.lock_key == f"domain:{event.domain_id}" and plan.required_seq == 10
+    assert plan.payload["topic_id"] == str(topic)
+    bare = _event(
+        "agent.requested",
+        payload={"kind": "topic_split", "params": {}, "needed_in_session": False},
+    )
+    assert _kinds(bare) == []
 
 
 def test_plan_update_cancels_agent_requests() -> None:

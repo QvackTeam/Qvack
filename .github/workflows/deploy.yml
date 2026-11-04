@@ -103,6 +103,8 @@ jobs:
           QUACK_REGISTRY: ${{ vars.QUACK_REGISTRY }}
           META_API_BASE_URL: ${{ vars.META_API_BASE_URL }}
           LLM_PRICES: ${{ vars.LLM_PRICES }}
+          LLM_POOL_BUDGET_USD: ${{ vars.LLM_POOL_BUDGET_USD }}
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           AUTH_SUCCESS_REDIRECT_URL: ${{ vars.AUTH_SUCCESS_REDIRECT_URL }}
           TERMS_VERSION: ${{ vars.TERMS_VERSION }}
           S3_BUCKET_LEARNERS: ${{ vars.S3_BUCKET_LEARNERS || secrets.S3_BUCKET_LEARNERS }}
@@ -127,10 +129,12 @@ jobs:
           BACKUP_S3_ACCESS_KEY: ${{ secrets.BACKUP_S3_ACCESS_KEY }}
           BACKUP_S3_SECRET_KEY: ${{ secrets.BACKUP_S3_SECRET_KEY }}
           HEARTBEAT_BACKUP_URL: ${{ secrets.HEARTBEAT_BACKUP_URL }}
-          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL || (secrets.TELEGRAM_BOT_TOKEN && format('https://api.telegram.org/bot{0}/sendMessage', secrets.TELEGRAM_BOT_TOKEN)) || (secrets.TELEGRAM_ALERT_BOT_TOKEN && format('https://api.telegram.org/bot{0}/sendMessage', secrets.TELEGRAM_ALERT_BOT_TOKEN)) }}
           HEARTBEAT_ALERTS_URL: ${{ secrets.HEARTBEAT_ALERTS_URL }}
-          ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT }}
-          ALERT_WEBHOOK_CHAT_ID: ${{ vars.ALERT_WEBHOOK_CHAT_ID }}
+          ALERT_WEBHOOK_FORMAT: ${{ vars.ALERT_WEBHOOK_FORMAT || secrets.ALERT_WEBHOOK_FORMAT || ((secrets.TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_ALERT_BOT_TOKEN || contains(secrets.ALERT_WEBHOOK_URL, 'api.telegram.org')) && 'telegram') }}
+          ALERT_WEBHOOK_CHAT_ID: ${{ vars.ALERT_WEBHOOK_CHAT_ID || secrets.ALERT_WEBHOOK_CHAT_ID || secrets.TELEGRAM_CHAT_ID || secrets.TELEGRAM_ALERT_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN || secrets.TELEGRAM_ALERT_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.ALERT_WEBHOOK_CHAT_ID || secrets.ALERT_WEBHOOK_CHAT_ID || secrets.TELEGRAM_CHAT_ID || secrets.TELEGRAM_ALERT_CHAT_ID }}
           BACKUP_AGE_PUBLIC_KEY: ${{ vars.BACKUP_AGE_PUBLIC_KEY }}
         run: |
           bash deploy/render-env.sh deploy/env.example > "$RUNNER_TEMP/new.env"
@@ -159,6 +163,8 @@ jobs:
         env:
           SHORT: ${{ steps.commit.outputs.short }}
         run: |
+          # deploy.sh: roles, dump, `dbmate up` (service `migrate`, D-C-160), and only then
+          # projector, workers and api (all of them run the Phase 4 processes, D-A-223).
           # shellcheck disable=SC2029  # SHORT is 7 hex characters, checked in the commit step
           ssh quack "cd /srv/quack && bash ./deploy/deploy.sh '${SHORT}'"
       - name: Journal of the rollout

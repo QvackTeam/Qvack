@@ -5,13 +5,11 @@ from __future__ import annotations
 import dataclasses
 import math
 from datetime import UTC, datetime, timedelta
-from typing import cast
 from uuid import uuid4
 
 import pytest
 from psycopg_pool import PoolClosed
 from pydantic import SecretStr
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from quack.api.email import EmailSender, EmailUnavailable, ResendEmailSender, create_email_sender
 from quack.api.resources import AppResources, create_app_resources
@@ -45,13 +43,11 @@ from tests.support.storage import BrokenObjectStore, InMemoryObjectStore
 
 
 def test_app_resources_fields() -> None:
-    # §4.2 contract; `engine` and `session_factory` leave in WP1.3 (stream A).
+    # §4.2 contract; the SQLAlchemy pair left in WP1.3 (D-C-170).
     names = {f.name for f in dataclasses.fields(AppResources)}
     assert names == {
         "settings",
         "db",
-        "engine",
-        "session_factory",
         "neo4j",
         "redis",
         "llm",
@@ -157,7 +153,7 @@ async def test_fake_deletion_journal_lists_since_and_can_be_down() -> None:
         await journal.write(old)
 
 
-@pytest.mark.usefixtures("pg_engine")  # Postgres up, else skipped (failed under REQUIRE_INFRA)
+@pytest.mark.usefixtures("pg_db")  # Postgres up, else skipped (failed under REQUIRE_INFRA)
 async def test_api_resources_open_db_and_close_it(settings: Settings) -> None:
     """§4.2: the API process opens one `Db` (seam S2) and closes it with the other resources."""
     resources = await create_app_resources(settings)
@@ -174,7 +170,7 @@ async def test_api_resources_open_db_and_close_it(settings: Settings) -> None:
 async def test_test_resources_without_db_fail_loudly(settings: Settings) -> None:
     """`build_app_resources` without a `Db` gives one over a closed pool: a test that touches
     Postgres without passing `pg_db` fails instead of reaching a real database."""
-    resources = build_app_resources(settings, cast(AsyncEngine, None), None, None)
+    resources = build_app_resources(settings, None, None)
     with pytest.raises(PoolClosed):
         async with resources.db.transaction():
             pass

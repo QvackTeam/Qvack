@@ -31,6 +31,8 @@
    ```
    Дальше `ALLOW_NO_DUMP` не нужен: перед миграцией скрипт делает дамп (`ops backup now`).
 
+**Схема и процессы (WP1.3, D-C-160).** Сервис `migrate` (`ops migrate`) запускает `dbmate up` на `/app/db/migrations` образа; `api`, `projector` и `workers` ждут его завершения и стартуют на процессах Фазы 4 (переключателя процессов Фаз 3 и 4 больше нет: D-A-223…225). Стенд с базой Фаз 1-3 (Alembic) не мигрируется: `ops migrate` видит `public.alembic_version`, отказывает с кодом 1, выкатка останавливается, сервисы остаются на старой версии. Чистый старт: остановить стек и пересоздать базу (`docker compose down`, `docker volume rm quack_postgres-data`), затем `ALLOW_NO_DUMP=1 ./deploy/deploy.sh <sha>`. `ops status` читает схему Фазы 4 (D-C-181): проверка выкатки после `migrate` проходит.
+
 Журнал выкаток — `/srv/quack/deploy.log`, текущий релиз — `/srv/quack/release.env`.
 
 ## Бэкап
@@ -54,9 +56,7 @@
 ## Что пока не готово
 
 - **Тревоги по расходу в долларах** (`team_daily_alert_usd`, нужна таблица `ops.llm_usage`, WP10.4), по объектам `quack-deletions` без строки в журнале (WP25) и по дате оплаты Contabo.
-- **Перевод `api`, `workers`, `projector` и `migrate` на роли `quack_app` и `quack_migrator`**: ждёт перехода слоя данных на dbmate (поток A), пока они работают под `quack`.
-- **Команды восстановления** `replay-deletions` и `orphan-objects` (WP9.6): первая зависит от журнала удалений в R2 (`replay_deletions`, WP25, поток A), вторая от списка ссылок на объекты в Postgres. Сценарии восстановления — Д-§8.3.
-- **Job выкатки** в GitHub Actions и публикация образов в GHCR: WP9.3/9.4.
+- **Перевод `api`, `workers`, `projector` и `migrate` на роли `quack_app` и `quack_migrator`**: схема уже идёт через dbmate, но SQLAlchemy-код Фазы 3 ещё не снят (WP1.3, шаг 5, поток A), поэтому сервисы пока работают под `quack` (D-C-160).
 - **CORS** API (`cors_origins` уже есть в конфиге, подключение к приложению — отдельный пакет).
 
 ## Локальная проверка
@@ -81,9 +81,14 @@ docker compose --env-file .env --env-file release.env ps
 
 Проверка: у `postgres`, `neo4j`, `redis` и `api` в колонке PORTS ничего нет, 80 и 443 только у `caddy`.
 
-## Проверка после восстановления
+## Восстановление
 
-`docker compose run --rm migrate ops restore-check` сравнивает у каждого ученика `appliedSeq` в Neo4j с `last_seq` в журнале Postgres. Если граф опережает журнал, команда печатает список учеников и завершается кодом 1: тогда `ops rebuild --all`. Отстающий граф проверку не ломает, проектор его догонит. Без пройденной проверки остальные сервисы после восстановления не запускаются (Д-§8.3).
+Порядок — Д-§8.3. Команды `ops` запускаются так: `docker compose run --rm migrate ops <команда>` для тех, что читают только Postgres и Neo4j (`restore-check`, `resume`), и `docker compose run --rm --no-deps workers ops <команда>` для тех, что ходят в хранилища (`replay-deletions`, `orphan-objects`): у `workers` есть ключи `quack-learners` и `quack-deletions`.
+
+- `ops replay-deletions --since <время дампа>` (шаг 5) повторяет все записи журнала `quack-deletions` новее дампа; повтор идемпотентен. Печатает `{"replayed": N}`.
+- `ops restore-check` сравнивает у каждого ученика `projectedSeq` в Neo4j с `seq` в `core.learners`. Если граф опережает журнал, команда печатает список учеников и завершается кодом 1: тогда `ops rebuild --all`. Отстающий граф проверку не ломает, проектор его догонит. Без пройденной проверки остальные сервисы после восстановления не запускаются.
+- `ops orphan-objects --since <время дампа> [--apply]` (последний шаг) ищет в `quack-learners` объекты новее дампа, на которые нет ссылок в Postgres (материалы, страницы, выгрузки, холсты, ключи в событиях и версиях артефактов). Без `--apply` только печатает отчёт `{checked, orphans, deleted: 0, dry_run: true}` и ничего не удаляет; удаляет лишь с явным `--apply`. Сначала запустите без флага, просмотрите список, затем повторите с `--apply`.
+- `ops resume --learner <id>` снимает остановку потока проектора после исправления причины (Д-§8.7); `ops rebuild --all --concurrency N` пересобирает графы по N учеников сразу (по умолчанию `rebuild_concurrency`).
 
 ## Выкатка из GitHub Actions
 

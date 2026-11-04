@@ -353,6 +353,22 @@ class LineBook:
             del self._lines[line_id]
         return gone
 
+    def erasure_boxes(self, batch: StrokeBatch) -> list[tuple[float, float, float, float]]:
+        """The box of the strokes each erasure of the batch removed (strokes this socket knows);
+        where the learner erases the same place again and again, they are stuck (WP21.5)."""
+        boxes: list[tuple[float, float, float, float]] = []
+        for erasure in batch.erasures:
+            points = [
+                p
+                for stroke_id in erasure.stroke_ids
+                if (stroke := self._strokes.get(stroke_id)) is not None
+                for p in stroke.points
+            ]
+            if points:
+                xs, ys = [p.x for p in points], [p.y for p in points]
+                boxes.append((min(xs), min(ys), max(xs), max(ys)))
+        return boxes
+
     def line(
         self,
         line_id: str,

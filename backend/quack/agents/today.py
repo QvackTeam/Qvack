@@ -22,12 +22,13 @@ from quack.events.log import NewEvent, append_events
 from quack.events.records import AgentParamsRecord, PlanUpdateRecord
 from quack.events.values import Level
 from quack.graph.read import GraphReader, HubGoal, create_graph_reader
-from quack.jobs.queue import ClaimedJob
 from quack.jobs.runner import JobContext, register_job_handler
+from quack.jobs.types import ClaimedJob
 from quack.llm.labels import LabelMap, UnknownLabelError
 from quack.practice.repo import event_by_seq
 from quack.practice.select import select_tasks
 from quack.practice.task_store import get_task
+from quack.practice.today_plan import prepared_session_id
 
 PLANNER_ROLE = "today_planner"
 ALL_LEVELS: list[Level] = [1, 2, 3, 4, 5, 6]
@@ -38,11 +39,6 @@ _PREPARED = (
     "VALUES (%(session_id)s, %(learner_id)s, %(plan)s, 'prepared') "
     "ON CONFLICT (session_id) DO NOTHING"
 )
-
-
-def prepared_session_id(learner_id: UUID, trigger_seq: int, skill_id: UUID) -> UUID:
-    """The session an item of «Сегодня» opens (`POST /v1/sessions {today_item}`)."""
-    return uuid5(learner_id, f"today:{trigger_seq}:{skill_id}")
 
 
 def _target_levels(item: TodayItem, hubs: list[HubGoal]) -> list[Level]:

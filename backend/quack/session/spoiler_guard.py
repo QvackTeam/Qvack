@@ -17,13 +17,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from uuid import UUID
-
-from sqlalchemy import text as sql
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from quack.config import Settings
-from quack.practice.evaluation import TaskToCheck, load_task
+from quack.practice.evaluation import TaskToCheck
 
 _OPERATOR_SPACES = re.compile(r"\s*([+\-*/^=(),])\s*")
 _SPACES = re.compile(r"\s+")
@@ -112,46 +108,3 @@ def remove_spoiler_sentences(text: str, tasks: Sequence[TaskToCheck], settings: 
         if index + 1 < len(parts):
             kept.append(parts[index + 1])
     return "".join(kept).strip()
-
-
-async def guarded_tasks(
-    session: AsyncSession,
-    learner_id: UUID,
-    session_id: UUID,
-    settings: Settings,
-    *,
-    closed_now: UUID | None = None,
-) -> list[TaskToCheck]:
-    """Active tasks of the session: assigned before this turn, no correct `task.evaluated`,
-    no hint of the highest level (the request for the solution, WP0 audit); `closed_now` —
-    a task this turn has just evaluated as correct."""
-    rows = (
-        await session.execute(
-            sql(
-                "SELECT type, payload FROM core.events WHERE learner_id = :l "
-                "AND type IN ('task.assigned', 'task.evaluated', 'task.hint_given') "
-                "AND payload->>'session_id' = :s ORDER BY seq"
-            ),
-            {"l": learner_id, "s": str(session_id)},
-        )
-    ).all()
-    assigned: list[UUID] = []
-    closed: set[UUID] = set() if closed_now is None else {closed_now}
-    for row in rows:
-        task_id = UUID(str(row.payload["task_id"]))
-        if row.type == "task.assigned":
-            if task_id not in assigned:
-                assigned.append(task_id)
-        elif row.type == "task.evaluated":
-            if row.payload.get("is_correct") is True:
-                closed.add(task_id)
-        elif int(row.payload.get("hint_level", 0)) >= settings.max_hint_level:
-            closed.add(task_id)
-    tasks: list[TaskToCheck] = []
-    for task_id in assigned:
-        if task_id in closed:
-            continue
-        task = await load_task(session, learner_id, task_id)
-        if task is not None:
-            tasks.append(task)
-    return tasks

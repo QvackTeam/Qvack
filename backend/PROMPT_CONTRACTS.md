@@ -173,11 +173,12 @@ Input blocks: `mode`, `title_context`, `skills_summary_json`, `misconceptions_su
 Output fields:
 
 - `p1_head`: object
-- `p1_head.intent`: "clarify_goal" | "explain" | "worked_example" | "practice" | "retrieval" | "diagnose" | "hint" | "feedback" | "answer_question" | "plan" | "wrap_up"
+- `p1_head.intent`: "clarify_goal" | "explain" | "worked_example" | "practice" | "retrieval" | "diagnose" | "hint" | "feedback" | "answer_question" | "plan" | "wrap_up" | "split_topic"
 - `p1_head.targetSkills`: list[string]
 - `p1_head.verdict_stance`: "code" | "formative" | null
 - `p1_head.branchType`: "corrective" | "curiosity" | "external" | null
 - `p1_head.approach`: "example_first" | "attempt_first" | "small_steps" | "prediction_first" | "faded_example" | "interleaving" | "contrast_pair" | "refutation" | "explain_in_own_words" | "visualization" | "none"
+- `p1_head.topicLabel`: string | null
 - `p2_body`: object
 - `p2_body.blocks`: list[object]
 - `p2_body.blocks.block_id`: string
@@ -290,7 +291,7 @@ Output fields:
 - `p3_markup.deadline.control_type`: "tasks" | "colloquium_proofs" | "oral_theory" | null
 
 Input blocks: `tools_and_elements`, `profile`, `domain_and_goals`, `conversation`, `session_plan`, `memory_picture`, `materials`, `labels`, `tail`, `guard_feedback`
-Label fields: `p1_head.targetSkills`, `p3_markup.tasks.tests.skill`, `p3_markup.tasks.variantOf`, `p3_markup.tasks.options.misconception`, `p3_markup.tasks.pairTaskId`, `p3_markup.exposures.skill`, `p3_markup.targetsMisconception`, `p3_markup.planUpdate.cancel_requests`, `p3_markup.agentRequests.params.skill`, `p3_markup.agentRequests.params.topic`, `p3_markup.agentRequests.params.task`, `p3_markup.agentRequests.params.misconception`, `p3_markup.deadline.hub_label`, `p3_markup.deadline.coverage`
+Label fields: `p1_head.targetSkills`, `p1_head.topicLabel`, `p3_markup.tasks.tests.skill`, `p3_markup.tasks.variantOf`, `p3_markup.tasks.options.misconception`, `p3_markup.tasks.pairTaskId`, `p3_markup.exposures.skill`, `p3_markup.targetsMisconception`, `p3_markup.planUpdate.cancel_requests`, `p3_markup.agentRequests.params.skill`, `p3_markup.agentRequests.params.topic`, `p3_markup.agentRequests.params.task`, `p3_markup.agentRequests.params.misconception`, `p3_markup.deadline.hub_label`, `p3_markup.deadline.coverage`
 Markers: "memory temporarily unavailable"
 
 ## `extractor@3` → `ExtractorOutputV3`
@@ -530,7 +531,7 @@ Output fields:
 Input blocks: `skills_state`, `misconceptions`, `evidence`, `session_plan`, `goals`, `profile`
 Label fields: `frontier.skill`, `gap_hypotheses.skill`, `forecast.skill`, `forecast.misconception`
 
-## `builder@1` → `BuilderOutput`, `HygieneOutput`
+## `builder@1` → `BuilderOutput`, `HygieneOutput`, `SplitOutput`
 
 Output fields of `BuilderOutput`:
 
@@ -550,8 +551,14 @@ Output fields of `HygieneOutput`:
 - `pairs.second`: string
 - `pairs.duplicate`: boolean
 
+Output fields of `SplitOutput`:
+
+- `parts`: list[object]
+- `parts.name`: string
+- `parts.skills`: list[string]
+
 Input blocks: `mode`, `subjects`, `candidates`
-Label fields: `items.target`, `items.same_idea`, `pairs.first`, `pairs.second`
+Label fields: `items.target`, `items.same_idea`, `pairs.first`, `pairs.second`, `parts.skills`
 
 ## `misconception_describer@1` → `MisconceptionDescription`
 
@@ -643,6 +650,7 @@ Output fields:
 - `blocks.content`: string
 - `blocks.sources`: list[string]
 - `blocks.skills`: list[string]
+- `blocks.formulas`: list[string]
 - `cards`: list[object]
 - `cards.kind`: "definition" | "sign_to_method" | "distinction" | "against_misconception"
 - `cards.prompt`: string
@@ -733,6 +741,25 @@ Output fields:
 
 Input blocks: `problem`, `solution_space`, `skills`, `known_misconceptions`, `earlier_lines`, `line`
 Label fields: `misconception`, `root_cause`
+
+## `material_parser@1` → `MaterialParserOutput`
+
+Output fields:
+
+- `title`: string
+- `chunks`: list[object]
+- `chunks.n`: integer
+- `chunks.topic`: string | null
+- `chunks.notation`: list[string]
+- `chunks.teaches`: list[string]
+- `chunks.uses`: list[string]
+- `deadlines`: list[object]
+- `deadlines.label`: string
+- `deadlines.date`: string
+- `deadlines.control_type`: "tasks" | "colloquium_proofs" | "oral_theory"
+- `deadlines.covers`: list[string]
+
+Input blocks: `chunks`
 
 ## Edit points after G1
 

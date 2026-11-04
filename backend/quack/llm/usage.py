@@ -13,6 +13,7 @@ from uuid import UUID
 
 from quack.config import Settings
 from quack.db import Db
+from quack.llm.access import access_mode, budgets_for, is_meta_judge, pool_remaining
 from quack.llm.errors import LLMBudgetExceededError
 from quack.logging import get_logger
 
@@ -115,11 +116,21 @@ def limited_roles(settings: Settings) -> list[str]:
 async def check_usd_budgets(
     db: Db, settings: Settings, role: str, learner_id: UUID, session_id: UUID | None
 ) -> None:
-    """Raise `LLMBudgetExceededError` (`session` or `daily`, unit `usd`) before a call of a
-    limited background role. Without prices every cost is 0, so nothing can trigger (§2.3
-    row 9) and the queries are skipped."""
-    if not settings.llm_prices or role not in limited_roles(settings):
+    """Raise `LLMBudgetExceededError` before a call: `pool` for every role of a learner who is
+    not a judge while the pool is in `judges_only` (D-B-211); `session` or `daily` (unit `usd`)
+    for a limited background role, with the budgets of the pool mode. Without prices every cost
+    is 0, so nothing can trigger (§2.3 row 9) and the queries are skipped."""
+    if not settings.llm_prices:
         return
+    mode = await access_mode(db, settings)
+    if mode == "judges_only" and not await is_meta_judge(db, settings, learner_id):
+        remaining = await pool_remaining(db, settings) or 0.0
+        raise LLMBudgetExceededError(
+            "pool", remaining, settings.llm_pool_judges_only_remaining_usd, "usd"
+        )
+    if role not in limited_roles(settings):
+        return
+    budgets = budgets_for(settings, mode)
     if session_id is not None:
         row = await db.fetch_one(
             _SESSION_SPEND,
@@ -130,11 +141,11 @@ async def check_usd_budgets(
             },
         )
         spent = float(row["spent"]) if row else 0.0
-        if spent > settings.session_agent_budget_usd:
-            raise LLMBudgetExceededError("session", spent, settings.session_agent_budget_usd, "usd")
+        if spent > budgets.session_usd:
+            raise LLMBudgetExceededError("session", spent, budgets.session_usd, "usd")
     row = await db.fetch_one(
         _DAILY_SPEND, {"learner_id": learner_id, "roles": background_roles(settings)}
     )
     spent = float(row["spent"]) if row else 0.0
-    if spent >= settings.learner_daily_budget_usd:
-        raise LLMBudgetExceededError("daily", spent, settings.learner_daily_budget_usd, "usd")
+    if spent >= budgets.daily_usd:
+        raise LLMBudgetExceededError("daily", spent, budgets.daily_usd, "usd")

@@ -1,44 +1,37 @@
-"""E2E: idempotency, isolation, concurrency (ТЗ Фазы 3 §8.7: T-E2, T-E3, T-E7)."""
+"""E2E: idempotency and isolation (ТЗ Фазы 3 §8.7: T-E2, T-E3). T-E7 (a parallel turn, parallel
+starts) left with the Phase 3 turn and the single active session (ТЗ Ф4 §8.15, П-4.10)."""
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 from uuid import UUID, uuid4
 
 import httpx
-from sqlalchemy import text
 
 from tests.e2e.endpoints import mutating_routes
-from tests.e2e.journey import first, ok, onboard, run_journey, turn
+from tests.e2e.journey import ok, onboard
 from tests.e2e.routes import (
     Ids,
     body_for,
     files_for,
+    form_for,
     isolation_prepares,
     no_key_routes,
     path_for,
     walk,
 )
+from tests.e2e.routes.b import _session_domain
 from tests.e2e.system import Learner, System
 from tests.session.helpers import parse_sse
 
 
 async def _events(system: System, learner_id: UUID) -> int:
-    """Events of the learner in both logs: the Phase 3 one and, for the routes of WP18
-    (consents), the Phase 4 one (D-C-115) until the whole API moves over (D-C-112)."""
-    async with system.session_factory() as session:
-        phase3 = int(
-            await session.scalar(
-                text("SELECT count(*) FROM core.events WHERE learner_id = :l"), {"l": learner_id}
-            )
-            or 0
-        )
+    """Events of the learner in the log."""
     row = await system.resources.db.fetch_one(
         "SELECT count(*) AS n FROM core.events WHERE learner_id = %(learner_id)s",
         {"learner_id": learner_id},
     )
-    return phase3 + (0 if row is None else int(row["n"]))
+    return 0 if row is None else int(row["n"])
 
 
 async def _send(
@@ -98,37 +91,27 @@ async def test_mutating_endpoints_are_idempotent(system_for_walk: System) -> Non
             ids = await route.advance(system, learner, ids, _payload(first_response))
 
 
-NOTE_WORD = "quokkasecret"
-
-
 async def test_cross_learner_isolation(system: System) -> None:
     """T-E3: learner B with ids of learner A gets 404 on every route with an id in the path;
-    A's data does not change; B's search does not see A's note."""
-    j = await run_journey(system, "te3")
-    a = j.learner
-    note = ok(
+    A's data does not change."""
+    a = await system.register()
+    domain_id, topic_id = await onboard(system, a, "te3")
+    ids = Ids(domain_id=domain_id, topic_id=topic_id)
+    # The session of the learner is on the Phase 4 log (D-B-210): its own domain, then a start.
+    ids = await _session_domain(system, a, ids)
+    started = ok(
         await system.client.post(
-            "/v1/artifacts/notes",
+            "/v1/sessions",
             json={
-                "domain_id": str(j.domain_id),
-                "title": "Mine",
-                "text": f"Remember the {NOTE_WORD}",
-                "idempotency_key": "te3:note",
+                "domain_id": str(ids.session_domain_id),
+                "intent": "learn",
+                "idempotency_key": str(uuid4()),
             },
             headers=a.headers,
         ),
         201,
     )
-    turn_started = first(j.turns[-1], "turn_started")
-    assert turn_started is not None
-    ids = Ids(
-        domain_id=j.domain_id,
-        topic_id=j.topic_id,
-        session_id=j.session_id,
-        task_id=j.practice_task_id,
-        turn_id=UUID(turn_started["turn_id"]),
-        artifact_id=UUID(note["artifact_id"]),
-    )
+    ids = ids.replace(session_id=UUID(started["session_id"]))
     for prepare in isolation_prepares():
         ids = await prepare(system, a, ids)
     await system.settle()
@@ -148,7 +131,9 @@ async def test_cross_learner_isolation(system: System) -> None:
         if method == "GET":
             response = await system.client.get(url, headers=b.headers)
         elif files is not None:
-            response = await system.client.request(method, url, files=files, headers=b.headers)
+            response = await system.client.request(
+                method, url, files=files, data=form_for(method, path), headers=b.headers
+            )
         else:
             body = body_for(method, path, ids, f"te3:b:{method}:{path}")
             response = await system.client.request(method, url, json=body, headers=b.headers)
@@ -159,72 +144,3 @@ async def test_cross_learner_isolation(system: System) -> None:
 
     await system.settle()
     assert await _events(system, a.learner_id) == a_events
-    found = ok(
-        await system.client.get("/v1/artifacts/search", params={"q": NOTE_WORD}, headers=b.headers)
-    )
-    assert found["artifact_hits"] == [] and found["event_hits"] == [], found
-
-
-async def test_concurrency_invariants(system: System) -> None:
-    """T-E7: a parallel turn of the same session is 409 TURN_LOCKED; two parallel session
-    starts leave exactly one active session and no 5xx."""
-    learner = await system.register()
-    domain_id, topic_id = await onboard(system, learner, "te7")
-    session = ok(
-        await system.client.post(
-            "/v1/sessions",
-            json={
-                "domain_id": str(domain_id),
-                "topic_id": str(topic_id),
-                "idempotency_key": "te7:s",
-            },
-            headers=learner.headers,
-        ),
-        201,
-    )
-    session_id = UUID(session["session_id"])
-
-    gate = system.llm.hold("TeacherOutput")
-    first_turn = asyncio.create_task(turn(system, learner, session_id, "one", "te7:t1"))
-    await asyncio.wait_for(gate.arrived.wait(), timeout=10)
-    second = await system.client.post(
-        f"/v1/sessions/{session_id}/turns",
-        json={"text": "two", "idempotency_key": "te7:t2"},
-        headers=learner.headers,
-    )
-    gate.release.set()
-    events = await asyncio.wait_for(first_turn, timeout=30)
-    assert first(events, "turn_completed") is not None
-    assert second.status_code == 409, second.text
-    assert second.json()["error"]["code"] == "TURN_LOCKED"
-
-    starts = await asyncio.gather(
-        *(
-            system.client.post(
-                "/v1/sessions",
-                json={"domain_id": str(domain_id), "idempotency_key": f"te7:par:{uuid4().hex}"},
-                headers=learner.headers,
-            )
-            for _ in range(2)
-        )
-    )
-    assert all(r.status_code in (200, 201) for r in starts), [r.text for r in starts]
-    started_ids = {r.json()["session_id"] for r in starts}
-    async with system.session_factory() as s:
-        rows = (
-            await s.execute(
-                text("SELECT id, status FROM core.sessions WHERE learner_id = :l"),
-                {"l": learner.learner_id},
-            )
-        ).all()
-        abandoned_reason = await s.scalar(
-            text(
-                "SELECT payload->>'reason' FROM core.events WHERE learner_id = :l "
-                "AND type = 'session.abandoned' AND payload->>'session_id' = ANY(:ids)"
-            ),
-            {"l": learner.learner_id, "ids": list(started_ids)},
-        )
-    statuses = {str(r.id): r.status for r in rows if str(r.id) in started_ids}
-    assert sorted(statuses.values()) == ["abandoned", "active"], statuses
-    assert sum(1 for r in rows if r.status == "active") == 1
-    assert abandoned_reason == "superseded_by_new_session"

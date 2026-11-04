@@ -265,6 +265,29 @@ async def test_rules3_stale_rebuild(pg_db: Db, neo4j: AsyncDriver, settings: Set
     assert rebuilt == projected  # the junk is gone, the rest is the same graph
 
 
+async def test_chunked_rebuild_respects_presence(
+    pg_db: Db, neo4j: AsyncDriver, settings: Settings, redis: Redis
+) -> None:
+    """WP3.5 (Д-§6.3, replaces the test of the rebuild of Phase 3): a learner over
+    `rebuild_max_tx_ops` is written by parts, and only without an active session."""
+    from quack.db.redis import presence_key
+    from quack.graph.projection.rebuild import rebuild_learner
+
+    learner = await create_learner(pg_db)
+    await append_events(pg_db, learner, _materials(*[uuid4() for _ in range(5)]))
+    tiny = settings.model_copy(update={"rebuild_max_tx_ops": 2})
+    await redis.set(presence_key(learner), str(uuid4()), ex=90)
+    busy = await rebuild_learner(pg_db, neo4j, tiny, learner, redis=redis)
+    assert busy.status == "active_session"
+    nodes, _ = await _graph(neo4j, learner)
+    assert nodes == set()
+    await redis.delete(presence_key(learner))
+    done = await rebuild_learner(pg_db, neo4j, tiny, learner, redis=redis)
+    assert done.status == "rebuilt" and done.operations > 2
+    nodes, _ = await _graph(neo4j, learner)
+    assert nodes != set()
+
+
 async def test_changed_topics_are_published_after_commit(
     pg_db: Db, neo4j: AsyncDriver, settings: Settings, redis: Redis
 ) -> None:
@@ -433,10 +456,12 @@ async def test_topic_and_hub_reads(pg_db: Db, neo4j: AsyncDriver, settings: Sett
     assert await reads.hub_view(neo4j, settings, other, created.hub_id) is None
 
 
-async def test_today_prep_mode_and_grade(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
-    """WP17 (`Т-§14.4`, `Т-§14.7`, `Т-§14.8`, D-A-195): «Сегодня» of a domain with nothing to
-    repeat is empty and writes no event; the past deadline of a hub offers the grade until it is
-    reported; prep mode switches once per state; another learner's ids are «not found»."""
+async def test_prep_mode_and_grade(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """T-RV4, WP17 (`Т-§14.4`, `Т-§14.7`, `Т-§14.8`, D-A-195): «Сегодня» of a domain with nothing
+    to repeat is empty and writes no event; the past deadline of a hub offers the grade until it
+    is reported; prep mode switches only by its explicit event, once per state; another
+    learner's ids are «not found». The deadline weight after the date:
+    `test_review_candidates_reasons_scope_and_isolation`; slot 6 of the turn is B's (WP17.4)."""
     from datetime import UTC, datetime
 
     from quack.review import today as review
@@ -493,8 +518,11 @@ async def test_delete_domain(pg_db: Db, neo4j: AsyncDriver, settings: Settings) 
     await store.put("k", b"pdf", "application/pdf")  # the object_key of both materials
     now = datetime(2026, 11, 3, tzinfo=UTC)
     down = FakeDeletionJournal(available=False)
-    with pytest.raises(DeletionJournalUnavailable):
+    count = "SELECT count(*) AS n FROM core.events WHERE learner_id = %(l)s"
+    before = await pg_db.fetch_one(count, {"l": learner})
+    with pytest.raises(DeletionJournalUnavailable):  # T-DL1: no record — the data are intact
         await delete_domain(pg_db, neo4j, settings, down, store, learner, gone_domain, now)
+    assert await pg_db.fetch_one(count, {"l": learner}) == before and "k" in store.objects
     journal = FakeDeletionJournal()
     assert (
         await delete_domain(pg_db, neo4j, settings, journal, store, other, gone_domain, now) is None
@@ -558,9 +586,9 @@ async def test_workers_adapter_runs_a_registered_handler(pg_db: Db, settings: Se
 
     from quack.jobs import queue_p4
     from quack.jobs.executor_p4 import JobWorker
-    from quack.jobs.queue import ClaimedJob as Phase3Job
     from quack.jobs.rules_p4 import JobPlan
     from quack.jobs.runner import JobContext
+    from quack.jobs.types import ClaimedJob as Phase3Job
     from quack.runtime.phase4 import bind_handlers
 
     learner = await create_learner(pg_db)
@@ -602,11 +630,10 @@ async def test_projector_process_starts_and_stops(neo4j: AsyncDriver, settings: 
     assert await asyncio.wait_for(projector_process(settings, stop), timeout=30) == 0
 
 
-async def test_reconcile_and_replay_deletions(
-    pg_db: Db, neo4j: AsyncDriver, settings: Settings
-) -> None:
-    """WP25 п.5 (D-A-201): a record of the journal without its row of `ops.deletion_log` runs
-    again; a second reconcile finds nothing; a replay after a «restore» deletes again."""
+async def test_reconcile_and_replay(pg_db: Db, neo4j: AsyncDriver, settings: Settings) -> None:
+    """T-DL3, WP25 п.5 (D-A-201): a record of the journal without its row of `ops.deletion_log`
+    runs again; a second reconcile finds nothing; a replay after a «restore» deletes again and is
+    idempotent."""
     from datetime import UTC, datetime
 
     from quack.deletion.journal import reconcile_deletions, replay_deletions
@@ -635,6 +662,8 @@ async def test_reconcile_and_replay_deletions(
     assert await reconcile_deletions(pg_db, neo4j, settings, journal, store, since) == 0
     restored = [e.model_copy(update={"idempotency_key": f"r:{e.idempotency_key}"}) for e in events]
     await append_events(pg_db, learner, restored)  # the dump brought the domain back
+    assert await replay_deletions(pg_db, neo4j, settings, journal, store, since) == 1
+    assert await left() == 0
     assert await replay_deletions(pg_db, neo4j, settings, journal, store, since) == 1
     assert await left() == 0
 
@@ -801,7 +830,7 @@ async def test_slice_waits_for_the_journal_of_phase_4(pg_db: Db) -> None:
         async def reader(_: UUID) -> int:
             return applied
 
-        return SliceDeps(None, None, reader, db=pg_db)
+        return SliceDeps(None, reader, db=pg_db)
 
     behind = await read_consistent_slice(learner, None, load, 50, deps=deps(0))
     assert (behind.min_seq, behind.lag_degraded) == (1, True)

@@ -50,6 +50,9 @@ type BlockKind = Literal[
     "custom",
 ]
 type Owner = Literal["system", "learner"]
+# Т-§17.4 (WP23.3): what a system block rests on — the materials (it cites a chunk) or only the
+# system's own explanation («без опоры»); None for the learner's blocks.
+type Basis = Literal["materials", "system"]
 # Т-§17.5: the kinds of cards (П-11.2) — definition or formula, sign → method, distinction,
 # against a misconception.
 type CardKind = Literal["definition", "sign_to_method", "distinction", "against_misconception"]
@@ -82,6 +85,9 @@ class Block(BaseModel):
         validation_alias=AliasChoices("supplementTo", "supplement_to"),
         serialization_alias="supplementTo",
     )
+    basis: Basis | None = None
+    # Т-§17.4: a formula of the block did not pass compute twice (or compute was unavailable).
+    unverified: bool = False
 
 
 _BLOCKS: TypeAdapter[list[Block]] = TypeAdapter(list[Block])
@@ -120,6 +126,8 @@ class SystemBlock(BaseModel):
     sources: list[dict[str, Any]] = Field(default_factory=list[dict[str, Any]])
     skills: list[str] = Field(default_factory=list[str])
     generated_by: dict[str, Any] | None = None
+    basis: Basis | None = None
+    unverified: bool = False
 
 
 @dataclass(frozen=True)
@@ -307,7 +315,13 @@ async def edit_block(
         for index, block in enumerate(current):
             if block.block_id == block_id:
                 edited = block.model_copy(
-                    update={"content": content, "owner": "learner", "supplement_to": None}
+                    update={
+                        "content": content,
+                        "owner": "learner",
+                        "supplement_to": None,
+                        "basis": None,
+                        "unverified": False,
+                    }
                 )
                 return [*current[:index], edited, *current[index + 1 :]]
         return [
@@ -571,6 +585,8 @@ def _system(new: SystemBlock, block_id: UUID, supplement_to: UUID | None) -> Blo
         skills=new.skills,
         generated_by=new.generated_by,
         supplement_to=supplement_to,
+        basis=new.basis,
+        unverified=new.unverified,
     )
 
 

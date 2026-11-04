@@ -18,9 +18,7 @@ import orjson
 from redis.asyncio import Redis
 
 from quack.db import Db
-from quack.db.postgres import SessionFactory
 from quack.db.redis import projector_applied_channel
-from quack.events.reader import last_seq
 from quack.logging import get_logger
 
 log = get_logger(__name__)
@@ -41,10 +39,9 @@ class ConsistentSlice[T]:
 
 @dataclass(frozen=True)
 class SliceDeps:
-    """`db` (Phase 4) or `session_factory` (Phase 3, leaves with WP1.3) gives the tail of the
-    learner's journal when `min_seq` is None; a slice with a `min_seq` needs neither."""
+    """`db` gives the tail of the learner's journal when `min_seq` is None; a slice with a
+    `min_seq` does not need it."""
 
-    session_factory: SessionFactory | None
     redis: Redis | None
     applied_seq_reader: Callable[[UUID], Awaitable[int]]
     snapshot_read_retries: int = 3
@@ -95,15 +92,10 @@ async def _wait_poll(learner_id: UUID, min_seq: int, deps: SliceDeps, deadline: 
 
 
 async def _journal_tail(learner_id: UUID, deps: SliceDeps) -> int:
-    if deps.db is not None:
-        row = await deps.db.fetch_one(_LAST_SEQ, {"learner_id": learner_id})
-        return int(row["seq"]) if row is not None else 0
-    if deps.session_factory is None:
-        raise RuntimeError(
-            "the slice waits for the journal: deps have neither db nor session_factory"
-        )
-    async with deps.session_factory() as session:
-        return await last_seq(session, learner_id)
+    if deps.db is None:
+        raise RuntimeError("the slice waits for the journal: deps have no db")
+    row = await deps.db.fetch_one(_LAST_SEQ, {"learner_id": learner_id})
+    return int(row["seq"]) if row is not None else 0
 
 
 async def read_consistent_slice[T](

@@ -3,8 +3,8 @@
 
 Covers:
 - every role of `Settings.llm_roles` — a text role is one structured call by its own output
-  schema through `LLMGateway.generate_structured` (strict schema, effort, output limit, ledger
-  and outbox); `segmenter`, `voice` and `illustrator` go through `LLMGateway.segment`,
+  schema through `LLMGateway.generate_structured` (strict schema, effort, output limit, usage
+  row); `segmenter`, `voice` and `illustrator` go through `LLMGateway.segment`,
   `transcribe` and `illustrate` on a tiny built-in input (D-B-187);
 - the prompts of Phase 3 that are not roles of the table (`evaluator`, `task_gen`, `structurer`,
   `curator`, `diagnostic`, `artifacts`);
@@ -12,13 +12,13 @@ Covers:
   `run_tool_loop` on the model of the teacher (Т-§11.8 п.1).
 
 A recording wrapper keeps the raw answer to report the token kinds and the rate-limit headers.
-A role whose prompt is not in the registry yet (`material_parser`, `viz_checker`) is reported as
+A role whose prompt is not in the registry yet (`viz_checker`) is reported as
 `skipped`. Output: the table «role → status, model, latency» and one line of JSON per row;
 `--out FILE` writes the same to a file. Exit code 1 if any role failed. Without `META_API_KEY`
 nothing is called: the report says «Не проверено» with the command, exit code 1.
 
-Run from `backend/` against a migrated Postgres (rows go to `ops.llm_ledger` and
-`core.llm_outbox` under a fresh learner id):
+Run from `backend/` against a migrated Postgres (rows go to `ops.llm_usage` under a
+fresh learner id):
 
     META_API_KEY=... META_API_BASE_URL=https://api.meta.ai/v1 POSTGRES_DSN=... \\
         uv run python scripts/meta_smoke.py --out /tmp/meta_smoke.txt
@@ -53,7 +53,7 @@ from quack.artifacts.writer import ArtifactWriterOutput
 from quack.canvas.diagnosis import CanvasDiagnoserOutput
 from quack.canvas.recognition import RecognizerOutput
 from quack.config import Settings, default_llm_roles
-from quack.db.postgres import SessionFactory, create_engine, create_session_factory
+from quack.db import Db, open_db
 from quack.domains.schemas import CuratorOutput, DiagnosticOutput, StructurerOutput
 from quack.llm.errors import LLMError, ProviderIncompleteError
 from quack.llm.gateway import LLMGateway
@@ -68,6 +68,7 @@ from quack.llm.responses_client import ResponsesClient
 from quack.llm.streaming import StreamEvent, StreamRequest
 from quack.llm.strict_schema import to_strict_json_schema
 from quack.llm.tool_loop import run_tool_loop
+from quack.materials.parse import MaterialParserOutput
 from quack.practice import role_outputs
 from quack.practice.schemas import EvaluatorOutput, TaskGenOutput
 from quack.prompts.registry import PromptError, PromptRegistry, PromptTemplate
@@ -127,8 +128,8 @@ _COMMON: dict[str, Any] = {
 
 
 # Output schema of each text role of the table (ТЗ Ф4 §6.6, `PROMPT_CONTRACTS.md`). A prompt with
-# two schemas (`builder@1`, `recognizer@1`) is smoked by its first one. `material_parser` and
-# `viz_checker` have no prompt in the registry yet, so they are reported as `skipped`.
+# two schemas (`builder@1`, `recognizer@1`) is smoked by its first one. `viz_checker` has no
+# prompt in the registry yet, so it is reported as `skipped`.
 ROLE_SCHEMAS: dict[str, type[BaseModel]] = {
     "teacher": TeacherOutputV2,
     "teacher_fallback": TeacherOutputV2,
@@ -148,6 +149,7 @@ ROLE_SCHEMAS: dict[str, type[BaseModel]] = {
     "viz_builder": agents.VizBuilderOutput,
     "misconception_describer": agents.MisconceptionDescription,
     "artifact_writer": ArtifactWriterOutput,
+    "material_parser": MaterialParserOutput,
     "today_planner": agents.TodayPlannerOutput,
     "domain_classifier": agents.DomainClassifierOutput,
     "release_judge": agents.ReleaseJudgeOutput,
@@ -390,16 +392,19 @@ def _failure(exc: Exception) -> str:
 
 
 async def run_smoke(
-    settings: Settings, session_factory: SessionFactory, provider: LLMProvider
+    settings: Settings, db: Db, provider: LLMProvider, only: frozenset[str] = frozenset()
 ) -> list[dict[str, Any]]:
     """Run every smoke call once; one report row per role (the table order), then the Phase 3
-    prompts and the stream probe."""
+    prompts and the stream probe. `only` — just these rows (a re-check of a failed one)."""
     recorder = _Recorder(provider)
-    gateway = LLMGateway(session_factory, recorder, settings)
+    gateway = LLMGateway(recorder, settings, db=db)
     registry = PromptRegistry()
     learner, run = uuid4(), uuid4().hex[:8]
     calls = {call.role: call for call in smoke_calls(settings)}
     rows: list[dict[str, Any]] = []
+
+    def wanted(name: str) -> bool:
+        return not only or name in only
 
     async def structured(call: SmokeCall) -> dict[str, Any]:
         started = time.monotonic()
@@ -441,6 +446,8 @@ async def run_smoke(
         return _row(role, None, settings, status, recorder.last, started)
 
     for role, table_row in settings.llm_roles.items():
+        if not wanted(role):
+            continue
         if role in MEDIA_ROLES:
             rows.append(await media(role))
         elif role in calls:
@@ -457,9 +464,10 @@ async def run_smoke(
                 _row(role, table_row.prompt, settings, f"skipped:{reason}", None, time.monotonic())
             )
     for call in calls.values():
-        if call.role not in settings.llm_roles:
+        if call.role not in settings.llm_roles and wanted(call.role):
             rows.append(await structured(call))
-    rows.append(await stream_probe(gateway, settings, learner))
+    if wanted(STREAM_ROW):
+        rows.append(await stream_probe(gateway, settings, learner))
     return rows
 
 
@@ -519,7 +527,7 @@ async def stream_probe(gateway: LLMGateway, settings: Settings, learner: UUID) -
             status = "NoToolCall:"
         elif value != PROBE_VALUE:
             status = "WrongToolResult:"
-    except (LLMError, ProviderIncompleteError, ValidationError) as exc:
+    except Exception as exc:  # a live smoke reports a broken probe, never aborts
         status = _failure(exc)
     return _row(
         STREAM_ROW,
@@ -565,27 +573,30 @@ def unchecked_report() -> str:
     return f"{NOT_CHECKED}\n\n    {LIVE_COMMAND}"
 
 
-async def run(settings: Settings | None = None) -> tuple[int, str]:
+async def run(
+    settings: Settings | None = None, only: frozenset[str] = frozenset()
+) -> tuple[int, str]:
     """The whole run: the report text and the exit code. Without `META_API_KEY` nothing is
     called — the report is «Не проверено» with the command."""
     settings = settings or Settings()
     if not settings.meta_api_key.get_secret_value():
         return 1, unchecked_report()
-    engine = create_engine(settings, pool_size=2)
+    db = await open_db(settings)
     client = ResponsesClient(settings.meta_api_base_url, settings.meta_api_key.get_secret_value())
     try:
-        rows = await run_smoke(settings, create_session_factory(engine), client)
+        rows = await run_smoke(settings, db, client, only)
     finally:
         await client.aclose()
-        await engine.dispose()
+        await db.close()
     return exit_code(rows), render_report(rows)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Live smoke of the Meta API (WP10.7).")
     parser.add_argument("--out", type=Path, default=None, help="also write the report to a file")
+    parser.add_argument("--only", nargs="*", default=[], help="just these rows")
     args = parser.parse_args(argv)
-    code, report = asyncio.run(run())
+    code, report = asyncio.run(run(only=frozenset(args.only)))
     print(report)
     if args.out is not None:
         args.out.write_text(report + "\n", encoding="utf-8")

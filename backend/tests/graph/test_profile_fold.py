@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from quack.events.models import StoredEvent
+from quack.events.log import StoredEvent
 from quack.graph.profile_fold import (
     EvidenceSample,
     ProfileParams,
@@ -26,19 +26,19 @@ def _event(seq: int, type_: str, payload: dict[str, Any]) -> StoredEvent:
     return StoredEvent(
         learner_id=LEARNER,
         seq=seq,
-        event_id=uuid4(),
+        id=seq,
         type=type_,
         schema_version=1,
         actor="test",
         session_id=None,
-        turn_id=None,
         domain_id=None,
         correlation_id=None,
-        causation_id=None,
+        causation_seq=None,
         idempotency_key=f"k{seq}",
         payload_hash="h",
         payload=payload,
         occurred_at=datetime(2026, 11, 1, tzinfo=UTC),
+        source_refs=[],
     )
 
 

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import fields
-from typing import Any, cast
+from typing import Any
 
 from quack.config import Settings
 from quack.jobs.runner import JobContext
 from quack.runtime import close_job_context
 
-# §4.2: `workers` get every resource but `email`; `engine` and `session_factory` leave with
-# SQLAlchemy (WP1.3).
+# §4.2: `workers` get every resource but `email`.
 WORKERS_FIELDS = {
     "settings",
     "db",
@@ -21,8 +20,6 @@ WORKERS_FIELDS = {
     "storage",
     "embeddings",
     "deletions",
-    "engine",
-    "session_factory",
 }
 
 
@@ -44,9 +41,9 @@ class _Closable:
 async def test_close_job_context_in_reverse_creation_order() -> None:
     closed: list[str] = []
     resources: dict[str, Any] = {
-        name: _Closable(name, closed) for name in WORKERS_FIELDS - {"settings", "session_factory"}
+        name: _Closable(name, closed) for name in WORKERS_FIELDS - {"settings"}
     }
-    context = JobContext(settings=Settings(), session_factory=cast(Any, None), **resources)
+    context = JobContext(settings=Settings(), **resources)
     await close_job_context(context)
     assert closed == [
         "deletions",
@@ -56,6 +53,5 @@ async def test_close_job_context_in_reverse_creation_order() -> None:
         "llm",
         "redis",
         "neo4j",
-        "engine",
         "db",
     ]
