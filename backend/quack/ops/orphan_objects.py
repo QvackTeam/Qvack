@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import LiteralString
 from uuid import UUID
 
 from quack.db import Db
@@ -28,7 +29,7 @@ class ReferenceSource:
     looked at (isolation)."""
 
     name: str
-    query: str
+    query: LiteralString
 
 
 REFERENCE_SOURCES: tuple[ReferenceSource, ...] = (
