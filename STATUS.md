@@ -76,7 +76,7 @@
 | WP7.2 | Эпизоды | влит | `jobs/episodes.py` (#182) | — | issue #193 | T-D2 |
 | WP7.3 | Покрытие | влит | `jobs/coverage.py`, `mark_covered` (#133, #182) | — | — | T-D3, T-X4 |
 | WP7.4 | Очередь по `Т-§13.1` | частично | `queue_p4`, `executor_p4`, `visible_jobs`, `jobs_changed` (#182, #186); `GET /v1/sessions/{id}/jobs` (B, issue #212, D-B-207) | подключение к `workers` (WP1.3) | WP1.3 | T-D4–D8, T-D10 |
-| WP7.5 | Периодические задачи | частично | Планировщик `periodic_p4.py` (#182); `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201) | `exports.cleanup`, `calibration.weekly` (P2); `session.sweep_inactive` в `periodic_p4` (#215) | — | T-D9 |
+| WP7.5 | Периодические задачи | частично | Планировщик `periodic_p4.py` (#182); `manifests.cleanup` (D-A-204), `deletions.reconcile` (D-A-201), `session.sweep_inactive` (D-A-211), `exports.cleanup` (D-A-215) | `calibration.weekly` (P2) | — | T-D9 |
 | WP8.1 | Оспаривания, «описка» | влит | `POST /v1/disputes`, `POST /v1/verdicts/{seq}/typo` (#185, D-A-192) | — | — | T-ED1, T-ED2 |
 | WP8.2 | Правки тем, «я это знаю» | частично | Пять маршрутов правок (#185, D-A-193), `episode.reassigned` | обработчик `check.known_claim` (короткая проверка, WP12.6) не зарегистрирован; разбиение темы из чата (WP13) | — | T-ED3, T-ED4 |
 | WP8.3 | Состояние на момент N | частично | `state_at` на rules@3 (D-A-191); `session_summary` «до и после» в кодах (D-A-213, T-ED5) | объявление `GET /v1/sessions/{id}/summary` и e2e T-E13 — B (#228, D-A-214) | #228 | T-ED5, T-E13 |
@@ -189,7 +189,7 @@
 1. **WP1.3, шаг 3** — A-часть сделана (#225, #226). Ждём B (#222) и C (#223, шаг 3 C).
 2. **WP1.3, шаг 5** — после шагов 3–4 всех потоков: снять код Фазы 3 зоны A (старые проектор, очередь, диспетчер, каталог, `db/postgres.py`), флаг `phase4_processes`, зависимости `sqlalchemy`, `asyncpg`, `alembic` (T-DB3).
 3. **WP8.3** — функция готова; маршрут — B (#228).
-4. **WP7.5** — `exports.cleanup`, `calibration.weekly` (P2).
+4. **WP7.5** — `calibration.weekly` (P2).
 5. **WP8.2** — разбиение темы из чата (с WP13); `check.known_claim` зарегистрирован B.
 6. **Владелец:** `D-A-196` (класс C) — на подтверждение владельцу.
 
