@@ -46,7 +46,7 @@
 | :-- | :-- | :-: | :-- | :-- | :-- | :-- |
 | WP1.1 | dbmate и базовая схема | влит | `db/migrations/…baseline.sql` + 3 расширяющие миграции (#78, #142) | — | — | T-DB1 |
 | WP1.2 | `Db` и репозитории | влит | `quack.db.Db`, `append_events`, блокировки на psycopg (#78, #107) | — | — | T-DB2, T-DB4, T-DB5 |
-| WP1.3 | Перенос кода, снятие SQLAlchemy | влит | Шаги 1–5 (#224, #239, #222, #225, #226, #240, #242, #243, #246, #254, #258; D-A-200, D-A-207…212, D-A-223…225, D-A-234…238); проверка `T-DB3` `test_no_sqlalchemy_left` (D-A-240, PR #262) | — | — |catalog|projections|models`, `db/postgres.py`, `db/locks.py`, `graph/projector.py`, `graph/phase_a.py`, `migrations/`, зависимости `sqlalchemy`/`asyncpg`/`alembic` сняты, `supervise` в `runtime/phase4.py`, фикстуры Фазы 3 сняты (D-A-234…238) | шаг 3 C, шаг 4 B | T-DB3 (G4) |
+| WP1.3 | Перенос кода, снятие SQLAlchemy | влит | Шаги 1–5 (#224, #239, #222, #225, #226, #240, #242, #243, #246, #254, #258; D-A-200, D-A-207…212, D-A-223…225, D-A-234…238); проверка `T-DB3` `test_no_sqlalchemy_left` (#265) | — | — |catalog|projections|models`, `db/postgres.py`, `db/locks.py`, `graph/projector.py`, `graph/phase_a.py`, `migrations/`, зависимости `sqlalchemy`/`asyncpg`/`alembic` сняты, `supervise` в `runtime/phase4.py`, фикстуры Фазы 3 сняты (D-A-234…238) | шаг 3 C, шаг 4 B | T-DB3 (G4) |
 | WP1.4 | squawk | влит | `backend/.squawk.toml` (#185), job `squawk` в CI (#189) | — | — | T-DB7 |
 | WP2.1 | Модели payload и реестр | влит | 65 типов, S3 заморожен (#80, #94, #119, #130) | — | D-A-121 (класс C) | T-EV1, T-EV2, T-EV3 |
 | WP2.2 | Ход и последствия вместе | влит | Пачка хода одним `append_events` (#109, `session/turn_commit.py`) | — | — | T-EV4 |
@@ -54,10 +54,10 @@
 | WP2.4 | Реестр в образе, полнота | влит | `test_registry_completeness` (#185); реестр Фазы 4, откат и пробелы — `quack/runtime/event_registry.py` (D-A-218, T-EV5); `ops event-registry`, `can-rollback`, шаг CI «реестр событий» (C, #237) | — | — | T-EV5 |
 | WP3.1 | Схема графа | влит | Ограничения и индексы Neo4j Фазы 4 (#114) | — | — | T-P7 |
 | WP3.2 | Обработчики фазы А | влит | Обработчики 38 строк S5 (#135, #185) | — | — | T-P2, T-P3, T-P4, T-P5 |
-| WP3.3 | Фазы А–В, срез | влит | Фазы А–В, запись разницей, остановка потока (#185) | в процесс `projector` не подключён (WP1.3) | — | T-P6 |
+| WP3.3 | Фазы А–В, срез | влит | Фазы А–В, запись разницей, остановка потока (#185) | подключён: процесс `projector` на `ProjectorP4` (WP1.3, D-A-200) | — | T-P6 |
 | WP3.4 | Режимы | влит | Пачки = пересборка (#185) | — | — | T-P1 |
 | WP3.5 | Пересборка | влит | Пересборка на rules@3, `--stale-rules` в `graph/projection` (#185) | `ops rebuild` в `cli.py` на `graph/projection` (C, #232, D-C-165, D-C-180) | — | T-P8 |
-| WP3.6 | Версия правил | влит | `RULES_VERSION = rules@3` в `projection/runner.py` | старая константа rules@2 в `graph/ids.py` уходит с WP1.3 | — | — |
+| WP3.6 | Версия правил | влит | `RULES_VERSION = rules@3` в `projection/runner.py` | старая константа rules@2 снята (WP1.3) | — | — |
 | WP4.1 | Свидетельство и ярус | влит | `projection/skill_fold.py` (#185, D-A-182) | — | — | T-F2 |
 | WP4.2 | Вычисляемые свойства | влит | Веса, окно «горит», новизна, delayed (#185) | — | — | T-F3, T-F9 |
 | WP4.3 | Понимание: статус уровня | влит | Ворота, пять шагов, следствия (#185) | — | — | T-F1, T-F4 |
@@ -186,7 +186,7 @@
 
 ### Поток A
 
-1. **PR #262** — тесты §8 под именами ТЗ (T-ED1–ED4, T-RV1, T-RV4, T-DL1–DL3, T-DB3, T-DB6; D-A-240), обработчик `embedding.compute` (D-A-241), вопросы владельцу A класса B решены по документам (D-A-242).
+1. **PR #262** — тесты §8 под именами ТЗ (T-ED1–ED4, T-RV1, T-RV4, T-TH4, T-DL1–DL3, T-DB6; D-A-240; T-DB3 — #265), обработчик `embedding.compute` (D-A-241), вопросы владельцу A класса B решены по документам (D-A-242).
 2. **Обработчики видов без обработчика** — `canvas.rediagnose`, `second_opinion.diagnosis`, `agent.artifact`, `export.data`: C (#263).
 3. **Подключение наложения сессии** в `session/turn_source.py` — B (#260); слот 6 режима подготовки (WP17.4) — B.
 4. **Владелец:** `D-A-121`, `D-A-196` (класс C) — подтвердить на G4; строки реестра §2.4 по D-A-242 (`Т-§14.7` — материал контроля, `Т-§18.5` — веса видов свидетельств).
