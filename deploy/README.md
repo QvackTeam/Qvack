@@ -81,6 +81,29 @@ docker compose --env-file .env --env-file release.env ps
 
 Проверка: у `postgres`, `neo4j`, `redis` и `api` в колонке PORTS ничего нет, 80 и 443 только у `caddy`.
 
+## Сайты других проектов на этом сервере
+
+Порты 80 и 443 держит только `caddy` из этого compose. Другой проект на том же сервере не поднимает свой Caddy, а подключается к этому:
+
+- кладёт один файл `<проект>.caddy` со своим блоком сайта в `/srv/edge/sites` на сервере. Каталог монтируется в `caddy` как `/etc/caddy/sites` только для чтения, `Caddyfile` импортирует `*.caddy` оттуда. Пустой каталог ничего не добавляет;
+- подключает свои контейнеры к сети `edge` (в своём compose: `networks: { edge: { external: true } }`) и проксирует на них по имени контейнера. Сети `backend` и `egress` чужим контейнерам не видны;
+- после изменения своего файла перечитывает конфиг без перезапуска:
+
+```bash
+docker exec quack-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+Сеть `edge` создаёт этот compose. Пока к ней подключены чужие контейнеры, `docker compose down` не сможет её удалить: остановите сначала их.
+
+`deploy.sh` поднимает `caddy` с `--no-recreate`, поэтому новое монтирование и сеть появятся у работающего контейнера только после одного ручного пересоздания:
+
+```bash
+cd /srv/quack && export COMPOSE_FILE=compose.yaml
+docker compose --env-file .env --env-file release.env up -d --no-deps caddy
+```
+
+Локально каталог задаётся через `EDGE_SITES_DIR` (по умолчанию `/srv/edge/sites`).
+
 ## Восстановление
 
 Порядок — Д-§8.3. Команды `ops` запускаются так: `docker compose run --rm migrate ops <команда>` для тех, что читают только Postgres и Neo4j (`restore-check`, `resume`), и `docker compose run --rm --no-deps workers ops <команда>` для тех, что ходят в хранилища (`replay-deletions`, `orphan-objects`): у `workers` есть ключи `quack-learners` и `quack-deletions`.
